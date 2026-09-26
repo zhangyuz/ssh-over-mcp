@@ -77,3 +77,22 @@ def test_oversized_stdin_is_rejected():
 
     with pytest.raises(HostAgentProtocolError):
         read_request(io.BytesIO(payload))
+
+
+class ShortReadStream:
+    def __init__(self, data: bytes, chunk_size: int = 2):
+        self._buffer = io.BytesIO(data)
+        self._chunk_size = chunk_size
+
+    def read(self, size: int = -1) -> bytes:
+        if size < 0:
+            size = self._chunk_size
+        return self._buffer.read(min(size, self._chunk_size))
+
+
+def test_short_reads_are_handled_correctly():
+    payload = encode_request(envelope(), b"hello")
+    actual, stdin = read_request(ShortReadStream(payload))
+
+    assert actual.request_id == "req_12345678"
+    assert stdin == b"hello"
