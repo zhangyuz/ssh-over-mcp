@@ -148,7 +148,7 @@ Executable authorization resolves the requested path and requires it to match th
 
 `exact` argv rules are the safer default. A `prefix` rule authorizes every trailing token after the configured prefix and MUST only be used when that wider argument surface is intentionally acceptable; it does not interpret shell syntax or constrain command-specific path/helper semantics.
 
-Authorization results include canonical executable/cwd paths plus filesystem device/inode identities.
+Authorization results include canonical executable/cwd paths plus filesystem device/inode/ctime identities.
 
 ### Phase 3d1 fd preparation
 
@@ -156,7 +156,7 @@ Before application stdin is accepted, the host agent re-runs host authorization 
 
 The executable descriptor is independently rechecked for:
 
-- the authorized device/inode identity;
+- the authorized device/inode/ctime identity;
 - regular-file type;
 - required ownership;
 - group/world write restrictions;
@@ -164,9 +164,9 @@ The executable descriptor is independently rechecked for:
 - Linux file capabilities using the opened fd;
 - executable mode bits.
 
-The cwd descriptor is independently checked for the authorized device/inode identity and directory type.
+The cwd descriptor is independently checked for the authorized device/inode/ctime identity and directory type.
 
-This closes pathname replacement between authorization and later execution: a renamed or substituted pathname does not change the already opened object. It does **not** make a mutable inode immutable. If a policy permits an untrusted principal to modify the executable's contents in place, fd pinning cannot prevent those contents from changing; the initial execution profile must therefore retain trusted ownership/write restrictions.
+This closes pathname replacement between authorization and later execution: a renamed or substituted pathname does not change the already opened object. Including `ctime_ns` also detects ordinary in-place metadata/content changes which occur between authorization and fd preparation. It does **not** make a mutable inode immutable after the fd is pinned. If a policy permits an untrusted principal to modify the executable's contents in place, fd pinning cannot prevent those contents from changing; the initial execution profile must therefore retain trusted ownership/write restrictions.
 
 The preparation layer records whether Python reports fd-based `os.execve()` support and classifies the opened file as ELF, shebang script, or other. Phase 3d1 still performs no process execution.
 
