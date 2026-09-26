@@ -18,7 +18,9 @@ The security runner MUST:
 - use the custom runner label `ssh-over-mcp-security`;
 - run the security workflow only through manual `workflow_dispatch`;
 - keep the workflow source on trusted `main`;
-- use a read-only GitHub token and no repository secrets.
+- use a read-only GitHub token and no repository secrets;
+- pin every third-party/action dependency in the privileged workflow to a full
+  commit SHA.
 
 The workflow accepts a target `ref` to test, but it refuses to start unless
 the workflow itself was launched from `main`. This prevents a feature branch
@@ -168,8 +170,9 @@ The preflight fails unless:
 - `cgroup.procs`, `cgroup.kill`, `memory.max`, `pids.max`, and
   `cpu.max` are writable.
 
-Only after that preflight does the workflow install the project and run the
-test suite.
+Only after that preflight does the workflow check out the selected target ref,
+install the project, and run the test suite. The checkout and Python setup
+actions are pinned to full commit SHAs rather than movable major-version tags.
 
 ## Persistent runner vs ephemeral runner
 
