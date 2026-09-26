@@ -8,30 +8,28 @@ ssh-over-mcp-host-agent
 
 Normative behavior is defined in [`../../docs/ssh-host-agent.md`](../../docs/ssh-host-agent.md).
 
-## Current Phase 3d2b1 behavior
+## Current Phase 3d2b2a behavior
 
-The ForceCommand request path remains **non-executing**, but the package now contains the first forked child supervisor.
+The ForceCommand request path remains **non-executing**, but the package now has a bounded parent execution loop around the forked native child.
 
-For an fd-pinned native ELF command, the supervisor:
+The runner:
 
-1. validates the execution spec before fork;
-2. creates close-on-exec stdin/stdout/stderr pipes;
-3. forks a disposable child;
-4. creates a new child session/process group;
-5. clears blocked signals and resets normal signal handlers;
-6. sets `umask 077` and disables core dumps;
-7. installs the three stdio pipes;
-8. closes unrelated child descriptors;
-9. invokes the fd-based native exec primitive.
+1. rejects oversized stdin before spawn;
+2. feeds stdin and drains stdout/stderr with nonblocking selector I/O;
+3. enforces the requested wall timeout;
+4. shares one output-byte budget across stdout and stderr;
+5. retains at most that configured output budget;
+6. closes stdin and sends SIGTERM on timeout/output overflow;
+7. escalates to SIGKILL after a short grace;
+8. drains/closes pipes and reaps the direct child;
+9. returns structured output/returncode/limit flags.
 
-The parent receives the child PID and pipe endpoints. Child setup/exec failure emits only a fixed generic error and exits 125.
+This is still not full containment. Process-group cleanup does not stop a deliberately escaping descendant which creates a new session/group; stronger cgroup/sandbox enforcement is still required for high-risk arbitrary-code profiles.
 
-Still missing by design:
+Still missing before remote execution is enabled:
 
-- wall timeout;
-- combined stdout/stderr byte budget;
-- termination/kill escalation;
-- CPU/memory/process-count limits;
+- CPU/address-space/process-count/file-size rlimits;
+- stronger descendant containment policy;
 - ForceCommand CLI integration.
 
-Next: Phase 3d2b2 adds bounded execution and process-group cleanup before any remote execution path is enabled.
+Next: Phase 3d2b2b adds host-side resource ceilings and defines the stronger containment requirement.
