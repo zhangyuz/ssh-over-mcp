@@ -1,0 +1,96 @@
+inventory:
+  hosts:
+    dev01:
+      address: 10.20.0.10
+      port: 22
+      ssh_user: mcp-developer
+      credential_ref: secret://ssh/dev01
+      host_key: "ssh-ed25519 AAAA_REPLACE_WITH_PINNED_KEY"
+      labels: [linux, dev]
+      allowed_roles: [observer, developer, admin]
+
+    prod01:
+      address: 10.20.0.20
+      port: 22
+      ssh_user: mcp-operator
+      credential_ref: secret://ssh/prod01
+      host_key: "ssh-ed25519 AAAA_REPLACE_WITH_PINNED_KEY"
+      labels: [linux, production]
+      allowed_roles: [operator, admin]
+
+policy:
+  version: 1
+  default: deny
+
+  roles:
+    observer:
+      env_allow: [LANG, "LC_*"]
+
+    developer:
+      inherits: [observer]
+      env_allow: [CI]
+      env_deny: ["AWS_*"]
+
+    operator:
+      env_allow: [LANG]
+
+    admin:
+      env_allow: [LANG, "LC_*", CI, TERM]
+      shell: true
+      sudo: true
+
+  rules:
+    - id: observer.read
+      effect: allow
+      roles: [observer]
+      tools: [hosts_list, host_info, fs_read]
+
+    - id: observer.inspect-exec
+      effect: allow
+      roles: [observer]
+      tools: [ssh_exec]
+      executables:
+        - /usr/bin/ls
+        - /usr/bin/stat
+        - /usr/bin/df
+
+    - id: developer.git
+      effect: allow
+      roles: [developer]
+      hosts: ["dev*"]
+      tools: [ssh_exec]
+      executables: [/usr/bin/git]
+      cwd: ["/srv/projects/**"]
+
+    - id: normal-role.shell-deny
+      effect: deny
+      roles: [observer, developer, operator]
+      capabilities: [shell]
+
+    - id: protected-files.deny
+      effect: deny
+      roles: [observer, developer, operator, admin]
+      tools: ["fs_*"]
+      paths:
+        - /etc/shadow
+        - "/root/**"
+
+    - id: operator.services
+      effect: allow
+      roles: [operator]
+      hosts: ["prod*"]
+      tools: [service_action]
+
+    - id: admin.shell
+      effect: allow
+      roles: [admin]
+      tools: [ssh_shell]
+
+    - id: admin.sudo
+      effect: allow
+      roles: [admin]
+      tools: [ssh_exec]
+      privileges: [root]
+
+  risk:
+    approval_required: [high, critical]
