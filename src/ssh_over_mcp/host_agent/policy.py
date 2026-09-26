@@ -320,7 +320,14 @@ def _resolve_executable(
     if not os.access(expected, os.X_OK):
         return None, None, "resolved executable is not executable"
 
-    return (\n        str(expected),\n        HostObjectIdentity(device=info.st_dev, inode=info.st_ino),\n        None,\n    )\n\n\ndef _resolve_cwd(
+    return (
+        str(expected),
+        HostObjectIdentity(device=info.st_dev, inode=info.st_ino),
+        None,
+    )
+
+
+def _resolve_cwd(
     cwd: str | None,
     rule: HostCommandRule,
 ) -> tuple[str | None, HostObjectIdentity | None, str | None]:
