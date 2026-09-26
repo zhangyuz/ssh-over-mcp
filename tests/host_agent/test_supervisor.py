@@ -1,17 +1,20 @@
 import os
+import resource
 import shutil
 import time
 from pathlib import Path
 
 import pytest
 
-from ssh_over_mcp.host_agent.policy import HostObjectIdentity
+from ssh_over_mcp.host_agent.policy import HostChildLimits, HostObjectIdentity
 from ssh_over_mcp.host_agent.prepare import PreparedCommand
 from ssh_over_mcp.host_agent.supervisor import (
     ChildSupervisorError,
     SpawnedChild,
+    _apply_child_rlimits,
     _close_unrelated_fds,
     _require_standard_fds,
+    _set_bounded_rlimit,
     spawn_prepared_native,
 )
 
@@ -22,6 +25,16 @@ pytestmark = pytest.mark.skipif(
     or os.execve not in os.supports_fd,
     reason="requires Linux/POSIX fork, pipe2, and fd-based execve",
 )
+
+
+def _child_limits() -> HostChildLimits:
+    return HostChildLimits(
+        cpu_seconds=10,
+        address_space_bytes=512 * 1024 * 1024,
+        max_processes=64,
+        file_size_bytes=64 * 1024 * 1024,
+        open_files=128,
+    )
 
 
 def _copy_native(tmp_path: Path, source: str) -> Path:
@@ -49,6 +62,7 @@ def _prepared(
     source: str = "/bin/cat",
     *,
     argv: tuple[str, ...] = (),
+    child_limits: HostChildLimits | None = None,
 ) -> PreparedCommand:
     executable = _copy_native(tmp_path, source)
     cwd = tmp_path / "work"
@@ -75,6 +89,7 @@ def _prepared(
         argv=argv,
         env={},
         fd_exec_supported=True,
+        child_limits=child_limits or _child_limits(),
     )
 
 
@@ -254,3 +269,127 @@ def test_missing_standard_fd_fails_closed(monkeypatch):
 
     with pytest.raises(ChildSupervisorError, match="standard"):
         _require_standard_fds()
+
+
+def test_rlimit_clamps_to_inherited_hard_limit(monkeypatch):
+    calls: list[tuple[int, tuple[int, int]]] = []
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor.resource.getrlimit",
+        lambda _resource_id: (50, 50),
+    )
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor.resource.setrlimit",
+        lambda resource_id, value: calls.append((resource_id, value)),
+    )
+
+    _set_bounded_rlimit(resource.RLIMIT_NOFILE, 128)
+
+    assert calls == [(resource.RLIMIT_NOFILE, (50, 50))]
+
+
+def test_apply_child_rlimits_uses_host_policy_values(monkeypatch):
+    calls: list[tuple[int, tuple[int, int]]] = []
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor.resource.getrlimit",
+        lambda _resource_id: (
+            resource.RLIM_INFINITY,
+            resource.RLIM_INFINITY,
+        ),
+    )
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor.resource.setrlimit",
+        lambda resource_id, value: calls.append((resource_id, value)),
+    )
+
+    limits = _child_limits()
+    _apply_child_rlimits(limits)
+
+    assert set(calls) == {
+        (resource.RLIMIT_CPU, (limits.cpu_seconds, limits.cpu_seconds)),
+        (
+            resource.RLIMIT_AS,
+            (limits.address_space_bytes, limits.address_space_bytes),
+        ),
+        (
+            resource.RLIMIT_NPROC,
+            (limits.max_processes, limits.max_processes),
+        ),
+        (
+            resource.RLIMIT_FSIZE,
+            (limits.file_size_bytes, limits.file_size_bytes),
+        ),
+        (
+            resource.RLIMIT_NOFILE,
+            (limits.open_files, limits.open_files),
+        ),
+    }
+
+
+def test_child_rlimit_failure_is_generic_exit_125(
+    tmp_path: Path,
+    monkeypatch,
+):
+    prepared = _prepared(tmp_path)
+
+    def fail_limits(_limits):
+        raise ChildSupervisorError("sensitive rlimit detail")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor._apply_child_rlimits",
+        fail_limits,
+    )
+
+    child = spawn_prepared_native(prepared)
+    prepared.close()
+
+    try:
+        child.close_stdin()
+        stdout = _read_all(child.stdout_fd)
+        stderr = _read_all(child.stderr_fd)
+        returncode = child.wait()
+
+        assert stdout == b""
+        assert stderr == b"ssh-over-mcp-host-agent: child exec failed\n"
+        assert returncode == 125
+        assert b"sensitive" not in stderr
+    finally:
+        child.close_pipes()
+
+
+def test_file_size_rlimit_is_enforced_in_real_child(tmp_path: Path):
+    source = "/usr/bin/dd" if Path("/usr/bin/dd").exists() else "/bin/dd"
+    if not Path(source).exists():
+        pytest.skip("dd is required for RLIMIT_FSIZE integration test")
+
+    limits = _child_limits().model_copy(
+        update={"file_size_bytes": 1024}
+    )
+    prepared = _prepared(
+        tmp_path,
+        source=source,
+        argv=(
+            "if=/dev/zero",
+            "of=too-large.bin",
+            "bs=4096",
+            "count=1",
+            "status=none",
+        ),
+        child_limits=limits,
+    )
+    output_path = Path(prepared.cwd_path) / "too-large.bin"
+    child = spawn_prepared_native(prepared)
+    prepared.close()
+
+    try:
+        child.close_stdin()
+        _read_all(child.stdout_fd)
+        _read_all(child.stderr_fd)
+        returncode = child.wait()
+
+        assert returncode != 0
+        assert output_path.exists()
+        assert output_path.stat().st_size <= limits.file_size_bytes
+    finally:
+        child.close_pipes()

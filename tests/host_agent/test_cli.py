@@ -9,10 +9,21 @@ from ssh_over_mcp.host_agent.cli import (
 )
 from ssh_over_mcp.host_agent.policy import (
     HostArgvRule,
+    HostChildLimits,
     HostCommandRule,
     HostExecutionPolicy,
 )
 from ssh_over_mcp.ssh.protocol import ExecEnvelope, ExecutionLimits, encode_request
+
+
+def test_child_limits() -> HostChildLimits:
+    return HostChildLimits(
+        cpu_seconds=10,
+        address_space_bytes=512 * 1024 * 1024,
+        max_processes=64,
+        file_size_bytes=64 * 1024 * 1024,
+        open_files=128,
+    )
 
 
 def make_executable(tmp_path: Path, name: str = "tool") -> Path:
@@ -53,6 +64,7 @@ def policy(
 ) -> HostExecutionPolicy:
     return HostExecutionPolicy(
         allowed_profiles=frozenset({"developer"}),
+        child_limits=test_child_limits(),
         commands={
             str(executable): HostCommandRule(
                 resolved_path=str(executable.resolve()),

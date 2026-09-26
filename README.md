@@ -8,24 +8,22 @@ The project is intentionally **not** a thin wrapper around `/bin/bash`. Every op
 
 ## Current status
 
-**Phase 3d2b2a — bounded parent execution loop.**
+**Phase 3d2b2b1 — host-local child rlimits.**
 
 Implemented through the current development branch:
 
 - central/default-deny and host-local canonical authorization;
 - fd-pinned native ELF execution;
-- forked child supervisor with sanitized stdio/session/signal/fd state;
-- nonblocking parent I/O via selectors;
-- request stdin checked against `max_stdin_bytes` before spawn;
-- wall-clock deadline from `timeout_seconds`;
-- one combined stdout+stderr capture budget from `max_output_bytes`;
-- output retained only up to the configured budget;
-- timeout or output overflow closes stdin and starts process-group termination;
-- SIGTERM grace followed by SIGKILL escalation;
-- bounded post-kill pipe cleanup and reliable direct-child reap;
-- structured result with return code, stdout, stderr, timeout/output flags, and duration.
+- sanitized forked-child supervisor;
+- bounded parent I/O with wall timeout and combined output budget;
+- host-policy schema v3 with explicit child resource ceilings;
+- required CPU-time, address-space, process-count, file-size, and open-file limits;
+- limits bound into `PreparedCommand` so supervisor callers cannot omit them;
+- child rlimits applied after fd/stdio sanitation and immediately before exec;
+- configured limits clamp downward to any stricter inherited hard limit;
+- core dumps remain disabled independently.
 
-**Remote command execution is still disabled in the ForceCommand CLI.** CPU/memory/process-count rlimits and stronger descendant containment are still pending.
+**Remote command execution is still disabled in the ForceCommand CLI.** Rlimits reduce resource blast radius but are not descendant containment; cgroup/systemd-scope design remains a separate required boundary for high-risk arbitrary-code profiles.
 
 
 ## Documentation is the source of truth

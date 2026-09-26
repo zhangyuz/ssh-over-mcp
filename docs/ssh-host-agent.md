@@ -122,7 +122,7 @@ The host agent maintains a second policy boundary on each managed host. The defa
 
 The policy file MUST be opened without following symlinks, MUST be a regular file, MUST be root-owned in production, and MUST NOT be group- or world-writable. The implementation bounds the policy file size and rejects duplicate YAML keys.
 
-Phase 3c uses host-policy schema version 2. Each command policy binds:
+Phase 3c introduced host-policy schema version 2. Phase 3d2b2b1 upgrades the active host policy to **version 3**, retaining the per-command rules below and adding required child resource ceilings. Each command policy binds:
 
 - an exact requested executable path;
 - an expected canonical filesystem realpath;
@@ -229,7 +229,28 @@ The result records the process return code, captured stdout/stderr, whether the 
 
 Process-group termination is a cleanup boundary, not a full sandbox. A program which deliberately creates a new session/process group can escape later group signals. Before high-risk/arbitrary-code workloads are enabled, stronger OS containment such as a dedicated cgroup/systemd scope or equivalent sandbox remains required.
 
-Phase 3d2b2a still does not set CPU/address-space/process-count limits and is not wired into the ForceCommand CLI.
+### Phase 3d2b2b1 host-local child rlimits
+
+Host-policy version 3 requires an explicit `child_limits` block. These values are server-owned hard ceilings and are bound into the prepared command so the execution supervisor cannot accidentally omit them:
+
+- `cpu_seconds` → `RLIMIT_CPU`;
+- `address_space_bytes` → `RLIMIT_AS`;
+- `max_processes` → `RLIMIT_NPROC`;
+- `file_size_bytes` → `RLIMIT_FSIZE`;
+- `open_files` → `RLIMIT_NOFILE`.
+
+The child applies these limits after stdio setup and unrelated-fd cleanup, immediately before the fd-based exec primitive. For every resource, the effective value is the minimum of the configured host-policy ceiling and the inherited hard limit; the child never raises an inherited hard limit. Core dumps remain unconditionally disabled with `RLIMIT_CORE=0`.
+
+These rlimits are defense-in-depth rather than complete isolation:
+
+- `RLIMIT_NPROC` is scoped to the real UID and is not a per-request process container; privileged/root semantics can also weaken its usefulness;
+- `RLIMIT_FSIZE` limits regular-file growth, not bytes written to stdout/stderr pipes;
+- `RLIMIT_AS` limits virtual address space and may cause allocations or dynamic loading to fail before the configured number is fully consumed;
+- rlimits do not stop descendants from deliberately escaping a process group.
+
+The parent combined-output budget remains the stdout/stderr control. Strong descendant containment still requires a cgroup/systemd scope or equivalent sandbox before high-risk arbitrary-code profiles are enabled.
+
+Phase 3d2b2b1 is not wired into the ForceCommand CLI.
 
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 

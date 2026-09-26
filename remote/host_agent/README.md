@@ -8,28 +8,25 @@ ssh-over-mcp-host-agent
 
 Normative behavior is defined in [`../../docs/ssh-host-agent.md`](../../docs/ssh-host-agent.md).
 
-## Current Phase 3d2b2a behavior
+## Current Phase 3d2b2b1 behavior
 
-The ForceCommand request path remains **non-executing**, but the package now has a bounded parent execution loop around the forked native child.
+The ForceCommand request path remains **non-executing**. The child supervisor now applies host-owned rlimits from host-policy schema v3 before native fd exec.
 
-The runner:
+Required `child_limits`:
 
-1. rejects oversized stdin before spawn;
-2. feeds stdin and drains stdout/stderr with nonblocking selector I/O;
-3. enforces the requested wall timeout;
-4. shares one output-byte budget across stdout and stderr;
-5. retains at most that configured output budget;
-6. closes stdin and sends SIGTERM on timeout/output overflow;
-7. escalates to SIGKILL after a short grace;
-8. drains/closes pipes and reaps the direct child;
-9. returns structured output/returncode/limit flags.
+- CPU seconds;
+- address-space bytes;
+- maximum processes;
+- maximum regular-file size;
+- maximum open files.
 
-This is still not full containment. Process-group cleanup does not stop a deliberately escaping descendant which creates a new session/group; stronger cgroup/sandbox enforcement is still required for high-risk arbitrary-code profiles.
+The limits are carried inside the prepared command, applied only in the disposable child, and clamped down to any stricter inherited hard limit. The child never expands a parent/container hard limit. Core dumps remain disabled.
+
+Rlimits are not treated as a sandbox. In particular, process limits are real-UID scoped and process-group escape remains possible. High-risk arbitrary-code execution still requires dedicated cgroup/systemd-scope or equivalent containment.
 
 Still missing before remote execution is enabled:
 
-- CPU/address-space/process-count/file-size rlimits;
-- stronger descendant containment policy;
-- ForceCommand CLI integration.
+- stronger descendant containment;
+- final ForceCommand execution/result integration.
 
-Next: Phase 3d2b2b adds host-side resource ceilings and defines the stronger containment requirement.
+Next: Phase 3d2b2b2 defines the cgroup/systemd-scope containment boundary separately from the rlimit layer.

@@ -10,6 +10,7 @@ from .execute import (
     build_native_exec_spec,
     exec_prepared_native_in_child,
 )
+from .policy import HostChildLimits
 from .prepare import PreparedCommand
 
 
@@ -168,6 +169,40 @@ def _close_unrelated_fds(keep: set[int]) -> None:
             pass
 
 
+def _set_bounded_rlimit(resource_id: int, requested: int) -> None:
+    try:
+        _soft, inherited_hard = resource.getrlimit(resource_id)
+    except (OSError, ValueError) as exc:
+        raise ChildSupervisorError("cannot read inherited resource limit") from exc
+
+    if inherited_hard == resource.RLIM_INFINITY:
+        effective = requested
+    else:
+        effective = min(requested, int(inherited_hard))
+
+    try:
+        resource.setrlimit(resource_id, (effective, effective))
+    except (OSError, ValueError) as exc:
+        raise ChildSupervisorError("cannot apply child resource limit") from exc
+
+
+def _apply_child_rlimits(limits: HostChildLimits) -> None:
+    required = {
+        "RLIMIT_CPU": limits.cpu_seconds,
+        "RLIMIT_AS": limits.address_space_bytes,
+        "RLIMIT_NPROC": limits.max_processes,
+        "RLIMIT_FSIZE": limits.file_size_bytes,
+        "RLIMIT_NOFILE": limits.open_files,
+    }
+
+    for name, requested in required.items():
+        if not hasattr(resource, name):
+            raise ChildSupervisorError(
+                f"required child resource limit is unavailable: {name}"
+            )
+        _set_bounded_rlimit(getattr(resource, name), requested)
+
+
 def _dup_stdio(
     stdin_read: int,
     stdout_write: int,
@@ -212,6 +247,7 @@ def _child_main(
             keep.add(prepared.cwd_fd)
 
         _close_unrelated_fds(keep)
+        _apply_child_rlimits(prepared.child_limits)
         exec_prepared_native_in_child(prepared)
     except BaseException:
         try:

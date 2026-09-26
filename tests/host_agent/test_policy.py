@@ -4,6 +4,7 @@ import pytest
 
 from ssh_over_mcp.host_agent.policy import (
     HostArgvRule,
+    HostChildLimits,
     HostCommandRule,
     HostExecutionPolicy,
     HostPolicyError,
@@ -11,6 +12,16 @@ from ssh_over_mcp.host_agent.policy import (
     load_host_policy,
 )
 from ssh_over_mcp.ssh.protocol import ExecEnvelope, ExecutionLimits
+
+
+def test_child_limits() -> HostChildLimits:
+    return HostChildLimits(
+        cpu_seconds=10,
+        address_space_bytes=512 * 1024 * 1024,
+        max_processes=64,
+        file_size_bytes=64 * 1024 * 1024,
+        open_files=128,
+    )
 
 
 def make_executable(tmp_path: Path, name: str = "tool") -> Path:
@@ -49,6 +60,7 @@ def make_policy(
             )
         },
         allowed_profiles=frozenset({"developer"}),
+        child_limits=test_child_limits(),
         env_allow=frozenset({"CI"}),
         max_timeout_seconds=60,
         max_output_bytes=1024,
@@ -342,8 +354,14 @@ def test_missing_cwd_is_denied_unless_explicitly_allowed(tmp_path: Path):
 
 def _valid_policy_text() -> str:
     return """
-version: 2
+version: 3
 allowed_profiles: [developer]
+child_limits:
+  cpu_seconds: 10
+  address_space_bytes: 536870912
+  max_processes: 64
+  file_size_bytes: 67108864
+  open_files: 128
 commands:
   /usr/bin/git:
     resolved_path: /usr/bin/git
@@ -403,6 +421,7 @@ def test_policy_rejects_noncanonical_requested_executable():
     with pytest.raises(ValueError):
         HostExecutionPolicy(
             allowed_profiles=frozenset({"developer"}),
+            child_limits=test_child_limits(),
             commands={
                 "/usr/bin/../bin/git": HostCommandRule(
                     resolved_path="/usr/bin/git",
@@ -420,6 +439,7 @@ def test_policy_cannot_allow_hard_denied_environment():
     with pytest.raises(ValueError):
         HostExecutionPolicy(
             allowed_profiles=frozenset({"developer"}),
+            child_limits=test_child_limits(),
             commands={
                 "/usr/bin/git": HostCommandRule(
                     resolved_path="/usr/bin/git",
@@ -434,10 +454,10 @@ def test_policy_cannot_allow_hard_denied_environment():
         )
 
 
-def test_version_one_policy_is_rejected(tmp_path: Path):
+def test_older_policy_versions_are_rejected(tmp_path: Path):
     path = tmp_path / "policy.yaml"
     path.write_text(
-        _valid_policy_text().replace("version: 2", "version: 1"),
+        _valid_policy_text().replace("version: 3", "version: 2"),
         encoding="utf-8",
     )
 
@@ -515,6 +535,7 @@ def test_policy_rejects_double_slash_command_path():
     with pytest.raises(ValueError):
         HostExecutionPolicy(
             allowed_profiles=frozenset({"developer"}),
+            child_limits=test_child_limits(),
             commands={
                 "//usr/bin/git": HostCommandRule(
                     resolved_path="/usr/bin/git",
@@ -526,3 +547,21 @@ def test_policy_rejects_double_slash_command_path():
             max_output_bytes=1024,
             max_stdin_bytes=16,
         )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("cpu_seconds", 0),
+        ("address_space_bytes", 1024),
+        ("max_processes", 0),
+        ("file_size_bytes", -1),
+        ("open_files", 3),
+    ],
+)
+def test_child_limit_invalid_values_are_rejected(field, value):
+    values = test_child_limits().model_dump()
+    values[field] = value
+
+    with pytest.raises(ValueError):
+        HostChildLimits(**values)

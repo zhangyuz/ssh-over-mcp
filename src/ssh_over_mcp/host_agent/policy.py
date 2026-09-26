@@ -90,11 +90,28 @@ class HostCommandRule(BaseModel):
         return self
 
 
+class HostChildLimits(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    cpu_seconds: int = Field(ge=1, le=3600)
+    address_space_bytes: int = Field(
+        ge=64 * 1024 * 1024,
+        le=1024 * 1024 * 1024 * 1024,
+    )
+    max_processes: int = Field(ge=1, le=4096)
+    file_size_bytes: int = Field(
+        ge=0,
+        le=1024 * 1024 * 1024 * 1024,
+    )
+    open_files: int = Field(ge=16, le=65536)
+
+
 class HostExecutionPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    version: Literal[2] = 2
+    version: Literal[3] = 3
     allowed_profiles: frozenset[str] = Field(min_length=1)
+    child_limits: HostChildLimits
     commands: dict[str, HostCommandRule] = Field(min_length=1)
     env_allow: frozenset[str] = frozenset()
     max_timeout_seconds: float = Field(gt=0, le=3600)
