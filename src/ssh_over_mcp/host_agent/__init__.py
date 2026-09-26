@@ -1,5 +1,17 @@
 """Remote ForceCommand host-agent components."""
 
+from .containment import (
+    CgroupV2Probe,
+    ContainmentBackend,
+    ContainmentError,
+    ContainmentHandle,
+    ContainmentLimits,
+    ContainmentRequest,
+    ContainmentStats,
+    ContainmentUnavailableError,
+    REQUIRED_CGROUP_V2_CONTROLLERS,
+    probe_cgroup_v2,
+)
 from .execute import (
     NativeExecSpec,
     NativeExecutionError,
@@ -36,6 +48,16 @@ from .protocol import (
 )
 
 __all__ = [
+    "CgroupV2Probe",
+    "ContainmentBackend",
+    "ContainmentError",
+    "ContainmentHandle",
+    "ContainmentLimits",
+    "ContainmentRequest",
+    "ContainmentStats",
+    "ContainmentUnavailableError",
+    "REQUIRED_CGROUP_V2_CONTROLLERS",
+    "probe_cgroup_v2",
     "BoundedExecutionError",
     "SupervisedExecutionResult",
     "run_prepared_native",
