@@ -7,7 +7,13 @@ from .policy import (
     authorize_request,
     load_host_policy,
 )
-from .protocol import HostAgentProtocolError, read_request, validate_ssh_context
+from .protocol import (
+    HostAgentProtocolError,
+    read_application_stdin,
+    read_envelope,
+    read_request,
+    validate_ssh_context,
+)
 
 __all__ = [
     "HostAuthorizationResult",
@@ -16,6 +22,8 @@ __all__ = [
     "authorize_request",
     "load_host_policy",
     "HostAgentProtocolError",
+    "read_application_stdin",
+    "read_envelope",
     "read_request",
     "validate_ssh_context",
 ]
