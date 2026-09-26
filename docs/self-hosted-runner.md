@@ -171,8 +171,8 @@ The preflight fails unless:
   `cpu.max` are writable.
 
 Only after that preflight does the workflow check out the selected target ref,
-install the project, and run the full test suite sequentially on Python 3.12
-and 3.13. Keeping both interpreters inside one job makes the workflow compatible
+install the project, and run the full test suite sequentially on Python 3.13
+and 3.14. Keeping both interpreters inside one job makes the workflow compatible
 with one-job ephemeral runners. The checkout and Python setup actions are pinned
 to full commit SHAs rather than movable major-version tags.
 
