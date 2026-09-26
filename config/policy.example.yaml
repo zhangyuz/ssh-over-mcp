@@ -40,10 +40,18 @@ policy:
       sudo: true
 
   rules:
-    - id: observer.read
+    - id: observer.discovery
       effect: allow
       roles: [observer]
-      tools: [hosts_list, host_info, fs_read]
+      tools: [hosts_list, host_info]
+
+    - id: observer.fs-read
+      effect: allow
+      roles: [observer]
+      tools: [fs_read]
+      paths:
+        - "/srv/projects/**"
+        - "/var/log/**"
 
     - id: observer.inspect-exec
       effect: allow
