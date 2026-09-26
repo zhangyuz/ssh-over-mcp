@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from ssh_over_mcp.host_agent.policy import HostObjectIdentity
+from ssh_over_mcp.host_agent.policy import HostChildLimits, HostObjectIdentity
 from ssh_over_mcp.host_agent.prepare import PreparedCommand
 from ssh_over_mcp.host_agent.run import (
     BoundedExecutionError,
@@ -23,6 +23,16 @@ pytestmark = pytest.mark.skipif(
     or os.execve not in os.supports_fd,
     reason="requires Linux/POSIX fork, pipe2, and fd-based execve",
 )
+
+
+def _child_limits() -> HostChildLimits:
+    return HostChildLimits(
+        cpu_seconds=10,
+        address_space_bytes=512 * 1024 * 1024,
+        max_processes=64,
+        file_size_bytes=64 * 1024 * 1024,
+        open_files=128,
+    )
 
 
 def _source(*candidates: str) -> Path:
@@ -78,6 +88,7 @@ def _prepared(
         argv=argv,
         env={},
         fd_exec_supported=True,
+        child_limits=_child_limits(),
     )
 
 
