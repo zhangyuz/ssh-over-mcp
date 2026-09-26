@@ -114,14 +114,27 @@ The remote host agent in Phase 3 MUST enforce its own limits independently. Clie
 
 ## Host-local policy
 
-The host agent maintains a local policy profile sufficient to constrain:
+The host agent maintains a second policy boundary on each managed host. The default policy path is:
 
-- allowed account/profile;
-- allowed filesystem roots;
-- allowed executable classes/paths where practical;
-- privilege helper calls;
-- PTY/forwarding behavior;
-- resource limits.
+```text
+/etc/ssh-over-mcp/host-policy.yaml
+```
+
+The policy file MUST be opened without following symlinks, MUST be a regular file, MUST be root-owned in production, and MUST NOT be group- or world-writable. The implementation bounds the policy file size and rejects duplicate YAML keys.
+
+Phase 3b host policy constrains:
+
+- exact allowed server-side profiles;
+- exact allowed executable paths;
+- allowed environment-variable names;
+- hard-denied loader/runtime environment variables;
+- maximum execution timeout requested by the control plane;
+- maximum output budget requested by the control plane;
+- maximum stdin budget requested by the control plane.
+
+The host agent MUST apply these metadata/resource checks before reading application stdin. A client cannot increase host limits by declaring larger limits in the request.
+
+Phase 3b intentionally does **not** yet authorize argv patterns, canonical filesystem working directories, or executable symlink resolution. Those checks MUST be added before command execution is enabled.
 
 The central policy may be more expressive, but the host-local policy should preserve critical invariants if the central layer is bypassed.
 
