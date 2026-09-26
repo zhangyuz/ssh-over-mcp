@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from ssh_over_mcp.policy.models import Decision, EvaluationRequest, RiskLevel
 
 
@@ -50,12 +53,12 @@ def test_raw_shell_is_critical_and_requires_approval_for_admin(engine):
     assert decision.risk == RiskLevel.CRITICAL
     assert decision.approval_required is True
 
-    approved = engine.evaluate(
+
+def test_request_cannot_self_assert_approval():
+    with pytest.raises(ValidationError):
         EvaluationRequest(
             profile="admin",
             host="prod01",
             tool="ssh_shell",
             approval_granted=True,
         )
-    )
-    assert approved.decision == Decision.ALLOW
