@@ -16,7 +16,7 @@ The host agent remains **non-executing**. It now performs:
 2. trusted host-policy loading;
 3. bounded metadata parsing and host authorization;
 4. canonical executable/argv/cwd checks;
-5. records executable/cwd device+inode identities;
+5. records executable/cwd device+inode+ctime identities;
 6. immediately re-authorizes before preparation;
 7. opens the canonical executable and cwd with no-follow/close-on-exec flags;
 8. revalidates identity and executable security properties on the opened fd;
