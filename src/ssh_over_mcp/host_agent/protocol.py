@@ -56,12 +56,8 @@ def _read_bounded_to_eof(stream: BinaryIO, limit: int) -> bytes:
     return b"".join(chunks)
 
 
-def read_request(stream: BinaryIO) -> tuple[ExecEnvelope, bytes]:
-    """Read and validate one complete SMCP v1 request from a binary stream.
-
-    This parser is deliberately bounded before allocating or reading variable
-    request components. It does not execute the parsed command.
-    """
+def read_envelope(stream: BinaryIO) -> ExecEnvelope:
+    """Read only the fixed header and bounded JSON metadata."""
 
     magic = _read_exact(stream, len(MAGIC))
     if magic != MAGIC:
@@ -74,17 +70,37 @@ def read_request(stream: BinaryIO) -> tuple[ExecEnvelope, bytes]:
 
     metadata = _read_exact(stream, metadata_length)
     try:
-        envelope = ExecEnvelope.model_validate_json(metadata)
+        return ExecEnvelope.model_validate_json(metadata)
     except Exception as exc:
         raise HostAgentProtocolError("invalid request metadata") from exc
 
-    # Read at most limit + 1 to detect oversized stdin without accepting
-    # unbounded input into memory. The helper tolerates short reads.
-    limit = envelope.limits.max_stdin_bytes
-    stdin = _read_bounded_to_eof(stream, limit + 1)
-    if len(stdin) > limit:
-        raise HostAgentProtocolError("stdin exceeds configured maximum")
 
+def read_application_stdin(stream: BinaryIO, max_stdin_bytes: int) -> bytes:
+    """Read application stdin with a caller-supplied server-side bound."""
+
+    stdin = _read_bounded_to_eof(stream, max_stdin_bytes + 1)
+    if len(stdin) > max_stdin_bytes:
+        raise HostAgentProtocolError("stdin exceeds configured maximum")
+    return stdin
+
+
+def read_request(
+    stream: BinaryIO,
+    *,
+    max_stdin_bytes: int | None = None,
+) -> tuple[ExecEnvelope, bytes]:
+    """Convenience wrapper for a full request.
+
+    The production host-agent CLI uses the two-stage API so host-local policy
+    can authorize metadata and resource ceilings before application stdin is
+    read.
+    """
+
+    envelope = read_envelope(stream)
+    bound = envelope.limits.max_stdin_bytes
+    if max_stdin_bytes is not None:
+        bound = min(bound, max_stdin_bytes)
+    stdin = read_application_stdin(stream, bound)
     return envelope, stdin
 
 
