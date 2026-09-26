@@ -439,3 +439,25 @@ def test_version_one_policy_is_rejected(tmp_path: Path):
 
     with pytest.raises(HostPolicyError):
         load_host_policy(path, require_root_owner=False)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"argv": ("status", "bad\x00arg")},
+        {"cwd": "bad\x00cwd"},
+        {"env": {"CI": "bad\x00value"}},
+    ],
+)
+def test_nul_bearing_request_fields_fail_closed(tmp_path: Path, overrides):
+    executable = make_executable(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    policy = make_policy(executable, cwd)
+
+    result = authorize_request(
+        policy,
+        envelope(executable, cwd, **overrides),
+    )
+
+    assert result.allowed is False
