@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Phase 3a merged; Phase 3b host policy implemented on phase-3b-host-policy; review/merge pending**
+Status: **Phases 3a/3b merged; Phase 3c implemented on phase-3c-command-canonicalization; review/merge pending**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -86,10 +86,24 @@ Implemented:
 - metadata authorization before application-stdin read;
 - fail-closed behavior after authorization; still no process execution.
 
+### Phase 3c — canonical command authorization
+
+Implemented:
+
+- host-policy schema version 2 with per-command rules;
+- exact/prefix argv token authorization;
+- requested executable → expected realpath pinning;
+- regular-file and execute-bit checks;
+- root ownership and group/world-write controls;
+- canonical cwd-root confinement;
+- symlink retarget and cwd escape rejection;
+- NUL-bearing argv/cwd/environment rejection;
+- canonical resolved paths returned for the future execution stage;
+- fail-closed behavior; still no process execution.
+
 ### Remaining Phase 3 work
 
-- Phase 3c: argv/cwd canonical authorization and executable filesystem resolution;
-- Phase 3d: structured execution without shell interpretation;
+- Phase 3d: race-resistant structured execution without shell interpretation;
 - typed filesystem operations;
 - execution-time resource enforcement;
 - optional privileged helper protocol.
