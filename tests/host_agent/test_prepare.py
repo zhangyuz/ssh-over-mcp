@@ -111,7 +111,7 @@ def test_executable_replacement_after_authorization_is_denied(tmp_path: Path):
 
     with pytest.raises(
         CommandPreparationError,
-        match="changed after authorization",
+        match="filesystem objects changed",
     ):
         prepare_command(policy, envelope, decision)
 
@@ -130,7 +130,7 @@ def test_cwd_replacement_after_authorization_is_denied(tmp_path: Path):
 
     with pytest.raises(
         CommandPreparationError,
-        match="working directory changed",
+        match="filesystem objects changed",
     ):
         prepare_command(policy, envelope, decision)
 
@@ -145,7 +145,7 @@ def test_permission_change_after_authorization_is_rechecked(tmp_path: Path):
 
     with pytest.raises(
         CommandPreparationError,
-        match="group/other writable",
+        match="no longer authorized",
     ):
         prepare_command(policy, envelope, decision)
 
@@ -160,8 +160,8 @@ def test_file_capabilities_are_rechecked_on_pinned_fd(
     decision = authorize(policy, envelope)
 
     monkeypatch.setattr(
-        "ssh_over_mcp.host_agent.prepare.os.getxattr",
-        lambda *args, **kwargs: b"capability",
+        "ssh_over_mcp.host_agent.prepare._read_file_capability",
+        lambda fd: b"capability",
     )
 
     with pytest.raises(
