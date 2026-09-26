@@ -1,0 +1,128 @@
+name: Self-hosted security validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref or commit to validate
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ssh-over-mcp-self-hosted-security
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Linux security validation
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, x64, ssh-over-mcp-security]
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout selected ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+          clean: true
+          fetch-depth: 0
+
+      - name: Verify non-root delegated cgroup v2 runner
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$(id -u)" -eq 0 ]; then
+            echo "::error::Security validation runner must not run as root"
+            exit 1
+          fi
+
+          current_rel="$(awk -F: '$1 == "0" { print $3 }' /proc/self/cgroup)"
+          if [ -z "$current_rel" ]; then
+            echo "::error::Unified cgroup v2 membership not found"
+            exit 1
+          fi
+
+          case "$current_rel" in
+            */runner) ;;
+            *)
+              echo "::error::Expected systemd DelegateSubgroup=runner; current cgroup is $current_rel"
+              exit 1
+              ;;
+          esac
+
+          delegated_rel="${current_rel%/runner}"
+          delegated_root="/sys/fs/cgroup${delegated_rel}"
+
+          if [ ! -r "$delegated_root/cgroup.controllers" ]; then
+            echo "::error::Delegated cgroup.controllers is unavailable"
+            exit 1
+          fi
+          if [ ! -w "$delegated_root/cgroup.subtree_control" ]; then
+            echo "::error::Runner does not own delegated cgroup.subtree_control"
+            exit 1
+          fi
+
+          controllers="$(cat "$delegated_root/cgroup.controllers")"
+          for controller in cpu memory pids; do
+            if ! grep -qw "$controller" <<<"$controllers"; then
+              echo "::error::Missing cgroup v2 controller: $controller"
+              exit 1
+            fi
+          done
+
+          printf '+cpu +memory +pids\n' > "$delegated_root/cgroup.subtree_control"
+
+          probe="$delegated_root/ssh-over-mcp-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir "$probe"
+          cleanup() {
+            rmdir "$probe" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for control in cgroup.procs cgroup.kill memory.max pids.max cpu.max; do
+            if [ ! -w "$probe/$control" ]; then
+              echo "::error::Required delegated cgroup control is not writable: $control"
+              exit 1
+            fi
+          done
+
+          echo "SSH_OVER_MCP_TEST_CGROUP_ROOT=$delegated_root" >> "$GITHUB_ENV"
+          echo "Delegated cgroup root: $delegated_root"
+          echo "Controllers: $controllers"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install -U pip
+          pip install -e '.[dev]'
+
+      - name: Verify project cgroup probe
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from ssh_over_mcp.host_agent.containment import probe_cgroup_v2
+
+          root = os.environ["SSH_OVER_MCP_TEST_CGROUP_ROOT"]
+          probe = probe_cgroup_v2(root)
+          print(probe)
+          if not probe.ready_for_containment:
+              raise SystemExit("project cgroup-v2 probe failed")
+          PY
+
+      - name: Compile
+        run: python -m compileall -q src tests
+
+      - name: Run full test suite
+        run: pytest -q
