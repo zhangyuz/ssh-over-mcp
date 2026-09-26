@@ -154,6 +154,10 @@ A rule may constrain roles, host aliases, required host labels, MCP tools, execu
 
 The implementation evaluates **all matching rules**. Any matching deny wins. At least one allow must match or the request is denied.
 
+Host membership is evaluated against the explicitly requested server-side profile. Role inheritance grants inherited policy rules; it does **not** implicitly grant a child role access to hosts which only list its parent role.
+
+Requests cannot assert that approval has already been granted. Until the trusted approval subsystem is implemented, operations in an approval-required risk class remain `approval_required` and cannot be converted to `allow` by request data.
+
 The canonical loadable example is `config/policy.example.yaml`.
 
 ## Command classification

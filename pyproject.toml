@@ -4,11 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ssh-over-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "Policy-enforced SSH remote control plane for MCP-compatible AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "asyncssh>=2.24,<3",
   "pydantic>=2.9,<3",
   "PyYAML>=6.0,<7",
 ]
@@ -16,12 +17,14 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8.3,<9",
+  "pytest-asyncio>=0.24,<1",
   "ruff>=0.8",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100

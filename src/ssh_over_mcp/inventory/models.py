@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import re
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+_ALIAS_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 class Host(BaseModel):
@@ -32,9 +36,12 @@ class Inventory(BaseModel):
     def validate_aliases(cls, hosts: dict[str, Host]) -> dict[str, Host]:
         if not hosts:
             raise ValueError("inventory must contain at least one host")
+
         for alias in hosts:
-            if not alias or alias != alias.strip():
-                raise ValueError("host aliases must be non-empty and trimmed")
-            if any(ch.isspace() for ch in alias):
-                raise ValueError(f"host alias may not contain whitespace: {alias!r}")
+            if not _ALIAS_RE.fullmatch(alias):
+                raise ValueError(
+                    "host aliases may contain only letters, digits, '.', "
+                    "'_', and '-'"
+                )
+
         return hosts

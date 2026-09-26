@@ -112,7 +112,7 @@ class PolicyEngine:
         if host is None:
             return self._deny("host is not present in server-side inventory", request, roles)
 
-        if host.allowed_roles and not roles.intersection(host.allowed_roles):
+        if host.allowed_roles and request.profile not in host.allowed_roles:
             return self._deny("profile is not allowed on target host", request, roles)
 
         try:
@@ -201,7 +201,7 @@ class PolicyEngine:
             )
 
         approval_required = risk in self.policy.risk.approval_required
-        if approval_required and not request.approval_granted:
+        if approval_required:
             return PolicyDecision(
                 decision=Decision.APPROVAL_REQUIRED,
                 reason=f"{risk.value} risk operation requires approval",

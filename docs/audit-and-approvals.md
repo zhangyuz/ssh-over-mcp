@@ -67,6 +67,8 @@ Approvals SHOULD bind:
 
 Changing any bound field invalidates the approval.
 
+An execution request MUST NOT contain a boolean or similar self-asserted field which converts an approval-required decision into an allow decision. Approval state must come from the trusted approval subsystem. Until that subsystem exists, approval-required operations fail closed.
+
 ## Risk model
 
 Suggested baseline:
