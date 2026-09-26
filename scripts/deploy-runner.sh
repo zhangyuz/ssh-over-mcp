@@ -61,10 +61,10 @@ Registration token:
   repository runner registration token via gh api.
 
 Examples:
-  RUNNER_TOKEN=... ./scripts/deploy-runner.sh up
-  ./scripts/deploy-runner.sh up --name mac-mini-runner
-  ./scripts/deploy-runner.sh up --persistent
-  ./scripts/deploy-runner.sh logs
+  RUNNER_TOKEN=... bash scripts/deploy-runner.sh up
+  bash scripts/deploy-runner.sh up --name mac-mini-runner
+  bash scripts/deploy-runner.sh up --persistent
+  bash scripts/deploy-runner.sh logs
 EOF
 }
 
@@ -249,7 +249,11 @@ start_runner() {
   resolve_registration_token
   default_runner_name
 
-  docker rm -f "${container_name}" >/dev/null 2>&1 || true
+  if docker inspect "${container_name}" >/dev/null 2>&1; then
+    echo "runner container already exists: ${container_name}" >&2
+    echo "use 'bash scripts/deploy-runner.sh down' before starting a replacement" >&2
+    exit 1
+  fi
 
   local run_args=(
     run
