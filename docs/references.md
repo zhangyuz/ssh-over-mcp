@@ -1,0 +1,22 @@
+# References
+
+These references inform the current architecture. They are informative; the repository's normative behavior is defined by the source-of-truth documents and ADRs.
+
+## Model Context Protocol
+
+- MCP 2026-07-28 specification release: https://blog.modelcontextprotocol.io/posts/2026-07-28/
+- MCP specification/documentation: https://modelcontextprotocol.io/
+- MCP TypeScript SDK: https://ts.sdk.modelcontextprotocol.io/
+
+## Cloudflare
+
+- MCP server portals: https://developers.cloudflare.com/cloudflare-one/access-controls/ai-controls/mcp-portals/
+- Managed OAuth: https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/
+- Private MCP server support: https://developers.cloudflare.com/changelog/post/2026-09-22-private-mcp-servers/
+- MCP portals GA: https://developers.cloudflare.com/changelog/post/2026-09-24-mcp-portals-ga/
+- Service tokens for MCP portals: https://developers.cloudflare.com/changelog/post/2026-06-26-mcp-portal-service-tokens/
+
+## OpenSSH
+
+- `sshd_config(5)`: https://man.openbsd.org/sshd_config
+- `authorized_keys` options are documented through OpenSSH manual pages and should be checked against the deployed OpenSSH version.
