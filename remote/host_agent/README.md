@@ -8,24 +8,30 @@ ssh-over-mcp-host-agent
 
 Normative behavior is defined in [`../../docs/ssh-host-agent.md`](../../docs/ssh-host-agent.md).
 
-## Current Phase 3d2a behavior
+## Current Phase 3d2b1 behavior
 
-The ForceCommand request path remains **non-executing**, but the package now contains a native execution primitive for the next supervised-child stage.
+The ForceCommand request path remains **non-executing**, but the package now contains the first forked child supervisor.
 
-The primitive accepts only a previously fd-pinned `PreparedCommand` and:
+For an fd-pinned native ELF command, the supervisor:
 
-1. requires native ELF format;
-2. requires fd-based `os.execve()` support;
-3. requires a pinned cwd;
-4. revalidates the executable fd using device/inode/ctime;
-5. revalidates the cwd fd using device/inode;
-6. builds argv without shell parsing;
-7. passes only the explicitly authorized request environment;
-8. calls `fchdir(cwd_fd)`;
-9. calls `os.execve(executable_fd, argv, env)`.
+1. validates the execution spec before fork;
+2. creates close-on-exec stdin/stdout/stderr pipes;
+3. forks a disposable child;
+4. creates a new child session/process group;
+5. clears blocked signals and resets normal signal handlers;
+6. sets `umask 077` and disables core dumps;
+7. installs the three stdio pipes;
+8. closes unrelated child descriptors;
+9. invokes the fd-based native exec primitive.
 
-It does not reopen the executable pathname, perform PATH lookup, invoke a shell, or inherit the host-agent environment.
+The parent receives the child PID and pipe endpoints. Child setup/exec failure emits only a fixed generic error and exits 125.
 
-The primitive is deliberately child-only and is **not called by the CLI yet**. Remote requests still terminate with "execution unavailable".
+Still missing by design:
 
-Next: a supervisor which forks a disposable child, connects stdin/stdout/stderr, enforces timeout/output limits, and calls this primitive only inside the child.
+- wall timeout;
+- combined stdout/stderr byte budget;
+- termination/kill escalation;
+- CPU/memory/process-count limits;
+- ForceCommand CLI integration.
+
+Next: Phase 3d2b2 adds bounded execution and process-group cleanup before any remote execution path is enabled.
