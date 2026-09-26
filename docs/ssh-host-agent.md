@@ -148,7 +148,7 @@ Executable authorization resolves the requested path and requires it to match th
 
 `exact` argv rules are the safer default. A `prefix` rule authorizes every trailing token after the configured prefix and MUST only be used when that wider argument surface is intentionally acceptable; it does not interpret shell syntax or constrain command-specific path/helper semantics.
 
-Authorization results include canonical executable/cwd paths plus filesystem device/inode/ctime identities.
+Authorization records canonical executable/cwd paths. Executable identity uses device+inode+ctime; cwd replacement identity uses device+inode because directory ctime changes during ordinary content updates.
 
 ### Phase 3d1 fd preparation
 
@@ -186,7 +186,9 @@ The first execution primitive is deliberately restricted to native ELF files. It
 
 There is no shell, command-string parsing, PATH lookup, or executable pathname reopen in this primitive.
 
-The primitive MUST only be called in a disposable child process because `fchdir()` mutates process state if exec subsequently fails. Phase 3d2a is not wired into the ForceCommand CLI, so remote requests remain non-executing.
+The primitive MUST only be called in a disposable child process because `fchdir()` mutates process state if exec subsequently fails. Phase 3d2a intentionally does not reset signal handlers/masks, umask, rlimits, groups, or unrelated inherited file descriptors, and it does not install stdin/stdout/stderr pipes. Those are supervisor responsibilities in Phase 3d2b.
+
+Phase 3d2a is not wired into the ForceCommand CLI, so remote requests remain non-executing.
 
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 
