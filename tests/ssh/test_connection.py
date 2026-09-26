@@ -68,6 +68,8 @@ async def test_connection_is_pinned_and_hardened():
     host, kwargs = calls[0]
     assert host == "10.0.0.1"
     assert kwargs["known_hosts"].startswith(b"dev01 ssh-ed25519 ")
+    assert kwargs["client_keys"] == [("/run/key", None)]
+    assert kwargs["client_certs"] == []
     assert kwargs["host_key_alias"] == "dev01"
     assert kwargs["config"] is None
     assert kwargs["agent_path"] is None
