@@ -8,23 +8,24 @@ The project is intentionally **not** a thin wrapper around `/bin/bash`. Every op
 
 ## Current status
 
-**Phase 3c — remote host canonical authorization.**
+**Phase 3d1 — fd-pinned execution preparation.**
 
 Implemented through the current development branch:
 
 - central default-deny policy and server-owned host inventory;
 - pinned-key SSH transport with explicit credentials and bounded sessions;
-- versioned SMCP request framing over a fixed `mcp-v1` ForceCommand channel;
-- parse-only remote host agent;
-- root-owned host-local policy with host-side resource ceilings;
-- per-command exact executable selection;
-- token-based exact/prefix argv authorization;
-- pinned executable realpath verification;
-- regular-file/executable/ownership/writeability checks;
-- canonical cwd-root confinement with symlink escape rejection;
-- fail-closed behavior after authorization.
+- versioned SMCP framing over a fixed `mcp-v1` ForceCommand channel;
+- root-owned host-local policy and server-side resource ceilings;
+- per-command argv/cwd canonical authorization;
+- executable realpath, ownership, writeability, setuid/setgid, and file-capability checks;
+- authorization-time device/inode identities for executable and cwd;
+- second authorization immediately before preparation;
+- executable/cwd opened with `O_NOFOLLOW|O_CLOEXEC`;
+- fd-level device/inode and executable-property revalidation;
+- executable format classification (`elf`, `script`, `other`);
+- deterministic descriptor cleanup.
 
-**Command execution is still disabled.** Phase 3d will add a race-resistant structured execution path only after the authorization-to-exec TOCTOU boundary is explicitly handled.
+**Process execution is still disabled.** The next execution increment will consume these pinned descriptors rather than reopening pathnames.
 
 
 ## Documentation is the source of truth
