@@ -26,3 +26,11 @@ These references inform the current architecture. They are informative; the repo
 
 - `sshd_config(5)`: https://man.openbsd.org/sshd_config
 - `authorized_keys` options are documented through OpenSSH manual pages and should be checked against the deployed OpenSSH version.
+
+
+## Race-resistant execution
+
+- Python 3.12 `os.execve` / fd support: https://docs.python.org/3.12/library/os.html
+- Linux `fexecve(3)`: https://man7.org/linux/man-pages/man3/fexecve.3.html
+- Linux `execveat(2)`: https://man7.org/linux/man-pages/man2/execveat.2.html
+- Linux `openat2(2)`: https://man7.org/linux/man-pages/man2/openat2.2.html
