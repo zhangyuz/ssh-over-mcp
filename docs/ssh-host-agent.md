@@ -129,7 +129,9 @@ Phase 3c uses host-policy schema version 2. Each command policy binds:
 - one or more token-based argv rules (`exact` or non-empty `prefix`);
 - canonical allowed cwd roots, or an explicit no-cwd allowance;
 - whether the resolved executable must be root-owned;
-- whether group/world-writable executables may be accepted.
+- whether group/world-writable executables may be accepted;
+- whether setuid/setgid bits may be accepted;
+- whether Linux file capabilities may be accepted.
 
 Global host policy also constrains:
 
@@ -142,7 +144,7 @@ Global host policy also constrains:
 
 The host agent MUST apply metadata/resource checks before reading application stdin. A client cannot increase host limits by declaring larger limits in the request.
 
-Executable authorization resolves the requested path and requires it to match the configured canonical target. The target MUST be a regular executable file and is root-owned/non-group-world-writable by default. Working directories are resolved with symlinks and MUST remain beneath an explicitly configured canonical root.
+Executable authorization resolves the requested path and requires it to match the configured canonical target. The target MUST be a regular executable file and is root-owned/non-group-world-writable by default. Setuid/setgid binaries and executables carrying Linux file capabilities are also denied by default and require explicit policy opt-in. Working directories are resolved with symlinks and MUST remain beneath an explicitly configured canonical root.
 
 `exact` argv rules are the safer default. A `prefix` rule authorizes every trailing token after the configured prefix and MUST only be used when that wider argument surface is intentionally acceptable; it does not interpret shell syntax or constrain command-specific path/helper semantics.
 
