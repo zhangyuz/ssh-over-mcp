@@ -89,17 +89,16 @@ def build_native_exec_spec(prepared: PreparedCommand) -> NativeExecSpec:
         include_ctime=True,
     )
 
-    if prepared.cwd_fd is not None:
-        if prepared.cwd_identity is None:
-            raise NativeExecutionError("pinned cwd identity is missing")
-        _validate_fd_identity(
-            prepared.cwd_fd,
-            prepared.cwd_identity,
-            require_directory=True,
-            include_ctime=False,
-        )
-    elif prepared.cwd_identity is not None:
-        raise NativeExecutionError("prepared cwd state is inconsistent")
+    if prepared.cwd_fd is None:
+        raise NativeExecutionError("native execution requires a pinned cwd")
+    if prepared.cwd_identity is None:
+        raise NativeExecutionError("pinned cwd identity is missing")
+    _validate_fd_identity(
+        prepared.cwd_fd,
+        prepared.cwd_identity,
+        require_directory=True,
+        include_ctime=False,
+    )
 
     # argv[0] is descriptive only. The executable itself is selected by fd.
     argv = (prepared.executable_path, *prepared.argv)
