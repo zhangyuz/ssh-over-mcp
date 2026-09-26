@@ -16,6 +16,12 @@ These references inform the current architecture. They are informative; the repo
 - MCP portals GA: https://developers.cloudflare.com/changelog/post/2026-09-24-mcp-portals-ga/
 - Service tokens for MCP portals: https://developers.cloudflare.com/changelog/post/2026-06-26-mcp-portal-service-tokens/
 
+## SSH transport
+
+- AsyncSSH 2.24 documentation: https://asyncssh.readthedocs.io/en/latest/
+- AsyncSSH API reference: https://asyncssh.readthedocs.io/en/latest/api.html
+- AsyncSSH PyPI releases: https://pypi.org/project/asyncssh/
+
 ## OpenSSH
 
 - `sshd_config(5)`: https://man.openbsd.org/sshd_config
