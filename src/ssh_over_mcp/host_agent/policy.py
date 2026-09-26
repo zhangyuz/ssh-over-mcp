@@ -131,13 +131,22 @@ class HostExecutionPolicy(BaseModel):
         return values
 
 
+class HostObjectIdentity(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    device: int
+    inode: int
+
+
 class HostAuthorizationResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     allowed: bool
     reason: str
     resolved_executable: str | None = None
+    executable_identity: HostObjectIdentity | None = None
     resolved_cwd: str | None = None
+    cwd_identity: HostObjectIdentity | None = None
 
 
 class _UniqueKeyLoader(yaml.SafeLoader):
@@ -255,43 +264,43 @@ def _deny(reason: str) -> HostAuthorizationResult:
 def _resolve_executable(
     requested_path: str,
     rule: HostCommandRule,
-) -> tuple[str | None, str | None]:
+) -> tuple[str | None, HostObjectIdentity | None, str | None]:
     try:
         expected = Path(rule.resolved_path).resolve(strict=True)
         requested = Path(requested_path).resolve(strict=True)
     except (OSError, RuntimeError, ValueError):
-        return None, "executable path cannot be resolved"
+        return None, None, "executable path cannot be resolved"
 
     # The configured resolved path must itself already name the canonical
     # target. This prevents policy from silently following a mutable symlink.
     if str(expected) != rule.resolved_path:
-        return None, "configured resolved executable is not canonical"
+        return None, None, "configured resolved executable is not canonical"
 
     if requested != expected:
-        return None, "executable resolved target does not match host policy"
+        return None, None, "executable resolved target does not match host policy"
 
     try:
         info = expected.stat()
     except OSError:
-        return None, "resolved executable is unavailable"
+        return None, None, "resolved executable is unavailable"
 
     if not stat.S_ISREG(info.st_mode):
-        return None, "resolved executable is not a regular file"
+        return None, None, "resolved executable is not a regular file"
     if rule.require_root_owned and info.st_uid != 0:
-        return None, "resolved executable is not root-owned"
+        return None, None, "resolved executable is not root-owned"
     if (
         not rule.allow_group_or_world_writable
         and info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
     ):
-        return None, "resolved executable is group/other writable"
+        return None, None, "resolved executable is group/other writable"
     if (
         not rule.allow_setuid_or_setgid
         and info.st_mode & (stat.S_ISUID | stat.S_ISGID)
     ):
-        return None, "resolved executable has setuid/setgid bits"
+        return None, None, "resolved executable has setuid/setgid bits"
     if not rule.allow_file_capabilities:
         if not hasattr(os, "getxattr"):
-            return None, "file-capability inspection is unavailable"
+            return None, None, "file-capability inspection is unavailable"
         try:
             capability = os.getxattr(
                 expected,
@@ -304,49 +313,58 @@ def _resolve_executable(
                 errno.ENOTSUP,
                 errno.EOPNOTSUPP,
             }:
-                return None, "file-capability inspection failed"
+                return None, None, "file-capability inspection failed"
         else:
             if capability:
-                return None, "resolved executable has file capabilities"
+                return None, None, "resolved executable has file capabilities"
     if not os.access(expected, os.X_OK):
-        return None, "resolved executable is not executable"
+        return None, None, "resolved executable is not executable"
 
-    return str(expected), None
-
-
-def _resolve_cwd(
+    return (\n        str(expected),\n        HostObjectIdentity(device=info.st_dev, inode=info.st_ino),\n        None,\n    )\n\n\ndef _resolve_cwd(
     cwd: str | None,
     rule: HostCommandRule,
-) -> tuple[str | None, str | None]:
+) -> tuple[str | None, HostObjectIdentity | None, str | None]:
     if cwd is None:
         if rule.allow_no_cwd:
-            return None, None
-        return None, "working directory is required by host policy"
+            return None, None, None
+        return None, None, "working directory is required by host policy"
 
     try:
         candidate = Path(cwd).resolve(strict=True)
     except (OSError, RuntimeError, ValueError):
-        return None, "working directory cannot be resolved"
+        return None, None, "working directory cannot be resolved"
 
-    if not candidate.is_dir():
-        return None, "working directory is not a directory"
+    try:
+        candidate_info = candidate.stat()
+    except OSError:
+        return None, None, "working directory is unavailable"
+
+    if not stat.S_ISDIR(candidate_info.st_mode):
+        return None, None, "working directory is not a directory"
 
     for root_text in rule.cwd_roots:
         try:
             root = Path(root_text).resolve(strict=True)
         except (OSError, RuntimeError, ValueError):
-            return None, "configured cwd root cannot be resolved"
+            return None, None, "configured cwd root cannot be resolved"
 
         if str(root) != root_text:
-            return None, "configured cwd root is not canonical"
+            return None, None, "configured cwd root is not canonical"
 
         try:
             candidate.relative_to(root)
-            return str(candidate), None
+            return (
+                str(candidate),
+                HostObjectIdentity(
+                    device=candidate_info.st_dev,
+                    inode=candidate_info.st_ino,
+                ),
+                None,
+            )
         except ValueError:
             continue
 
-    return None, "working directory is outside allowed roots"
+    return None, None, "working directory is outside allowed roots"
 
 
 def authorize_request(
@@ -385,14 +403,14 @@ def authorize_request(
     if envelope.limits.max_stdin_bytes > policy.max_stdin_bytes:
         return _deny("requested stdin limit exceeds host-policy ceiling")
 
-    resolved_executable, error = _resolve_executable(
+    resolved_executable, executable_identity, error = _resolve_executable(
         envelope.executable,
         rule,
     )
     if error:
         return _deny(error)
 
-    resolved_cwd, error = _resolve_cwd(envelope.cwd, rule)
+    resolved_cwd, cwd_identity, error = _resolve_cwd(envelope.cwd, rule)
     if error:
         return _deny(error)
 
@@ -400,5 +418,7 @@ def authorize_request(
         allowed=True,
         reason="host policy allowed request",
         resolved_executable=resolved_executable,
+        executable_identity=executable_identity,
         resolved_cwd=resolved_cwd,
+        cwd_identity=cwd_identity,
     )
