@@ -105,7 +105,7 @@ Implemented:
 
 Implemented:
 
-- authorization-time executable/cwd device+inode identities;
+- authorization-time executable/cwd device+inode+ctime identities;
 - host authorization repeated immediately before fd preparation;
 - canonical executable opened with `O_NOFOLLOW|O_CLOEXEC`;
 - canonical cwd opened as a directory fd with `O_NOFOLLOW|O_CLOEXEC`;
