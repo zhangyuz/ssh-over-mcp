@@ -8,24 +8,24 @@ ssh-over-mcp-host-agent
 
 Normative behavior is defined in [`../../docs/ssh-host-agent.md`](../../docs/ssh-host-agent.md).
 
-## Current Phase 3d1 behavior
+## Current Phase 3d2a behavior
 
-The host agent remains **non-executing**. It now performs:
+The ForceCommand request path remains **non-executing**, but the package now contains a native execution primitive for the next supervised-child stage.
 
-1. exact ForceCommand/no-PTY validation;
-2. trusted host-policy loading;
-3. bounded metadata parsing and host authorization;
-4. canonical executable/argv/cwd checks;
-5. records executable/cwd device+inode+ctime identities;
-6. immediately re-authorizes before preparation;
-7. opens the canonical executable and cwd with no-follow/close-on-exec flags;
-8. revalidates identity and executable security properties on the opened fd;
-9. classifies the pinned executable as ELF, script, or other;
-10. reads bounded application stdin while the fds remain pinned;
-11. closes all prepared fds and exits with "execution unavailable".
+The primitive accepts only a previously fd-pinned `PreparedCommand` and:
 
-No process is started.
+1. requires native ELF format;
+2. requires fd-based `os.execve()` support;
+3. requires a pinned cwd;
+4. revalidates the executable fd using device/inode/ctime;
+5. revalidates the cwd fd using device/inode;
+6. builds argv without shell parsing;
+7. passes only the explicitly authorized request environment;
+8. calls `fchdir(cwd_fd)`;
+9. calls `os.execve(executable_fd, argv, env)`.
 
-fd pinning prevents pathname replacement from silently changing the object selected for future execution. It does not protect a deliberately mutable inode from in-place modification, so future execution keeps the trusted ownership/writeability requirements as part of its security boundary.
+It does not reopen the executable pathname, perform PATH lookup, invoke a shell, or inherit the host-agent environment.
 
-The next increment will execute only through the pinned descriptor path and will not reopen the executable pathname.
+The primitive is deliberately child-only and is **not called by the CLI yet**. Remote requests still terminate with "execution unavailable".
+
+Next: a supervisor which forks a disposable child, connects stdin/stdout/stderr, enforces timeout/output limits, and calls this primitive only inside the child.
