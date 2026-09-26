@@ -103,7 +103,6 @@ class EvaluationRequest(BaseModel):
     path: str | None = None
     env: dict[str, str] = Field(default_factory=dict)
     privilege: str = "user"
-    approval_granted: bool = False
 
 
 class PolicyDecision(BaseModel):
