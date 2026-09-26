@@ -16,6 +16,11 @@ from .policy import (
     load_host_policy,
 )
 from .prepare import CommandPreparationError, PreparedCommand, prepare_command
+from .run import (
+    BoundedExecutionError,
+    SupervisedExecutionResult,
+    run_prepared_native,
+)
 from .supervisor import (
     ChildSupervisorError,
     SpawnedChild,
@@ -30,6 +35,9 @@ from .protocol import (
 )
 
 __all__ = [
+    "BoundedExecutionError",
+    "SupervisedExecutionResult",
+    "run_prepared_native",
     "ChildSupervisorError",
     "SpawnedChild",
     "spawn_prepared_native",

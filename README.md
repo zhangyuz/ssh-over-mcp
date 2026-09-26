@@ -8,26 +8,24 @@ The project is intentionally **not** a thin wrapper around `/bin/bash`. Every op
 
 ## Current status
 
-**Phase 3d2b1 — forked child supervisor skeleton.**
+**Phase 3d2b2a — bounded parent execution loop.**
 
 Implemented through the current development branch:
 
-- central default-deny policy and server-owned host inventory;
-- pinned-key SSH transport and host-local canonical authorization;
-- fd-pinned native ELF execution primitive with explicit argv/environment;
-- parent-side native spec validation before fork;
-- three close-on-exec stdio pipes;
-- child `setsid()` session/process-group isolation;
-- blocked-signal mask cleared and catchable signals reset to defaults;
-- child `umask 077`;
-- core dumps disabled with `RLIMIT_CORE=0`;
-- stdin/stdout/stderr installed with `dup2()`;
-- unrelated descriptors closed before exec while preserving only stdio + pinned executable/cwd fds;
-- fixed generic child-failure message and exit code 125;
-- parent receives PID plus stdin/stdout/stderr pipe handles;
-- real native `cat` integration coverage for stdin/stdout and exit handling.
+- central/default-deny and host-local canonical authorization;
+- fd-pinned native ELF execution;
+- forked child supervisor with sanitized stdio/session/signal/fd state;
+- nonblocking parent I/O via selectors;
+- request stdin checked against `max_stdin_bytes` before spawn;
+- wall-clock deadline from `timeout_seconds`;
+- one combined stdout+stderr capture budget from `max_output_bytes`;
+- output retained only up to the configured budget;
+- timeout or output overflow closes stdin and starts process-group termination;
+- SIGTERM grace followed by SIGKILL escalation;
+- bounded post-kill pipe cleanup and reliable direct-child reap;
+- structured result with return code, stdout, stderr, timeout/output flags, and duration.
 
-**Remote command execution is still disabled in the ForceCommand CLI.** Timeout, output ceilings, kill escalation, and execution-result framing are not implemented yet.
+**Remote command execution is still disabled in the ForceCommand CLI.** CPU/memory/process-count rlimits and stronger descendant containment are still pending.
 
 
 ## Documentation is the source of truth
