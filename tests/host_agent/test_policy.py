@@ -162,3 +162,23 @@ def test_policy_rejects_noncanonical_executable():
             max_output_bytes=1024,
             max_stdin_bytes=16,
         )
+
+
+def test_policy_loader_rejects_symlink(tmp_path: Path):
+    target = tmp_path / "target.yaml"
+    target.write_text(
+        """
+version: 1
+allowed_profiles: [developer]
+allowed_executables: [/usr/bin/git]
+max_timeout_seconds: 60
+max_output_bytes: 1024
+max_stdin_bytes: 16
+""",
+        encoding="utf-8",
+    )
+    link = tmp_path / "policy.yaml"
+    link.symlink_to(target)
+
+    with pytest.raises(HostPolicyError):
+        load_host_policy(link, require_root_owner=False)
