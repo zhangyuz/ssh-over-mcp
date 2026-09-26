@@ -13,6 +13,7 @@ from .policy import (
     HostCommandRule,
     HostExecutionPolicy,
     HostObjectIdentity,
+    authorize_request,
 )
 
 
@@ -251,6 +252,23 @@ def prepare_command(
         raise CommandPreparationError(
             "cannot prepare a denied authorization result"
         )
+
+    fresh = authorize_request(policy, envelope)
+    if not fresh.allowed:
+        raise CommandPreparationError(
+            "request is no longer authorized"
+        )
+    if (
+        fresh.resolved_executable != decision.resolved_executable
+        or fresh.executable_identity != decision.executable_identity
+        or fresh.resolved_cwd != decision.resolved_cwd
+        or fresh.cwd_identity != decision.cwd_identity
+    ):
+        raise CommandPreparationError(
+            "authorized filesystem objects changed before preparation"
+        )
+
+    decision = fresh
 
     rule = policy.commands.get(envelope.executable)
     if rule is None:
