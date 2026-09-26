@@ -73,7 +73,11 @@ def _require_linux_open_flags() -> int:
 
 
 def _same_identity(info: os.stat_result, identity: HostObjectIdentity) -> bool:
-    return info.st_dev == identity.device and info.st_ino == identity.inode
+    return (
+        info.st_dev == identity.device
+        and info.st_ino == identity.inode
+        and info.st_ctime_ns == identity.ctime_ns
+    )
 
 
 def _read_file_capability(fd: int) -> bytes:
