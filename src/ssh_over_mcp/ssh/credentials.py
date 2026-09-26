@@ -18,6 +18,16 @@ class SSHCredential:
     def __post_init__(self) -> None:
         if not self.client_keys:
             raise ValueError("at least one SSH client key is required")
+        if self.client_certs and len(self.client_certs) != len(self.client_keys):
+            raise ValueError(
+                "SSH client certificate count must match client key count"
+            )
+
+    def explicit_keypairs(self) -> list[tuple[str, str | None]]:
+        """Return key/cert pairs without AsyncSSH sidecar auto-discovery."""
+        if self.client_certs:
+            return list(zip(self.client_keys, self.client_certs, strict=True))
+        return [(key, None) for key in self.client_keys]
 
 
 class CredentialProvider(Protocol):
