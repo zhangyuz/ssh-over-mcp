@@ -10,32 +10,19 @@ commands:
   /usr/bin/git:
     resolved_path: /usr/bin/git
     argv:
-      - mode: prefix
-        args: [status]
-      - mode: prefix
-        args: [diff]
-      - mode: prefix
-        args: [log]
+      - mode: exact
+        args: [status, --short]
+      - mode: exact
+        args: [log, --oneline, -n, "20"]
     cwd_roots:
       - /srv/projects
 
-  /usr/bin/ls:
-    resolved_path: /usr/bin/ls
+  /usr/bin/uptime:
+    resolved_path: /usr/bin/uptime
     argv:
-      - mode: prefix
-        args: ["--"]
       - mode: exact
         args: []
-    cwd_roots:
-      - /srv/projects
-
-  /usr/bin/stat:
-    resolved_path: /usr/bin/stat
-    argv:
-      - mode: prefix
-        args: ["--"]
-    cwd_roots:
-      - /srv/projects
+    allow_no_cwd: true
 
 env_allow:
   - CI
