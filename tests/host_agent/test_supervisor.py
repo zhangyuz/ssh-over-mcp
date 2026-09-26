@@ -9,7 +9,9 @@ from ssh_over_mcp.host_agent.policy import HostObjectIdentity
 from ssh_over_mcp.host_agent.prepare import PreparedCommand
 from ssh_over_mcp.host_agent.supervisor import (
     ChildSupervisorError,
+    SpawnedChild,
     _close_unrelated_fds,
+    _require_standard_fds,
     spawn_prepared_native,
 )
 
@@ -208,3 +210,47 @@ def test_spawned_child_creates_own_session(tmp_path: Path):
         assert child.wait() == 0
     finally:
         child.close_pipes()
+
+
+def test_wait_retries_interrupted_waitpid(monkeypatch):
+    calls = 0
+
+    def fake_waitpid(pid: int, options: int):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise InterruptedError()
+        return pid, 7 << 8
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor.os.waitpid",
+        fake_waitpid,
+    )
+
+    child = SpawnedChild(
+        pid=12345,
+        stdin_fd=-1,
+        stdout_fd=-1,
+        stderr_fd=-1,
+    )
+
+    assert child.wait() == 7
+    assert child.wait() == 7
+    assert calls == 2
+
+
+def test_missing_standard_fd_fails_closed(monkeypatch):
+    real_fstat = os.fstat
+
+    def fake_fstat(fd: int):
+        if fd == 1:
+            raise OSError("closed")
+        return real_fstat(fd)
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor.os.fstat",
+        fake_fstat,
+    )
+
+    with pytest.raises(ChildSupervisorError, match="standard"):
+        _require_standard_fds()
