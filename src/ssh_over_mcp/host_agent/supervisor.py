@@ -29,6 +29,8 @@ class SpawnedChild:
         if self.stdin_fd >= 0:
             try:
                 os.close(self.stdin_fd)
+            except OSError:
+                pass
             finally:
                 self.stdin_fd = -1
 
@@ -46,13 +48,27 @@ class SpawnedChild:
         if self._returncode is not None:
             return self._returncode
 
-        try:
-            _, status = os.waitpid(self.pid, 0)
-        except OSError as exc:
-            raise ChildSupervisorError("cannot wait for child") from exc
+        while True:
+            try:
+                _, status = os.waitpid(self.pid, 0)
+                break
+            except InterruptedError:
+                continue
+            except OSError as exc:
+                raise ChildSupervisorError("cannot wait for child") from exc
 
         self._returncode = os.waitstatus_to_exitcode(status)
         return self._returncode
+
+
+def _require_standard_fds() -> None:
+    for fd in (0, 1, 2):
+        try:
+            os.fstat(fd)
+        except OSError as exc:
+            raise ChildSupervisorError(
+                "standard file descriptors must be open"
+            ) from exc
 
 
 def _pipe_cloexec() -> tuple[int, int]:
@@ -143,7 +159,9 @@ def _dup_stdio(
         (stdout_write, 1),
         (stderr_write, 2),
     ):
-        if source != target:
+        if source == target:
+            os.set_inheritable(target, True)
+        else:
             os.dup2(source, target, inheritable=True)
 
 
@@ -196,6 +214,8 @@ def spawn_prepared_native(prepared: PreparedCommand) -> SpawnedChild:
         raise ChildSupervisorError("POSIX fork/session support is unavailable")
     if prepared._closed:
         raise ChildSupervisorError("prepared command is closed")
+
+    _require_standard_fds()
 
     try:
         build_native_exec_spec(prepared)
