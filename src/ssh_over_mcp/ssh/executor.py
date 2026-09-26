@@ -146,7 +146,7 @@ class SSHExecutor:
                 # Env is carried inside the encrypted structured frame and
                 # interpreted by the Phase 3 host agent after policy checks.
                 env={},
-                send_env=(),
+                send_env=[],
                 x11_forwarding=False,
                 encoding=None,
             )
