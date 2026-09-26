@@ -88,7 +88,11 @@ def test_allowed_request_returns_canonical_paths(tmp_path: Path):
 
     assert result.allowed is True
     assert result.resolved_executable == str(executable.resolve())
+    assert result.executable_identity is not None
+    assert result.executable_identity.inode == executable.stat().st_ino
     assert result.resolved_cwd == str(cwd.resolve())
+    assert result.cwd_identity is not None
+    assert result.cwd_identity.inode == cwd.stat().st_ino
 
 
 def test_profile_is_exactly_allowlisted(tmp_path: Path):
