@@ -48,10 +48,17 @@ def policy() -> PolicyDocument:
         },
         rules=(
             PolicyRule(
-                id="observer.read",
+                id="observer.discovery",
                 effect=Effect.ALLOW,
                 roles=("observer",),
-                tools=("hosts_list", "host_info", "fs_read"),
+                tools=("hosts_list", "host_info"),
+            ),
+            PolicyRule(
+                id="observer.fs-read",
+                effect=Effect.ALLOW,
+                roles=("observer",),
+                tools=("fs_read",),
+                paths=("/srv/projects/**", "/var/log/**"),
             ),
             PolicyRule(
                 id="observer.inspect-exec",
