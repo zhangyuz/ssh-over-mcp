@@ -1,14 +1,28 @@
-version: 1
+version: 2
 
-# This file is installed on the managed host, owned by root, and must not be
-# writable by the MCP SSH account.
+# Install as /etc/ssh-over-mcp/host-policy.yaml.
+# Production loader requires a regular, root-owned file which is not
+# group/world-writable.
 allowed_profiles:
   - developer
 
-allowed_executables:
-  - /usr/bin/git
-  - /usr/bin/ls
-  - /usr/bin/stat
+commands:
+  /usr/bin/git:
+    resolved_path: /usr/bin/git
+    argv:
+      - mode: exact
+        args: [status, --short]
+      - mode: exact
+        args: [log, --oneline, -n, "20"]
+    cwd_roots:
+      - /srv/projects
+
+  /usr/bin/uptime:
+    resolved_path: /usr/bin/uptime
+    argv:
+      - mode: exact
+        args: []
+    allow_no_cwd: true
 
 env_allow:
   - CI

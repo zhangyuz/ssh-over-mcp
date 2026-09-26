@@ -122,19 +122,33 @@ The host agent maintains a second policy boundary on each managed host. The defa
 
 The policy file MUST be opened without following symlinks, MUST be a regular file, MUST be root-owned in production, and MUST NOT be group- or world-writable. The implementation bounds the policy file size and rejects duplicate YAML keys.
 
-Phase 3b host policy constrains:
+Phase 3c uses host-policy schema version 2. Each command policy binds:
+
+- an exact requested executable path;
+- an expected canonical filesystem realpath;
+- one or more token-based argv rules (`exact` or non-empty `prefix`);
+- canonical allowed cwd roots, or an explicit no-cwd allowance;
+- whether the resolved executable must be root-owned;
+- whether group/world-writable executables may be accepted;
+- whether setuid/setgid bits may be accepted;
+- whether Linux file capabilities may be accepted.
+
+Global host policy also constrains:
 
 - exact allowed server-side profiles;
-- exact allowed executable paths;
 - allowed environment-variable names;
 - hard-denied loader/runtime environment variables;
 - maximum execution timeout requested by the control plane;
 - maximum output budget requested by the control plane;
 - maximum stdin budget requested by the control plane.
 
-The host agent MUST apply these metadata/resource checks before reading application stdin. A client cannot increase host limits by declaring larger limits in the request.
+The host agent MUST apply metadata/resource checks before reading application stdin. A client cannot increase host limits by declaring larger limits in the request.
 
-Phase 3b intentionally does **not** yet authorize argv patterns, canonical filesystem working directories, or executable symlink resolution. Those checks MUST be added before command execution is enabled.
+Executable authorization resolves the requested path and requires it to match the configured canonical target. The target MUST be a regular executable file and is root-owned/non-group-world-writable by default. Setuid/setgid binaries and executables carrying Linux file capabilities are also denied by default and require explicit policy opt-in. Working directories are resolved with symlinks and MUST remain beneath an explicitly configured canonical root.
+
+`exact` argv rules are the safer default. A `prefix` rule authorizes every trailing token after the configured prefix and MUST only be used when that wider argument surface is intentionally acceptable; it does not interpret shell syntax or constrain command-specific path/helper semantics.
+
+Authorization results may carry canonical executable/cwd paths for the next stage, but Phase 3c still performs no process execution. Phase 3d MUST close the authorization-to-exec TOCTOU window using an fd-pinned or equivalently race-resistant execution mechanism before enabling commands.
 
 The central policy may be more expressive, but the host-local policy should preserve critical invariants if the central layer is bypassed.
 
