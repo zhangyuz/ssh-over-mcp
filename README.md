@@ -6,51 +6,25 @@
 
 The project is intentionally **not** a thin wrapper around `/bin/bash`. Every operation is expected to pass through authentication, host inventory, role/policy evaluation, risk classification, optional approval, remote host enforcement, and audit logging.
 
-## Target architecture
+## Current status
 
-```text
-ChatGPT / Claude / Cursor / autonomous agents
-                    |
-             MCP Streamable HTTP
-                    v
-          Cloudflare MCP Portal
-                    |
-          Access Managed OAuth
-        or Access Service Token
-                    |
-                    v
-          Cloudflare Gateway
-         logging / DLP / policy
-                    |
-                    v
-          Cloudflare Tunnel
-                    |
-                    v
-      ssh-over-mcp control plane
-   +--------------------------------+
-   | MCP API                        |
-   | identity/profile resolution    |
-   | host inventory                 |
-   | RBAC + policy engine           |
-   | allow/deny evaluation          |
-   | risk + approval engine         |
-   | SSH connection manager         |
-   | audit logger                   |
-   +---------------+----------------+
-                   | SSH
-                   v
-          managed Linux hosts
-   +--------------------------------+
-   | dedicated SSH account          |
-   | ForceCommand host agent        |
-   | host-local policy              |
-   | OS ACL / sudo / sandbox        |
-   +--------------------------------+
-```
+**Phase 1 — policy core implementation.**
 
-## Security model in one paragraph
+Implemented on the current development branch:
 
-Policy is **default deny**. Allow rules define the intended capability; deny rules override allows. The control plane never accepts arbitrary target addresses, usernames, SSH keys, or host keys from the model. Hosts come from server-side inventory. Structured command execution is preferred over shell strings. Raw shell is a separate privileged capability. Sensitive or high-risk actions can require short-lived, scope-bound approval. The remote host independently enforces restrictions using a dedicated SSH account, `ForceCommand`, OS permissions, and optional privileged helpers. The model is not a security boundary.
+- strict Pydantic configuration and inventory models;
+- duplicate-key-safe YAML/JSON loading;
+- default-deny policy evaluation;
+- deny-overrides-allow semantics across role inheritance;
+- host alias/inventory enforcement;
+- executable capability classification;
+- path normalization and symlink-confinement helper;
+- environment allow/deny controls;
+- risk classification and approval-required outcomes;
+- deterministic policy hashing and decision explanation;
+- adversarial policy tests.
+
+Next: SSH transport and pinned host-key execution core.
 
 ## Documentation is the source of truth
 
@@ -71,41 +45,46 @@ Start here:
 
 Agents and contributors should also read [`AGENTS.md`](AGENTS.md).
 
-## Planned repository layout
+## Security model in one paragraph
+
+Policy is **default deny**. Allow rules define intended capability; deny rules override allows. The control plane never accepts arbitrary target addresses, usernames, SSH keys, or host keys from the model. Hosts come from server-side inventory. Structured command execution is preferred over shell strings. Raw shell is a separate privileged capability. Sensitive or high-risk actions can require short-lived, scope-bound approval. The remote host independently enforces restrictions using a dedicated SSH account, `ForceCommand`, OS permissions, and optional privileged helpers. The model is not a security boundary.
+
+## Target architecture
 
 ```text
-ssh-over-mcp/
-├── README.md
-├── AGENTS.md
-├── pyproject.toml
-├── docs/
-│   ├── README.md
-│   ├── architecture.md
-│   ├── security-model.md
-│   ├── threat-model.md
-│   ├── policy-spec.md
-│   ├── mcp-api.md
-│   ├── ssh-host-agent.md
-│   ├── cloudflare-deployment.md
-│   ├── audit-and-approvals.md
-│   ├── development-plan.md
-│   ├── references.md
-│   └── decisions/
-├── src/ssh_over_mcp/
-│   ├── api/
-│   ├── policy/
-│   ├── ssh/
-│   ├── audit/
-│   └── approvals/
-├── remote/host_agent/
-├── config/
-├── tests/
-└── .github/
+ChatGPT / Claude / Cursor / autonomous agents
+                    |
+             MCP Streamable HTTP
+                    v
+          Cloudflare MCP Portal
+                    |
+          Access Managed OAuth
+        or Access Service Token
+                    |
+                    v
+          Cloudflare Gateway
+                    |
+                    v
+          Cloudflare Tunnel
+                    |
+                    v
+      ssh-over-mcp control plane
+                    |
+                   SSH
+                    v
+          managed Linux hosts
 ```
 
-## Protocol direction
+## Development
 
-The remote MCP endpoint should use **Streamable HTTP**. The preferred implementation target is the current stateless MCP protocol revision supported by the selected SDK and Cloudflare MCP Portal, while preserving compatibility with earlier Streamable HTTP clients where practical.
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev]'
+pytest
+```
+
+A loadable reference policy is in [`config/policy.example.yaml`](config/policy.example.yaml).
 
 ## Non-goals
 
@@ -117,7 +96,3 @@ The initial project does not aim to:
 - treat command blacklists as the primary security boundary;
 - rely on prompts or client-side confirmation as authorization;
 - store long-lived host credentials in model-visible configuration.
-
-## Status
-
-**Architecture/specification phase.** The repository structure and source-of-truth documents are established first; implementation follows the roadmap in [`docs/development-plan.md`](docs/development-plan.md).
