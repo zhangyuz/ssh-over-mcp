@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import os
 import stat
 from pathlib import Path
@@ -64,6 +65,8 @@ class HostCommandRule(BaseModel):
     allow_no_cwd: bool = False
     require_root_owned: bool = True
     allow_group_or_world_writable: bool = False
+    allow_setuid_or_setgid: bool = False
+    allow_file_capabilities: bool = False
 
     @field_validator("resolved_path")
     @classmethod
@@ -164,6 +167,8 @@ _UniqueKeyLoader.add_constructor(
 def _validate_lexical_absolute_path(value: str, label: str) -> str:
     if "\x00" in value:
         raise ValueError(f"{label} must not contain NUL")
+    if value.startswith("//"):
+        raise ValueError(f"{label} must use a single leading slash")
     try:
         normalized = normalize_executable(value)
     except ValueError as exc:
@@ -279,6 +284,30 @@ def _resolve_executable(
         and info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
     ):
         return None, "resolved executable is group/other writable"
+    if (
+        not rule.allow_setuid_or_setgid
+        and info.st_mode & (stat.S_ISUID | stat.S_ISGID)
+    ):
+        return None, "resolved executable has setuid/setgid bits"
+    if not rule.allow_file_capabilities:
+        if not hasattr(os, "getxattr"):
+            return None, "file-capability inspection is unavailable"
+        try:
+            capability = os.getxattr(
+                expected,
+                "security.capability",
+                follow_symlinks=False,
+            )
+        except OSError as exc:
+            if exc.errno not in {
+                errno.ENODATA,
+                errno.ENOTSUP,
+                errno.EOPNOTSUPP,
+            }:
+                return None, "file-capability inspection failed"
+        else:
+            if capability:
+                return None, "resolved executable has file capabilities"
     if not os.access(expected, os.X_OK):
         return None, "resolved executable is not executable"
 
