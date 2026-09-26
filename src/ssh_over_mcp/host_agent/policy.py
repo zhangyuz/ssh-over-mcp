@@ -161,7 +161,6 @@ def load_host_policy(
 def authorize_request(
     policy: HostExecutionPolicy,
     envelope: ExecEnvelope,
-    application_stdin: bytes,
 ) -> HostAuthorizationResult:
     if envelope.profile not in policy.allowed_profiles:
         return HostAuthorizationResult(
@@ -203,12 +202,6 @@ def authorize_request(
         return HostAuthorizationResult(
             allowed=False,
             reason="requested stdin limit exceeds host-policy ceiling",
-        )
-
-    if len(application_stdin) > policy.max_stdin_bytes:
-        return HostAuthorizationResult(
-            allowed=False,
-            reason="stdin exceeds host-policy ceiling",
         )
 
     return HostAuthorizationResult(allowed=True, reason="host policy allowed request")
