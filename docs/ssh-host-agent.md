@@ -252,6 +252,25 @@ The parent combined-output budget remains the stdout/stderr control. Strong desc
 
 Phase 3d2b2b1 is not wired into the ForceCommand CLI.
 
+### Phase 3d2b2b2a descendant-containment contract
+
+Rlimits and process-group signaling are retained as defense-in-depth, but descendant containment is modeled as an independent mandatory execution boundary.
+
+The backend-neutral contract defines one containment scope per request:
+
+1. create a scope from a validated request and finite containment limits;
+2. attach the initial child before it is released to exec;
+3. allow descendants to inherit the same containment subtree;
+4. provide a recursive `kill_all()` operation which kills the scope subtree rather than only one PID/process group;
+5. expose best-effort memory/PID/CPU accounting;
+6. clean up the empty scope deterministically.
+
+Containment limits are deliberately separate from rlimits because their semantics differ. The current contract expresses finite memory, PID and CPU quota/period ceilings and does not invent implicit production defaults.
+
+A read-only cgroup-v2 probe checks for a unified hierarchy and the `cpu`, `memory`, and `pids` controllers. This probe does **not** prove delegation/write access or `cgroup.kill` availability; the concrete backend must prove those properties when it creates a real scope.
+
+This phase defines interfaces only. No cgroup is created and the child supervisor is not yet wired to a containment backend.
+
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 
 The central policy may be more expressive, but the host-local policy should preserve critical invariants if the central layer is bypassed.
