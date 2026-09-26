@@ -1,0 +1,11 @@
+# Install as a systemd drop-in for the GitHub Actions runner service.
+# Example:
+#   sudo systemctl edit "$(cat ~/actions-runner/.service)"
+#
+# Requires systemd with DelegateSubgroup= support (systemd 254+ recommended).
+
+[Service]
+Delegate=cpu memory pids
+DelegateSubgroup=runner
+NoNewPrivileges=yes
+LimitCORE=0

@@ -13,7 +13,8 @@ This directory is the canonical behavioral and security specification for `ssh-o
 7. **Edge/auth deployment** — [`cloudflare-deployment.md`](cloudflare-deployment.md)
 8. **Approvals and audit** — [`audit-and-approvals.md`](audit-and-approvals.md)
 9. **Implementation sequencing** — [`development-plan.md`](development-plan.md)
-10. **Normative design changes** — [`decisions/`](decisions/README.md)
+10. **Self-hosted security validation** — [`self-hosted-runner.md`](self-hosted-runner.md)
+11. **Normative design changes** — [`decisions/`](decisions/README.md)
 
 ## Normative language
 
