@@ -200,7 +200,7 @@ class SSHExecutor:
         stderr_task = asyncio.create_task(
             read_stream(process.stderr)
         )
-        wait_task = asyncio.create_task(process.wait(check=False))
+        close_task = asyncio.create_task(process.wait_closed())
         overflow_task = asyncio.create_task(overflow.wait())
 
         timed_out = False
@@ -208,7 +208,7 @@ class SSHExecutor:
 
         try:
             done, _ = await asyncio.wait(
-                {wait_task, overflow_task},
+                {close_task, overflow_task},
                 timeout=timeout_seconds,
                 return_when=asyncio.FIRST_COMPLETED,
             )
@@ -220,7 +220,7 @@ class SSHExecutor:
             elif (
                 overflow_task in done
                 and overflow.is_set()
-                and not wait_task.done()
+                and not close_task.done()
             ):
                 # Stop a process which exceeds its allowed output. Signals can
                 # be ignored by some OpenSSH servers, so _abort_process also
@@ -228,17 +228,19 @@ class SSHExecutor:
                 aborting.set()
                 await self._abort_process(process)
 
-            if wait_task.done() and not wait_task.cancelled():
+            if close_task.done() and not close_task.cancelled():
                 with contextlib.suppress(Exception):
-                    completed = wait_task.result()
+                    close_task.result()
+                completed = process
         except asyncio.CancelledError:
             aborting.set()
             await self._abort_process(process)
             raise
         finally:
             overflow_task.cancel()
-            if not wait_task.done():
-                wait_task.cancel()
+            if not close_task.done():
+                close_task.cancel()
+                await asyncio.gather(close_task, return_exceptions=True)
 
             try:
                 stdout, stderr = await asyncio.wait_for(
