@@ -105,7 +105,7 @@ Implemented:
 
 Implemented:
 
-- authorization-time executable/cwd device+inode+ctime identities;
+- authorization-time executable device+inode+ctime and cwd device+inode identities;
 - host authorization repeated immediately before fd preparation;
 - canonical executable opened with `O_NOFOLLOW|O_CLOEXEC`;
 - canonical cwd opened as a directory fd with `O_NOFOLLOW|O_CLOEXEC`;
@@ -130,7 +130,8 @@ Implemented:
 - `fchdir(cwd_fd)` followed by `execve(executable_fd, ...)`;
 - no shell or PATH lookup;
 - disposable-child real exec smoke test;
-- primitive remains disconnected from the ForceCommand CLI.
+- primitive remains disconnected from the ForceCommand CLI;
+- signal/fd/stdio/rlimit process-state sanitation explicitly deferred to the child supervisor.
 
 ### Remaining Phase 3 work
 
