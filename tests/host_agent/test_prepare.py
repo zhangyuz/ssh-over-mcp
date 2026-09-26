@@ -93,6 +93,7 @@ def test_prepare_pins_authorized_executable_and_cwd(tmp_path: Path):
         assert cwd_info.st_ino == decision.cwd_identity.inode
         assert prepared.executable_format == "script"
         assert isinstance(prepared.fd_exec_supported, bool)
+        assert prepared.child_limits == policy.child_limits
     finally:
         prepared.close()
 
