@@ -421,7 +421,7 @@ def test_policy_rejects_noncanonical_requested_executable():
     with pytest.raises(ValueError):
         HostExecutionPolicy(
             allowed_profiles=frozenset({"developer"}),
-        child_limits=test_child_limits(),
+            child_limits=test_child_limits(),
             commands={
                 "/usr/bin/../bin/git": HostCommandRule(
                     resolved_path="/usr/bin/git",
@@ -439,7 +439,7 @@ def test_policy_cannot_allow_hard_denied_environment():
     with pytest.raises(ValueError):
         HostExecutionPolicy(
             allowed_profiles=frozenset({"developer"}),
-        child_limits=test_child_limits(),
+            child_limits=test_child_limits(),
             commands={
                 "/usr/bin/git": HostCommandRule(
                     resolved_path="/usr/bin/git",
@@ -535,7 +535,7 @@ def test_policy_rejects_double_slash_command_path():
     with pytest.raises(ValueError):
         HostExecutionPolicy(
             allowed_profiles=frozenset({"developer"}),
-        child_limits=test_child_limits(),
+            child_limits=test_child_limits(),
             commands={
                 "//usr/bin/git": HostCommandRule(
                     resolved_path="/usr/bin/git",
@@ -547,3 +547,21 @@ def test_policy_rejects_double_slash_command_path():
             max_output_bytes=1024,
             max_stdin_bytes=16,
         )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("cpu_seconds", 0),
+        ("address_space_bytes", 1024),
+        ("max_processes", 0),
+        ("file_size_bytes", -1),
+        ("open_files", 3),
+    ],
+)
+def test_child_limit_invalid_values_are_rejected(field, value):
+    values = test_child_limits().model_dump()
+    values[field] = value
+
+    with pytest.raises(ValueError):
+        HostChildLimits(**values)
