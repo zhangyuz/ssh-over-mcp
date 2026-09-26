@@ -42,6 +42,20 @@ def _read_exact(stream: BinaryIO, size: int) -> bytes:
     return b"".join(chunks)
 
 
+def _read_bounded_to_eof(stream: BinaryIO, limit: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+
+    while total < limit:
+        chunk = stream.read(limit - total)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+
+    return b"".join(chunks)
+
+
 def read_request(stream: BinaryIO) -> tuple[ExecEnvelope, bytes]:
     """Read and validate one complete SMCP v1 request from a binary stream.
 
@@ -64,20 +78,12 @@ def read_request(stream: BinaryIO) -> tuple[ExecEnvelope, bytes]:
     except Exception as exc:
         raise HostAgentProtocolError("invalid request metadata") from exc
 
-    # Read at most limit + 1 to detect an oversized stdin without accepting
-    # unbounded input into memory.
+    # Read at most limit + 1 to detect oversized stdin without accepting
+    # unbounded input into memory. The helper tolerates short reads.
     limit = envelope.limits.max_stdin_bytes
-    stdin = stream.read(limit + 1)
+    stdin = _read_bounded_to_eof(stream, limit + 1)
     if len(stdin) > limit:
         raise HostAgentProtocolError("stdin exceeds configured maximum")
-
-    # A compliant SSH client closes stdin after the framed request. If a custom
-    # stream returns fewer than requested bytes without EOF, this extra read
-    # catches trailing data without changing the normal blocking SSH behavior.
-    if len(stdin) <= limit:
-        trailing = stream.read(1)
-        if trailing:
-            raise HostAgentProtocolError("stdin exceeds configured maximum")
 
     return envelope, stdin
 
