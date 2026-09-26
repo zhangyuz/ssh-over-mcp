@@ -9,6 +9,7 @@ from .execute import (
 from .policy import (
     HostArgvRule,
     HostAuthorizationResult,
+    HostChildLimits,
     HostCommandRule,
     HostExecutionPolicy,
     HostPolicyError,
@@ -50,6 +51,7 @@ __all__ = [
     "prepare_command",
     "HostArgvRule",
     "HostAuthorizationResult",
+    "HostChildLimits",
     "HostCommandRule",
     "HostExecutionPolicy",
     "HostPolicyError",
