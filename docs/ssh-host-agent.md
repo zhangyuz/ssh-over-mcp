@@ -192,7 +192,7 @@ Phase 3d2a is not wired into the ForceCommand CLI, so remote requests remain non
 
 ### Phase 3d2b1 child supervisor skeleton
 
-The first supervisor increment validates the native exec spec in the parent before forking, then creates three `O_CLOEXEC` pipes and forks a disposable child. The child:
+The first supervisor increment requires parent fd 0/1/2 to already be open, validates the native exec spec before forking, then creates three `O_CLOEXEC` pipes and forks a disposable child. This precondition prevents pipe allocation from colliding with stdio target descriptors. The child:
 
 1. creates a new session/process group with `setsid()`;
 2. clears the blocked signal mask and resets catchable signals to default handling;
