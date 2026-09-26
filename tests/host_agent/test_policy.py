@@ -461,3 +461,64 @@ def test_nul_bearing_request_fields_fail_closed(tmp_path: Path, overrides):
     )
 
     assert result.allowed is False
+
+
+def test_setuid_or_setgid_executable_is_denied_by_default(tmp_path: Path):
+    executable = make_executable(tmp_path)
+    executable.chmod(0o4755)
+    policy = make_policy(
+        executable,
+        tmp_path,
+        allow_no_cwd=True,
+        argv=(HostArgvRule(mode="exact", args=()),),
+    )
+
+    result = authorize_request(
+        policy,
+        envelope(executable, None, argv=()),
+    )
+
+    assert result.allowed is False
+    assert "setuid/setgid" in result.reason
+
+
+def test_file_capability_executable_is_denied_by_default(
+    tmp_path: Path,
+    monkeypatch,
+):
+    executable = make_executable(tmp_path)
+    policy = make_policy(
+        executable,
+        tmp_path,
+        allow_no_cwd=True,
+        argv=(HostArgvRule(mode="exact", args=()),),
+    )
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.policy.os.getxattr",
+        lambda *args, **kwargs: b"capability",
+    )
+
+    result = authorize_request(
+        policy,
+        envelope(executable, None, argv=()),
+    )
+
+    assert result.allowed is False
+    assert "capabilities" in result.reason
+
+
+def test_policy_rejects_double_slash_command_path():
+    with pytest.raises(ValueError):
+        HostExecutionPolicy(
+            allowed_profiles=frozenset({"developer"}),
+            commands={
+                "//usr/bin/git": HostCommandRule(
+                    resolved_path="/usr/bin/git",
+                    argv=(HostArgvRule(mode="exact", args=()),),
+                    allow_no_cwd=True,
+                )
+            },
+            max_timeout_seconds=60,
+            max_output_bytes=1024,
+            max_stdin_bytes=16,
+        )
