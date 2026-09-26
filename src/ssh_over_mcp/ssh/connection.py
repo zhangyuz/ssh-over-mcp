@@ -140,6 +140,8 @@ class SSHConnectionManager:
                 password_auth=False,
                 kbdint_auth=False,
                 host_based_auth=False,
+                x509_trusted_certs=None,
+                x509_trusted_cert_paths=(),
                 gss_auth=False,
                 gss_kex=False,
                 public_key_auth=True,
