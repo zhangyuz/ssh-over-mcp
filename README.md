@@ -80,7 +80,6 @@ The package requires **Python 3.13 or newer**. CI explicitly validates the curre
 
 ## Development
 
-
 ```bash
 python -m venv .venv
 source .venv/bin/activate
