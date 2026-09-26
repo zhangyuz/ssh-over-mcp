@@ -39,7 +39,7 @@ Start here:
 - [Cloudflare deployment](docs/cloudflare-deployment.md)
 - [Audit and approvals](docs/audit-and-approvals.md)
 - [Development roadmap](docs/development-plan.md)
-- [Self-hosted security runner](docs/self-hosted-runner.md)
+- [Self-hosted Docker runner](docs/self-hosted-runner.md)
 - [Architecture decisions](docs/decisions/README.md)
 
 Agents and contributors should also read [`AGENTS.md`](AGENTS.md).
