@@ -44,6 +44,25 @@ class SpawnedChild:
                     pass
                 setattr(self, name, -1)
 
+    def poll(self) -> int | None:
+        if self._returncode is not None:
+            return self._returncode
+
+        while True:
+            try:
+                pid, status = os.waitpid(self.pid, os.WNOHANG)
+                break
+            except InterruptedError:
+                continue
+            except OSError as exc:
+                raise ChildSupervisorError("cannot poll child") from exc
+
+        if pid == 0:
+            return None
+
+        self._returncode = os.waitstatus_to_exitcode(status)
+        return self._returncode
+
     def wait(self) -> int:
         if self._returncode is not None:
             return self._returncode
