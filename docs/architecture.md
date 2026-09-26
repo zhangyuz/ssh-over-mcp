@@ -37,7 +37,7 @@ Interactive MCP clients                 Headless agents
           | audit pipeline                      |
           +------------------+------------------+
                              |
-                            SSH
+                   pinned-key SSH
                              |
             +----------------+----------------+
             |                                 |
@@ -89,7 +89,9 @@ Maps the authenticated portal path, origin credential, explicit deployment profi
 
 ### Host inventory
 
-Resolves a stable host alias such as `prod-web-01` into address, port, SSH principal, key/certificate policy, host-key pins, labels, and capability profile.
+Resolves a stable host alias such as `prod-web-01` into address, port, SSH principal, credential reference, pinned host key, labels, and capability profile.
+
+Host aliases are restricted to a non-pattern-safe identifier character set so they can also be used as host-key lookup aliases.
 
 ### Policy engine
 
@@ -101,7 +103,21 @@ Classifies allowed operations. High-risk actions may require a scope-bound appro
 
 ### SSH connection manager
 
-Maintains host-key-verified connections. Agent forwarding, arbitrary port forwarding, and automatic host-key acceptance are disabled by default.
+Maintains host-key-verified connections keyed by inventory alias.
+
+It MUST:
+
+- validate the pinned inventory host key;
+- avoid implicit trust-on-first-use;
+- avoid ambient SSH configuration and ssh-agent credentials;
+- disable password, keyboard-interactive, host-based, and GSS authentication for the service connection;
+- pool connections only within the same inventory host identity;
+- expire pooled connections after a configured maximum age;
+- bound concurrent sessions per host.
+
+### Structured SSH executor
+
+Obtains an allow decision before opening the transport, creates the versioned request frame, invokes only the fixed `mcp-v1` remote command, and applies client-side timeout/input/output limits.
 
 ### Remote host agent
 
@@ -127,7 +143,9 @@ risk/approval evaluation
       |
 audit decision event
       |
-SSH structured request
+fixed SSH command: mcp-v1
+      |
+binary framed request on stdin
       |
 remote ForceCommand agent
       |
