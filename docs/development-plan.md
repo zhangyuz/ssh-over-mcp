@@ -2,7 +2,7 @@
 
 ## Phase 0 — specification baseline
 
-Status: **current**
+Status: **complete**
 
 Deliverables:
 
@@ -16,7 +16,9 @@ Exit criteria: security invariants and API semantics are reviewable before imple
 
 ## Phase 1 — policy core
 
-Implement:
+Status: **implemented on phase-1-policy-core; review/merge pending**
+
+Implemented:
 
 - typed configuration loader;
 - host inventory schema;
