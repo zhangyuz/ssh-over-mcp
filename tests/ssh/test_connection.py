@@ -77,7 +77,7 @@ async def test_connection_is_pinned_and_hardened():
     assert kwargs["gss_auth"] is False
     assert kwargs["gss_kex"] is False
     assert kwargs["x509_trusted_certs"] is None
-    assert kwargs["x509_trusted_cert_paths"] == ()
+    assert kwargs["x509_trusted_cert_paths"] == []
     assert kwargs["disable_trivial_auth"] is True
 
     await manager.close()
