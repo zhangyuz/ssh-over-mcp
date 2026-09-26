@@ -8,21 +8,21 @@ ssh-over-mcp-host-agent
 
 Normative behavior is defined in [`../../docs/ssh-host-agent.md`](../../docs/ssh-host-agent.md).
 
-## Current Phase 3b behavior
+## Current Phase 3c behavior
 
-The host agent is deliberately **non-executing**:
+The host agent is deliberately **non-executing**. It now performs:
 
-1. requires `SSH_ORIGINAL_COMMAND=mcp-v1` exactly;
-2. rejects PTY-backed structured sessions;
-3. loads the fixed host-local policy from `/etc/ssh-over-mcp/host-policy.yaml`;
-4. requires a regular, root-owned, non-group/world-writable policy file without symlink following;
-5. parses only the bounded SMCP metadata envelope;
-6. applies exact profile/executable rules, environment rules, and host-side resource ceilings;
-7. only after authorization reads bounded application stdin;
-8. exits fail-closed with "execution unavailable".
+1. exact `SSH_ORIGINAL_COMMAND=mcp-v1` and no-PTY validation;
+2. root-owned/no-symlink host-policy loading;
+3. bounded metadata parsing and host resource-ceiling checks;
+4. exact requested-command lookup;
+5. token-based argv exact/prefix authorization;
+6. requested executable → configured canonical realpath verification;
+7. regular-file/execute-bit and ownership/writeability checks;
+8. canonical cwd-root confinement with symlink-escape rejection;
+9. bounded application-stdin read only after authorization;
+10. fail-closed exit with "execution unavailable".
 
-It still does **not** execute `executable` or `argv`.
+The reference schema is version 2 in [`../../config/host-policy.example.yaml`](../../config/host-policy.example.yaml).
 
-The reference policy is [`../../config/host-policy.example.yaml`](../../config/host-policy.example.yaml).
-
-The next increment adds argv/cwd and executable filesystem canonicalization before any `execve` path is introduced.
+No process is started yet. The next increment must use a race-resistant execution mechanism so an authorized executable/cwd cannot be swapped between authorization and execution.
