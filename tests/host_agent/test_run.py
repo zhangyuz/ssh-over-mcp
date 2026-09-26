@@ -10,6 +10,7 @@ from ssh_over_mcp.host_agent.prepare import PreparedCommand
 from ssh_over_mcp.host_agent.run import (
     BoundedExecutionError,
     _read_output,
+    _reap_until,
     _signal_process_group,
     run_prepared_native,
 )
@@ -279,3 +280,21 @@ def test_signal_group_falls_back_to_pid_before_setsid(monkeypatch):
         ("killpg", 1234, signal.SIGTERM),
         ("kill", 1234, signal.SIGTERM),
     ]
+
+
+def test_reap_until_is_bounded(monkeypatch):
+    class NeverReaps:
+        def poll(self):
+            return None
+
+    monotonic_values = iter([0.0, 1.0])
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run.time.monotonic",
+        lambda: next(monotonic_values),
+    )
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run.time.sleep",
+        lambda _seconds: None,
+    )
+
+    assert _reap_until(NeverReaps(), 0.5) is None
