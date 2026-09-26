@@ -7,7 +7,7 @@ name = "ssh-over-mcp"
 version = "0.2.0"
 description = "Policy-enforced SSH remote control plane for MCP-compatible AI agents"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
   "asyncssh>=2.24,<3",
   "pydantic>=2.9,<3",
@@ -31,4 +31,4 @@ asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py313"
