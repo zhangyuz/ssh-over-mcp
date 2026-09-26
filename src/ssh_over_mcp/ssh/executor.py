@@ -101,9 +101,15 @@ class SSHExecutor:
         if not decision.normalized_executable:
             raise SSHPolicyDenied(decision)
 
-        timeout = timeout_seconds or self.default_timeout_seconds
+        timeout = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else self.default_timeout_seconds
+        )
         output_limit = (
-            max_output_bytes or self.default_max_output_bytes
+            max_output_bytes
+            if max_output_bytes is not None
+            else self.default_max_output_bytes
         )
         stdin_limit = (
             max_stdin_bytes
@@ -171,19 +177,24 @@ class SSHExecutor:
         # stdout and stderr share one total byte budget.
         budget = _OutputBudget(max_output_bytes)
         overflow = asyncio.Event()
+        aborting = asyncio.Event()
 
         async def read_stream(stream: Any) -> bytes:
             chunks: list[bytes] = []
-            while True:
-                chunk = await stream.read(16 * 1024)
-                if not chunk:
-                    break
+            try:
+                while True:
+                    chunk = await stream.read(16 * 1024)
+                    if not chunk:
+                        break
 
-                accepted = budget.take(chunk)
-                if accepted:
-                    chunks.append(accepted)
-                if budget.truncated:
-                    overflow.set()
+                    accepted = budget.take(chunk)
+                    if accepted:
+                        chunks.append(accepted)
+                    if budget.truncated:
+                        overflow.set()
+            except Exception:
+                if not aborting.is_set():
+                    raise
 
             return b"".join(chunks)
 
@@ -208,6 +219,7 @@ class SSHExecutor:
 
             if not done:
                 timed_out = True
+                aborting.set()
                 await self._abort_process(process)
             elif (
                 overflow_task in done
@@ -217,11 +229,16 @@ class SSHExecutor:
                 # Stop a process which exceeds its allowed output. Signals can
                 # be ignored by some OpenSSH servers, so _abort_process also
                 # closes the SSH channel.
+                aborting.set()
                 await self._abort_process(process)
 
             if wait_task.done() and not wait_task.cancelled():
                 with contextlib.suppress(Exception):
                     completed = wait_task.result()
+        except asyncio.CancelledError:
+            aborting.set()
+            await self._abort_process(process)
+            raise
         finally:
             overflow_task.cancel()
             if not wait_task.done():
