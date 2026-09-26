@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Phases 3a/3b/3c/3d1/3d2a merged; Phase 3d2b1 implemented on phase-3d2b1-child-supervisor; review/merge pending**
+Status: **Through Phase 3d2b1 merged; Phase 3d2b2a implemented on phase-3d2b2a-bounded-run; review/merge pending**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -151,9 +151,25 @@ Implemented:
 - real `cat` integration coverage;
 - supervisor remains disconnected from the ForceCommand CLI.
 
+### Phase 3d2b2a — bounded parent execution loop
+
+Implemented:
+
+- nonblocking selector-based stdin/stdout/stderr loop;
+- pre-spawn stdin byte-limit enforcement;
+- wall-clock timeout;
+- shared stdout+stderr output byte budget;
+- exact capture truncation at the combined budget;
+- SIGTERM process-group termination;
+- SIGKILL escalation after grace;
+- cleanup deadline and direct-child reap;
+- structured execution result with timeout/output flags and duration;
+- tests for cat round-trip, sleep timeout, yes output overflow, stderr capture and pre-setsid signal fallback;
+- runner remains disconnected from the ForceCommand CLI.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2b2: wall timeout, combined output budget, process-group kill escalation and additional rlimits;
+- Phase 3d2b2b: CPU/address-space/process-count/file-size rlimits and stronger descendant containment design;
 - Phase 3d2c: wire supervised native execution into the ForceCommand CLI;
 - typed filesystem operations;
 - execution-time resource enforcement;
