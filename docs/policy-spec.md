@@ -140,7 +140,21 @@ roles:
         - destructive
 ```
 
-The implementation MUST define a strict schema; this example is conceptual until that schema is versioned.
+## Phase 1 implemented schema
+
+The Phase 1 implementation now defines the strict configuration schema in `src/ssh_over_mcp/policy/models.py` and `src/ssh_over_mcp/inventory/models.py`.
+
+A versioned policy contains:
+
+- `roles`: named `RoleSpec` objects with inheritance, environment allow/deny patterns, and explicit `shell` / `sudo` capability flags;
+- `rules`: ordered-independent allow/deny rules with unique IDs;
+- `risk.approval_required`: risk levels requiring approval before execution.
+
+A rule may constrain roles, host aliases, required host labels, MCP tools, executable paths, executable capability classes, argv prefix, working-directory patterns, filesystem-path patterns, and privilege level.
+
+The implementation evaluates **all matching rules**. Any matching deny wins. At least one allow must match or the request is denied.
+
+The canonical loadable example is `config/policy.example.yaml`.
 
 ## Command classification
 
