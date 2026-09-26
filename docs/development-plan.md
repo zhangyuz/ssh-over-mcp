@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Phase 3a parser implemented on phase-3a-host-agent-parser; review/merge pending**
+Status: **Phase 3a merged; Phase 3b host policy implemented on phase-3b-host-policy; review/merge pending**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -73,12 +73,25 @@ Implemented:
 - metadata and stdin limits enforced before execution;
 - fail-closed parse-only behavior: valid requests are not executed yet.
 
+### Phase 3b — host-local request gate
+
+Implemented:
+
+- root-owned, no-symlink host-policy loader;
+- duplicate-key and size validation;
+- exact profile allowlist;
+- exact executable allowlist;
+- environment allowlist plus hard-denied loader variables;
+- host-side timeout/output/stdin ceilings;
+- metadata authorization before application-stdin read;
+- fail-closed behavior after authorization; still no process execution.
+
 ### Remaining Phase 3 work
 
-- host-local policy;
-- structured exec without shell interpretation;
-- filesystem operations;
-- resource controls;
+- Phase 3c: argv/cwd canonical authorization and executable filesystem resolution;
+- Phase 3d: structured execution without shell interpretation;
+- typed filesystem operations;
+- execution-time resource enforcement;
 - optional privileged helper protocol.
 
 Adversarial tests include malformed envelopes, command injection, env injection, PTY/forwarding attempts, and bypass through alternate executables.
