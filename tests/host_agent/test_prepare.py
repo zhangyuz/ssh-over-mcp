@@ -200,3 +200,17 @@ def test_same_inode_content_change_after_authorization_is_denied(tmp_path: Path)
         match="filesystem objects changed",
     ):
         prepare_command(policy, envelope, decision)
+
+
+def test_cwd_content_change_between_authorize_and_prepare_is_allowed(tmp_path: Path):
+    executable = make_executable(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    policy = make_policy(executable, cwd)
+    envelope = make_envelope(executable, cwd)
+    decision = authorize(policy, envelope)
+
+    (cwd / "new-file").write_text("ok", encoding="utf-8")
+
+    prepared = prepare_command(policy, envelope, decision)
+    prepared.close()
