@@ -221,7 +221,9 @@ The parent enforces:
 - SIGTERM to the child process group;
 - SIGKILL after a short grace period;
 - bounded post-kill drain/cleanup;
-- direct-child reaping.
+- nonblocking direct-child reaping within a cleanup deadline.
+
+The runner never converts the cleanup deadline back into an unbounded blocking wait. If a SIGKILLed direct child still cannot be reaped within the cleanup window (for example, pathological uninterruptible kernel sleep), execution fails closed instead of indefinitely blocking the host agent.
 
 The result records the process return code, captured stdout/stderr, whether the wall timeout fired, whether the output budget was exceeded, and elapsed duration.
 
