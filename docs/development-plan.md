@@ -75,9 +75,6 @@ Implemented:
 
 ### Remaining Phase 3 work
 
-
-- ForceCommand executable;
-- streaming Phase 2 protocol parser;
 - host-local policy;
 - structured exec without shell interpretation;
 - filesystem operations;
