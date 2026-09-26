@@ -74,12 +74,15 @@ def _require_linux_open_flags() -> int:
     return os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
 
 
-def _same_identity(info: os.stat_result, identity: HostObjectIdentity) -> bool:
-    return (
-        info.st_dev == identity.device
-        and info.st_ino == identity.inode
-        and info.st_ctime_ns == identity.ctime_ns
-    )
+def _same_identity(
+    info: os.stat_result,
+    identity: HostObjectIdentity,
+    *,
+    include_ctime: bool,
+) -> bool:
+    if info.st_dev != identity.device or info.st_ino != identity.inode:
+        return False
+    return not include_ctime or info.st_ctime_ns == identity.ctime_ns
 
 
 def _read_file_capability(fd: int) -> bytes:
@@ -119,7 +122,7 @@ def _validate_executable_fd(
             "cannot inspect pinned executable"
         ) from exc
 
-    if not _same_identity(info, identity):
+    if not _same_identity(info, identity, include_ctime=True):
         raise CommandPreparationError(
             "executable changed after authorization"
         )
@@ -232,7 +235,11 @@ def _open_cwd(decision: HostAuthorizationResult) -> int | None:
 
     try:
         info = os.fstat(fd)
-        if not _same_identity(info, decision.cwd_identity):
+        if not _same_identity(
+            info,
+            decision.cwd_identity,
+            include_ctime=False,
+        ):
             raise CommandPreparationError(
                 "working directory changed after authorization"
             )
