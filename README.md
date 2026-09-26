@@ -18,7 +18,7 @@ Implemented through the current development branch:
 - root-owned host-local policy and server-side resource ceilings;
 - per-command argv/cwd canonical authorization;
 - executable realpath, ownership, writeability, setuid/setgid, and file-capability checks;
-- authorization-time device/inode identities for executable and cwd;
+- authorization-time device/inode/ctime identities for executable and cwd;
 - second authorization immediately before preparation;
 - executable/cwd opened with `O_NOFOLLOW|O_CLOEXEC`;
 - fd-level device/inode and executable-property revalidation;
