@@ -1,5 +1,6 @@
 import os
 import shutil
+import time
 from pathlib import Path
 
 import pytest
@@ -188,12 +189,13 @@ def test_spawned_child_creates_own_session(tmp_path: Path):
     try:
         # cat stays alive while stdin remains open. setsid() should make the
         # child both a session leader and process-group leader.
-        for _ in range(1000):
+        for _ in range(100):
             try:
                 if os.getsid(child.pid) == child.pid:
                     break
             except ProcessLookupError:
                 break
+            time.sleep(0.001)
         else:
             pytest.fail("child did not enter its own session")
 
