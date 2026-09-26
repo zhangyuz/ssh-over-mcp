@@ -8,22 +8,20 @@ The project is intentionally **not** a thin wrapper around `/bin/bash`. Every op
 
 ## Current status
 
-**Phase 3d2b2b1 — host-local child rlimits.**
+**Phase 3d2b2b2a — descendant-containment contract.**
 
 Implemented through the current development branch:
 
-- central/default-deny and host-local canonical authorization;
-- fd-pinned native ELF execution;
-- sanitized forked-child supervisor;
-- bounded parent I/O with wall timeout and combined output budget;
-- host-policy schema v3 with explicit child resource ceilings;
-- required CPU-time, address-space, process-count, file-size, and open-file limits;
-- limits bound into `PreparedCommand` so supervisor callers cannot omit them;
-- child rlimits applied after fd/stdio sanitation and immediately before exec;
-- configured limits clamp downward to any stricter inherited hard limit;
-- core dumps remain disabled independently.
+- host-policy v3 and fd-pinned native execution;
+- sanitized child supervisor and bounded parent I/O;
+- host-owned child rlimits;
+- backend-neutral per-request containment contract;
+- explicit finite containment limits for memory, PIDs and CPU quota/period;
+- opaque containment handles with attach / kill-all / stats / cleanup lifecycle;
+- read-only cgroup-v2 preflight probe requiring cpu, memory and pids controllers;
+- no permissive no-op containment backend.
 
-**Remote command execution is still disabled in the ForceCommand CLI.** Rlimits reduce resource blast radius but are not descendant containment; cgroup/systemd-scope design remains a separate required boundary for high-risk arbitrary-code profiles.
+**Remote command execution is still disabled in the ForceCommand CLI.** This phase defines the descendant-containment boundary only; it does not yet create cgroups, attach children, or invoke `cgroup.kill`.
 
 
 ## Documentation is the source of truth
