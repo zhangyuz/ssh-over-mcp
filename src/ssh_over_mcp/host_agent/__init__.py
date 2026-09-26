@@ -9,6 +9,7 @@ from .policy import (
     authorize_request,
     load_host_policy,
 )
+from .prepare import CommandPreparationError, PreparedCommand, prepare_command
 from .protocol import (
     HostAgentProtocolError,
     read_application_stdin,
@@ -18,6 +19,9 @@ from .protocol import (
 )
 
 __all__ = [
+    "CommandPreparationError",
+    "PreparedCommand",
+    "prepare_command",
     "HostArgvRule",
     "HostAuthorizationResult",
     "HostCommandRule",
