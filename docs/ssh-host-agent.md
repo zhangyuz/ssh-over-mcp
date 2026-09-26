@@ -208,6 +208,27 @@ The parent receives a PID and three parent-side pipe descriptors. This increment
 
 The supervisor is still not wired into the ForceCommand CLI, so remote requests remain non-executing.
 
+### Phase 3d2b2a bounded parent loop
+
+The bounded runner consumes a prepared command, application stdin, and the already-authorized `ExecutionLimits`. Before spawning it rejects stdin larger than `max_stdin_bytes`. It then uses nonblocking parent-side pipes and a selector loop to simultaneously feed stdin and drain stdout/stderr.
+
+The parent enforces:
+
+- a wall-clock deadline from `timeout_seconds`;
+- one shared capture budget across stdout and stderr from `max_output_bytes`;
+- capture truncation at exactly that combined budget;
+- immediate stdin closure when timeout/output termination begins;
+- SIGTERM to the child process group;
+- SIGKILL after a short grace period;
+- bounded post-kill drain/cleanup;
+- direct-child reaping.
+
+The result records the process return code, captured stdout/stderr, whether the wall timeout fired, whether the output budget was exceeded, and elapsed duration.
+
+Process-group termination is a cleanup boundary, not a full sandbox. A program which deliberately creates a new session/process group can escape later group signals. Before high-risk/arbitrary-code workloads are enabled, stronger OS containment such as a dedicated cgroup/systemd scope or equivalent sandbox remains required.
+
+Phase 3d2b2a still does not set CPU/address-space/process-count limits and is not wired into the ForceCommand CLI.
+
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 
 The central policy may be more expressive, but the host-local policy should preserve critical invariants if the central layer is bypassed.
