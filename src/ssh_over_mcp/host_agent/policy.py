@@ -254,7 +254,7 @@ def _resolve_executable(
     try:
         expected = Path(rule.resolved_path).resolve(strict=True)
         requested = Path(requested_path).resolve(strict=True)
-    except (OSError, RuntimeError):
+    except (OSError, RuntimeError, ValueError):
         return None, "executable path cannot be resolved"
 
     # The configured resolved path must itself already name the canonical
@@ -296,7 +296,7 @@ def _resolve_cwd(
 
     try:
         candidate = Path(cwd).resolve(strict=True)
-    except (OSError, RuntimeError):
+    except (OSError, RuntimeError, ValueError):
         return None, "working directory cannot be resolved"
 
     if not candidate.is_dir():
@@ -305,7 +305,7 @@ def _resolve_cwd(
     for root_text in rule.cwd_roots:
         try:
             root = Path(root_text).resolve(strict=True)
-        except (OSError, RuntimeError):
+        except (OSError, RuntimeError, ValueError):
             return None, "configured cwd root cannot be resolved"
 
         if str(root) != root_text:
@@ -331,10 +331,17 @@ def authorize_request(
     if rule is None:
         return _deny("executable is not allowed by host policy")
 
+    if any("\x00" in arg for arg in envelope.args):
+        return _deny("argv contains NUL")
+    if envelope.cwd is not None and "\x00" in envelope.cwd:
+        return _deny("working directory contains NUL")
+
     if not _argv_allowed(rule.argv, envelope.args):
         return _deny("argv is not allowed by host policy")
 
-    for name in envelope.env:
+    for name, value in envelope.env.items():
+        if "\x00" in name or "\x00" in value:
+            return _deny("environment contains NUL")
         if name in _ALWAYS_DENIED_ENV:
             return _deny("environment contains a hard-denied variable")
         if name not in policy.env_allow:
