@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Phases 3a/3b/3c/3d1 merged; Phase 3d2a implemented on phase-3d2a-fd-exec-primitive; review/merge pending**
+Status: **Phases 3a/3b/3c/3d1/3d2a merged; Phase 3d2b1 implemented on phase-3d2b1-child-supervisor; review/merge pending**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -133,9 +133,27 @@ Implemented:
 - primitive remains disconnected from the ForceCommand CLI;
 - signal/fd/stdio/rlimit process-state sanitation explicitly deferred to the child supervisor.
 
+### Phase 3d2b1 — forked child supervisor skeleton
+
+Implemented:
+
+- parent-side native exec spec validation before fork;
+- atomic close-on-exec stdin/stdout/stderr pipes;
+- disposable child created with `fork()`;
+- independent child session/process group via `setsid()`;
+- child signal mask cleared and catchable signals reset;
+- `umask 077`;
+- core dumps disabled;
+- child stdio installed with `dup2()`;
+- unrelated child descriptors closed before exec;
+- generic child exec failure message with fixed exit code 125;
+- parent-side PID/pipe handle with deterministic pipe cleanup and wait;
+- real `cat` integration coverage;
+- supervisor remains disconnected from the ForceCommand CLI.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2b: child-process supervisor, stdin/stdout/stderr, timeout and output ceilings;
+- Phase 3d2b2: wall timeout, combined output budget, process-group kill escalation and additional rlimits;
 - Phase 3d2c: wire supervised native execution into the ForceCommand CLI;
 - typed filesystem operations;
 - execution-time resource enforcement;
