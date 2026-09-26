@@ -10,6 +10,7 @@ from ssh_over_mcp.ssh.protocol import ExecEnvelope
 
 from .policy import (
     HostAuthorizationResult,
+    HostChildLimits,
     HostCommandRule,
     HostExecutionPolicy,
     HostObjectIdentity,
@@ -37,6 +38,7 @@ class PreparedCommand:
     argv: tuple[str, ...]
     env: dict[str, str]
     fd_exec_supported: bool
+    child_limits: HostChildLimits
     _closed: bool = False
 
     def close(self) -> None:
@@ -333,4 +335,5 @@ def prepare_command(
         argv=envelope.args,
         env=dict(envelope.env),
         fd_exec_supported=os.execve in os.supports_fd,
+        child_limits=policy.child_limits,
     )
