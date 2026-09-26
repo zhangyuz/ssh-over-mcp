@@ -1,4 +1,3 @@
-"""ssh-over-mcp control plane.
+"""ssh-over-mcp control plane."""
 
-Implementation is intentionally pending the source-of-truth specification in /docs.
-"""
+__version__ = "0.1.0"
