@@ -1,0 +1,19 @@
+version: 1
+
+# This file is installed on the managed host, owned by root, and must not be
+# writable by the MCP SSH account.
+allowed_profiles:
+  - developer
+
+allowed_executables:
+  - /usr/bin/git
+  - /usr/bin/ls
+  - /usr/bin/stat
+
+env_allow:
+  - CI
+  - LANG
+
+max_timeout_seconds: 120
+max_output_bytes: 1048576
+max_stdin_bytes: 1048576
