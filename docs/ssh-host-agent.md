@@ -2,11 +2,11 @@
 
 ## Purpose
 
-The host agent is the second enforcement boundary. It prevents a compromised or misconfigured control plane from converting a dedicated MCP SSH key into an unrestricted shell credential.
+The host agent is the second enforcement boundary. It prevents a compromised or misconfigured control plane from converting a dedicated MCP SSH credential into an unrestricted shell credential.
 
 ## OpenSSH entry point
 
-A dedicated account should be configured with an authorized key or SSH certificate principal that forces the host agent, for example conceptually:
+A dedicated account should be configured with an authorized key or SSH certificate principal that forces the host agent, for example:
 
 ```text
 restrict,command="/usr/local/libexec/ssh-over-mcp-host-agent" ssh-ed25519 AAAA...
@@ -26,9 +26,48 @@ Unless a capability explicitly needs otherwise:
 - no PTY for structured operations;
 - no arbitrary `.ssh/rc` behavior.
 
-## Host-agent protocol
+The Phase 2 client additionally disables ambient SSH configuration, ssh-agent authentication, password authentication, keyboard-interactive authentication, host-based authentication, GSS authentication/key exchange, PTY allocation, X11 forwarding, and SSH environment forwarding for structured operations.
 
-The control plane sends a versioned structured envelope over the forced command channel. Example conceptual payload:
+## Host-key validation
+
+The control plane connects to the server-owned inventory address while validating the host key against the inventory alias.
+
+For each connection it constructs an in-memory `known_hosts` entry:
+
+```text
+<inventory-alias> <key-type> <base64-public-key>
+```
+
+and connects with that alias as the host-key lookup name. Unknown, malformed, or changed host keys fail closed.
+
+Host aliases are restricted to letters, digits, `.`, `_`, and `-` so they cannot inject `known_hosts` patterns.
+
+## Phase 2 host-agent wire protocol
+
+Structured execution uses a fixed SSH exec command:
+
+```text
+mcp-v1
+```
+
+The executable, argv, cwd, environment, resource limits, and stdin are **not** embedded into that SSH command string.
+
+Instead, stdin on the SSH channel contains:
+
+```text
++----------------------+-----------------------------------------------+
+| field                | encoding                                      |
++----------------------+-----------------------------------------------+
+| magic                | 6 bytes: 53 4d 43 50 00 01 ("SMCP" + v1)      |
+| metadata length      | 4-byte unsigned big-endian integer            |
+| metadata             | UTF-8 JSON ExecEnvelope                       |
+| application stdin    | remaining bytes                               |
++----------------------+-----------------------------------------------+
+```
+
+Metadata is limited to 64 KiB. The envelope defines bounded stdin, output, and execution time limits.
+
+Conceptual metadata:
 
 ```json
 {
@@ -40,15 +79,38 @@ The control plane sends a versioned structured envelope over the forced command 
   "argv": ["status", "--short"],
   "cwd": "/srv/projects/app",
   "env": {},
-  "timeout_seconds": 60
+  "limits": {
+    "timeout_seconds": 60,
+    "max_output_bytes": 1048576,
+    "max_stdin_bytes": 1048576
+  }
 }
 ```
 
-The transport encoding MUST avoid shell interpretation. The host agent parses and validates the envelope before execution.
+This framing has two important properties:
+
+1. executable/argv/environment values are not shell-parsed by the SSH client path;
+2. sensitive environment values are not placed in `SSH_ORIGINAL_COMMAND`.
+
+The host agent MUST validate the fixed protocol command and parse the frame from stdin.
 
 ## Execution
 
-Structured command execution should use an `execve`-equivalent path with a concrete executable and argv. The host agent MUST NOT turn structured execution into `sh -c`.
+Structured command execution MUST use an `execve`-equivalent path with a concrete executable and argv. The host agent MUST NOT turn structured execution into `sh -c`.
+
+The central control plane MUST obtain an allow decision before opening the SSH connection for an operation.
+
+## Resource handling
+
+The Phase 2 client:
+
+- shares one configured output-byte budget across stdout and stderr;
+- closes the SSH channel when the output budget is exceeded;
+- applies a wall-clock timeout;
+- aborts the remote channel on caller cancellation;
+- never requests a PTY for structured execution.
+
+The remote host agent in Phase 3 MUST enforce its own limits independently. Client-side limits are not a substitute for server-side resource enforcement.
 
 ## Host-local policy
 
