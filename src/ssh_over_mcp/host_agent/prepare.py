@@ -74,12 +74,28 @@ def _require_linux_open_flags() -> int:
     return os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
 
 
-def _same_identity(info: os.stat_result, identity: HostObjectIdentity) -> bool:
-    return (
-        info.st_dev == identity.device
-        and info.st_ino == identity.inode
-        and info.st_ctime_ns == identity.ctime_ns
-    )
+def _same_authorized_identity(
+    left: HostObjectIdentity | None,
+    right: HostObjectIdentity | None,
+    *,
+    include_ctime: bool,
+) -> bool:
+    if left is None or right is None:
+        return left is right
+    if left.device != right.device or left.inode != right.inode:
+        return False
+    return not include_ctime or left.ctime_ns == right.ctime_ns
+
+
+def _same_identity(
+    info: os.stat_result,
+    identity: HostObjectIdentity,
+    *,
+    include_ctime: bool,
+) -> bool:
+    if info.st_dev != identity.device or info.st_ino != identity.inode:
+        return False
+    return not include_ctime or info.st_ctime_ns == identity.ctime_ns
 
 
 def _read_file_capability(fd: int) -> bytes:
@@ -119,7 +135,7 @@ def _validate_executable_fd(
             "cannot inspect pinned executable"
         ) from exc
 
-    if not _same_identity(info, identity):
+    if not _same_identity(info, identity, include_ctime=True):
         raise CommandPreparationError(
             "executable changed after authorization"
         )
@@ -232,7 +248,11 @@ def _open_cwd(decision: HostAuthorizationResult) -> int | None:
 
     try:
         info = os.fstat(fd)
-        if not _same_identity(info, decision.cwd_identity):
+        if not _same_identity(
+            info,
+            decision.cwd_identity,
+            include_ctime=False,
+        ):
             raise CommandPreparationError(
                 "working directory changed after authorization"
             )
@@ -266,9 +286,17 @@ def prepare_command(
         )
     if (
         fresh.resolved_executable != decision.resolved_executable
-        or fresh.executable_identity != decision.executable_identity
+        or not _same_authorized_identity(
+            fresh.executable_identity,
+            decision.executable_identity,
+            include_ctime=True,
+        )
         or fresh.resolved_cwd != decision.resolved_cwd
-        or fresh.cwd_identity != decision.cwd_identity
+        or not _same_authorized_identity(
+            fresh.cwd_identity,
+            decision.cwd_identity,
+            include_ctime=False,
+        )
     ):
         raise CommandPreparationError(
             "authorized filesystem objects changed before preparation"

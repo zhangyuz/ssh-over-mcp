@@ -8,7 +8,7 @@ The project is intentionally **not** a thin wrapper around `/bin/bash`. Every op
 
 ## Current status
 
-**Phase 3d1 — fd-pinned execution preparation.**
+**Phase 3d2a — native fd-based exec primitive.**
 
 Implemented through the current development branch:
 
@@ -17,15 +17,17 @@ Implemented through the current development branch:
 - versioned SMCP framing over a fixed `mcp-v1` ForceCommand channel;
 - root-owned host-local policy and server-side resource ceilings;
 - per-command argv/cwd canonical authorization;
-- executable realpath, ownership, writeability, setuid/setgid, and file-capability checks;
-- authorization-time device/inode/ctime identities for executable and cwd;
-- second authorization immediately before preparation;
-- executable/cwd opened with `O_NOFOLLOW|O_CLOEXEC`;
-- fd-level device/inode and executable-property revalidation;
-- executable format classification (`elf`, `script`, `other`);
-- deterministic descriptor cleanup.
+- fd-pinned executable/cwd preparation with final filesystem identity checks;
+- native ELF-only execution specification;
+- executable selected by pinned fd rather than reopened pathname;
+- deterministic pinned cwd required for execution;
+- child cwd transition through `fchdir(cwd_fd)`;
+- explicit argv construction with no shell interpretation;
+- explicit request environment only; host-agent `os.environ` is not inherited;
+- final fd identity revalidation immediately before `execve(fd, ...)`;
+- disposable-child smoke coverage for real fd-based native execution.
 
-**Process execution is still disabled.** The next execution increment will consume these pinned descriptors rather than reopening pathnames.
+**Remote command execution is still disabled in the ForceCommand CLI.** The primitive exists, but no request path invokes it yet.
 
 
 ## Documentation is the source of truth

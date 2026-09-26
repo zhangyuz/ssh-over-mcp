@@ -148,7 +148,7 @@ Executable authorization resolves the requested path and requires it to match th
 
 `exact` argv rules are the safer default. A `prefix` rule authorizes every trailing token after the configured prefix and MUST only be used when that wider argument surface is intentionally acceptable; it does not interpret shell syntax or constrain command-specific path/helper semantics.
 
-Authorization results include canonical executable/cwd paths plus filesystem device/inode/ctime identities.
+Authorization records canonical executable/cwd paths. Executable identity uses device+inode+ctime; cwd replacement identity uses device+inode because directory ctime changes during ordinary content updates.
 
 ### Phase 3d1 fd preparation
 
@@ -164,13 +164,33 @@ The executable descriptor is independently rechecked for:
 - Linux file capabilities using the opened fd;
 - executable mode bits.
 
-The cwd descriptor is independently checked for the authorized device/inode/ctime identity and directory type.
+The cwd descriptor is independently checked for the authorized device/inode identity and directory type. Directory ctime is intentionally not part of execution identity because legitimate creation/removal of children changes directory ctime without replacing the directory object.
 
 This closes pathname replacement between authorization and later execution: a renamed or substituted pathname does not change the already opened object. Including `ctime_ns` also detects ordinary in-place metadata/content changes which occur between authorization and fd preparation. It does **not** make a mutable inode immutable after the fd is pinned. If a policy permits an untrusted principal to modify the executable's contents in place, fd pinning cannot prevent those contents from changing; the initial execution profile must therefore retain trusted ownership/write restrictions.
 
-The preparation layer records whether Python reports fd-based `os.execve()` support and classifies the opened file as ELF, shebang script, or other. Phase 3d1 still performs no process execution.
+The preparation layer records whether Python reports fd-based `os.execve()` support and classifies the opened file as ELF, shebang script, or other.
 
-Linux/POSIX `fexecve()` is specifically intended to avoid pathname replacement between verification and execution, but executable scripts have a close-on-exec descriptor caveat. Script execution MUST therefore receive an explicit design before it is enabled; the first execution increment may restrict execution to native binaries.
+### Phase 3d2a native exec primitive
+
+The first execution primitive is deliberately restricted to native ELF files. It consumes a `PreparedCommand` and:
+
+1. requires fd-based `os.execve()` support;
+2. requires the prepared executable format to be ELF;
+3. requires a pinned cwd rather than inheriting the host-agent cwd;
+4. revalidates executable device/inode/ctime immediately before exec;
+5. revalidates cwd device/inode immediately before exec;
+6. constructs `argv[0]` as descriptive metadata while selecting the executable solely by fd;
+7. passes only the explicit, host-policy-authorized request environment and does not merge `os.environ`;
+8. enters the pinned cwd using `fchdir()`;
+9. invokes `os.execve(executable_fd, argv, env)` directly.
+
+There is no shell, command-string parsing, PATH lookup, or executable pathname reopen in this primitive.
+
+The primitive MUST only be called in a disposable child process because `fchdir()` mutates process state if exec subsequently fails. Phase 3d2a intentionally does not reset signal handlers/masks, umask, rlimits, groups, or unrelated inherited file descriptors, and it does not install stdin/stdout/stderr pipes. Those are supervisor responsibilities in Phase 3d2b.
+
+Phase 3d2a is not wired into the ForceCommand CLI, so remote requests remain non-executing.
+
+Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 
 The central policy may be more expressive, but the host-local policy should preserve critical invariants if the central layer is bypassed.
 
