@@ -39,6 +39,9 @@ if [[ ! -f .runner ]]; then
   ./config.sh "${config_args[@]}"
 fi
 
+# The registration token is short-lived and is not needed by the job process.
+unset RUNNER_TOKEN
+
 child_pid=""
 
 forward_signal() {
