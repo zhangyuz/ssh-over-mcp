@@ -48,7 +48,6 @@ def test_profile_is_exactly_allowlisted():
     result = authorize_request(
         policy(),
         envelope(profile="admin"),
-        b"",
     )
     assert result.allowed is False
 
@@ -57,7 +56,6 @@ def test_executable_is_exactly_allowlisted():
     result = authorize_request(
         policy(),
         envelope(executable="/bin/bash"),
-        b"",
     )
     assert result.allowed is False
 
@@ -66,7 +64,6 @@ def test_unlisted_environment_variable_is_denied():
     result = authorize_request(
         policy(),
         envelope(env={"HOME": "/tmp"}),
-        b"",
     )
     assert result.allowed is False
 
@@ -75,7 +72,6 @@ def test_loader_environment_is_hard_denied():
     result = authorize_request(
         policy(),
         envelope(env={"LD_PRELOAD": "/tmp/evil.so"}),
-        b"",
     )
     assert result.allowed is False
 
@@ -115,6 +111,29 @@ def test_resource_ceiling_is_enforced(limits, reason):
     assert reason in result.reason
 
 
+def _valid_policy_text() -> str:
+    return """
+version: 1
+allowed_profiles: [developer]
+allowed_executables: [/usr/bin/git]
+env_allow: [CI]
+max_timeout_seconds: 60
+max_output_bytes: 1024
+max_stdin_bytes: 16
+"""
+
+
+def test_policy_loader_accepts_secure_regular_file(tmp_path: Path):
+    path = tmp_path / "policy.yaml"
+    path.write_text(_valid_policy_text(), encoding="utf-8")
+    path.chmod(0o640)
+
+    loaded = load_host_policy(path, require_root_owner=False)
+
+    assert loaded.allowed_profiles == frozenset({"developer"})
+    assert loaded.allowed_executables == frozenset({"/usr/bin/git"})
+
+
 def test_policy_loader_rejects_duplicate_keys(tmp_path: Path):
     path = tmp_path / "policy.yaml"
     path.write_text(
@@ -136,21 +155,21 @@ max_stdin_bytes: 16
 
 def test_policy_loader_rejects_group_writable_file(tmp_path: Path):
     path = tmp_path / "policy.yaml"
-    path.write_text(
-        """
-version: 1
-allowed_profiles: [developer]
-allowed_executables: [/usr/bin/git]
-max_timeout_seconds: 60
-max_output_bytes: 1024
-max_stdin_bytes: 16
-""",
-        encoding="utf-8",
-    )
+    path.write_text(_valid_policy_text(), encoding="utf-8")
     path.chmod(0o660)
 
     with pytest.raises(HostPolicyError, match="group/other writable"):
         load_host_policy(path, require_root_owner=False)
+
+
+def test_policy_loader_rejects_symlink(tmp_path: Path):
+    target = tmp_path / "target.yaml"
+    target.write_text(_valid_policy_text(), encoding="utf-8")
+    link = tmp_path / "policy.yaml"
+    link.symlink_to(target)
+
+    with pytest.raises(HostPolicyError):
+        load_host_policy(link, require_root_owner=False)
 
 
 def test_policy_rejects_noncanonical_executable():
@@ -164,21 +183,13 @@ def test_policy_rejects_noncanonical_executable():
         )
 
 
-def test_policy_loader_rejects_symlink(tmp_path: Path):
-    target = tmp_path / "target.yaml"
-    target.write_text(
-        """
-version: 1
-allowed_profiles: [developer]
-allowed_executables: [/usr/bin/git]
-max_timeout_seconds: 60
-max_output_bytes: 1024
-max_stdin_bytes: 16
-""",
-        encoding="utf-8",
-    )
-    link = tmp_path / "policy.yaml"
-    link.symlink_to(target)
-
-    with pytest.raises(HostPolicyError):
-        load_host_policy(link, require_root_owner=False)
+def test_policy_cannot_allow_hard_denied_environment():
+    with pytest.raises(ValueError):
+        HostExecutionPolicy(
+            allowed_profiles=frozenset({"developer"}),
+            allowed_executables=frozenset({"/usr/bin/git"}),
+            env_allow=frozenset({"LD_PRELOAD"}),
+            max_timeout_seconds=60,
+            max_output_bytes=1024,
+            max_stdin_bytes=16,
+        )
