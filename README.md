@@ -8,23 +8,27 @@ The project is intentionally **not** a thin wrapper around `/bin/bash`. Every op
 
 ## Current status
 
-**Phase 1 — policy core implementation.**
+**Phase 2 — SSH execution core implementation.**
 
-Implemented on the current development branch:
+Implemented:
 
 - strict Pydantic configuration and inventory models;
 - duplicate-key-safe YAML/JSON loading;
-- default-deny policy evaluation;
-- deny-overrides-allow semantics across role inheritance;
-- host alias/inventory enforcement;
-- executable capability classification;
-- path normalization and symlink-confinement helper;
-- environment allow/deny controls;
+- default-deny, deny-overrides-allow policy evaluation;
 - risk classification and approval-required outcomes;
-- deterministic policy hashing and decision explanation;
-- adversarial policy tests.
+- inventory-only SSH targets with safe aliases;
+- pinned server host keys using per-host known_hosts payloads;
+- explicit credential-provider abstraction;
+- no ambient ssh-agent, password, keyboard-interactive, GSS, or SSH config fallback;
+- pooled SSH connections with maximum connection age and per-host session limits;
+- fixed remote protocol command plus binary framed request envelope;
+- no PTY, SSH environment forwarding, or X11 forwarding for structured execution;
+- bounded stdin/output;
+- timeout and cancellation cleanup;
+- policy denial before any SSH connection is opened;
+- adversarial unit tests for the policy and SSH core.
 
-Next: SSH transport and pinned host-key execution core.
+Next: the remote `ForceCommand` host agent which parses the Phase 2 wire protocol and independently enforces host-local policy.
 
 ## Documentation is the source of truth
 
@@ -70,7 +74,7 @@ ChatGPT / Claude / Cursor / autonomous agents
                     v
       ssh-over-mcp control plane
                     |
-                   SSH
+         pinned-key SSH transport
                     v
           managed Linux hosts
 ```
