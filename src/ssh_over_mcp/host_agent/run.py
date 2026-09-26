@@ -60,6 +60,22 @@ def _signal_process_group(pid: int, sig: int) -> None:
     _ = group_error
 
 
+def _reap_until(
+    child: SpawnedChild,
+    deadline: float,
+) -> int | None:
+    while True:
+        returncode = child.poll()
+        if returncode is not None:
+            return returncode
+
+        now = time.monotonic()
+        if now >= deadline:
+            return None
+
+        time.sleep(min(0.005, max(0.0, deadline - now)))
+
+
 def _unregister_close(
     selector: selectors.BaseSelector,
     child: SpawnedChild,
@@ -245,9 +261,15 @@ def run_prepared_native(
                     _unregister_close(selector, child, "stderr_fd")
                 if child.poll() is None:
                     _signal_process_group(child.pid, signal.SIGKILL)
-                    returncode = child.wait()
-                else:
-                    returncode = child.poll()
+
+                returncode = _reap_until(
+                    child,
+                    time.monotonic() + 0.05,
+                )
+                if returncode is None:
+                    raise BoundedExecutionError(
+                        "child could not be reaped within cleanup window"
+                    )
                 break
 
             wake_at = deadline if not terminating else None
@@ -312,14 +334,12 @@ def run_prepared_native(
             _signal_process_group(child.pid, signal.SIGKILL)
         except Exception:
             pass
+        child.close_stdin()
+        child.close_pipes()
         try:
-            child.close_stdin()
-            child.close_pipes()
-        finally:
-            try:
-                child.wait()
-            except Exception:
-                pass
+            _reap_until(child, time.monotonic() + 0.05)
+        except Exception:
+            pass
 
         if isinstance(exc, BoundedExecutionError):
             raise
