@@ -1,7 +1,9 @@
 """Remote ForceCommand host-agent components."""
 
 from .policy import (
+    HostArgvRule,
     HostAuthorizationResult,
+    HostCommandRule,
     HostExecutionPolicy,
     HostPolicyError,
     authorize_request,
@@ -16,7 +18,9 @@ from .protocol import (
 )
 
 __all__ = [
+    "HostArgvRule",
     "HostAuthorizationResult",
+    "HostCommandRule",
     "HostExecutionPolicy",
     "HostPolicyError",
     "authorize_request",
