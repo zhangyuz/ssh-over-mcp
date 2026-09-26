@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import stat
 from pathlib import Path
 from typing import Any, Literal
@@ -110,26 +111,42 @@ def load_host_policy(
 ) -> HostExecutionPolicy:
     policy_path = Path(path)
 
-    try:
-        if policy_path.is_symlink():
-            raise HostPolicyError("host policy must not be a symlink")
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise HostPolicyError("host policy requires O_NOFOLLOW support")
 
-        info = policy_path.stat()
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+    try:
+        fd = os.open(policy_path, flags)
     except OSError as exc:
         raise HostPolicyError("host policy is unavailable") from exc
 
-    if not stat.S_ISREG(info.st_mode):
-        raise HostPolicyError("host policy must be a regular file")
-    if require_root_owner and info.st_uid != 0:
-        raise HostPolicyError("host policy must be owned by root")
-    if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
-        raise HostPolicyError("host policy must not be group/other writable")
-    if info.st_size > MAX_POLICY_BYTES:
-        raise HostPolicyError("host policy exceeds maximum size")
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise HostPolicyError("host policy must be a regular file")
+        if require_root_owner and info.st_uid != 0:
+            raise HostPolicyError("host policy must be owned by root")
+        if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            raise HostPolicyError("host policy must not be group/other writable")
+        if info.st_size > MAX_POLICY_BYTES:
+            raise HostPolicyError("host policy exceeds maximum size")
+
+        data = bytearray()
+        while len(data) <= MAX_POLICY_BYTES:
+            remaining = MAX_POLICY_BYTES + 1 - len(data)
+            chunk = os.read(fd, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            data.extend(chunk)
+
+        if len(data) > MAX_POLICY_BYTES:
+            raise HostPolicyError("host policy exceeds maximum size")
+    finally:
+        os.close(fd)
 
     try:
         raw = yaml.load(
-            policy_path.read_text(encoding="utf-8"),
+            bytes(data).decode("utf-8"),
             Loader=_UniqueKeyLoader,
         )
         if not isinstance(raw, dict):
@@ -137,7 +154,7 @@ def load_host_policy(
         return HostExecutionPolicy.model_validate(raw)
     except HostPolicyError:
         raise
-    except (OSError, UnicodeError, yaml.YAMLError, ValidationError) as exc:
+    except (UnicodeError, yaml.YAMLError, ValidationError) as exc:
         raise HostPolicyError("invalid host policy") from exc
 
 
