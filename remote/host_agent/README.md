@@ -8,25 +8,20 @@ ssh-over-mcp-host-agent
 
 Normative behavior is defined in [`../../docs/ssh-host-agent.md`](../../docs/ssh-host-agent.md).
 
-## Current Phase 3d2b2b1 behavior
+## Current Phase 3d2b2b2a behavior
 
-The ForceCommand request path remains **non-executing**. The child supervisor now applies host-owned rlimits from host-policy schema v3 before native fd exec.
+The ForceCommand request path remains **non-executing**.
 
-Required `child_limits`:
+A backend-neutral descendant-containment contract now exists with:
 
-- CPU seconds;
-- address-space bytes;
-- maximum processes;
-- maximum regular-file size;
-- maximum open files.
+- finite memory/PID/CPU cgroup-style limits;
+- one opaque scope per request;
+- initial-child attach;
+- subtree-wide kill;
+- accounting snapshot;
+- deterministic cleanup;
+- cgroup-v2 host preflight for `cpu`, `memory`, and `pids`.
 
-The limits are carried inside the prepared command, applied only in the disposable child, and clamped down to any stricter inherited hard limit. The child never expands a parent/container hard limit. Core dumps remain disabled.
+This phase does not create cgroups and does not yet connect containment to the forked child supervisor.
 
-Rlimits are not treated as a sandbox. In particular, process limits are real-UID scoped and process-group escape remains possible. High-risk arbitrary-code execution still requires dedicated cgroup/systemd-scope or equivalent containment.
-
-Still missing before remote execution is enabled:
-
-- stronger descendant containment;
-- final ForceCommand execution/result integration.
-
-Next: Phase 3d2b2b2 defines the cgroup/systemd-scope containment boundary separately from the rlimit layer.
+Next: implement the concrete cgroup-v2 backend and a fork-start barrier so the child cannot exec before successful cgroup attachment.

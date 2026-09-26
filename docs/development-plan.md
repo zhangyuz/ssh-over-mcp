@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Through Phase 3d2b2a merged; Phase 3d2b2b1 implemented on phase-3d2b2b1-child-rlimits; review/merge pending**
+Status: **Through Phase 3d2b2b1 merged; Phase 3d2b2b2a implemented on phase-3d2b2b2a-containment-contract; review/merge pending**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -183,10 +183,23 @@ Implemented:
 - rlimit setup failures remain generic child exit 125;
 - rlimits explicitly documented as defense-in-depth, not descendant containment.
 
+### Phase 3d2b2b2a — descendant-containment contract
+
+Implemented:
+
+- backend-neutral `ContainmentBackend` and per-request `ContainmentHandle`;
+- explicit finite `memory_max_bytes`, `pids_max`, `cpu_quota_us`, and `cpu_period_us`;
+- attach / recursive kill-all / accounting / cleanup lifecycle;
+- read-only cgroup-v2 probe;
+- required `cpu`, `memory`, and `pids` controller detection;
+- invalid request identifiers and non-positive/absurd limit values fail closed;
+- no default/no-op backend and no supervisor integration yet.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2b2b2: dedicated cgroup/systemd-scope containment design/reference implementation;
-- Phase 3d2c: wire supervised native execution into the ForceCommand CLI only after containment decision;
+- Phase 3d2b2b2b: concrete cgroup-v2 backend plus fork-start barrier;
+- Phase 3d2b2b2c: cgroup descendant-kill and resource-limit integration tests;
+- Phase 3d2c: wire supervised native execution into the ForceCommand CLI only after containment is enforced;
 - typed filesystem operations;
 - execution-time resource enforcement;
 - optional privileged helper protocol.
