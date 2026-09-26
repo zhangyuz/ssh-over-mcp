@@ -40,7 +40,7 @@ def envelope(**overrides) -> ExecEnvelope:
 
 
 def test_allowed_request():
-    result = authorize_request(policy(), envelope(), b"hello")
+    result = authorize_request(policy(), envelope())
     assert result.allowed is True
 
 
@@ -110,7 +110,7 @@ def test_loader_environment_is_hard_denied():
     ],
 )
 def test_resource_ceiling_is_enforced(limits, reason):
-    result = authorize_request(policy(), envelope(limits=limits), b"")
+    result = authorize_request(policy(), envelope(limits=limits))
     assert result.allowed is False
     assert reason in result.reason
 
