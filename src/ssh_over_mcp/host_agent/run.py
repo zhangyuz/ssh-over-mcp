@@ -177,11 +177,15 @@ def run_prepared_native(
     deadline = start + limits.timeout_seconds
 
     try:
+        selector = selectors.DefaultSelector()
+    except Exception as exc:
+        raise BoundedExecutionError("cannot create I/O selector") from exc
+
+    try:
         child = spawn_prepared_native(prepared)
     except ChildSupervisorError as exc:
+        selector.close()
         raise BoundedExecutionError("cannot spawn supervised child") from exc
-
-    selector = selectors.DefaultSelector()
     stdout = bytearray()
     stderr = bytearray()
     total_output = 0
