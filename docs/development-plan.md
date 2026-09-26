@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Phases 3a/3b/3c merged; Phase 3d1 implemented on phase-3d1-fd-pinning; review/merge pending**
+Status: **Phases 3a/3b/3c/3d1 merged; Phase 3d2a implemented on phase-3d2a-fd-exec-primitive; review/merge pending**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -116,9 +116,26 @@ Implemented:
 - deterministic descriptor cleanup;
 - fail-closed behavior; still no process execution.
 
+### Phase 3d2a — native fd-based exec primitive
+
+Implemented:
+
+- native ELF-only execution gate;
+- fd-based `os.execve()` requirement;
+- pinned cwd requirement; no ambient cwd inheritance;
+- final executable identity revalidation using device+inode+ctime;
+- final cwd identity revalidation using device+inode;
+- explicit argv construction;
+- explicit request environment only; no ambient `os.environ`;
+- `fchdir(cwd_fd)` followed by `execve(executable_fd, ...)`;
+- no shell or PATH lookup;
+- disposable-child real exec smoke test;
+- primitive remains disconnected from the ForceCommand CLI.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2: execute a pinned native-binary fd without shell interpretation;
+- Phase 3d2b: child-process supervisor, stdin/stdout/stderr, timeout and output ceilings;
+- Phase 3d2c: wire supervised native execution into the ForceCommand CLI;
 - typed filesystem operations;
 - execution-time resource enforcement;
 - optional privileged helper protocol.
