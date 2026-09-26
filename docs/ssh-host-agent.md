@@ -190,6 +190,24 @@ The primitive MUST only be called in a disposable child process because `fchdir(
 
 Phase 3d2a is not wired into the ForceCommand CLI, so remote requests remain non-executing.
 
+### Phase 3d2b1 child supervisor skeleton
+
+The first supervisor increment requires parent fd 0/1/2 to already be open, validates the native exec spec before forking, then creates three `O_CLOEXEC` pipes and forks a disposable child. This precondition prevents pipe allocation from colliding with stdio target descriptors. The child:
+
+1. creates a new session/process group with `setsid()`;
+2. clears the blocked signal mask and resets catchable signals to default handling;
+3. sets `umask 077`;
+4. disables core dumps with `RLIMIT_CORE=0`;
+5. wires stdin/stdout/stderr using `dup2()`;
+6. closes unrelated file descriptors, preserving only fd 0/1/2 plus the pinned executable and cwd descriptors;
+7. invokes the Phase 3d2a fd-exec primitive.
+
+If child setup or exec fails, the child writes only a fixed generic diagnostic and exits with code 125; internal exception details are not written to the SSH-visible stderr stream.
+
+The parent receives a PID and three parent-side pipe descriptors. This increment intentionally does not provide wall-clock timeout, output-byte accounting, process-group termination escalation, CPU/memory/process-count rlimits, or final request/response integration.
+
+The supervisor is still not wired into the ForceCommand CLI, so remote requests remain non-executing.
+
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 
 The central policy may be more expressive, but the host-local policy should preserve critical invariants if the central layer is bypassed.

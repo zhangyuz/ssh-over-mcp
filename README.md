@@ -8,26 +8,26 @@ The project is intentionally **not** a thin wrapper around `/bin/bash`. Every op
 
 ## Current status
 
-**Phase 3d2a — native fd-based exec primitive.**
+**Phase 3d2b1 — forked child supervisor skeleton.**
 
 Implemented through the current development branch:
 
 - central default-deny policy and server-owned host inventory;
-- pinned-key SSH transport with explicit credentials and bounded sessions;
-- versioned SMCP framing over a fixed `mcp-v1` ForceCommand channel;
-- root-owned host-local policy and server-side resource ceilings;
-- per-command argv/cwd canonical authorization;
-- fd-pinned executable/cwd preparation with final filesystem identity checks;
-- native ELF-only execution specification;
-- executable selected by pinned fd rather than reopened pathname;
-- deterministic pinned cwd required for execution;
-- child cwd transition through `fchdir(cwd_fd)`;
-- explicit argv construction with no shell interpretation;
-- explicit request environment only; host-agent `os.environ` is not inherited;
-- final fd identity revalidation immediately before `execve(fd, ...)`;
-- disposable-child smoke coverage for real fd-based native execution.
+- pinned-key SSH transport and host-local canonical authorization;
+- fd-pinned native ELF execution primitive with explicit argv/environment;
+- parent-side native spec validation before fork;
+- three close-on-exec stdio pipes;
+- child `setsid()` session/process-group isolation;
+- blocked-signal mask cleared and catchable signals reset to defaults;
+- child `umask 077`;
+- core dumps disabled with `RLIMIT_CORE=0`;
+- stdin/stdout/stderr installed with `dup2()`;
+- unrelated descriptors closed before exec while preserving only stdio + pinned executable/cwd fds;
+- fixed generic child-failure message and exit code 125;
+- parent receives PID plus stdin/stdout/stderr pipe handles;
+- real native `cat` integration coverage for stdin/stdout and exit handling.
 
-**Remote command execution is still disabled in the ForceCommand CLI.** The primitive exists, but no request path invokes it yet.
+**Remote command execution is still disabled in the ForceCommand CLI.** Timeout, output ceilings, kill escalation, and execution-result framing are not implemented yet.
 
 
 ## Documentation is the source of truth
