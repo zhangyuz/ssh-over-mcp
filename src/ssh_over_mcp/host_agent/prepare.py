@@ -30,7 +30,9 @@ class PreparedCommand:
     executable_fd: int
     cwd_fd: int | None
     executable_path: str
+    executable_identity: HostObjectIdentity
     cwd_path: str | None
+    cwd_identity: HostObjectIdentity | None
     executable_format: ExecutableFormat
     argv: tuple[str, ...]
     env: dict[str, str]
@@ -296,7 +298,9 @@ def prepare_command(
         executable_fd=executable_fd,
         cwd_fd=cwd_fd,
         executable_path=decision.resolved_executable or "",
+        executable_identity=decision.executable_identity,
         cwd_path=decision.resolved_cwd,
+        cwd_identity=decision.cwd_identity,
         executable_format=executable_format,
         argv=envelope.args,
         env=dict(envelope.env),
