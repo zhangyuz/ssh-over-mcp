@@ -183,3 +183,20 @@ def test_denied_authorization_cannot_be_prepared(tmp_path: Path):
 
     with pytest.raises(CommandPreparationError, match="denied"):
         prepare_command(policy, envelope, decision)
+
+
+def test_same_inode_content_change_after_authorization_is_denied(tmp_path: Path):
+    executable = make_executable(tmp_path)
+    policy = make_policy(executable, None)
+    envelope = make_envelope(executable, None)
+    decision = authorize(policy, envelope)
+
+    # Rewrite in place: inode remains the same but ctime changes.
+    with executable.open("a", encoding="utf-8") as stream:
+        stream.write("# changed\n")
+
+    with pytest.raises(
+        CommandPreparationError,
+        match="filesystem objects changed",
+    ):
+        prepare_command(policy, envelope, decision)
