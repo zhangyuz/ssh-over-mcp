@@ -74,6 +74,10 @@ ChatGPT / Claude / Cursor / autonomous agents
           managed Linux hosts
 ```
 
+## Python support
+
+The package requires **Python 3.13 or newer**. CI explicitly validates the currently released stable series 3.13 and 3.14; newer Python feature releases are added to the validation matrix as they become stable.
+
 ## Development
 
 ```bash
