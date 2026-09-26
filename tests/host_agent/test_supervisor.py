@@ -62,6 +62,7 @@ def _prepared(
     source: str = "/bin/cat",
     *,
     argv: tuple[str, ...] = (),
+    child_limits: HostChildLimits | None = None,
 ) -> PreparedCommand:
     executable = _copy_native(tmp_path, source)
     cwd = tmp_path / "work"
@@ -88,7 +89,7 @@ def _prepared(
         argv=argv,
         env={},
         fd_exec_supported=True,
-        child_limits=_child_limits(),
+        child_limits=child_limits or _child_limits(),
     )
 
 
@@ -353,5 +354,42 @@ def test_child_rlimit_failure_is_generic_exit_125(
         assert stderr == b"ssh-over-mcp-host-agent: child exec failed\n"
         assert returncode == 125
         assert b"sensitive" not in stderr
+    finally:
+        child.close_pipes()
+
+
+def test_file_size_rlimit_is_enforced_in_real_child(tmp_path: Path):
+    source = "/usr/bin/dd" if Path("/usr/bin/dd").exists() else "/bin/dd"
+    if not Path(source).exists():
+        pytest.skip("dd is required for RLIMIT_FSIZE integration test")
+
+    limits = _child_limits().model_copy(
+        update={"file_size_bytes": 1024}
+    )
+    prepared = _prepared(
+        tmp_path,
+        source=source,
+        argv=(
+            "if=/dev/zero",
+            "of=too-large.bin",
+            "bs=4096",
+            "count=1",
+            "status=none",
+        ),
+        child_limits=limits,
+    )
+    output_path = Path(prepared.cwd_path) / "too-large.bin"
+    child = spawn_prepared_native(prepared)
+    prepared.close()
+
+    try:
+        child.close_stdin()
+        _read_all(child.stdout_fd)
+        _read_all(child.stderr_fd)
+        returncode = child.wait()
+
+        assert returncode != 0
+        assert output_path.exists()
+        assert output_path.stat().st_size <= limits.file_size_bytes
     finally:
         child.close_pipes()
