@@ -1,10 +1,18 @@
-version: 2
+version: 3
 
 # Install as /etc/ssh-over-mcp/host-policy.yaml.
 # Production loader requires a regular, root-owned file which is not
 # group/world-writable.
 allowed_profiles:
   - developer
+
+# Host-owned hard ceilings. They are not request-controlled.
+child_limits:
+  cpu_seconds: 30
+  address_space_bytes: 2147483648
+  max_processes: 64
+  file_size_bytes: 268435456
+  open_files: 256
 
 commands:
   /usr/bin/git:
