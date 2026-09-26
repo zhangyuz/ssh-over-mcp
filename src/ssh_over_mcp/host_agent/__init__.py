@@ -1,5 +1,11 @@
 """Remote ForceCommand host-agent components."""
 
+from .execute import (
+    NativeExecSpec,
+    NativeExecutionError,
+    build_native_exec_spec,
+    exec_prepared_native_in_child,
+)
 from .policy import (
     HostArgvRule,
     HostAuthorizationResult,
@@ -19,6 +25,10 @@ from .protocol import (
 )
 
 __all__ = [
+    "NativeExecSpec",
+    "NativeExecutionError",
+    "build_native_exec_spec",
+    "exec_prepared_native_in_child",
     "CommandPreparationError",
     "PreparedCommand",
     "prepare_command",
