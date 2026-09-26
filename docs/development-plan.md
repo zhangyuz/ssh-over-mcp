@@ -16,7 +16,7 @@ Exit criteria: security invariants and API semantics are reviewable before imple
 
 ## Phase 1 — policy core
 
-Status: **implemented on phase-1-policy-core; review/merge pending**
+Status: **complete; merged to main**
 
 Implemented:
 
@@ -41,21 +41,29 @@ Tests:
 
 ## Phase 2 — SSH execution core
 
-Implement:
+Status: **implemented on phase-2-ssh-core; review/merge pending**
 
-- host-key-pinned SSH connections;
-- structured remote envelope;
-- timeouts and output limits;
-- cancellation;
-- connection pooling;
-- dedicated credential abstraction / future SSH CA interface.
+Implemented:
+
+- AsyncSSH-based client transport;
+- pinned host-key validation via inventory alias;
+- no ambient SSH config/agent/password/GSS fallback;
+- credential-provider abstraction;
+- structured binary-framed remote envelope;
+- fixed `mcp-v1` SSH command;
+- no PTY / X11 / SSH environment forwarding for structured execution;
+- bounded stdin and combined stdout/stderr;
+- timeouts and cancellation cleanup;
+- connection pooling with age limit;
+- per-host session concurrency limit;
+- policy decision before network access.
 
 ## Phase 3 — remote host agent
 
 Implement:
 
 - ForceCommand executable;
-- protocol parser;
+- streaming Phase 2 protocol parser;
 - host-local policy;
 - structured exec without shell interpretation;
 - filesystem operations;
