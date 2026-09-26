@@ -12,7 +12,12 @@ from .policy import (
     authorize_request,
     load_host_policy,
 )
-from .protocol import HostAgentProtocolError, read_request, validate_ssh_context
+from .protocol import (
+    HostAgentProtocolError,
+    read_application_stdin,
+    read_envelope,
+    validate_ssh_context,
+)
 
 EX_PROTOCOL = 65
 EX_UNAVAILABLE = 69
@@ -31,7 +36,6 @@ def run(
 
     try:
         validate_ssh_context(env)
-        envelope, application_stdin = read_request(stdin)
     except HostAgentProtocolError as exc:
         print(f"ssh-over-mcp-host-agent: rejected: {exc}", file=stderr)
         return EX_PROTOCOL
@@ -44,13 +48,29 @@ def run(
             print("ssh-over-mcp-host-agent: host policy unavailable", file=stderr)
             return EX_CONFIG
 
-    decision = authorize_request(policy, envelope, application_stdin)
+    try:
+        envelope = read_envelope(stdin)
+    except HostAgentProtocolError as exc:
+        print(f"ssh-over-mcp-host-agent: rejected: {exc}", file=stderr)
+        return EX_PROTOCOL
+
+    decision = authorize_request(policy, envelope)
     if not decision.allowed:
         print(
             f"ssh-over-mcp-host-agent: denied: {decision.reason}",
             file=stderr,
         )
         return EX_NOPERM
+
+    # Only after host-local authorization do we accept application stdin.
+    try:
+        _application_stdin = read_application_stdin(
+            stdin,
+            envelope.limits.max_stdin_bytes,
+        )
+    except HostAgentProtocolError as exc:
+        print(f"ssh-over-mcp-host-agent: rejected: {exc}", file=stderr)
+        return EX_PROTOCOL
 
     # Phase 3b remains intentionally non-executing. Reaching this point proves
     # both framing and host-local authorization, but no process is started.
