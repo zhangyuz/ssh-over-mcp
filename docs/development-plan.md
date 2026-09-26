@@ -41,7 +41,7 @@ Tests:
 
 ## Phase 2 — SSH execution core
 
-Status: **implemented on phase-2-ssh-core; review/merge pending**
+Status: **complete; merged to main**
 
 Implemented:
 
@@ -60,7 +60,21 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Implement:
+Status: **Phase 3a parser implemented on phase-3a-host-agent-parser; review/merge pending**
+
+### Phase 3a — ForceCommand protocol entry
+
+Implemented:
+
+- installable `ssh-over-mcp-host-agent` entrypoint;
+- exact `SSH_ORIGINAL_COMMAND=mcp-v1` validation;
+- PTY rejection;
+- bounded streaming SMCP v1 frame parser;
+- metadata and stdin limits enforced before execution;
+- fail-closed parse-only behavior: valid requests are not executed yet.
+
+### Remaining Phase 3 work
+
 
 - ForceCommand executable;
 - streaming Phase 2 protocol parser;
