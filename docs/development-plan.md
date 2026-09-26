@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Through Phase 3d2b1 merged; Phase 3d2b2a implemented on phase-3d2b2a-bounded-run; review/merge pending**
+Status: **Through Phase 3d2b2a merged; Phase 3d2b2b1 implemented on phase-3d2b2b1-child-rlimits; review/merge pending**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -167,10 +167,26 @@ Implemented:
 - tests for cat round-trip, sleep timeout, yes output overflow, stderr capture and pre-setsid signal fallback;
 - runner remains disconnected from the ForceCommand CLI.
 
+### Phase 3d2b2b1 — host-local child rlimits
+
+Implemented:
+
+- host-policy schema version 3;
+- required server-owned child resource ceilings;
+- CPU-time limit via `RLIMIT_CPU`;
+- address-space limit via `RLIMIT_AS`;
+- process-count limit via `RLIMIT_NPROC`;
+- regular-file-size limit via `RLIMIT_FSIZE`;
+- open-file limit via `RLIMIT_NOFILE`;
+- prepared commands carry their host-local child limits;
+- effective limits clamp to stricter inherited hard limits;
+- rlimit setup failures remain generic child exit 125;
+- rlimits explicitly documented as defense-in-depth, not descendant containment.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2b2b: CPU/address-space/process-count/file-size rlimits and stronger descendant containment design;
-- Phase 3d2c: wire supervised native execution into the ForceCommand CLI;
+- Phase 3d2b2b2: dedicated cgroup/systemd-scope containment design/reference implementation;
+- Phase 3d2c: wire supervised native execution into the ForceCommand CLI only after containment decision;
 - typed filesystem operations;
 - execution-time resource enforcement;
 - optional privileged helper protocol.
