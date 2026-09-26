@@ -8,27 +8,24 @@ The project is intentionally **not** a thin wrapper around `/bin/bash`. Every op
 
 ## Current status
 
-**Phase 2 — SSH execution core implementation.**
+**Phase 3c — remote host canonical authorization.**
 
-Implemented:
+Implemented through the current development branch:
 
-- strict Pydantic configuration and inventory models;
-- duplicate-key-safe YAML/JSON loading;
-- default-deny, deny-overrides-allow policy evaluation;
-- risk classification and approval-required outcomes;
-- inventory-only SSH targets with safe aliases;
-- pinned server host keys using per-host known_hosts payloads;
-- explicit credential-provider abstraction;
-- no ambient ssh-agent, password, keyboard-interactive, GSS, or SSH config fallback;
-- pooled SSH connections with maximum connection age and per-host session limits;
-- fixed remote protocol command plus binary framed request envelope;
-- no PTY, SSH environment forwarding, or X11 forwarding for structured execution;
-- bounded stdin/output;
-- timeout and cancellation cleanup;
-- policy denial before any SSH connection is opened;
-- adversarial unit tests for the policy and SSH core.
+- central default-deny policy and server-owned host inventory;
+- pinned-key SSH transport with explicit credentials and bounded sessions;
+- versioned SMCP request framing over a fixed `mcp-v1` ForceCommand channel;
+- parse-only remote host agent;
+- root-owned host-local policy with host-side resource ceilings;
+- per-command exact executable selection;
+- token-based exact/prefix argv authorization;
+- pinned executable realpath verification;
+- regular-file/executable/ownership/writeability checks;
+- canonical cwd-root confinement with symlink escape rejection;
+- fail-closed behavior after authorization.
 
-Next: the remote `ForceCommand` host agent which parses the Phase 2 wire protocol and independently enforces host-local policy.
+**Command execution is still disabled.** Phase 3d will add a race-resistant structured execution path only after the authorization-to-exec TOCTOU boundary is explicitly handled.
+
 
 ## Documentation is the source of truth
 
