@@ -151,18 +151,14 @@ class SSHExecutor:
                 encoding=None,
             )
 
-            try:
-                return await self._collect(
-                    process,
-                    request_id=req_id,
-                    host=request.host,
-                    timeout_seconds=timeout,
-                    max_output_bytes=output_limit,
-                    started=started,
-                )
-            except asyncio.CancelledError:
-                await self._abort_process(process)
-                raise
+            return await self._collect(
+                process,
+                request_id=req_id,
+                host=request.host,
+                timeout_seconds=timeout,
+                max_output_bytes=output_limit,
+                started=started,
+            )
 
     async def _collect(
         self,
