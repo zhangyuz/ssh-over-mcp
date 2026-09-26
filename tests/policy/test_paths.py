@@ -41,3 +41,16 @@ def test_resolve_within_rejects_symlink_escape(tmp_path: Path):
 
     with pytest.raises(PathPolicyError):
         resolve_within(root, "escape/secret.txt")
+
+
+def test_allowed_read_path_matches_positive_scope(engine):
+    decision = engine.evaluate(
+        EvaluationRequest(
+            profile="observer",
+            host="dev01",
+            tool="fs_read",
+            path="/srv/projects/app/README.md",
+        )
+    )
+    assert decision.decision == Decision.ALLOW
+    assert "observer.fs-read" in decision.matched_allow_rules
