@@ -1,4 +1,5 @@
 import os
+import resource
 import shutil
 import time
 from pathlib import Path
@@ -10,8 +11,10 @@ from ssh_over_mcp.host_agent.prepare import PreparedCommand
 from ssh_over_mcp.host_agent.supervisor import (
     ChildSupervisorError,
     SpawnedChild,
+    _apply_child_rlimits,
     _close_unrelated_fds,
     _require_standard_fds,
+    _set_bounded_rlimit,
     spawn_prepared_native,
 )
 
@@ -265,3 +268,90 @@ def test_missing_standard_fd_fails_closed(monkeypatch):
 
     with pytest.raises(ChildSupervisorError, match="standard"):
         _require_standard_fds()
+
+
+def test_rlimit_clamps_to_inherited_hard_limit(monkeypatch):
+    calls: list[tuple[int, tuple[int, int]]] = []
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor.resource.getrlimit",
+        lambda _resource_id: (50, 50),
+    )
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor.resource.setrlimit",
+        lambda resource_id, value: calls.append((resource_id, value)),
+    )
+
+    _set_bounded_rlimit(resource.RLIMIT_NOFILE, 128)
+
+    assert calls == [(resource.RLIMIT_NOFILE, (50, 50))]
+
+
+def test_apply_child_rlimits_uses_host_policy_values(monkeypatch):
+    calls: list[tuple[int, tuple[int, int]]] = []
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor.resource.getrlimit",
+        lambda _resource_id: (
+            resource.RLIM_INFINITY,
+            resource.RLIM_INFINITY,
+        ),
+    )
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor.resource.setrlimit",
+        lambda resource_id, value: calls.append((resource_id, value)),
+    )
+
+    limits = _child_limits()
+    _apply_child_rlimits(limits)
+
+    assert set(calls) == {
+        (resource.RLIMIT_CPU, (limits.cpu_seconds, limits.cpu_seconds)),
+        (
+            resource.RLIMIT_AS,
+            (limits.address_space_bytes, limits.address_space_bytes),
+        ),
+        (
+            resource.RLIMIT_NPROC,
+            (limits.max_processes, limits.max_processes),
+        ),
+        (
+            resource.RLIMIT_FSIZE,
+            (limits.file_size_bytes, limits.file_size_bytes),
+        ),
+        (
+            resource.RLIMIT_NOFILE,
+            (limits.open_files, limits.open_files),
+        ),
+    }
+
+
+def test_child_rlimit_failure_is_generic_exit_125(
+    tmp_path: Path,
+    monkeypatch,
+):
+    prepared = _prepared(tmp_path)
+
+    def fail_limits(_limits):
+        raise ChildSupervisorError("sensitive rlimit detail")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor._apply_child_rlimits",
+        fail_limits,
+    )
+
+    child = spawn_prepared_native(prepared)
+    prepared.close()
+
+    try:
+        child.close_stdin()
+        stdout = _read_all(child.stdout_fd)
+        stderr = _read_all(child.stderr_fd)
+        returncode = child.wait()
+
+        assert stdout == b""
+        assert stderr == b"ssh-over-mcp-host-agent: child exec failed\n"
+        assert returncode == 125
+        assert b"sensitive" not in stderr
+    finally:
+        child.close_pipes()
