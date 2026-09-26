@@ -109,7 +109,7 @@ It MUST:
 
 - validate the pinned inventory host key;
 - avoid implicit trust-on-first-use;
-- avoid ambient SSH configuration and ssh-agent credentials;
+- avoid ambient SSH configuration, ssh-agent credentials, and automatically discovered adjacent client certificates;
 - disable password, keyboard-interactive, host-based, GSS, and ambient X.509 trust for the service connection;
 - pool connections only within the same inventory host identity;
 - expire pooled connections after a configured maximum age;
