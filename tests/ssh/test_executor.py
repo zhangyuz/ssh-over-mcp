@@ -1,5 +1,4 @@
 import asyncio
-from types import SimpleNamespace
 
 import pytest
 
@@ -44,19 +43,40 @@ class Process:
         self.delay = delay
         self.closed = False
         self.terminated = False
+        self.exit_status = 0
+        self.exit_signal = None
+        self._closed = asyncio.Event()
 
     async def wait(self, check=False):
-        await asyncio.sleep(self.delay)
-        return SimpleNamespace(exit_status=0, exit_signal=None)
+        raise AssertionError(
+            "manual stream readers must not be combined with process.wait()"
+        )
 
     def terminate(self):
         self.terminated = True
 
     def close(self):
         self.closed = True
+        self._closed.set()
 
     async def wait_closed(self):
-        pass
+        if self.closed:
+            return
+
+        if self.delay <= 0:
+            self.closed = True
+            self._closed.set()
+            return
+
+        try:
+            await asyncio.wait_for(
+                self._closed.wait(),
+                timeout=self.delay,
+            )
+        except TimeoutError:
+            # Simulate a normal remote channel close.
+            self.closed = True
+            self._closed.set()
 
 
 class Connection:
@@ -174,7 +194,7 @@ async def test_fixed_remote_command_and_framed_payload():
     assert kwargs["request_pty"] is False
     assert kwargs["encoding"] is None
     assert kwargs["env"] == {}
-    assert kwargs["send_env"] == ()
+    assert kwargs["send_env"] == []
     assert kwargs["x11_forwarding"] is False
 
     envelope, stdin = decode_request(kwargs["input"])
