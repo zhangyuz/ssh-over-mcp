@@ -144,6 +144,8 @@ The host agent MUST apply metadata/resource checks before reading application st
 
 Executable authorization resolves the requested path and requires it to match the configured canonical target. The target MUST be a regular executable file and is root-owned/non-group-world-writable by default. Working directories are resolved with symlinks and MUST remain beneath an explicitly configured canonical root.
 
+`exact` argv rules are the safer default. A `prefix` rule authorizes every trailing token after the configured prefix and MUST only be used when that wider argument surface is intentionally acceptable; it does not interpret shell syntax or constrain command-specific path/helper semantics.
+
 Authorization results may carry canonical executable/cwd paths for the next stage, but Phase 3c still performs no process execution. Phase 3d MUST close the authorization-to-exec TOCTOU window using an fd-pinned or equivalently race-resistant execution mechanism before enabling commands.
 
 The central policy may be more expressive, but the host-local policy should preserve critical invariants if the central layer is bypassed.
