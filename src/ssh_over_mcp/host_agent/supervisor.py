@@ -5,7 +5,11 @@ import resource
 import signal
 from dataclasses import dataclass
 
-from .execute import exec_prepared_native_in_child
+from .execute import (
+    NativeExecutionError,
+    build_native_exec_spec,
+    exec_prepared_native_in_child,
+)
 from .prepare import PreparedCommand
 
 
@@ -157,6 +161,7 @@ def _child_main(
         os.setsid()
         _reset_child_signals()
         os.umask(0o077)
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
         _dup_stdio(stdin_read, stdout_write, stderr_write)
 
@@ -191,6 +196,13 @@ def spawn_prepared_native(prepared: PreparedCommand) -> SpawnedChild:
         raise ChildSupervisorError("POSIX fork/session support is unavailable")
     if prepared._closed:
         raise ChildSupervisorError("prepared command is closed")
+
+    try:
+        build_native_exec_spec(prepared)
+    except NativeExecutionError as exc:
+        raise ChildSupervisorError(
+            "prepared command cannot enter native execution"
+        ) from exc
 
     stdin_read = stdin_write = -1
     stdout_read = stdout_write = -1
