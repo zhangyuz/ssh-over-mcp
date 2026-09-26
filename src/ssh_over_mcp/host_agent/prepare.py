@@ -40,10 +40,18 @@ class PreparedCommand:
         if self._closed:
             return
 
-        if self.cwd_fd is not None:
-            os.close(self.cwd_fd)
-        os.close(self.executable_fd)
-        self._closed = True
+        try:
+            if self.cwd_fd is not None:
+                try:
+                    os.close(self.cwd_fd)
+                except OSError:
+                    pass
+        finally:
+            try:
+                os.close(self.executable_fd)
+            except OSError:
+                pass
+            self._closed = True
 
     def __enter__(self) -> "PreparedCommand":
         return self
