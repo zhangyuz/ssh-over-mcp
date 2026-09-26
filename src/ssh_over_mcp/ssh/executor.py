@@ -238,6 +238,7 @@ class SSHExecutor:
             raise
         finally:
             overflow_task.cancel()
+            await asyncio.gather(overflow_task, return_exceptions=True)
             if not close_task.done():
                 close_task.cancel()
                 await asyncio.gather(close_task, return_exceptions=True)
