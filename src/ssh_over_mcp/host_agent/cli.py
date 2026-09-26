@@ -5,10 +5,19 @@ import sys
 from collections.abc import Sequence
 from typing import BinaryIO, TextIO
 
+from .policy import (
+    DEFAULT_POLICY_PATH,
+    HostExecutionPolicy,
+    HostPolicyError,
+    authorize_request,
+    load_host_policy,
+)
 from .protocol import HostAgentProtocolError, read_request, validate_ssh_context
 
 EX_PROTOCOL = 65
 EX_UNAVAILABLE = 69
+EX_NOPERM = 77
+EX_CONFIG = 78
 
 
 def run(
@@ -16,18 +25,35 @@ def run(
     env: dict[str, str],
     stdin: BinaryIO,
     stderr: TextIO,
+    policy: HostExecutionPolicy | None = None,
 ) -> int:
-    """Validate and parse a ForceCommand request, but do not execute it yet."""
+    """Parse and host-authorize a request, but do not execute it yet."""
 
     try:
         validate_ssh_context(env)
-        envelope, _application_stdin = read_request(stdin)
+        envelope, application_stdin = read_request(stdin)
     except HostAgentProtocolError as exc:
         print(f"ssh-over-mcp-host-agent: rejected: {exc}", file=stderr)
         return EX_PROTOCOL
 
-    # Phase 3a is intentionally parse-only. Reaching this point proves the
-    # transport and ForceCommand context are valid, but no command is executed.
+    if policy is None:
+        try:
+            policy = load_host_policy(DEFAULT_POLICY_PATH)
+        except HostPolicyError:
+            # Do not disclose policy-file details over the SSH channel.
+            print("ssh-over-mcp-host-agent: host policy unavailable", file=stderr)
+            return EX_CONFIG
+
+    decision = authorize_request(policy, envelope, application_stdin)
+    if not decision.allowed:
+        print(
+            f"ssh-over-mcp-host-agent: denied: {decision.reason}",
+            file=stderr,
+        )
+        return EX_NOPERM
+
+    # Phase 3b remains intentionally non-executing. Reaching this point proves
+    # both framing and host-local authorization, but no process is started.
     print(
         "ssh-over-mcp-host-agent: execution unavailable "
         f"for request {envelope.request_id}",
