@@ -55,6 +55,8 @@ class HostExecutionPolicy(BaseModel):
     @classmethod
     def validate_executables(cls, values: frozenset[str]) -> frozenset[str]:
         for value in values:
+            if "\x00" in value:
+                raise ValueError("allowed executables must not contain NUL")
             try:
                 normalized = normalize_executable(value)
             except ValueError as exc:
