@@ -127,8 +127,8 @@ class SSHConnectionManager:
             kwargs = dict(
                 port=host.port,
                 username=host.ssh_user,
-                client_keys=list(credential.client_keys),
-                client_certs=list(credential.client_certs),
+                client_keys=credential.explicit_keypairs(),
+                client_certs=[],
                 passphrase=passphrase,
                 known_hosts=known_hosts,
                 host_key_alias=alias,
