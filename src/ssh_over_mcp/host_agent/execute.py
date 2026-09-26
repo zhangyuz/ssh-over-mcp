@@ -16,7 +16,7 @@ class NativeExecutionError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class NativeExecSpec:
     executable_fd: int
-    cwd_fd: int | None
+    cwd_fd: int
     argv: tuple[str, ...]
     env: dict[str, str]
 
@@ -128,22 +128,21 @@ def exec_prepared_native_in_child(
 
     spec = build_native_exec_spec(prepared)
 
-    if spec.cwd_fd is not None:
-        try:
-            fchdir(spec.cwd_fd)
-        except OSError as exc:
-            raise NativeExecutionError("cannot enter pinned cwd") from exc
+    try:
+        fchdir(spec.cwd_fd)
+    except OSError as exc:
+        raise NativeExecutionError("cannot enter pinned cwd") from exc
 
-        # fchdir itself doesn't consume the descriptor. Revalidate it after
-        # changing cwd and immediately before exec.
-        if prepared.cwd_identity is None:
-            raise NativeExecutionError("pinned cwd identity is missing")
-        _validate_fd_identity(
-            spec.cwd_fd,
-            prepared.cwd_identity,
-            require_directory=True,
-            include_ctime=False,
-        )
+    # fchdir itself doesn't consume the descriptor. Revalidate it after
+    # changing cwd and immediately before exec.
+    if prepared.cwd_identity is None:
+        raise NativeExecutionError("pinned cwd identity is missing")
+    _validate_fd_identity(
+        spec.cwd_fd,
+        prepared.cwd_identity,
+        require_directory=True,
+        include_ctime=False,
+    )
 
     _validate_fd_identity(
         spec.executable_fd,
