@@ -28,19 +28,22 @@ class SupervisedExecutionResult:
 
 
 def _signal_process_group(pid: int, sig: int) -> None:
+    group_error: OSError | None = None
     try:
         os.killpg(pid, sig)
         return
-    except ProcessLookupError:
-        return
+    except ProcessLookupError as exc:
+        # The child may not have reached setsid() yet.
+        group_error = exc
     except OSError as exc:
-        if exc.errno != errno.ESRCH:
-            # The child may not have reached setsid() yet. Fall back to the
-            # direct pid only for group-lookup failures.
-            if exc.errno not in {errno.EPERM, errno.EINVAL}:
-                raise BoundedExecutionError(
-                    "cannot signal child process group"
-                ) from exc
+        if exc.errno == errno.ESRCH:
+            group_error = exc
+        elif exc.errno in {errno.EPERM, errno.EINVAL}:
+            group_error = exc
+        else:
+            raise BoundedExecutionError(
+                "cannot signal child process group"
+            ) from exc
 
     try:
         os.kill(pid, sig)
@@ -51,6 +54,10 @@ def _signal_process_group(pid: int, sig: int) -> None:
             raise BoundedExecutionError(
                 "cannot signal supervised child"
             ) from exc
+
+    # group_error is intentionally retained only for debugging/chaining in a
+    # future audit layer; a successful direct-pid fallback is acceptable here.
+    _ = group_error
 
 
 def _unregister_close(
@@ -276,11 +283,12 @@ def run_prepared_native(
 
                 if exceeded and not output_exceeded:
                     output_exceeded = True
-                    terminating = True
-                    term_sent_at = time.monotonic()
-                    if child.stdin_fd >= 0:
-                        _unregister_close(selector, child, "stdin_fd")
-                    _signal_process_group(child.pid, signal.SIGTERM)
+                    if not terminating:
+                        terminating = True
+                        term_sent_at = time.monotonic()
+                        if child.stdin_fd >= 0:
+                            _unregister_close(selector, child, "stdin_fd")
+                        _signal_process_group(child.pid, signal.SIGTERM)
 
                 if eof:
                     attr = "stdout_fd" if kind == "stdout" else "stderr_fd"
