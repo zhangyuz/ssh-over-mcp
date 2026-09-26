@@ -148,7 +148,29 @@ Executable authorization resolves the requested path and requires it to match th
 
 `exact` argv rules are the safer default. A `prefix` rule authorizes every trailing token after the configured prefix and MUST only be used when that wider argument surface is intentionally acceptable; it does not interpret shell syntax or constrain command-specific path/helper semantics.
 
-Authorization results may carry canonical executable/cwd paths for the next stage, but Phase 3c still performs no process execution. Phase 3d MUST close the authorization-to-exec TOCTOU window using an fd-pinned or equivalently race-resistant execution mechanism before enabling commands.
+Authorization results include canonical executable/cwd paths plus filesystem device/inode/ctime identities.
+
+### Phase 3d1 fd preparation
+
+Before application stdin is accepted, the host agent re-runs host authorization and requires the filesystem identities to match the first authorization result. It then opens the canonical executable and cwd using no-follow/close-on-exec flags, validates the opened objects with `fstat()`, and keeps the descriptors pinned until the request completes.
+
+The executable descriptor is independently rechecked for:
+
+- the authorized device/inode/ctime identity;
+- regular-file type;
+- required ownership;
+- group/world write restrictions;
+- setuid/setgid restrictions;
+- Linux file capabilities using the opened fd;
+- executable mode bits.
+
+The cwd descriptor is independently checked for the authorized device/inode/ctime identity and directory type.
+
+This closes pathname replacement between authorization and later execution: a renamed or substituted pathname does not change the already opened object. Including `ctime_ns` also detects ordinary in-place metadata/content changes which occur between authorization and fd preparation. It does **not** make a mutable inode immutable after the fd is pinned. If a policy permits an untrusted principal to modify the executable's contents in place, fd pinning cannot prevent those contents from changing; the initial execution profile must therefore retain trusted ownership/write restrictions.
+
+The preparation layer records whether Python reports fd-based `os.execve()` support and classifies the opened file as ELF, shebang script, or other. Phase 3d1 still performs no process execution.
+
+Linux/POSIX `fexecve()` is specifically intended to avoid pathname replacement between verification and execution, but executable scripts have a close-on-exec descriptor caveat. Script execution MUST therefore receive an explicit design before it is enabled; the first execution increment may restrict execution to native binaries.
 
 The central policy may be more expressive, but the host-local policy should preserve critical invariants if the central layer is bypassed.
 

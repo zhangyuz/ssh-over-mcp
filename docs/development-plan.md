@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Phases 3a/3b merged; Phase 3c implemented on phase-3c-command-canonicalization; review/merge pending**
+Status: **Phases 3a/3b/3c merged; Phase 3d1 implemented on phase-3d1-fd-pinning; review/merge pending**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -101,9 +101,24 @@ Implemented:
 - canonical resolved paths returned for the future execution stage;
 - fail-closed behavior; still no process execution.
 
+### Phase 3d1 — fd-pinned execution preparation
+
+Implemented:
+
+- authorization-time executable/cwd device+inode+ctime identities;
+- host authorization repeated immediately before fd preparation;
+- canonical executable opened with `O_NOFOLLOW|O_CLOEXEC`;
+- canonical cwd opened as a directory fd with `O_NOFOLLOW|O_CLOEXEC`;
+- fd identity revalidation using `fstat()`;
+- executable ownership/writeability/setuid/setgid/capability revalidation on the pinned object;
+- ELF/shebang/other format classification;
+- fd-based `os.execve()` capability detection;
+- deterministic descriptor cleanup;
+- fail-closed behavior; still no process execution.
+
 ### Remaining Phase 3 work
 
-- Phase 3d: race-resistant structured execution without shell interpretation;
+- Phase 3d2: execute a pinned native-binary fd without shell interpretation;
 - typed filesystem operations;
 - execution-time resource enforcement;
 - optional privileged helper protocol.

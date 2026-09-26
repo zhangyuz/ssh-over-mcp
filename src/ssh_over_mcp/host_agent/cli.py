@@ -12,6 +12,7 @@ from .policy import (
     authorize_request,
     load_host_policy,
 )
+from .prepare import CommandPreparationError, prepare_command
 from .protocol import (
     HostAgentProtocolError,
     read_application_stdin,
@@ -62,24 +63,35 @@ def run(
         )
         return EX_NOPERM
 
-    # Only after host-local authorization do we accept application stdin.
+    # Pin the exact executable/cwd objects before accepting application stdin.
+    # This closes pathname replacement races without enabling execution yet.
     try:
-        _application_stdin = read_application_stdin(
-            stdin,
-            envelope.limits.max_stdin_bytes,
+        prepared = prepare_command(policy, envelope, decision)
+    except CommandPreparationError:
+        print(
+            "ssh-over-mcp-host-agent: command preparation failed",
+            file=stderr,
         )
-    except HostAgentProtocolError as exc:
-        print(f"ssh-over-mcp-host-agent: rejected: {exc}", file=stderr)
-        return EX_PROTOCOL
+        return EX_NOPERM
 
-    # Phase 3b remains intentionally non-executing. Reaching this point proves
-    # both framing and host-local authorization, but no process is started.
-    print(
-        "ssh-over-mcp-host-agent: execution unavailable "
-        f"for request {envelope.request_id}",
-        file=stderr,
-    )
-    return EX_UNAVAILABLE
+    with prepared:
+        try:
+            _application_stdin = read_application_stdin(
+                stdin,
+                envelope.limits.max_stdin_bytes,
+            )
+        except HostAgentProtocolError as exc:
+            print(f"ssh-over-mcp-host-agent: rejected: {exc}", file=stderr)
+            return EX_PROTOCOL
+
+        # Phase 3d1 remains intentionally non-executing. The pinned fds are
+        # closed on exit from this block.
+        print(
+            "ssh-over-mcp-host-agent: execution unavailable "
+            f"for request {envelope.request_id}",
+            file=stderr,
+        )
+        return EX_UNAVAILABLE
 
 
 def main(argv: Sequence[str] | None = None) -> int:
