@@ -60,6 +60,13 @@ class ContainmentServiceIdentityPlan:
     def __post_init__(self) -> None:
         _validate_kernel_id(self.manager_client_gid, "manager_client_gid")
 
+        if self.host_agent.uid == 0 or self.host_agent.gid == 0:
+            raise ValueError("host-agent identity must be non-root")
+        if self.workload.uid == 0 or self.workload.gid == 0:
+            raise ValueError("workload identity must be non-root")
+        if self.manager_client_gid == 0:
+            raise ValueError("manager client GID must be non-root")
+
         uids = {
             self.manager.uid,
             self.host_agent.uid,
