@@ -280,3 +280,19 @@ def test_service_plan_rejects_root_execution_identities(overrides):
 
     with pytest.raises(ValueError, match="non-root"):
         ContainmentServiceIdentityPlan(**values)
+
+
+def test_policy_normalizes_primary_gid_out_of_supplementary_set():
+    value = LinuxProcessIdentityPolicy(
+        identity=identity(2102, 3102),
+        supplementary_gids=frozenset({3102, 3199}),
+    )
+
+    assert value.supplementary_gids == frozenset({3199})
+
+
+def test_identity_policy_rejects_wrong_identity_type():
+    with pytest.raises(TypeError, match="LinuxProcessIdentity"):
+        LinuxProcessIdentityPolicy(  # type: ignore[arg-type]
+            identity=(2102, 3102),
+        )
