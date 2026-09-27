@@ -8,29 +8,31 @@ The project is intentionally **not** a thin wrapper around `/bin/bash`. Every op
 
 ## Current status
 
-**Phase 3d2b2b2c2b2a — secure filesystem Unix manager endpoint.**
+**Phase 3d2b2b2c2b2b1 — Linux service identity contract.**
 
 Remote ForceCommand execution remains disabled.
 
-The containment-manager now has a filesystem AF_UNIX listener primitive with a
-strict endpoint policy:
+Production containment now has an explicit OS-identity plan for four roles:
 
-- absolute, lexically canonical pathname;
-- Linux pathname-length bound;
-- pre-existing endpoint paths are rejected and never auto-unlinked;
-- parent directory must already exist, resolve canonically, match configured
-  UID/GID, and be non-group/world-writable;
-- ancestor directories must be root/endpoint-owner owned; writable ancestors
-  require sticky-bit protection;
-- socket owner/group/mode are set and read back before `listen()`;
-- only `0600` and `0660` socket modes are accepted;
-- listening and accepted descriptors are non-inheritable;
-- cleanup removes the socket only if device/inode still match the object this
-  listener created.
+- containment manager identity;
+- SSH host-agent identity;
+- untrusted workload identity;
+- dedicated manager-client group.
 
-This phase still does not define a daemon, background lifecycle, or OS-account
-switch. Separate manager / host-agent / workload identities remain mandatory
-before hostile workload execution can be enabled.
+Manager, host-agent, and workload UIDs must be distinct. Host-agent/workload
+UID/GID and the manager-client GID must be non-root. Real, effective, and saved
+UID/GID are checked against policy, and supplementary groups must match the
+configured set exactly.
+
+The identity plan derives:
+
+- manager and host-agent process identity policies;
+- workload process identity policy with no supplementary groups;
+- bidirectional manager/host-agent SO_PEERCRED policies;
+- secure endpoint owner/group policy.
+
+The manager-client group is shared only by manager and host-agent. Workload is
+excluded from that group.
 
 **Remote command execution remains disabled in the ForceCommand CLI.**
 

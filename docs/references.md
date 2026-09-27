@@ -46,3 +46,10 @@ These references inform the current architecture. They are informative; the repo
 
 - Linux `unix(7)` / `SO_PEERCRED`: https://man7.org/linux/man-pages/man7/unix.7.html
 - Linux `socket(7)`: https://man7.org/linux/man-pages/man7/socket.7.html
+
+
+## Linux process credentials
+
+- Linux `credentials(7)`: https://man7.org/linux/man-pages/man7/credentials.7.html
+- Linux `getresuid(2)` / `getresgid(2)`: https://man7.org/linux/man-pages/man2/getresuid.2.html
+- Linux `setresuid(2)` / `setresgid(2)`: https://man7.org/linux/man-pages/man2/setresuid.2.html
