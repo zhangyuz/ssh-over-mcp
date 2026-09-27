@@ -23,6 +23,7 @@ from ssh_over_mcp.host_agent.containment_manager import (
     ContainmentManagerProtocolError,
 )
 from ssh_over_mcp.host_agent.containment_manager_peer import (
+    ContainmentManagerPeerAuthError,
     LinuxPeerCredentialPolicy,
 )
 from ssh_over_mcp.host_agent.containment_manager_unix import (
@@ -440,3 +441,45 @@ def test_transport_rejects_unconnected_unix_stream_socket():
             )
     finally:
         sock.close()
+
+
+def test_transport_peer_auth_failure_closes_socket():
+    client_sock, server_sock = socket_pair()
+    try:
+        wrong_uid = 0 if os.getuid() != 0 else 1
+        with pytest.raises(ContainmentManagerPeerAuthError):
+            UnixContainmentManagerTransport(
+                client_sock,
+                peer_policy=LinuxPeerCredentialPolicy(
+                    expected_uid=wrong_uid,
+                ),
+            )
+
+        assert client_sock.fileno() == -1
+    finally:
+        server_sock.close()
+
+
+def test_server_peer_auth_failure_closes_before_protocol_read():
+    client_sock, server_sock = socket_pair()
+    backend = FakeBackend()
+    dispatcher = ContainmentManagerDispatcher(
+        backend,
+        capability_factory=lambda: "A" * 43,
+    )
+    wrong_uid = 0 if os.getuid() != 0 else 1
+
+    try:
+        with pytest.raises(ContainmentManagerPeerAuthError):
+            serve_containment_manager_connection(
+                server_sock,
+                dispatcher,
+                peer_policy=LinuxPeerCredentialPolicy(
+                    expected_uid=wrong_uid,
+                ),
+            )
+
+        assert server_sock.fileno() == -1
+        assert backend.handle.attached == []
+    finally:
+        client_sock.close()
