@@ -301,10 +301,36 @@ The handle:
 - refuses cleanup while `cgroup.events` reports `populated 1`;
 - removes the empty cgroup deterministically.
 
-The backend is still disconnected from the child supervisor. No child is yet
-held behind a start barrier, so remote execution remains disabled. The next
-phase must guarantee that the child cannot execute user code before the parent
-successfully creates/configures the cgroup and attaches the child.
+### Phase 3d2b2b2b2 containment start barrier
+
+A separate contained-spawn path now connects the supervisor to any
+`ContainmentBackend` without changing the existing uncontained internal spawn
+primitive.
+
+The contained path enforces this order:
+
+1. validate the prepared native-exec specification;
+2. require the containment request ID to equal the prepared command request ID;
+3. create/configure the containment scope;
+4. create stdio pipes plus a dedicated `O_CLOEXEC` start-barrier pipe;
+5. fork;
+6. in the child, close parent-owned pipe endpoints and block reading one barrier byte;
+7. in the parent, attach the child PID to the containment scope;
+8. only after successful attach, write the single release byte;
+9. child continues with session/signal/stdio/rlimit setup and fd-based exec.
+
+No untrusted executable runs before containment attachment succeeds.
+
+If attach or barrier release fails, the parent never sends a valid release
+byte. Cleanup closes the barrier, attempts recursive containment kill, falls
+back to direct `SIGKILL` for pre-attachment failures, performs bounded reap,
+and closes the containment scope. The failed child therefore cannot continue
+into the exec path.
+
+A successfully spawned child retains its containment handle, but the bounded
+execution loop has not yet been switched to this path. Process-group timeout
+handling remains unchanged until the next increment, and the ForceCommand CLI
+remains non-executing.
 
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 

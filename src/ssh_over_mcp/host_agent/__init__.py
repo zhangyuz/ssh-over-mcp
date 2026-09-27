@@ -39,6 +39,7 @@ from .supervisor import (
     ChildSupervisorError,
     SpawnedChild,
     spawn_prepared_native,
+    spawn_prepared_native_contained,
 )
 from .protocol import (
     HostAgentProtocolError,
@@ -67,6 +68,7 @@ __all__ = [
     "ChildSupervisorError",
     "SpawnedChild",
     "spawn_prepared_native",
+    "spawn_prepared_native_contained",
     "NativeExecSpec",
     "NativeExecutionError",
     "build_native_exec_spec",

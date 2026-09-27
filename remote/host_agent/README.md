@@ -8,23 +8,23 @@ ssh-over-mcp-host-agent
 
 Normative behavior is defined in [`../../docs/ssh-host-agent.md`](../../docs/ssh-host-agent.md).
 
-## Current Phase 3d2b2b2b1 behavior
+## Current Phase 3d2b2b2b2 behavior
 
 The ForceCommand request path remains **non-executing**.
 
-A concrete cgroup-v2 backend now exists for an already delegated canonical
-Linux cgroup subtree. It can:
+The supervisor now has an explicit contained-spawn path:
 
-- require/enable `cpu`, `memory`, and `pids` controllers;
-- create a unique per-request child cgroup;
-- apply finite `memory.max`, `pids.max`, and `cpu.max`;
-- attach a child through `cgroup.procs`;
-- recursively terminate the scope through `cgroup.kill`;
-- read memory/PID/CPU/populated accounting;
-- remove the scope only after it is empty.
+1. create/configure containment;
+2. fork a child blocked on a close-on-exec start-barrier pipe;
+3. attach the child's PID to containment;
+4. release one byte only after attach succeeds;
+5. continue child sanitation and native fd exec.
 
-The backend is not yet connected to the forked supervisor.
+The containment request ID must match the prepared command request ID.
 
-Next: add a fork-start barrier so a freshly forked child cannot exec before the
-parent successfully creates/configures its request cgroup and attaches that
-child.
+If attach/release fails, the child is never released into exec and cleanup uses
+containment kill plus direct-SIGKILL fallback and bounded reap.
+
+The existing bounded runner still uses the older uncontained spawn function.
+Next: switch bounded execution to the contained path and make timeout/output
+termination prefer cgroup-wide kill/accounting before process-group fallback.

@@ -8,23 +8,23 @@ The project is intentionally **not** a thin wrapper around `/bin/bash`. Every op
 
 ## Current status
 
-**Phase 3d2b2b2b1 — concrete cgroup-v2 backend.**
+**Phase 3d2b2b2b2 — containment start barrier.**
 
 Implemented through the current development branch:
 
 - host-policy v3 and fd-pinned native execution;
 - sanitized child supervisor and bounded parent I/O;
 - host-owned child rlimits;
-- backend-neutral descendant-containment contract;
-- concrete cgroup-v2 backend for a pre-delegated canonical subtree;
-- required `cpu`, `memory`, and `pids` controller enablement;
-- per-request cgroup creation with finite `memory.max`, `pids.max`, and `cpu.max`;
-- PID migration through `cgroup.procs`;
-- recursive subtree termination through `cgroup.kill`;
-- memory/PID/CPU accounting snapshots;
-- empty-scope cleanup with populated-scope refusal.
+- concrete cgroup-v2 containment backend;
+- new contained-spawn path with a dedicated CLOEXEC start-barrier pipe;
+- containment request ID must match the prepared command request ID;
+- containment scope is created before fork;
+- child blocks before session setup/exec;
+- parent attaches the child to containment before sending the one-byte release;
+- attach/release failures keep the child from entering the exec path and trigger bounded cleanup;
+- successful spawned children retain their containment handle for later termination/accounting integration.
 
-**Remote command execution is still disabled in the ForceCommand CLI.** The backend is not yet connected to the forked child supervisor. The next phase adds a start barrier so a child cannot exec before successful cgroup attachment.
+**Remote command execution is still disabled in the ForceCommand CLI.** The bounded runner still uses the older uncontained spawn path; the next phase switches timeout/output termination and cleanup to containment-aware execution.
 
 
 ## Documentation is the source of truth

@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Through Phase 3d2b2b2a merged; Phase 3d2b2b2b1 implemented on phase-3d2b2b2b1-cgroup-v2-backend; review/merge pending**
+Status: **Through Phase 3d2b2b2b1 merged; Phase 3d2b2b2b2 implemented on phase-3d2b2b2b2-start-barrier; review/merge pending**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -210,9 +210,23 @@ Implemented:
 - populated-scope cleanup refusal and idempotent closed-handle behavior;
 - no supervisor integration yet.
 
+### Phase 3d2b2b2b2 — containment start barrier
+
+Implemented:
+
+- new explicit contained-spawn API; existing uncontained internal spawn remains unchanged;
+- prepared-command/request ID binding before backend creation;
+- containment scope creation before fork;
+- dedicated close-on-exec barrier pipe;
+- child closes parent pipe endpoints and blocks before session setup/exec;
+- parent attaches child PID before releasing the barrier;
+- attach/release failure keeps exec blocked and performs cgroup-kill/direct-kill bounded cleanup;
+- successful spawned child retains the containment handle for later lifecycle integration;
+- tests prove child code cannot run during attach and cannot run after attach failure.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2b2b2b2: fork-start barrier and supervisor-to-cgroup attach integration;
+- Phase 3d2b2b2b3: switch bounded execution to contained spawn and use cgroup kill/accounting/cleanup;
 - Phase 3d2b2b2c: live delegated-cgroup descendant-kill and resource-limit integration tests;
 - Phase 3d2c: wire supervised native execution into the ForceCommand CLI only after containment is enforced;
 - typed filesystem operations;
