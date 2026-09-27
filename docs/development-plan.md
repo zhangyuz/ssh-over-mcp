@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Through Phase 3d2b2b2c1 merged; Phase 3d2b2b2c2a implemented on phase-3d2b2b2c2a-unix-transport; review/merge pending**
+Status: **Through Phase 3d2b2b2c2a merged; Phase 3d2b2b2c2b1 implemented on phase-3d2b2b2c2b1-peer-credentials; review/merge pending**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -285,9 +285,23 @@ Implemented:
 - socketpair lifecycle/timeout/truncation/schema-error tests;
 - transport remains explicitly separate from peer authentication/endpoint policy.
 
+### Phase 3d2b2b2c2b1 — Linux Unix peer credentials
+
+Implemented:
+
+- strict Linux `SO_PEERCRED` read for connected AF_UNIX/SOCK_STREAM peers;
+- exact expected UID policy;
+- optional exact expected real-GID policy;
+- peer PID retained as metadata only, not a durable authorization key;
+- Unix manager transport requires peer policy before protocol I/O;
+- manager-side connected session requires peer policy before reading frames;
+- peer-auth failure closes the connection immediately;
+- missing `SO_PEERCRED`, malformed credential size, disconnected sockets and mismatched identity fail closed;
+- tests cover exact UID/GID, UID-only mode, mismatch, unavailable kernel option and channel closure.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2b2b2c2b: manager socket endpoint, peer credential/UID policy, daemon lifecycle, and workload/host-agent OS identity separation;
+- Phase 3d2b2b2c2b2: manager socket endpoint, daemon lifecycle, and manager/host-agent/workload OS identity separation;
 - Phase 3d2b2b2c2c: use the authenticated manager client through the existing start barrier and bounded runner;
 - Phase 3d2b2b2c3: live delegated-cgroup descendant-kill/resource-limit/self-migration tests;
 - Phase 3d2c: wire supervised native execution into the ForceCommand CLI only after containment is enforced;

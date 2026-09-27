@@ -8,33 +8,23 @@ The project is intentionally **not** a thin wrapper around `/bin/bash`. Every op
 
 ## Current status
 
-**Phase 3d2b2b2c2a — pre-connected Unix containment-manager transport.**
+**Phase 3d2b2b2c2b1 — Linux Unix peer-credential authentication.**
 
 Remote ForceCommand execution remains disabled.
 
-The host-agent now has a real local IPC transport for the narrow containment
-manager protocol. It operates only on an **already connected AF_UNIX
-SOCK_STREAM socket** and deliberately has no socket-path discovery or connect
-API.
+Every pre-connected containment-manager Unix stream now requires an explicit
+`LinuxPeerCredentialPolicy`. The kernel-reported peer credentials are read
+with Linux `SO_PEERCRED` before any manager protocol traffic is accepted.
 
-Transport properties:
+The policy requires an exact peer UID and may additionally require an exact
+real GID. Authentication failure closes the socket immediately. The reported
+PID is retained only as connection metadata and is not used as a durable
+authorization identity.
 
-- manager socket is forced non-inheritable;
-- synchronous round trips are serialized;
-- each client round trip has one total deadline across send + receive;
-- partial reads are handled;
-- frame magic and length are bounded before payload reads;
-- EOF/truncation/OSError/timeout fail closed as manager unavailable and poison the stream;
-- schema-invalid manager responses fail closed as manager unavailable;
-- malformed client frames terminate the manager session.
-
-The server helper in this phase serves one already-authenticated connected
-socket. It does not create/listen on a filesystem endpoint and does not define
-who is allowed to establish a manager session.
-
-This preserves ADR 0004: **pre-connected transport is plumbing, not
-authentication**. Endpoint ownership, peer credentials, manager process
-identity, and host-agent/workload UID separation are the next increment.
+This is necessary but not sufficient privilege separation. If the host-agent
+and executed workload share the same OS UID, peer-credential checks cannot
+distinguish them. The next increment must define the manager endpoint and
+separate manager / host-agent / workload identities.
 
 **Remote command execution remains disabled in the ForceCommand CLI.**
 

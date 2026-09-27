@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import socket
 import struct
 import threading
@@ -20,6 +21,10 @@ from ssh_over_mcp.host_agent.containment_manager import (
     ContainmentManagerClient,
     ContainmentManagerDispatcher,
     ContainmentManagerProtocolError,
+)
+from ssh_over_mcp.host_agent.containment_manager_peer import (
+    ContainmentManagerPeerAuthError,
+    LinuxPeerCredentialPolicy,
 )
 from ssh_over_mcp.host_agent.containment_manager_unix import (
     UnixContainmentManagerTransport,
@@ -79,6 +84,15 @@ def request() -> ContainmentRequest:
     )
 
 
+def peer_policy() -> LinuxPeerCredentialPolicy:
+    if not hasattr(socket, "SO_PEERCRED"):
+        pytest.skip("Linux SO_PEERCRED is required")
+    return LinuxPeerCredentialPolicy(
+        expected_uid=os.getuid(),
+        expected_gid=os.getgid(),
+    )
+
+
 def socket_pair() -> tuple[socket.socket, socket.socket]:
     return socket.socketpair(
         socket.AF_UNIX,
@@ -97,6 +111,7 @@ def start_server(
     thread = threading.Thread(
         target=serve_containment_manager_connection,
         args=(server_sock, dispatcher),
+        kwargs={"peer_policy": peer_policy()},
         daemon=True,
     )
     thread.start()
@@ -109,6 +124,7 @@ def test_unix_transport_full_manager_lifecycle():
     thread = start_server(server_sock, backend)
     transport = UnixContainmentManagerTransport(
         client_sock,
+        peer_policy=peer_policy(),
         timeout_seconds=1.0,
     )
     client = ContainmentManagerClient(transport)
@@ -136,8 +152,13 @@ def test_transport_socket_is_non_inheritable():
     client_sock, server_sock = socket_pair()
     try:
         client_sock.set_inheritable(True)
-        transport = UnixContainmentManagerTransport(client_sock)
+        transport = UnixContainmentManagerTransport(
+        client_sock,
+        peer_policy=peer_policy(),
+    )
         assert transport.inheritable is False
+        assert transport.peer_credentials.uid == os.getuid()
+        assert transport.peer_credentials.gid == os.getgid()
         transport.close()
     finally:
         server_sock.close()
@@ -147,6 +168,7 @@ def test_transport_timeout_fails_closed():
     client_sock, server_sock = socket_pair()
     transport = UnixContainmentManagerTransport(
         client_sock,
+        peer_policy=peer_policy(),
         timeout_seconds=0.01,
     )
     client = ContainmentManagerClient(transport)
@@ -184,6 +206,7 @@ def test_truncated_manager_response_fails_closed():
 
     transport = UnixContainmentManagerTransport(
         client_sock,
+        peer_policy=peer_policy(),
         timeout_seconds=1.0,
     )
     client = ContainmentManagerClient(transport)
@@ -228,7 +251,10 @@ def test_transport_rejects_non_unix_socket():
     tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         with pytest.raises(ValueError, match="AF_UNIX"):
-            UnixContainmentManagerTransport(tcp)
+            UnixContainmentManagerTransport(
+                tcp,
+                peer_policy=peer_policy(),
+            )
     finally:
         tcp.close()
 
@@ -256,6 +282,7 @@ def test_schema_invalid_manager_response_is_unavailable():
 
     transport = UnixContainmentManagerTransport(
         client_sock,
+        peer_policy=peer_policy(),
         timeout_seconds=1.0,
     )
     client = ContainmentManagerClient(transport)
@@ -273,7 +300,10 @@ def test_schema_invalid_manager_response_is_unavailable():
 
 def test_transport_rejects_malformed_outbound_frame_before_send():
     client_sock, server_sock = socket_pair()
-    transport = UnixContainmentManagerTransport(client_sock)
+    transport = UnixContainmentManagerTransport(
+            client_sock,
+            peer_policy=peer_policy(),
+        )
     try:
         bad = (
             MANAGER_PROTOCOL_MAGIC
@@ -304,6 +334,7 @@ def test_transport_rejects_invalid_timeouts(timeout):
         with pytest.raises(ValueError, match="timeout"):
             UnixContainmentManagerTransport(
                 client_sock,
+                peer_policy=peer_policy(),
                 timeout_seconds=timeout,
             )
     finally:
@@ -340,6 +371,7 @@ def test_round_trip_timeout_is_total_deadline_not_per_recv():
 
     transport = UnixContainmentManagerTransport(
         client_sock,
+        peer_policy=peer_policy(),
         timeout_seconds=0.05,
     )
     client = ContainmentManagerClient(transport)
@@ -380,6 +412,7 @@ def test_broken_response_poisons_transport():
 
     transport = UnixContainmentManagerTransport(
         client_sock,
+        peer_policy=peer_policy(),
         timeout_seconds=1.0,
     )
     client = ContainmentManagerClient(transport)
@@ -402,6 +435,51 @@ def test_transport_rejects_unconnected_unix_stream_socket():
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         with pytest.raises(ValueError, match="connected"):
-            UnixContainmentManagerTransport(sock)
+            UnixContainmentManagerTransport(
+                sock,
+                peer_policy=peer_policy(),
+            )
     finally:
         sock.close()
+
+
+def test_transport_peer_auth_failure_closes_socket():
+    client_sock, server_sock = socket_pair()
+    try:
+        wrong_uid = 0 if os.getuid() != 0 else 1
+        with pytest.raises(ContainmentManagerPeerAuthError):
+            UnixContainmentManagerTransport(
+                client_sock,
+                peer_policy=LinuxPeerCredentialPolicy(
+                    expected_uid=wrong_uid,
+                ),
+            )
+
+        assert client_sock.fileno() == -1
+    finally:
+        server_sock.close()
+
+
+def test_server_peer_auth_failure_closes_before_protocol_read():
+    client_sock, server_sock = socket_pair()
+    backend = FakeBackend()
+    dispatcher = ContainmentManagerDispatcher(
+        backend,
+        capability_factory=lambda: "A" * 43,
+    )
+    wrong_uid = 0 if os.getuid() != 0 else 1
+
+    try:
+        with pytest.raises(ContainmentManagerPeerAuthError):
+            serve_containment_manager_connection(
+                server_sock,
+                dispatcher,
+                peer_policy=LinuxPeerCredentialPolicy(
+                    expected_uid=wrong_uid,
+                ),
+            )
+
+        assert server_sock.fileno() == -1
+        assert backend.handle.attached == []
+    finally:
+        client_sock.close()

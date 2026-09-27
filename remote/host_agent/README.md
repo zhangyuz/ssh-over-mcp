@@ -8,18 +8,20 @@ ssh-over-mcp-host-agent
 
 Normative behavior is defined in [`../../docs/ssh-host-agent.md`](../../docs/ssh-host-agent.md).
 
-## Current Phase 3d2b2b2c2a behavior
+## Current Phase 3d2b2b2c2b1 behavior
 
 The ForceCommand request path remains **non-executing**.
 
-The containment-manager client can now communicate over one pre-connected Unix
-stream socket. The transport is bounded, timeout-controlled, serialized and
-non-inheritable, and invalid manager responses fail closed.
+Pre-connected containment-manager Unix sockets now require Linux
+`SO_PEERCRED` authentication before protocol traffic:
 
-It deliberately has no `connect(path)` API and the server helper deliberately
-does not create/listen on an endpoint. Therefore this phase does not yet decide
-which process/user is authorized to establish a manager session.
+- exact expected UID;
+- optional exact real GID;
+- PID retained only as metadata;
+- auth mismatch/unavailable peer credentials fail closed;
+- failed authentication closes the socket.
 
-Next: define the Linux manager daemon endpoint, peer-credential policy, and
-separate workload OS identity. Then route the existing start-barrier/bounded
-runner through that authenticated manager connection.
+This is only one half of ADR 0004. If workload and host-agent share the same
+UID, the workload can present the same peer identity. The next increment must
+define the manager endpoint and separate manager, host-agent and workload OS
+identities.

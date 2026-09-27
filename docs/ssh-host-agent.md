@@ -448,6 +448,29 @@ no untrusted code runs at that point. It is not part of the child keep-set, is
 marked non-inheritable, and MUST be closed by the existing child FD sanitation
 before `execve`.
 
+### Phase 3d2b2b2c2b1 Linux peer-credential authentication
+
+The pre-connected Unix transport and manager-side connected-session helper now
+require an explicit Linux peer credential policy before any protocol traffic is
+accepted.
+
+Authentication uses the kernel's `SO_PEERCRED` value captured for the
+connected Unix peer. The policy always requires an exact UID and may
+additionally require an exact real GID. The peer PID is exposed only as
+connection metadata; it is not a durable authorization key because process
+lifetime/PID reuse are separate concerns.
+
+A peer mismatch, unavailable `SO_PEERCRED`, malformed credential result or
+disconnected socket fails closed. Client-side authentication failure closes the
+manager socket immediately; manager-side authentication failure closes the
+accepted connection before any request frame is read.
+
+This does **not** by itself satisfy ADR 0004 if the host-agent and untrusted
+workload run under the same UID. In that deployment, the workload would present
+the same UID to a future manager endpoint. Production therefore MUST use
+separate OS identities and endpoint permissions so the workload cannot create
+an equivalent authenticated manager session.
+
 The ForceCommand CLI remains non-executing.
 
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.

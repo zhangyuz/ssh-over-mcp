@@ -40,3 +40,9 @@ These references inform the current architecture. They are informative; the repo
 
 - Linux kernel cgroup v2 documentation: https://docs.kernel.org/admin-guide/cgroup-v2.html
 - systemd control-group delegation: https://systemd.io/CGROUP_DELEGATION/
+
+
+## Linux Unix peer authentication
+
+- Linux `unix(7)` / `SO_PEERCRED`: https://man7.org/linux/man-pages/man7/unix.7.html
+- Linux `socket(7)`: https://man7.org/linux/man-pages/man7/socket.7.html
