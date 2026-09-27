@@ -129,6 +129,66 @@ def _close_many(fds: tuple[int, ...]) -> None:
             pass
 
 
+_START_BARRIER_RELEASE = b"R"
+
+
+def _wait_start_barrier(fd: int) -> None:
+    while True:
+        try:
+            token = os.read(fd, 1)
+            break
+        except InterruptedError:
+            continue
+        except OSError as exc:
+            raise ChildSupervisorError(
+                "cannot read child start barrier"
+            ) from exc
+
+    if token != _START_BARRIER_RELEASE:
+        raise ChildSupervisorError(
+            "child start barrier was not released"
+        )
+
+
+def _release_start_barrier(fd: int) -> None:
+    while True:
+        try:
+            written = os.write(fd, _START_BARRIER_RELEASE)
+            break
+        except InterruptedError:
+            continue
+        except OSError as exc:
+            raise ChildSupervisorError(
+                "cannot release child start barrier"
+            ) from exc
+
+    if written != len(_START_BARRIER_RELEASE):
+        raise ChildSupervisorError(
+            "cannot release child start barrier"
+        )
+
+
+def _reap_pid_bounded(pid: int, timeout_seconds: float = 0.20) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+
+    while True:
+        try:
+            waited, _status = os.waitpid(pid, os.WNOHANG)
+        except InterruptedError:
+            continue
+        except ChildProcessError:
+            return True
+        except OSError:
+            return False
+
+        if waited == pid:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+
+        time.sleep(0.005)
+
+
 def _reset_child_signals() -> None:
     if not hasattr(signal, "pthread_sigmask"):
         raise ChildSupervisorError("signal-mask reset is unavailable")
