@@ -8,24 +8,32 @@ The project is intentionally **not** a thin wrapper around `/bin/bash`. Every op
 
 ## Current status
 
-**Phase 3d2b2b2c0 — containment privilege separation.**
+**Phase 3d2b2b2c1 — narrow containment-manager protocol.**
 
-The bounded native runner now uses request-scoped cgroup-v2 containment, but
-remote ForceCommand execution remains disabled.
+The bounded native execution path remains internally implemented, but remote
+ForceCommand execution is still disabled.
 
-The current security review identified a post-attach escape condition: Linux
-cgroup-v2 delegation prevents a delegatee from escaping the outer delegated
-subtree, but a workload sharing the manager's migration authority can still
-move between cgroups inside that subtree. Moving from a request scope back to
-the delegated root would bypass request-specific limits and request-scoped
-`cgroup.kill`.
+ADR 0004 requires writable cgroup management to live outside the untrusted
+workload privilege domain. This phase adds a versioned, bounded manager protocol
+which exposes only:
 
-ADR 0004 therefore requires writable cgroup management to move into a separate,
-narrow containment-manager privilege domain. The existing start barrier and
-bounded execution logic remain, but the child will not be released until the
-manager confirms attachment and the workload must not inherit manager authority.
+- create scope;
+- attach PID;
+- kill all descendants;
+- read accounting;
+- close empty scope.
 
-**Remote command execution is still disabled in the ForceCommand CLI.**
+A create response returns an opaque 256-bit scope capability. Every subsequent
+scope operation requires both the manager-owned scope identifier and that
+capability. Message correlation is explicit, protocol types are strict, unknown
+fields fail closed, and manager/backend exception details are not returned over
+the protocol.
+
+The current transport is **in-memory and test-only**. It validates the protocol
+and adapter state machine but does not itself provide privilege separation.
+A real local IPC/helper transport is the next increment.
+
+**Remote command execution remains disabled in the ForceCommand CLI.**
 
 
 ## Documentation is the source of truth

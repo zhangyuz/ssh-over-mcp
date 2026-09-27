@@ -13,6 +13,14 @@ from .containment import (
     REQUIRED_CGROUP_V2_CONTROLLERS,
     probe_cgroup_v2,
 )
+from .containment_manager import (
+    ContainmentManagerClient,
+    ContainmentManagerDispatcher,
+    ContainmentManagerProtocolError,
+    ContainmentManagerTransport,
+    InMemoryContainmentManagerTransport,
+    ManagedContainmentHandle,
+)
 from .execute import (
     NativeExecSpec,
     NativeExecutionError,
@@ -50,6 +58,12 @@ from .protocol import (
 )
 
 __all__ = [
+    "ContainmentManagerClient",
+    "ContainmentManagerDispatcher",
+    "ContainmentManagerProtocolError",
+    "ContainmentManagerTransport",
+    "InMemoryContainmentManagerTransport",
+    "ManagedContainmentHandle",
     "CgroupV2Backend",
     "CgroupV2Handle",
     "CgroupV2Probe",
