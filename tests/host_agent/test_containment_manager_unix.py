@@ -152,10 +152,12 @@ def test_transport_socket_is_non_inheritable():
     try:
         client_sock.set_inheritable(True)
         transport = UnixContainmentManagerTransport(
-            client_sock,
-            peer_policy=peer_policy(),
-        )
+        client_sock,
+        peer_policy=peer_policy(),
+    )
         assert transport.inheritable is False
+        assert transport.peer_credentials.uid == os.getuid()
+        assert transport.peer_credentials.gid == os.getgid()
         transport.close()
     finally:
         server_sock.close()
@@ -248,7 +250,10 @@ def test_transport_rejects_non_unix_socket():
     tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         with pytest.raises(ValueError, match="AF_UNIX"):
-            UnixContainmentManagerTransport(tcp)
+            UnixContainmentManagerTransport(
+                tcp,
+                peer_policy=peer_policy(),
+            )
     finally:
         tcp.close()
 
@@ -429,6 +434,9 @@ def test_transport_rejects_unconnected_unix_stream_socket():
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         with pytest.raises(ValueError, match="connected"):
-            UnixContainmentManagerTransport(sock)
+            UnixContainmentManagerTransport(
+                sock,
+                peer_policy=peer_policy(),
+            )
     finally:
         sock.close()
