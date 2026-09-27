@@ -8,30 +8,33 @@ The project is intentionally **not** a thin wrapper around `/bin/bash`. Every op
 
 ## Current status
 
-**Phase 3d2b2b2c1 — narrow containment-manager protocol.**
+**Phase 3d2b2b2c2a — pre-connected Unix containment-manager transport.**
 
-The bounded native execution path remains internally implemented, but remote
-ForceCommand execution is still disabled.
+Remote ForceCommand execution remains disabled.
 
-ADR 0004 requires writable cgroup management to live outside the untrusted
-workload privilege domain. This phase adds a versioned, bounded manager protocol
-which exposes only:
+The host-agent now has a real local IPC transport for the narrow containment
+manager protocol. It operates only on an **already connected AF_UNIX
+SOCK_STREAM socket** and deliberately has no socket-path discovery or connect
+API.
 
-- create scope;
-- attach PID;
-- kill all descendants;
-- read accounting;
-- close empty scope.
+Transport properties:
 
-A create response returns an opaque 256-bit scope capability. Every subsequent
-scope operation requires both the manager-owned scope identifier and that
-capability. Message correlation is explicit, protocol types are strict, unknown
-fields fail closed, and manager/backend exception details are not returned over
-the protocol.
+- manager socket is forced non-inheritable;
+- synchronous round trips are serialized;
+- client read/write operations use a bounded timeout;
+- partial reads are handled;
+- frame magic and length are bounded before payload reads;
+- EOF/truncation/OSError/timeout fail closed as manager unavailable;
+- schema-invalid manager responses fail closed as manager unavailable;
+- malformed client frames terminate the manager session.
 
-The current transport is **in-memory and test-only**. It validates the protocol
-and adapter state machine but does not itself provide privilege separation.
-A real local IPC/helper transport is the next increment.
+The server helper in this phase serves one already-authenticated connected
+socket. It does not create/listen on a filesystem endpoint and does not define
+who is allowed to establish a manager session.
+
+This preserves ADR 0004: **pre-connected transport is plumbing, not
+authentication**. Endpoint ownership, peer credentials, manager process
+identity, and host-agent/workload UID separation are the next increment.
 
 **Remote command execution remains disabled in the ForceCommand CLI.**
 
