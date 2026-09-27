@@ -76,9 +76,12 @@ class ContainmentServiceIdentityPlan:
             )
 
     def manager_process_policy(self) -> LinuxProcessIdentityPolicy:
+        supplementary = set()
+        if self.manager_client_gid != self.manager.gid:
+            supplementary.add(self.manager_client_gid)
         return LinuxProcessIdentityPolicy(
             identity=self.manager,
-            supplementary_gids=frozenset(),
+            supplementary_gids=frozenset(supplementary),
         )
 
     def host_agent_process_policy(self) -> LinuxProcessIdentityPolicy:
@@ -118,7 +121,7 @@ class ContainmentServiceIdentityPlan:
         return UnixManagerEndpointPolicy(
             path=Path(path),
             directory_uid=self.manager.uid,
-            directory_gid=self.manager.gid,
+            directory_gid=self.manager_client_gid,
             socket_uid=self.manager.uid,
             socket_gid=self.manager_client_gid,
             socket_mode=socket_mode,
