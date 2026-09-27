@@ -14,6 +14,7 @@
 10. **All decisions are auditable.** Allow, deny, approval-required, execution start, and execution completion are logged with stable request IDs.
 11. **Secrets are never model-facing.** SSH private keys, service tokens, origin credentials, and secret environment variables are not returned by tools or stored in tool descriptions.
 12. **Policy changes are versioned.** Audit events record the policy version/hash used for the decision.
+13. **Containment authority is not workload authority.** Untrusted executed code MUST NOT inherit the ability to move itself out of its request cgroup, modify ancestor cgroup controls, or invoke manager operations which weaken its request-specific containment.
 
 ## Defense layers
 
@@ -66,6 +67,11 @@ Examples of shell-equivalent or code-execution-capable programs include interpre
 - SSH user environment injection MUST remain disabled unless narrowly constrained.
 
 ## Resource controls
+
+Per-request descendant containment and process/resource limits are separate
+layers. Writable cgroup management for hostile workloads MUST live in a manager
+privilege domain which the workload cannot use to migrate itself out of its
+request scope.
 
 Every execution path SHOULD support:
 

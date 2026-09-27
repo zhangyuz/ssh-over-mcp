@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Through Phase 3d2b2b2b2 merged; Phase 3d2b2b2b3 implemented on phase-3d2b2b2b3-contained-bounded-run; review/merge pending**
+Status: **Through Phase 3d2b2b2b3 merged; Phase 3d2b2b2c0 architecture decision implemented on phase-3d2b2b2c0-containment-privilege-separation; review/merge pending**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -239,9 +239,23 @@ Implemented:
 - containment empty-state wait and close are bounded;
 - tests cover timeout containment kill, lingering descendants after direct-child exit, and process-group fallback semantics.
 
+### Phase 3d2b2b2c0 — containment privilege separation decision
+
+Implemented:
+
+- identified request-scope self-migration as a distinct post-attach escape path;
+- accepted ADR 0004;
+- direct cgroup-v2 filesystem management is classified as manager-side only;
+- hostile workload execution requires a separate containment-manager privilege domain;
+- the child start barrier remains mandatory until manager-confirmed attachment;
+- workload access to ancestor/sibling cgroup migration controls is prohibited;
+- live validation must attempt self-migration and fail if it succeeds.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2b2b2c: live delegated-cgroup descendant-kill/resource-limit tests, including an attempted workload self-migration through ancestor `cgroup.procs` which MUST fail;
+- Phase 3d2b2b2c1: narrow local containment-manager/helper protocol and fake-manager tests;
+- Phase 3d2b2b2c2: manager-backed cgroup backend integration with the existing start barrier and bounded runner;
+- Phase 3d2b2b2c3: live delegated-cgroup descendant-kill/resource-limit/self-migration tests;
 - Phase 3d2c: wire supervised native execution into the ForceCommand CLI only after containment is enforced;
 - typed filesystem operations;
 - execution-time resource enforcement;
