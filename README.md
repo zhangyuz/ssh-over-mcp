@@ -8,23 +8,23 @@ The project is intentionally **not** a thin wrapper around `/bin/bash`. Every op
 
 ## Current status
 
-**Phase 3d2b2b2b2 — containment start barrier.**
+**Phase 3d2b2b2b3 — containment-aware bounded execution.**
 
 Implemented through the current development branch:
 
 - host-policy v3 and fd-pinned native execution;
-- sanitized child supervisor and bounded parent I/O;
-- host-owned child rlimits;
 - concrete cgroup-v2 containment backend;
-- new contained-spawn path with a dedicated CLOEXEC start-barrier pipe;
-- containment request ID must match the prepared command request ID;
-- containment scope is created before fork;
-- child blocks before session setup/exec;
-- parent attaches the child to containment before sending the one-byte release;
-- attach/release failures keep the child from entering the exec path and trigger bounded cleanup;
-- successful spawned children retain their containment handle for later termination/accounting integration.
+- contained spawn with a pre-exec start barrier;
+- bounded runner now requires a containment backend/request and uses contained spawn;
+- timeout/output-overflow escalation keeps graceful process-group SIGTERM first, then uses recursive containment kill;
+- normal direct-child exit still checks cgroup populated state and kills lingering descendants before returning;
+- process-group SIGKILL is defense-in-depth after successful containment kill, not an authority over it;
+- containment accounting is returned with the supervised execution result;
+- containment cleanup is bounded and must reach an empty scope before close.
 
-**Remote command execution is still disabled in the ForceCommand CLI.** The bounded runner still uses the older uncontained spawn path; the next phase switches timeout/output termination and cleanup to containment-aware execution.
+**Remote command execution is still disabled in the ForceCommand CLI.** Live delegated-cgroup validation is still required before this containment boundary is trusted for arbitrary code.
+
+A deployment must also prevent the workload from writing ancestor cgroup membership controls. If executed code can write an ancestor `cgroup.procs`, it may be able to migrate itself out of the request scope. The upcoming live-cgroup validation phase must explicitly test and reject that escape path.
 
 
 ## Documentation is the source of truth

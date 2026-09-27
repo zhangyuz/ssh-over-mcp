@@ -8,23 +8,26 @@ ssh-over-mcp-host-agent
 
 Normative behavior is defined in [`../../docs/ssh-host-agent.md`](../../docs/ssh-host-agent.md).
 
-## Current Phase 3d2b2b2b2 behavior
+## Current Phase 3d2b2b2b3 behavior
 
 The ForceCommand request path remains **non-executing**.
 
-The supervisor now has an explicit contained-spawn path:
+The bounded native runner now always uses the contained-spawn path:
 
-1. create/configure containment;
-2. fork a child blocked on a close-on-exec start-barrier pipe;
-3. attach the child's PID to containment;
-4. release one byte only after attach succeeds;
-5. continue child sanitation and native fd exec.
+1. create/configure the request containment scope;
+2. fork a child blocked on the start barrier;
+3. attach the child before release;
+4. execute with bounded stdin/stdout/stderr and wall timeout;
+5. attempt graceful process-group SIGTERM on timeout/output overflow;
+6. use recursive containment kill for hard termination;
+7. on normal direct-child exit, kill any lingering contained descendants;
+8. wait for an empty scope, collect accounting, and remove containment before returning.
 
-The containment request ID must match the prepared command request ID.
+Process-group SIGKILL is only defense-in-depth once containment kill succeeds.
 
-If attach/release fails, the child is never released into exec and cleanup uses
-containment kill plus direct-SIGKILL fallback and bounded reap.
+Containment is not considered production-complete until live delegated-cgroup
+tests prove descendant kill/resource ceilings and prove that workload code
+cannot self-migrate through writable ancestor cgroup membership controls.
 
-The existing bounded runner still uses the older uncontained spawn function.
-Next: switch bounded execution to the contained path and make timeout/output
-termination prefer cgroup-wide kill/accounting before process-group fallback.
+Next: live delegated-cgroup integration tests. The ForceCommand CLI remains
+disabled until those tests and deployment invariants are satisfied.

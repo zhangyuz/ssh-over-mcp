@@ -327,10 +327,37 @@ back to direct `SIGKILL` for pre-attachment failures, performs bounded reap,
 and closes the containment scope. The failed child therefore cannot continue
 into the exec path.
 
-A successfully spawned child retains its containment handle, but the bounded
-execution loop has not yet been switched to this path. Process-group timeout
-handling remains unchanged until the next increment, and the ForceCommand CLI
-remains non-executing.
+A successfully spawned child retains its containment handle.
+
+### Phase 3d2b2b2b3 containment-aware bounded execution
+
+The bounded execution loop now requires an explicit containment backend and
+request and always enters through the contained-spawn path.
+
+Timeout/output termination keeps a short graceful phase using process-group
+`SIGTERM`. After the grace period, hard termination is containment-authoritative:
+the runner invokes recursive `kill_all()` on the request scope and then attempts
+process-group `SIGKILL` only as defense-in-depth. A process-group signaling
+failure does not convert a successful containment kill into a false failure.
+
+Normal direct-child exit does not imply request completion. Before returning,
+the runner reads containment accounting. If the request scope is still
+populated, it recursively kills remaining descendants, waits for the scope to
+become empty within a bounded cleanup deadline, then removes it. The returned
+execution result includes the final containment accounting snapshot.
+
+This mechanism has an additional deployment invariant: untrusted workload code
+MUST NOT have write access to an ancestor cgroup membership interface which
+would let it migrate out of the request scope. In particular, a deployment
+where the workload can write an ancestor `cgroup.procs` is not considered
+escape-resistant containment. Production deployment must keep cgroup control
+interfaces unavailable/read-only to the workload or separate the cgroup
+manager from the workload privilege domain.
+
+The next live delegated-cgroup phase MUST test descendant kill/resource limits
+and MUST include an attempted self-migration escape which is expected to fail.
+
+The ForceCommand CLI remains non-executing.
 
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 
