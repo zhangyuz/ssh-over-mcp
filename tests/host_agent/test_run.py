@@ -100,10 +100,11 @@ def _prepared(
 
 
 class RunContainmentHandle(ContainmentHandle):
-    def __init__(self) -> None:
+    def __init__(self, *, populated_until_kill: bool = False) -> None:
         self.attached_pid: int | None = None
         self.kill_count = 0
         self.closed = False
+        self.populated_until_kill = populated_until_kill
 
     @property
     def scope_id(self) -> str:
@@ -122,7 +123,7 @@ class RunContainmentHandle(ContainmentHandle):
             memory_current_bytes=0,
             pids_current=0,
             cpu_usage_usec=123,
-            populated=False,
+            populated=self.populated_until_kill and self.kill_count == 0,
         )
 
     def close(self) -> None:
@@ -130,9 +131,10 @@ class RunContainmentHandle(ContainmentHandle):
 
 
 class RunContainmentBackend(ContainmentBackend):
-    def __init__(self) -> None:
+    def __init__(self, *, populated_until_kill: bool = False) -> None:
         self.requests: list[ContainmentRequest] = []
         self.handles: list[RunContainmentHandle] = []
+        self.populated_until_kill = populated_until_kill
 
     @property
     def name(self) -> str:
@@ -140,15 +142,21 @@ class RunContainmentBackend(ContainmentBackend):
 
     def create(self, request: ContainmentRequest) -> ContainmentHandle:
         self.requests.append(request)
-        handle = RunContainmentHandle()
+        handle = RunContainmentHandle(
+            populated_until_kill=self.populated_until_kill,
+        )
         self.handles.append(handle)
         return handle
 
 
 def _containment(
     prepared: PreparedCommand,
+    *,
+    populated_until_kill: bool = False,
 ) -> tuple[RunContainmentBackend, ContainmentRequest]:
-    backend = RunContainmentBackend()
+    backend = RunContainmentBackend(
+        populated_until_kill=populated_until_kill,
+    )
     request = ContainmentRequest(
         request_id=prepared.request_id,
         limits=ContainmentLimits(
@@ -223,8 +231,6 @@ def test_wall_timeout_terminates_process_group(tmp_path: Path):
         assert backend.handles[0].kill_count >= 1
         assert backend.handles[0].closed is True
         assert result.duration_seconds < 2.0
-        assert backend.handles[0].kill_count >= 1
-        assert backend.handles[0].closed is True
     finally:
         prepared.close()
 
@@ -385,3 +391,34 @@ def test_reap_until_is_bounded(monkeypatch):
     )
 
     assert _reap_until(NeverReaps(), 0.5) is None
+
+
+def test_normal_child_exit_kills_lingering_containment(tmp_path: Path):
+    prepared = _prepared(
+        tmp_path,
+        _source("/bin/true", "/usr/bin/true"),
+    )
+    backend, request = _containment(
+        prepared,
+        populated_until_kill=True,
+    )
+
+    try:
+        result = run_prepared_native(
+            prepared,
+            b"",
+            _limits(),
+            containment_backend=backend,
+            containment_request=request,
+            term_grace_seconds=0.05,
+            kill_cleanup_seconds=0.5,
+        )
+
+        assert result.returncode == 0
+        assert result.timed_out is False
+        assert result.output_exceeded is False
+        assert backend.handles[0].kill_count == 1
+        assert backend.handles[0].closed is True
+        assert result.containment_stats.populated is False
+    finally:
+        prepared.close()
