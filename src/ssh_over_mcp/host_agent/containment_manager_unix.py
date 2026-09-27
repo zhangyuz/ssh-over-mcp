@@ -4,6 +4,7 @@ import math
 import socket
 import struct
 import threading
+import time
 
 from .containment import ContainmentUnavailableError
 from .containment_manager import (
@@ -56,12 +57,21 @@ def _recv_exact(
     sock: socket.socket,
     size: int,
     *,
+    deadline: float | None = None,
     allow_clean_eof: bool = False,
 ) -> bytes | None:
     chunks: list[bytes] = []
     remaining = size
 
     while remaining:
+        if deadline is not None:
+            remaining_time = deadline - time.monotonic()
+            if remaining_time <= 0:
+                raise ContainmentUnavailableError(
+                    "containment manager transport timed out"
+                )
+            sock.settimeout(remaining_time)
+
         try:
             chunk = sock.recv(remaining)
         except TimeoutError as exc:
@@ -89,11 +99,13 @@ def _recv_exact(
 def _recv_frame(
     sock: socket.socket,
     *,
+    deadline: float | None = None,
     allow_clean_eof: bool = False,
 ) -> bytes | None:
     header = _recv_exact(
         sock,
         _HEADER_SIZE,
+        deadline=deadline,
         allow_clean_eof=allow_clean_eof,
     )
     if header is None:
@@ -113,7 +125,11 @@ def _recv_frame(
             "containment-manager transport frame exceeds maximum"
         )
 
-    payload = _recv_exact(sock, length)
+    payload = _recv_exact(
+        sock,
+        length,
+        deadline=deadline,
+    )
     assert payload is not None
     return header + payload
 
@@ -146,7 +162,7 @@ class UnixContainmentManagerTransport(ContainmentManagerTransport):
 
         self._sock = sock
         self._sock.set_inheritable(False)
-        self._sock.settimeout(timeout_seconds)
+        self._timeout_seconds = float(timeout_seconds)
         self._lock = threading.Lock()
         self._closed = False
 
@@ -158,31 +174,7 @@ class UnixContainmentManagerTransport(ContainmentManagerTransport):
     def inheritable(self) -> bool:
         return self._sock.get_inheritable()
 
-    def round_trip(self, frame: bytes) -> bytes:
-        if self._closed:
-            raise ContainmentUnavailableError(
-                "containment manager transport is closed"
-            )
-
-        _validate_complete_frame(frame)
-
-        with self._lock:
-            try:
-                self._sock.sendall(frame)
-            except TimeoutError as exc:
-                raise ContainmentUnavailableError(
-                    "containment manager transport timed out"
-                ) from exc
-            except OSError as exc:
-                raise ContainmentUnavailableError(
-                    "containment manager transport write failed"
-                ) from exc
-
-            response = _recv_frame(self._sock)
-            assert response is not None
-            return response
-
-    def close(self) -> None:
+    def _close_unlocked(self) -> None:
         if self._closed:
             return
         self._closed = True
@@ -190,6 +182,47 @@ class UnixContainmentManagerTransport(ContainmentManagerTransport):
             self._sock.close()
         except OSError:
             pass
+
+    def round_trip(self, frame: bytes) -> bytes:
+        _validate_complete_frame(frame)
+
+        with self._lock:
+            if self._closed:
+                raise ContainmentUnavailableError(
+                    "containment manager transport is closed"
+                )
+
+            deadline = time.monotonic() + self._timeout_seconds
+            try:
+                self._sock.settimeout(self._timeout_seconds)
+                self._sock.sendall(frame)
+
+                response = _recv_frame(
+                    self._sock,
+                    deadline=deadline,
+                )
+                assert response is not None
+                return response
+            except TimeoutError as exc:
+                self._close_unlocked()
+                raise ContainmentUnavailableError(
+                    "containment manager transport timed out"
+                ) from exc
+            except (
+                ContainmentManagerProtocolError,
+                ContainmentUnavailableError,
+            ):
+                self._close_unlocked()
+                raise
+            except OSError as exc:
+                self._close_unlocked()
+                raise ContainmentUnavailableError(
+                    "containment manager transport I/O failed"
+                ) from exc
+
+    def close(self) -> None:
+        with self._lock:
+            self._close_unlocked()
 
 
 def serve_containment_manager_connection(
