@@ -396,3 +396,12 @@ def test_broken_response_poisons_transport():
     finally:
         transport.close()
         thread.join(timeout=1.0)
+
+
+def test_transport_rejects_unconnected_unix_stream_socket():
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        with pytest.raises(ValueError, match="connected"):
+            UnixContainmentManagerTransport(sock)
+    finally:
+        sock.close()
