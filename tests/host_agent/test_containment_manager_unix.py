@@ -18,6 +18,7 @@ from ssh_over_mcp.host_agent.containment_manager import (
     MANAGER_PROTOCOL_MAGIC,
     ContainmentManagerClient,
     ContainmentManagerDispatcher,
+    ContainmentManagerProtocolError,
 )
 from ssh_over_mcp.host_agent.containment_manager_unix import (
     UnixContainmentManagerTransport,
@@ -274,7 +275,7 @@ def test_transport_rejects_malformed_outbound_frame_before_send():
             + b"{}"
         )
         with pytest.raises(
-            Exception,
+            ContainmentManagerProtocolError,
             match="frame length",
         ):
             transport.round_trip(bad)
