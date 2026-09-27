@@ -218,7 +218,6 @@ class UnixContainmentManagerListener:
             os.chmod(
                 policy.path,
                 policy.socket_mode,
-                follow_symlinks=False,
             )
 
             verified_identity, verified = _read_socket_identity(policy.path)
