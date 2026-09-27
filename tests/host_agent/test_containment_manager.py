@@ -317,3 +317,38 @@ def test_manager_error_does_not_leak_backend_exception_text():
 
     assert "secret filesystem detail" not in decoded_text
     assert "/sys/fs/cgroup/private" not in decoded_text
+
+
+def test_failed_create_response_closes_unpublished_scope():
+    class InvalidScopeBackend(FakeBackend):
+        def create(self, request: ContainmentRequest) -> ContainmentHandle:
+            self.requests.append(request)
+            handle = FakeHandle("bad")
+            self.handles.append(handle)
+            return handle
+
+    backend = InvalidScopeBackend()
+    dispatcher = ContainmentManagerDispatcher(
+        backend,
+        capability_factory=lambda: "A" * 43,
+    )
+    message = CreateRequest(
+        message_id="msg_12345678",
+        request_id="req_12345678",
+        limits=ManagerLimits.from_limits(limits()),
+    )
+
+    from ssh_over_mcp.host_agent.containment_manager import (
+        ErrorResponse,
+        decode_manager_response,
+    )
+
+    decoded = decode_manager_response(
+        dispatcher.handle_frame(
+            encode_manager_message(message)
+        )
+    )
+
+    assert isinstance(decoded, ErrorResponse)
+    assert decoded.code == "operation_failed"
+    assert backend.handles[0].closed is True
