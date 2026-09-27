@@ -479,9 +479,15 @@ def test_nul_bearing_request_fields_fail_closed(tmp_path: Path, overrides):
     cwd.mkdir()
     policy = make_policy(executable, cwd)
 
+    request_cwd = overrides.get("cwd", cwd)
+    other_overrides = {
+        key: value
+        for key, value in overrides.items()
+        if key != "cwd"
+    }
     result = authorize_request(
         policy,
-        envelope(executable, cwd, **overrides),
+        envelope(executable, request_cwd, **other_overrides),
     )
 
     assert result.allowed is False
