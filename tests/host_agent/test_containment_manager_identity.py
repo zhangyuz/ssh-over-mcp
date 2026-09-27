@@ -186,7 +186,7 @@ def test_service_plan_derives_strict_process_policies():
     workload = value.workload_process_policy()
 
     assert manager.identity == value.manager
-    assert manager.supplementary_gids == frozenset()
+    assert manager.supplementary_gids == frozenset({3199})
     assert agent.identity == value.host_agent
     assert agent.supplementary_gids == frozenset({3199})
     assert workload.identity == value.workload
@@ -225,7 +225,7 @@ def test_service_plan_derives_endpoint_policy():
     )
 
     assert endpoint.directory_uid == value.manager.uid
-    assert endpoint.directory_gid == value.manager.gid
+    assert endpoint.directory_gid == value.manager_client_gid
     assert endpoint.socket_uid == value.manager.uid
     assert endpoint.socket_gid == value.manager_client_gid
     assert endpoint.socket_mode == 0o660
@@ -246,3 +246,14 @@ def test_service_plan_derives_endpoint_policy():
 def test_invalid_process_identity_ids_are_rejected(uid, gid):
     with pytest.raises(ValueError):
         LinuxProcessIdentity(uid=uid, gid=gid)
+
+
+def test_manager_primary_gid_can_be_manager_client_gid():
+    value = ContainmentServiceIdentityPlan(
+        manager=identity(2101, 3199),
+        host_agent=identity(2102, 3102),
+        workload=identity(2103, 3103),
+        manager_client_gid=3199,
+    )
+
+    assert value.manager_process_policy().supplementary_gids == frozenset()
