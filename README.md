@@ -8,23 +8,24 @@ The project is intentionally **not** a thin wrapper around `/bin/bash`. Every op
 
 ## Current status
 
-**Phase 3d2b2b2b3 — containment-aware bounded execution.**
+**Phase 3d2b2b2c0 — containment privilege separation.**
 
-Implemented through the current development branch:
+The bounded native runner now uses request-scoped cgroup-v2 containment, but
+remote ForceCommand execution remains disabled.
 
-- host-policy v3 and fd-pinned native execution;
-- concrete cgroup-v2 containment backend;
-- contained spawn with a pre-exec start barrier;
-- bounded runner now requires a containment backend/request and uses contained spawn;
-- timeout/output-overflow escalation keeps graceful process-group SIGTERM first, then uses recursive containment kill;
-- normal direct-child exit still checks cgroup populated state and kills lingering descendants before returning;
-- process-group SIGKILL is defense-in-depth after successful containment kill, not an authority over it;
-- containment accounting is returned with the supervised execution result;
-- containment cleanup is bounded and must reach an empty scope before close.
+The current security review identified a post-attach escape condition: Linux
+cgroup-v2 delegation prevents a delegatee from escaping the outer delegated
+subtree, but a workload sharing the manager's migration authority can still
+move between cgroups inside that subtree. Moving from a request scope back to
+the delegated root would bypass request-specific limits and request-scoped
+`cgroup.kill`.
 
-**Remote command execution is still disabled in the ForceCommand CLI.** Live delegated-cgroup validation is still required before this containment boundary is trusted for arbitrary code.
+ADR 0004 therefore requires writable cgroup management to move into a separate,
+narrow containment-manager privilege domain. The existing start barrier and
+bounded execution logic remain, but the child will not be released until the
+manager confirms attachment and the workload must not inherit manager authority.
 
-A deployment must also prevent the workload from writing ancestor cgroup membership controls. If executed code can write an ancestor `cgroup.procs`, it may be able to migrate itself out of the request scope. The upcoming live-cgroup validation phase must explicitly test and reject that escape path.
+**Remote command execution is still disabled in the ForceCommand CLI.**
 
 
 ## Documentation is the source of truth
