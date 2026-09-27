@@ -5,6 +5,13 @@ from pathlib import Path
 
 import pytest
 
+from ssh_over_mcp.host_agent.containment import (
+    ContainmentBackend,
+    ContainmentHandle,
+    ContainmentLimits,
+    ContainmentRequest,
+    ContainmentStats,
+)
 from ssh_over_mcp.host_agent.policy import HostChildLimits, HostObjectIdentity
 from ssh_over_mcp.host_agent.prepare import PreparedCommand
 from ssh_over_mcp.host_agent.run import (
@@ -92,6 +99,68 @@ def _prepared(
     )
 
 
+class RunContainmentHandle(ContainmentHandle):
+    def __init__(self) -> None:
+        self.attached_pid: int | None = None
+        self.kill_count = 0
+        self.closed = False
+
+    @property
+    def scope_id(self) -> str:
+        return "run-test"
+
+    def attach(self, pid: int) -> None:
+        self.attached_pid = pid
+
+    def kill_all(self) -> None:
+        self.kill_count += 1
+
+    def stats(self) -> ContainmentStats:
+        # Unit tests exercise lifecycle/ordering without writable host cgroups.
+        # Direct process cleanup remains covered by the process-group fallback.
+        return ContainmentStats(
+            memory_current_bytes=0,
+            pids_current=0,
+            cpu_usage_usec=123,
+            populated=False,
+        )
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class RunContainmentBackend(ContainmentBackend):
+    def __init__(self) -> None:
+        self.requests: list[ContainmentRequest] = []
+        self.handles: list[RunContainmentHandle] = []
+
+    @property
+    def name(self) -> str:
+        return "run-test"
+
+    def create(self, request: ContainmentRequest) -> ContainmentHandle:
+        self.requests.append(request)
+        handle = RunContainmentHandle()
+        self.handles.append(handle)
+        return handle
+
+
+def _containment(
+    prepared: PreparedCommand,
+) -> tuple[RunContainmentBackend, ContainmentRequest]:
+    backend = RunContainmentBackend()
+    request = ContainmentRequest(
+        request_id=prepared.request_id,
+        limits=ContainmentLimits(
+            memory_max_bytes=512 * 1024 * 1024,
+            pids_max=64,
+            cpu_quota_us=50_000,
+            cpu_period_us=100_000,
+        ),
+    )
+    return backend, request
+
+
 def _limits(
     *,
     timeout: float = 2.0,
@@ -107,11 +176,14 @@ def _limits(
 
 def test_bounded_cat_round_trip(tmp_path: Path):
     prepared = _prepared(tmp_path, _source("/bin/cat", "/usr/bin/cat"))
+    backend, request = _containment(prepared)
     try:
         result = run_prepared_native(
             prepared,
             b"hello bounded runner\n",
             _limits(),
+            containment_backend=backend,
+            containment_request=request,
             term_grace_seconds=0.05,
             kill_cleanup_seconds=0.5,
         )
@@ -121,6 +193,8 @@ def test_bounded_cat_round_trip(tmp_path: Path):
         assert result.stderr == b""
         assert result.timed_out is False
         assert result.output_exceeded is False
+        assert result.containment_stats.cpu_usage_usec == 123
+        assert backend.handles[0].closed is True
     finally:
         prepared.close()
 
@@ -131,11 +205,14 @@ def test_wall_timeout_terminates_process_group(tmp_path: Path):
         _source("/bin/sleep", "/usr/bin/sleep"),
         argv=("5",),
     )
+    backend, request = _containment(prepared)
     try:
         result = run_prepared_native(
             prepared,
             b"",
             _limits(timeout=0.05),
+            containment_backend=backend,
+            containment_request=request,
             term_grace_seconds=0.02,
             kill_cleanup_seconds=0.5,
         )
@@ -143,7 +220,11 @@ def test_wall_timeout_terminates_process_group(tmp_path: Path):
         assert result.timed_out is True
         assert result.output_exceeded is False
         assert result.returncode < 0
+        assert backend.handles[0].kill_count >= 1
+        assert backend.handles[0].closed is True
         assert result.duration_seconds < 2.0
+        assert backend.handles[0].kill_count >= 1
+        assert backend.handles[0].closed is True
     finally:
         prepared.close()
 
@@ -153,11 +234,14 @@ def test_output_budget_is_hard_combined_ceiling(tmp_path: Path):
         tmp_path,
         _source("/usr/bin/yes", "/bin/yes"),
     )
+    backend, request = _containment(prepared)
     try:
         result = run_prepared_native(
             prepared,
             b"",
             _limits(timeout=2.0, output=1024),
+            containment_backend=backend,
+            containment_request=request,
             term_grace_seconds=0.02,
             kill_cleanup_seconds=0.5,
         )
@@ -176,11 +260,14 @@ def test_stderr_is_captured(tmp_path: Path):
         _source("/bin/ls", "/usr/bin/ls"),
         argv=("/definitely-not-present-ssh-over-mcp",),
     )
+    backend, request = _containment(prepared)
     try:
         result = run_prepared_native(
             prepared,
             b"",
             _limits(),
+            containment_backend=backend,
+            containment_request=request,
             term_grace_seconds=0.05,
             kill_cleanup_seconds=0.5,
         )
@@ -194,22 +281,9 @@ def test_stderr_is_captured(tmp_path: Path):
         prepared.close()
 
 
-def test_oversized_stdin_is_rejected_before_spawn(
-    tmp_path: Path,
-    monkeypatch,
-):
+def test_oversized_stdin_is_rejected_before_spawn(tmp_path: Path):
     prepared = _prepared(tmp_path, _source("/bin/cat", "/usr/bin/cat"))
-    called = False
-
-    def fake_spawn(_prepared):
-        nonlocal called
-        called = True
-        raise AssertionError("must not spawn")
-
-    monkeypatch.setattr(
-        "ssh_over_mcp.host_agent.run.spawn_prepared_native",
-        fake_spawn,
-    )
+    backend, request = _containment(prepared)
 
     try:
         with pytest.raises(BoundedExecutionError, match="stdin"):
@@ -217,8 +291,10 @@ def test_oversized_stdin_is_rejected_before_spawn(
                 prepared,
                 b"too large",
                 _limits(stdin=1),
+                containment_backend=backend,
+                containment_request=request,
             )
-        assert called is False
+        assert backend.requests == []
     finally:
         prepared.close()
 
