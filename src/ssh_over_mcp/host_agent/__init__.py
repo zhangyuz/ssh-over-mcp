@@ -21,6 +21,10 @@ from .containment_manager import (
     InMemoryContainmentManagerTransport,
     ManagedContainmentHandle,
 )
+from .containment_manager_unix import (
+    UnixContainmentManagerTransport,
+    serve_containment_manager_connection,
+)
 from .execute import (
     NativeExecSpec,
     NativeExecutionError,
@@ -58,6 +62,8 @@ from .protocol import (
 )
 
 __all__ = [
+    "UnixContainmentManagerTransport",
+    "serve_containment_manager_connection",
     "ContainmentManagerClient",
     "ContainmentManagerDispatcher",
     "ContainmentManagerProtocolError",

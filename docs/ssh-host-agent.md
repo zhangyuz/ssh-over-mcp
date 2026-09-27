@@ -416,6 +416,38 @@ close-on-exec and unavailable to the executed workload, and transport
 authentication/authorization must prevent the workload from opening an
 equivalent manager session.
 
+### Phase 3d2b2b2c2a pre-connected Unix transport
+
+The first real transport consumes an already connected
+`AF_UNIX/SOCK_STREAM` socket. It intentionally does not accept a filesystem
+path and cannot establish a new manager session.
+
+The client:
+
+- forces the socket descriptor non-inheritable;
+- serializes manager round trips;
+- enforces one total round-trip deadline across send and receive;
+- reads exact bounded frames and tolerates normal partial stream reads;
+- maps timeout, EOF, truncation, socket errors and invalid manager responses to
+  fail-closed manager-unavailable errors;
+- permanently closes/poisons the stream after any inbound framing or transport
+  failure because the request/response frame boundary can no longer be trusted.
+
+The manager-side connected-session loop consumes the same bounded frames and
+terminates the session on malformed/truncated input. It does not create or
+accept a socket endpoint.
+
+This is still not the ADR 0004 authentication boundary. A pre-connected FD is
+only a transport capability. The next phase must define who creates the
+listening endpoint, which OS identity may connect, how Linux peer credentials
+are verified, and how the executed workload is placed in a different privilege
+domain so it cannot establish its own equivalent session.
+
+The manager socket FD may exist in the forked blocked child before release, but
+no untrusted code runs at that point. It is not part of the child keep-set, is
+marked non-inheritable, and MUST be closed by the existing child FD sanitation
+before `execve`.
+
 The ForceCommand CLI remains non-executing.
 
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.

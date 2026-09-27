@@ -8,30 +8,18 @@ ssh-over-mcp-host-agent
 
 Normative behavior is defined in [`../../docs/ssh-host-agent.md`](../../docs/ssh-host-agent.md).
 
-## Current Phase 3d2b2b2c1 behavior
+## Current Phase 3d2b2b2c2a behavior
 
 The ForceCommand request path remains **non-executing**.
 
-The package now contains a narrow containment-manager protocol and a
-`ContainmentManagerClient` adapter compatible with the existing
-`ContainmentBackend` interface.
+The containment-manager client can now communicate over one pre-connected Unix
+stream socket. The transport is bounded, timeout-controlled, serialized and
+non-inheritable, and invalid manager responses fail closed.
 
-Allowed manager operations are only:
+It deliberately has no `connect(path)` API and the server helper deliberately
+does not create/listen on an endpoint. Therefore this phase does not yet decide
+which process/user is authorized to establish a manager session.
 
-- create;
-- attach;
-- kill;
-- stats;
-- close.
-
-Each created scope receives an opaque 256-bit capability. Scope operations
-require both scope ID and capability, messages are bounded/strict/correlated,
-and manager implementation errors are not returned to the client.
-
-The current in-memory manager transport is for tests only and provides no
-privilege separation. The next increment provides the real local helper/IPC
-boundary and then plugs this client into the existing start-barrier and bounded
-execution path.
-
-Remote execution remains disabled until that boundary and live self-migration
-tests are complete.
+Next: define the Linux manager daemon endpoint, peer-credential policy, and
+separate workload OS identity. Then route the existing start-barrier/bounded
+runner through that authenticated manager connection.
