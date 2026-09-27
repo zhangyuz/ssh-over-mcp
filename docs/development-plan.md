@@ -308,6 +308,7 @@ Implemented:
 - explicit parent-directory UID/GID policy;
 - canonical/non-symlink parent requirement;
 - group/world-writable parent rejection;
+- ancestor ownership validation and non-sticky writable-ancestor rejection;
 - existing endpoint/file/socket/symlink rejection with no automatic stale unlink;
 - socket UID/GID and 0600/0660 mode configuration before listen;
 - socket ownership/mode/device/inode read-back verification;
