@@ -51,6 +51,19 @@ Mitigation: canonical executable resolution, profile-controlled executable paths
 
 Mitigation: canonical path resolution for typed filesystem tools; use safe OS APIs where available; protected roots; remote OS permissions remain final boundary.
 
+### Cgroup self-migration / containment escape
+
+A repository-controlled workload may attempt to move itself from its
+request-specific cgroup into the delegated root or a sibling cgroup if it shares
+the containment manager's migration authority. Remaining inside the outer
+delegated subtree is not sufficient because request-specific resource ceilings
+and `cgroup.kill` would no longer cover the escaped process.
+
+Mitigation: keep writable cgroup controls in a separate containment-manager
+privilege domain; retain the pre-exec attach barrier; do not expose ancestor
+membership controls to the workload; require a live self-migration test before
+enabling remote execution.
+
 ### Credential exfiltration via logs
 
 Mitigation: structured redaction, no secret environment logging, bounded output retention, access-controlled audit backend.
