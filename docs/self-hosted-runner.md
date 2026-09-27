@@ -74,9 +74,16 @@ The deployment script starts the container with:
 --pids-limit 1024
 --cpus 2
 --memory 4g
+--tmpfs /tmp:rw,exec,nosuid,nodev,size=512m
 ```
 
-and does not mount:
+The explicit `exec` on `/tmp` is required because the Linux integration tests
+create temporary executable fixtures under pytest's default temporary directory.
+Docker Desktop may otherwise mount container tmpfs with `noexec`, which makes
+valid `0755` test executables fail `X_OK` checks and `execve()` with
+permission denied.
+
+The deployment also does not mount:
 
 - `/var/run/docker.sock`;
 - host credentials;
