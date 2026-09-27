@@ -482,6 +482,9 @@ The endpoint policy requires:
   `sockaddr_un.sun_path` limit;
 - a parent directory which resolves to itself (no symlink/lexical alias), is a
   real directory, has the configured UID/GID, and is not group/world writable;
+- every higher ancestor directory must be owned by root or the configured
+  endpoint-directory owner; an ancestor which is group/world writable is
+  accepted only when sticky-bit semantics protect directory-entry replacement;
 - the endpoint pathname to be absent before bind;
 - a configured socket owner/group and socket mode of exactly `0600` or
   `0660`;
@@ -493,8 +496,9 @@ active manager socket, attacker-created path, or split-brain endpoint as a
 
 After `bind()`, the listener sets socket ownership/mode and reads back the
 socket type, owner/group, mode, device and inode **before** calling
-`listen()`. The trusted parent-directory invariant prevents untrusted path
-replacement during this setup window.
+`listen()`. The trusted parent plus ancestor-chain invariants prevent untrusted path
+replacement during this setup window. A sticky writable ancestor such as
+`/tmp` is permitted; a writable non-sticky ancestor is not.
 
 The listening descriptor and every accepted descriptor are explicitly
 non-inheritable.
