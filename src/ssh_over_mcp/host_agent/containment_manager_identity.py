@@ -42,9 +42,16 @@ class LinuxProcessIdentityPolicy:
     supplementary_gids: frozenset[int] = frozenset()
 
     def __post_init__(self) -> None:
+        if not isinstance(self.identity, LinuxProcessIdentity):
+            raise TypeError("identity must be LinuxProcessIdentity")
+
         values = frozenset(self.supplementary_gids)
         for value in values:
             _validate_kernel_id(value, "supplementary_gid")
+
+        # Linux getgroups() may include the primary GID on some systems and
+        # omit it on others. Policy therefore models only *extra* groups.
+        values = values - {self.identity.gid}
         object.__setattr__(self, "supplementary_gids", values)
 
 
@@ -58,6 +65,12 @@ class ContainmentServiceIdentityPlan:
     manager_client_gid: int
 
     def __post_init__(self) -> None:
+        for value in (self.manager, self.host_agent, self.workload):
+            if not isinstance(value, LinuxProcessIdentity):
+                raise TypeError(
+                    "manager, host_agent, and workload must be LinuxProcessIdentity"
+                )
+
         _validate_kernel_id(self.manager_client_gid, "manager_client_gid")
 
         if self.host_agent.uid == 0 or self.host_agent.gid == 0:
