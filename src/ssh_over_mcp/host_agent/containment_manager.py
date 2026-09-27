@@ -438,11 +438,18 @@ class ContainmentManagerClient(ContainmentBackend):
         self,
         request: ManagerRequest,
     ) -> ManagerResponse:
-        response = decode_manager_response(
-            self._transport.round_trip(
-                encode_manager_message(request)
+        try:
+            response = decode_manager_response(
+                self._transport.round_trip(
+                    encode_manager_message(request)
+                )
             )
-        )
+        except ContainmentUnavailableError:
+            raise
+        except ContainmentManagerProtocolError as exc:
+            raise ContainmentUnavailableError(
+                "containment manager returned an invalid response"
+            ) from exc
         if response.message_id != request.message_id:
             raise ContainmentError(
                 "containment-manager response correlation failed"
