@@ -339,12 +339,7 @@ def _child_main(
     os._exit(126)
 
 
-def spawn_prepared_native(prepared: PreparedCommand) -> SpawnedChild:
-    """Fork a sanitized child wired to three parent-side stdio pipes.
-
-    This does not enforce wall-clock timeout or output byte limits yet.
-    """
-
+def _validate_spawn_preconditions(prepared: PreparedCommand) -> None:
     if not hasattr(os, "fork") or not hasattr(os, "setsid"):
         raise ChildSupervisorError("POSIX fork/session support is unavailable")
     if prepared._closed:
@@ -358,6 +353,60 @@ def spawn_prepared_native(prepared: PreparedCommand) -> SpawnedChild:
         raise ChildSupervisorError(
             "prepared command cannot enter native execution"
         ) from exc
+
+
+def _contained_child_entry(
+    prepared: PreparedCommand,
+    *,
+    barrier_read: int,
+    barrier_write: int,
+    stdin_read: int,
+    stdin_write: int,
+    stdout_read: int,
+    stdout_write: int,
+    stderr_read: int,
+    stderr_write: int,
+) -> None:
+    # Close all parent-owned pipe endpoints before waiting. No untrusted code
+    # executes before the parent releases the one-byte start barrier.
+    _close_many(
+        (
+            barrier_write,
+            stdin_write,
+            stdout_read,
+            stderr_read,
+        )
+    )
+
+    try:
+        _wait_start_barrier(barrier_read)
+    except BaseException:
+        os._exit(125)
+    finally:
+        try:
+            os.close(barrier_read)
+        except OSError:
+            pass
+
+    _child_main(
+        prepared,
+        stdin_read=stdin_read,
+        stdin_write=-1,
+        stdout_read=-1,
+        stdout_write=stdout_write,
+        stderr_read=-1,
+        stderr_write=stderr_write,
+    )
+    os._exit(127)
+
+
+def spawn_prepared_native(prepared: PreparedCommand) -> SpawnedChild:
+    """Fork a sanitized child wired to three parent-side stdio pipes.
+
+    This does not enforce wall-clock timeout or output byte limits yet.
+    """
+
+    _validate_spawn_preconditions(prepared)
 
     stdin_read = stdin_write = -1
     stdout_read = stdout_write = -1
@@ -404,3 +453,157 @@ def spawn_prepared_native(prepared: PreparedCommand) -> SpawnedChild:
         stdout_fd=stdout_read,
         stderr_fd=stderr_read,
     )
+
+
+
+def _cleanup_failed_contained_spawn(
+    *,
+    pid: int,
+    barrier_write: int,
+    child: SpawnedChild,
+    containment: ContainmentHandle,
+) -> None:
+    # Closing without the release byte makes a correctly blocked child fail
+    # closed. cgroup.kill covers a partially successful attach; direct SIGKILL
+    # is a fallback for failures before cgroup membership was established.
+    _close_many((barrier_write,))
+    child.close_stdin()
+    child.close_pipes()
+
+    cleanup_failed = False
+
+    try:
+        containment.kill_all()
+    except ContainmentError:
+        cleanup_failed = True
+
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except OSError:
+        cleanup_failed = True
+
+    if not _reap_pid_bounded(pid):
+        cleanup_failed = True
+
+    try:
+        containment.close()
+    except ContainmentError:
+        cleanup_failed = True
+
+    if cleanup_failed:
+        raise ChildSupervisorError(
+            "cannot clean failed contained child"
+        )
+
+
+def spawn_prepared_native_contained(
+    prepared: PreparedCommand,
+    backend: ContainmentBackend,
+    request: ContainmentRequest,
+) -> SpawnedChild:
+    """Fork a child which cannot exec before successful containment attach."""
+
+    _validate_spawn_preconditions(prepared)
+
+    if request.request_id != prepared.request_id:
+        raise ChildSupervisorError(
+            "containment request id does not match prepared command"
+        )
+
+    try:
+        containment = backend.create(request)
+    except ContainmentError as exc:
+        raise ChildSupervisorError(
+            "cannot create child containment scope"
+        ) from exc
+
+    stdin_read = stdin_write = -1
+    stdout_read = stdout_write = -1
+    stderr_read = stderr_write = -1
+    barrier_read = barrier_write = -1
+
+    try:
+        stdin_read, stdin_write = _pipe_cloexec()
+        stdout_read, stdout_write = _pipe_cloexec()
+        stderr_read, stderr_write = _pipe_cloexec()
+        barrier_read, barrier_write = _pipe_cloexec()
+        pid = os.fork()
+    except BaseException as exc:
+        _close_many(
+            (
+                stdin_read,
+                stdin_write,
+                stdout_read,
+                stdout_write,
+                stderr_read,
+                stderr_write,
+                barrier_read,
+                barrier_write,
+            )
+        )
+        try:
+            containment.close()
+        except ContainmentError as cleanup_exc:
+            raise ChildSupervisorError(
+                "cannot clean unstarted containment scope"
+            ) from cleanup_exc
+
+        if isinstance(exc, ChildSupervisorError):
+            raise
+        raise ChildSupervisorError(
+            "cannot fork contained child"
+        ) from exc
+
+    if pid == 0:
+        _contained_child_entry(
+            prepared,
+            barrier_read=barrier_read,
+            barrier_write=barrier_write,
+            stdin_read=stdin_read,
+            stdin_write=stdin_write,
+            stdout_read=stdout_read,
+            stdout_write=stdout_write,
+            stderr_read=stderr_read,
+            stderr_write=stderr_write,
+        )
+        os._exit(127)
+
+    _close_many(
+        (
+            barrier_read,
+            stdin_read,
+            stdout_write,
+            stderr_write,
+        )
+    )
+
+    child = SpawnedChild(
+        pid=pid,
+        stdin_fd=stdin_write,
+        stdout_fd=stdout_read,
+        stderr_fd=stderr_read,
+        containment=containment,
+    )
+
+    try:
+        containment.attach(pid)
+        _release_start_barrier(barrier_write)
+    except (ContainmentError, ChildSupervisorError) as exc:
+        try:
+            _cleanup_failed_contained_spawn(
+                pid=pid,
+                barrier_write=barrier_write,
+                child=child,
+                containment=containment,
+            )
+        except ChildSupervisorError as cleanup_exc:
+            raise cleanup_exc from exc
+        raise ChildSupervisorError(
+            "cannot attach contained child"
+        ) from exc
+    finally:
+        _close_many((barrier_write,))
+
+    return child
