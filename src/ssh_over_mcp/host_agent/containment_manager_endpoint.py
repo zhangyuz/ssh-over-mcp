@@ -29,6 +29,7 @@ class UnixManagerEndpointPolicy:
 
     def __post_init__(self) -> None:
         path = Path(self.path)
+        object.__setattr__(self, "path", path)
         raw = os.fspath(path)
 
         if "\x00" in raw:
