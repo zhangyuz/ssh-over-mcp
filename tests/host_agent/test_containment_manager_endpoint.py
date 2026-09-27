@@ -237,3 +237,37 @@ def test_accept_after_close_fails_closed(tmp_path: Path):
         match="closed",
     ):
         listener.accept()
+
+
+def test_nonsticky_writable_ancestor_is_rejected(tmp_path: Path):
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    outer.chmod(0o777)
+
+    parent = outer / "manager"
+    parent.mkdir()
+    parent.chmod(0o700)
+
+    with pytest.raises(
+        ContainmentManagerEndpointError,
+        match="ancestor is writable without sticky",
+    ):
+        UnixContainmentManagerListener.create(
+            policy(parent / "manager.sock")
+        )
+
+
+def test_sticky_writable_ancestor_is_allowed(tmp_path: Path):
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    outer.chmod(0o1777)
+
+    parent = outer / "manager"
+    parent.mkdir()
+    parent.chmod(0o700)
+    endpoint = parent / "manager.sock"
+
+    listener = UnixContainmentManagerListener.create(policy(endpoint))
+    listener.close()
+
+    assert not endpoint.exists()
