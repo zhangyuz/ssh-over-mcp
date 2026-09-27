@@ -269,7 +269,42 @@ Containment limits are deliberately separate from rlimits because their semantic
 
 A read-only cgroup-v2 probe checks for a unified hierarchy and the `cpu`, `memory`, and `pids` controllers. This probe does **not** prove delegation/write access or `cgroup.kill` availability; the concrete backend must prove those properties when it creates a real scope.
 
-This phase defines interfaces only. No cgroup is created and the child supervisor is not yet wired to a containment backend.
+### Phase 3d2b2b2b1 concrete cgroup-v2 backend
+
+The first concrete containment backend operates only inside a server-configured,
+already delegated, canonical cgroup-v2 subtree. It does not search for or write
+outside that root.
+
+Before creating a request scope it requires the `cpu`, `memory`, and `pids`
+controllers to be available and enabled for child cgroups. If a required
+controller is available but not yet enabled, the backend writes the
+corresponding `+controller` tokens to the delegated root's
+`cgroup.subtree_control` and verifies the result.
+
+For each request it creates exactly one child cgroup named from the validated
+request ID and configures:
+
+- `memory.max` from `memory_max_bytes`;
+- `pids.max` from `pids_max`;
+- `cpu.max` from `cpu_quota_us cpu_period_us`.
+
+The backend reads each configured limit back and fails closed if the kernel did
+not apply the requested finite value. It also requires writable
+`cgroup.procs` and `cgroup.kill` interfaces.
+
+The handle:
+
+- attaches one initial child by writing its PID to `cgroup.procs`;
+- recursively terminates the request cgroup and descendants by writing `1` to
+  `cgroup.kill`;
+- reads memory, PID, CPU-usage and populated-state accounting;
+- refuses cleanup while `cgroup.events` reports `populated 1`;
+- removes the empty cgroup deterministically.
+
+The backend is still disconnected from the child supervisor. No child is yet
+held behind a start barrier, so remote execution remains disabled. The next
+phase must guarantee that the child cannot execute user code before the parent
+successfully creates/configures the cgroup and attaches the child.
 
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 

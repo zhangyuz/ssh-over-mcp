@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Through Phase 3d2b2b1 merged; Phase 3d2b2b2a implemented on phase-3d2b2b2a-containment-contract; review/merge pending**
+Status: **Through Phase 3d2b2b2a merged; Phase 3d2b2b2b1 implemented on phase-3d2b2b2b1-cgroup-v2-backend; review/merge pending**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -195,10 +195,25 @@ Implemented:
 - invalid request identifiers and non-positive/absurd limit values fail closed;
 - no default/no-op backend and no supervisor integration yet.
 
+### Phase 3d2b2b2b1 — concrete cgroup-v2 backend
+
+Implemented:
+
+- canonical absolute delegated cgroup-v2 root;
+- required controller availability check;
+- required `cpu`, `memory`, and `pids` subtree enablement;
+- unique per-request scope creation;
+- finite `memory.max`, `pids.max`, and `cpu.max` configuration with read-back verification;
+- PID attachment through `cgroup.procs`;
+- recursive subtree kill through `cgroup.kill`;
+- `memory.current`, `pids.current`, `cpu.stat usage_usec`, and `cgroup.events populated` accounting;
+- populated-scope cleanup refusal and idempotent closed-handle behavior;
+- no supervisor integration yet.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2b2b2b: concrete cgroup-v2 backend plus fork-start barrier;
-- Phase 3d2b2b2c: cgroup descendant-kill and resource-limit integration tests;
+- Phase 3d2b2b2b2: fork-start barrier and supervisor-to-cgroup attach integration;
+- Phase 3d2b2b2c: live delegated-cgroup descendant-kill and resource-limit integration tests;
 - Phase 3d2c: wire supervised native execution into the ForceCommand CLI only after containment is enforced;
 - typed filesystem operations;
 - execution-time resource enforcement;

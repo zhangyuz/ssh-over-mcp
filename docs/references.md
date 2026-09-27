@@ -30,7 +30,13 @@ These references inform the current architecture. They are informative; the repo
 
 ## Race-resistant execution
 
-- Python 3.12 `os.execve` / fd support: https://docs.python.org/3.12/library/os.html
+- Python 3.13 `os.execve` / fd support: https://docs.python.org/3.13/library/os.html
 - Linux `fexecve(3)`: https://man7.org/linux/man-pages/man3/fexecve.3.html
 - Linux `execveat(2)`: https://man7.org/linux/man-pages/man2/execveat.2.html
 - Linux `openat2(2)`: https://man7.org/linux/man-pages/man2/openat2.2.html
+
+
+## Linux cgroup v2 and delegation
+
+- Linux kernel cgroup v2 documentation: https://docs.kernel.org/admin-guide/cgroup-v2.html
+- systemd control-group delegation: https://systemd.io/CGROUP_DELEGATION/

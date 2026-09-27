@@ -1,5 +1,6 @@
 """Remote ForceCommand host-agent components."""
 
+from .cgroup_v2 import CgroupV2Backend, CgroupV2Handle
 from .containment import (
     CgroupV2Probe,
     ContainmentBackend,
@@ -48,6 +49,8 @@ from .protocol import (
 )
 
 __all__ = [
+    "CgroupV2Backend",
+    "CgroupV2Handle",
     "CgroupV2Probe",
     "ContainmentBackend",
     "ContainmentError",
