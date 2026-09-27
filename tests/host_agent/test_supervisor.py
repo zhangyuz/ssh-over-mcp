@@ -6,6 +6,14 @@ from pathlib import Path
 
 import pytest
 
+from ssh_over_mcp.host_agent.containment import (
+    ContainmentBackend,
+    ContainmentError,
+    ContainmentHandle,
+    ContainmentLimits,
+    ContainmentRequest,
+    ContainmentStats,
+)
 from ssh_over_mcp.host_agent.policy import HostChildLimits, HostObjectIdentity
 from ssh_over_mcp.host_agent.prepare import PreparedCommand
 from ssh_over_mcp.host_agent.supervisor import (
@@ -16,6 +24,7 @@ from ssh_over_mcp.host_agent.supervisor import (
     _require_standard_fds,
     _set_bounded_rlimit,
     spawn_prepared_native,
+    spawn_prepared_native_contained,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -393,3 +402,166 @@ def test_file_size_rlimit_is_enforced_in_real_child(tmp_path: Path):
         assert output_path.stat().st_size <= limits.file_size_bytes
     finally:
         child.close_pipes()
+
+
+class BarrierHandle(ContainmentHandle):
+    def __init__(
+        self,
+        marker: Path,
+        *,
+        fail_attach: bool = False,
+    ) -> None:
+        self.marker = marker
+        self.fail_attach = fail_attach
+        self.attached_pid: int | None = None
+        self.marker_seen_during_attach: bool | None = None
+        self.killed = False
+        self.closed = False
+
+    @property
+    def scope_id(self) -> str:
+        return "barrier-test"
+
+    def attach(self, pid: int) -> None:
+        self.marker_seen_during_attach = self.marker.exists()
+        time.sleep(0.02)
+        if self.fail_attach:
+            raise ContainmentError("attach failed")
+        self.attached_pid = pid
+
+    def kill_all(self) -> None:
+        self.killed = True
+
+    def stats(self) -> ContainmentStats:
+        return ContainmentStats(populated=False)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class BarrierBackend(ContainmentBackend):
+    def __init__(
+        self,
+        marker: Path,
+        *,
+        fail_attach: bool = False,
+    ) -> None:
+        self.handle = BarrierHandle(
+            marker,
+            fail_attach=fail_attach,
+        )
+        self.requests: list[ContainmentRequest] = []
+
+    @property
+    def name(self) -> str:
+        return "barrier-test"
+
+    def create(self, request: ContainmentRequest) -> ContainmentHandle:
+        self.requests.append(request)
+        return self.handle
+
+
+def _containment_request(
+    request_id: str = "req_12345678",
+) -> ContainmentRequest:
+    return ContainmentRequest(
+        request_id=request_id,
+        limits=ContainmentLimits(
+            memory_max_bytes=512 * 1024 * 1024,
+            pids_max=64,
+            cpu_quota_us=50_000,
+            cpu_period_us=100_000,
+        ),
+    )
+
+
+def test_contained_child_does_not_exec_before_attach(
+    tmp_path: Path,
+    monkeypatch,
+):
+    prepared = _prepared(tmp_path)
+    marker = tmp_path / "child-started"
+    backend = BarrierBackend(marker)
+
+    def fake_child_main(*_args, **_kwargs):
+        marker.write_text("started", encoding="ascii")
+        os._exit(0)
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor._child_main",
+        fake_child_main,
+    )
+
+    child = spawn_prepared_native_contained(
+        prepared,
+        backend,
+        _containment_request(prepared.request_id),
+    )
+    prepared.close()
+
+    try:
+        assert backend.handle.marker_seen_during_attach is False
+        assert backend.handle.attached_pid == child.pid
+        assert child.wait() == 0
+        assert marker.read_text(encoding="ascii") == "started"
+        child.close_containment()
+        assert backend.handle.closed is True
+    finally:
+        child.close_pipes()
+
+
+def test_containment_attach_failure_never_releases_child(
+    tmp_path: Path,
+    monkeypatch,
+):
+    prepared = _prepared(tmp_path)
+    marker = tmp_path / "child-started"
+    backend = BarrierBackend(marker, fail_attach=True)
+
+    def fake_child_main(*_args, **_kwargs):
+        marker.write_text("started", encoding="ascii")
+        os._exit(0)
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor._child_main",
+        fake_child_main,
+    )
+
+    try:
+        with pytest.raises(
+            ChildSupervisorError,
+            match="cannot attach contained child",
+        ):
+            spawn_prepared_native_contained(
+                prepared,
+                backend,
+                _containment_request(prepared.request_id),
+            )
+
+        assert marker.exists() is False
+        assert backend.handle.killed is True
+        assert backend.handle.closed is True
+    finally:
+        prepared.close()
+
+
+def test_containment_request_id_mismatch_is_rejected_before_create(
+    tmp_path: Path,
+):
+    prepared = _prepared(tmp_path)
+    backend = BarrierBackend(tmp_path / "unused")
+
+    try:
+        with pytest.raises(
+            ChildSupervisorError,
+            match="request id",
+        ):
+            spawn_prepared_native_contained(
+                prepared,
+                backend,
+                _containment_request("req_different"),
+            )
+
+        assert backend.requests == []
+    finally:
+        prepared.close()
