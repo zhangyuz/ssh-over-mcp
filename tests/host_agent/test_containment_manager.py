@@ -268,3 +268,52 @@ def test_capability_must_decode_to_32_bytes():
             scope_id="scope_12345678",
             capability="too-short",
         )
+
+
+def test_boolean_pid_is_rejected():
+    with pytest.raises(ValueError):
+        AttachRequest(
+            message_id="msg_12345678",
+            scope_id="scope_12345678",
+            capability="A" * 43,
+            pid=True,
+        )
+
+
+def test_non_urlsafe_capability_is_rejected():
+    with pytest.raises(ValueError):
+        KillRequest(
+            message_id="msg_12345678",
+            scope_id="scope_12345678",
+            capability="!" * 43,
+        )
+
+
+def test_manager_error_does_not_leak_backend_exception_text():
+    class FailingBackend(ContainmentBackend):
+        @property
+        def name(self) -> str:
+            return "failing"
+
+        def create(self, request: ContainmentRequest) -> ContainmentHandle:
+            raise ContainmentError(
+                "secret filesystem detail /sys/fs/cgroup/private"
+            )
+
+    dispatcher = ContainmentManagerDispatcher(
+        FailingBackend(),
+        capability_factory=lambda: "A" * 43,
+    )
+    message = CreateRequest(
+        message_id="msg_12345678",
+        request_id="req_12345678",
+        limits=ManagerLimits.from_limits(limits()),
+    )
+
+    raw = dispatcher.handle_frame(
+        encode_manager_message(message)
+    )
+    decoded_text = raw.decode("utf-8", errors="ignore")
+
+    assert "secret filesystem detail" not in decoded_text
+    assert "/sys/fs/cgroup/private" not in decoded_text
