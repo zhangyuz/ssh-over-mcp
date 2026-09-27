@@ -149,8 +149,9 @@ class UnixContainmentManagerTransport(ContainmentManagerTransport):
     """Synchronous transport over one pre-connected Unix stream socket.
 
     This class intentionally does not know a socket path and cannot establish a
-    new manager session. Connection acquisition/authentication is a separate
-    privilege-boundary concern.
+    new manager session. The supplied connected socket is authenticated with
+    Linux SO_PEERCRED before it can carry manager protocol traffic. Endpoint
+    creation and connection acquisition remain separate concerns.
     """
 
     def __init__(
@@ -258,10 +259,10 @@ def serve_containment_manager_connection(
     *,
     peer_policy: LinuxPeerCredentialPolicy,
 ) -> None:
-    """Serve a single already-authenticated local manager connection.
+    """Serve one connected local manager session after SO_PEERCRED auth.
 
-    Endpoint creation, accept policy, peer credentials, UID separation and
-    daemon lifecycle are intentionally outside this function.
+    Endpoint creation, accept policy, workload/host-agent UID separation and
+    daemon lifecycle remain outside this function.
     """
 
     _require_unix_stream(sock)
