@@ -331,28 +331,45 @@ class ContainmentManagerDispatcher:
                     limits=request.limits.to_limits(),
                 )
                 handle = self._backend.create(containment_request)
-                scope_id = handle.scope_id
-                if scope_id in self._scopes:
-                    try:
-                        handle.close()
-                    finally:
+                registered = False
+                try:
+                    scope_id = handle.scope_id
+                    if scope_id in self._scopes:
                         raise ContainmentError(
                             "duplicate manager scope identifier"
                         )
 
-                capability = self._capability_factory()
-                _decode_capability(capability)
-                self._scopes[scope_id] = _ManagedScope(
-                    capability=capability,
-                    handle=handle,
-                )
-                return encode_manager_message(
-                    CreateResponse(
+                    capability = self._capability_factory()
+                    _decode_capability(capability)
+                    if any(
+                        secrets.compare_digest(
+                            managed.capability,
+                            capability,
+                        )
+                        for managed in self._scopes.values()
+                    ):
+                        raise ContainmentError(
+                            "duplicate manager capability"
+                        )
+
+                    response = CreateResponse(
                         message_id=request.message_id,
                         scope_id=scope_id,
                         capability=capability,
                     )
-                )
+                    encoded = encode_manager_message(response)
+                    self._scopes[scope_id] = _ManagedScope(
+                        capability=capability,
+                        handle=handle,
+                    )
+                    registered = True
+                    return encoded
+                finally:
+                    if not registered:
+                        try:
+                            handle.close()
+                        except ContainmentError:
+                            pass
 
             handle = self._lookup(
                 request.scope_id,
