@@ -83,7 +83,7 @@ Docker Desktop may otherwise mount container tmpfs with `noexec`, which makes
 valid `0755` test executables fail `X_OK` checks and `execve()` with
 permission denied.
 
-and does not mount:
+The deployment also does not mount:
 
 - `/var/run/docker.sock`;
 - host credentials;
