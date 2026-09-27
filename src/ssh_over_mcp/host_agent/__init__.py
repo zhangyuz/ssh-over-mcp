@@ -21,6 +21,11 @@ from .containment_manager import (
     InMemoryContainmentManagerTransport,
     ManagedContainmentHandle,
 )
+from .containment_manager_endpoint import (
+    ContainmentManagerEndpointError,
+    UnixContainmentManagerListener,
+    UnixManagerEndpointPolicy,
+)
 from .containment_manager_peer import (
     ContainmentManagerPeerAuthError,
     LinuxPeerCredentialPolicy,
@@ -69,6 +74,9 @@ from .protocol import (
 )
 
 __all__ = [
+    "ContainmentManagerEndpointError",
+    "UnixContainmentManagerListener",
+    "UnixManagerEndpointPolicy",
     "ContainmentManagerPeerAuthError",
     "LinuxPeerCredentialPolicy",
     "LinuxPeerCredentials",

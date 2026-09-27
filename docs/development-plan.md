@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Through Phase 3d2b2b2c2a merged; Phase 3d2b2b2c2b1 implemented on phase-3d2b2b2c2b1-peer-credentials; review/merge pending**
+Status: **Through Phase 3d2b2b2c2b1 merged; Phase 3d2b2b2c2b2a implemented on phase-3d2b2b2c2b2a-endpoint; review/merge pending**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -299,9 +299,27 @@ Implemented:
 - missing `SO_PEERCRED`, malformed credential size, disconnected sockets and mismatched identity fail closed;
 - tests cover exact UID/GID, UID-only mode, mismatch, unavailable kernel option and channel closure.
 
+### Phase 3d2b2b2c2b2a — secure filesystem Unix endpoint
+
+Implemented:
+
+- absolute and lexically canonical pathname policy;
+- Linux AF_UNIX pathname-length bound;
+- explicit parent-directory UID/GID policy;
+- canonical/non-symlink parent requirement;
+- group/world-writable parent rejection;
+- ancestor ownership validation and non-sticky writable-ancestor rejection;
+- existing endpoint/file/socket/symlink rejection with no automatic stale unlink;
+- socket UID/GID and 0600/0660 mode configuration before listen;
+- socket ownership/mode/device/inode read-back verification;
+- non-inheritable listening and accepted descriptors;
+- endpoint cleanup only when the pathname still names the socket created by the listener;
+- replacement-path preservation on cleanup mismatch;
+- no daemon/background lifecycle or OS identity switching yet.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2b2b2c2b2: manager socket endpoint, daemon lifecycle, and manager/host-agent/workload OS identity separation;
+- Phase 3d2b2b2c2b2b: containment-manager daemon lifecycle and explicit manager/host-agent/workload OS identity separation;
 - Phase 3d2b2b2c2c: use the authenticated manager client through the existing start barrier and bounded runner;
 - Phase 3d2b2b2c3: live delegated-cgroup descendant-kill/resource-limit/self-migration tests;
 - Phase 3d2c: wire supervised native execution into the ForceCommand CLI only after containment is enforced;

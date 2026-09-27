@@ -8,20 +8,22 @@ ssh-over-mcp-host-agent
 
 Normative behavior is defined in [`../../docs/ssh-host-agent.md`](../../docs/ssh-host-agent.md).
 
-## Current Phase 3d2b2b2c2b1 behavior
+## Current Phase 3d2b2b2c2b2a behavior
 
 The ForceCommand request path remains **non-executing**.
 
-Pre-connected containment-manager Unix sockets now require Linux
-`SO_PEERCRED` authentication before protocol traffic:
+The containment-manager package now owns a secure filesystem Unix listener
+primitive:
 
-- exact expected UID;
-- optional exact real GID;
-- PID retained only as metadata;
-- auth mismatch/unavailable peer credentials fail closed;
-- failed authentication closes the socket.
+- canonical absolute endpoint path;
+- secure pre-existing parent directory;
+- no automatic removal of existing paths;
+- explicit socket UID/GID and 0600/0660 mode;
+- permission/identity verification before listen;
+- non-inheritable listener/accepted descriptors;
+- device/inode-bound cleanup which never unlinks a replacement path.
 
-This is only one half of ADR 0004. If workload and host-agent share the same
-UID, the workload can present the same peer identity. The next increment must
-define the manager endpoint and separate manager, host-agent and workload OS
-identities.
+The listener does not yet define daemon lifecycle or production service-account
+separation. The next increment must establish distinct manager, host-agent and
+workload identities before the authenticated manager path can be used for
+hostile execution.

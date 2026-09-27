@@ -8,23 +8,29 @@ The project is intentionally **not** a thin wrapper around `/bin/bash`. Every op
 
 ## Current status
 
-**Phase 3d2b2b2c2b1 — Linux Unix peer-credential authentication.**
+**Phase 3d2b2b2c2b2a — secure filesystem Unix manager endpoint.**
 
 Remote ForceCommand execution remains disabled.
 
-Every pre-connected containment-manager Unix stream now requires an explicit
-`LinuxPeerCredentialPolicy`. The kernel-reported peer credentials are read
-with Linux `SO_PEERCRED` before any manager protocol traffic is accepted.
+The containment-manager now has a filesystem AF_UNIX listener primitive with a
+strict endpoint policy:
 
-The policy requires an exact peer UID and may additionally require an exact
-real GID. Authentication failure closes the socket immediately. The reported
-PID is retained only as connection metadata and is not used as a durable
-authorization identity.
+- absolute, lexically canonical pathname;
+- Linux pathname-length bound;
+- pre-existing endpoint paths are rejected and never auto-unlinked;
+- parent directory must already exist, resolve canonically, match configured
+  UID/GID, and be non-group/world-writable;
+- ancestor directories must be root/endpoint-owner owned; writable ancestors
+  require sticky-bit protection;
+- socket owner/group/mode are set and read back before `listen()`;
+- only `0600` and `0660` socket modes are accepted;
+- listening and accepted descriptors are non-inheritable;
+- cleanup removes the socket only if device/inode still match the object this
+  listener created.
 
-This is necessary but not sufficient privilege separation. If the host-agent
-and executed workload share the same OS UID, peer-credential checks cannot
-distinguish them. The next increment must define the manager endpoint and
-separate manager / host-agent / workload identities.
+This phase still does not define a daemon, background lifecycle, or OS-account
+switch. Separate manager / host-agent / workload identities remain mandatory
+before hostile workload execution can be enabled.
 
 **Remote command execution remains disabled in the ForceCommand CLI.**
 

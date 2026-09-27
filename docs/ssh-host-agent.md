@@ -471,6 +471,47 @@ the same UID to a future manager endpoint. Production therefore MUST use
 separate OS identities and endpoint permissions so the workload cannot create
 an equivalent authenticated manager session.
 
+### Phase 3d2b2b2c2b2a secure filesystem Unix endpoint
+
+The manager-side endpoint owner creates one pathname AF_UNIX/SOCK_STREAM
+listener under a pre-existing trusted parent directory.
+
+The endpoint policy requires:
+
+- an absolute, lexically canonical socket path within the Linux pathname
+  `sockaddr_un.sun_path` limit;
+- a parent directory which resolves to itself (no symlink/lexical alias), is a
+  real directory, has the configured UID/GID, and is not group/world writable;
+- every higher ancestor directory must be owned by root or the configured
+  endpoint-directory owner; an ancestor which is group/world writable is
+  accepted only when sticky-bit semantics protect directory-entry replacement;
+- the endpoint pathname to be absent before bind;
+- a configured socket owner/group and socket mode of exactly `0600` or
+  `0660`;
+- a bounded listen backlog.
+
+An existing pathname is never automatically removed. This avoids treating an
+active manager socket, attacker-created path, or split-brain endpoint as a
+"stale" artifact.
+
+After `bind()`, the listener sets socket ownership/mode and reads back the
+socket type, owner/group, mode, device and inode **before** calling
+`listen()`. The trusted parent plus ancestor-chain invariants prevent untrusted path
+replacement during this setup window. A sticky writable ancestor such as
+`/tmp` is permitted; a writable non-sticky ancestor is not.
+
+The listening descriptor and every accepted descriptor are explicitly
+non-inheritable.
+
+Cleanup is identity-bound: the endpoint pathname is removed only when it still
+names a socket with the same device/inode recorded after bind. If the pathname
+has been removed and replaced, cleanup fails closed and preserves the
+replacement instead of unlinking an unrelated object.
+
+This phase owns only endpoint creation/accept/cleanup. It does not run a daemon,
+spawn background sessions, choose production service accounts, or switch the
+workload UID. Those identity/lifecycle decisions remain the next boundary.
+
 The ForceCommand CLI remains non-executing.
 
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
