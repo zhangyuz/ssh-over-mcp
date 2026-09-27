@@ -3,8 +3,15 @@ from __future__ import annotations
 import os
 import resource
 import signal
+import time
 from dataclasses import dataclass
 
+from .containment import (
+    ContainmentBackend,
+    ContainmentError,
+    ContainmentHandle,
+    ContainmentRequest,
+)
 from .execute import (
     NativeExecutionError,
     build_native_exec_spec,
@@ -24,6 +31,7 @@ class SpawnedChild:
     stdin_fd: int
     stdout_fd: int
     stderr_fd: int
+    containment: ContainmentHandle | None = None
     _returncode: int | None = None
 
     def close_stdin(self) -> None:
@@ -63,6 +71,18 @@ class SpawnedChild:
 
         self._returncode = os.waitstatus_to_exitcode(status)
         return self._returncode
+
+    def close_containment(self) -> None:
+        if self.containment is None:
+            return
+
+        try:
+            self.containment.close()
+        except ContainmentError as exc:
+            raise ChildSupervisorError(
+                "cannot close child containment scope"
+            ) from exc
+        self.containment = None
 
     def wait(self) -> int:
         if self._returncode is not None:
