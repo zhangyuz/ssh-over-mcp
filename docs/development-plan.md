@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Through Phase 3d2b2b2c0 merged; Phase 3d2b2b2c1 implemented on phase-3d2b2b2c1-manager-protocol; review/merge pending**
+Status: **Through Phase 3d2b2b2c1 merged; Phase 3d2b2b2c2a implemented on phase-3d2b2b2c2a-unix-transport; review/merge pending**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -269,9 +269,26 @@ Implemented:
 - in-memory transport/dispatcher lifecycle tests;
 - in-memory transport explicitly remains test-only and is not a privilege boundary.
 
+### Phase 3d2b2b2c2a — pre-connected Unix manager transport
+
+Implemented:
+
+- AF_UNIX/SOCK_STREAM transport over an already-connected socket;
+- no socket path discovery/connect API;
+- manager descriptor forced non-inheritable;
+- serialized request/response round trips;
+- bounded client-side I/O timeout;
+- exact bounded frame receive with partial-read handling;
+- timeout/EOF/truncation/OSError mapped to manager unavailable;
+- schema-invalid manager responses mapped to manager unavailable;
+- manager-side connected-session loop which closes on malformed frames;
+- socketpair lifecycle/timeout/truncation/schema-error tests;
+- transport remains explicitly separate from peer authentication/endpoint policy.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2b2b2c2: real local containment-manager/helper transport, peer/authentication boundary, and manager-backed integration with the existing start barrier/bounded runner;
+- Phase 3d2b2b2c2b: manager socket endpoint, peer credential/UID policy, daemon lifecycle, and workload/host-agent OS identity separation;
+- Phase 3d2b2b2c2c: use the authenticated manager client through the existing start barrier and bounded runner;
 - Phase 3d2b2b2c3: live delegated-cgroup descendant-kill/resource-limit/self-migration tests;
 - Phase 3d2c: wire supervised native execution into the ForceCommand CLI only after containment is enforced;
 - typed filesystem operations;
