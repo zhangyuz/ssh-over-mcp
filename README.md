@@ -20,6 +20,8 @@ strict endpoint policy:
 - pre-existing endpoint paths are rejected and never auto-unlinked;
 - parent directory must already exist, resolve canonically, match configured
   UID/GID, and be non-group/world-writable;
+- ancestor directories must be root/endpoint-owner owned; writable ancestors
+  require sticky-bit protection;
 - socket owner/group/mode are set and read back before `listen()`;
 - only `0600` and `0660` socket modes are accepted;
 - listening and accepted descriptors are non-inheritable;
