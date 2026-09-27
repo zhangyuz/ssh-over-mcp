@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import re
 import secrets
 import struct
 from abc import ABC, abstractmethod
@@ -23,6 +24,7 @@ MANAGER_PROTOCOL_MAGIC = b"SCMG\x00\x01"
 MAX_MANAGER_MESSAGE_BYTES = 16 * 1024
 
 _SAFE_ID = r"^[A-Za-z0-9._:-]{8,160}$"
+_CAPABILITY_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")
 
 
 class ContainmentManagerProtocolError(ValueError):
@@ -30,14 +32,14 @@ class ContainmentManagerProtocolError(ValueError):
 
 
 class _Message(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     version: Literal[1] = 1
     message_id: str = Field(pattern=_SAFE_ID)
 
 
 class ManagerLimits(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     memory_max_bytes: int
     pids_max: int
@@ -63,11 +65,11 @@ class ManagerLimits(BaseModel):
 
 
 class ManagerStats(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    memory_current_bytes: int | None = None
-    pids_current: int | None = None
-    cpu_usage_usec: int | None = None
+    memory_current_bytes: int | None = Field(default=None, ge=0)
+    pids_current: int | None = Field(default=None, ge=0)
+    cpu_usage_usec: int | None = Field(default=None, ge=0)
     populated: bool | None = None
 
     @classmethod
@@ -107,7 +109,7 @@ class _ScopeRequest(_Message):
 
 class AttachRequest(_ScopeRequest):
     op: Literal["attach"] = "attach"
-    pid: int = Field(gt=0)
+    pid: int = Field(gt=0, strict=True)
 
 
 class KillRequest(_ScopeRequest):
@@ -171,7 +173,7 @@ _RESPONSE_ADAPTER = TypeAdapter(ManagerResponse)
 
 
 def _decode_capability(value: str) -> bytes:
-    if not isinstance(value, str) or not 40 <= len(value) <= 64:
+    if not isinstance(value, str) or not _CAPABILITY_RE.fullmatch(value):
         raise ValueError("invalid containment-manager capability")
 
     padding = "=" * (-len(value) % 4)
