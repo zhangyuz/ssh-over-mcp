@@ -332,7 +332,7 @@ def prepare_command(
         cwd_path=decision.resolved_cwd,
         cwd_identity=decision.cwd_identity,
         executable_format=executable_format,
-        argv=envelope.args,
+        argv=envelope.argv,
         env=dict(envelope.env),
         fd_exec_supported=os.execve in os.supports_fd,
         child_limits=policy.child_limits,
