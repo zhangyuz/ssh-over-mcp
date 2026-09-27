@@ -21,10 +21,10 @@ Transport properties:
 
 - manager socket is forced non-inheritable;
 - synchronous round trips are serialized;
-- client read/write operations use a bounded timeout;
+- each client round trip has one total deadline across send + receive;
 - partial reads are handled;
 - frame magic and length are bounded before payload reads;
-- EOF/truncation/OSError/timeout fail closed as manager unavailable;
+- EOF/truncation/OSError/timeout fail closed as manager unavailable and poison the stream;
 - schema-invalid manager responses fail closed as manager unavailable;
 - malformed client frames terminate the manager session.
 
