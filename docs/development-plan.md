@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Through Phase 3d2b2b2c2b1 merged; Phase 3d2b2b2c2b2a implemented on phase-3d2b2b2c2b2a-endpoint; review/merge pending**
+Status: **Through Phase 3d2b2b2c2b2a merged; Phase 3d2b2b2c2b2b1 implemented on phase-3d2b2b2c2b2b1-identity-contract; review/merge pending**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -317,9 +317,25 @@ Implemented:
 - replacement-path preservation on cleanup mismatch;
 - no daemon/background lifecycle or OS identity switching yet.
 
+### Phase 3d2b2b2c2b2b1 — Linux service identity contract
+
+Implemented:
+
+- explicit manager / host-agent / workload identities;
+- distinct manager, host-agent, and workload UIDs;
+- non-root host-agent and workload UID/GID;
+- non-root dedicated manager-client GID;
+- exact real/effective/saved UID/GID process validation;
+- exact supplementary-group validation;
+- manager and host-agent both receive the manager-client group;
+- workload receives no supplementary groups;
+- bidirectional SO_PEERCRED policies derived from the identity plan;
+- filesystem endpoint owner/group policy derived from the identity plan.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2b2b2c2b2b: containment-manager daemon lifecycle and explicit manager/host-agent/workload OS identity separation;
+- Phase 3d2b2b2c2b2b2: containment-manager service lifecycle and process-identity enforcement at startup;
+- Phase 3d2b2b2c2b2b3: workload UID/GID transition before exec with no saved privilege;
 - Phase 3d2b2b2c2c: use the authenticated manager client through the existing start barrier and bounded runner;
 - Phase 3d2b2b2c3: live delegated-cgroup descendant-kill/resource-limit/self-migration tests;
 - Phase 3d2c: wire supervised native execution into the ForceCommand CLI only after containment is enforced;
