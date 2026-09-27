@@ -354,8 +354,26 @@ escape-resistant containment. Production deployment must keep cgroup control
 interfaces unavailable/read-only to the workload or separate the cgroup
 manager from the workload privilege domain.
 
-The next live delegated-cgroup phase MUST test descendant kill/resource limits
-and MUST include an attempted self-migration escape which is expected to fail.
+Kernel cgroup-v2 delegation contains a delegatee within its outer delegated
+subtree, but the delegatee may reorganize processes inside that subtree.
+Therefore request-scope containment is not sufficient when the executed
+workload shares the manager's migration authority.
+
+### Phase 3d2b2b2c0 containment privilege separation
+
+Production hostile-workload execution MUST place writable cgroup management in
+a separate containment-manager privilege domain. The existing
+`CgroupV2Backend` remains the manager-side filesystem implementation, while
+the host agent will consume a narrow typed manager/helper interface.
+
+The workload MUST NOT inherit writable ancestor/sibling cgroup membership
+controls or reusable manager authority. The existing start barrier remains in
+place and the child is released only after manager-confirmed attachment.
+
+Live validation MUST test descendant kill/resource limits and MUST attempt to
+move the workload from its request scope into the delegated root. A successful
+self-migration is a deployment failure even though the process remains inside
+the outer delegated subtree.
 
 The ForceCommand CLI remains non-executing.
 
