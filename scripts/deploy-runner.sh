@@ -267,7 +267,7 @@ start_runner() {
     --cpus "${cpus}"
     --memory "${memory}"
     --pids-limit "${pids_limit}"
-    --tmpfs /tmp:rw,nosuid,nodev,size=512m
+    --tmpfs /tmp:rw,exec,nosuid,nodev,size=512m
     -e "RUNNER_URL=${runner_url}"
     -e "RUNNER_TOKEN=${runner_token}"
     -e "RUNNER_NAME=${runner_name}"
