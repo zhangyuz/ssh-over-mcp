@@ -273,13 +273,13 @@ Implemented:
 
 Implemented:
 
-- AF_UNIX/SOCK_STREAM transport over an already-connected socket;
+- AF_UNIX/SOCK_STREAM transport which rejects sockets that are not already connected;
 - no socket path discovery/connect API;
 - manager descriptor forced non-inheritable;
 - serialized request/response round trips;
-- bounded client-side I/O timeout;
+- one total client-side round-trip deadline;
 - exact bounded frame receive with partial-read handling;
-- timeout/EOF/truncation/OSError mapped to manager unavailable;
+- timeout/EOF/truncation/OSError mapped to manager unavailable and the broken stream is poisoned;
 - schema-invalid manager responses mapped to manager unavailable;
 - manager-side connected-session loop which closes on malformed frames;
 - socketpair lifecycle/timeout/truncation/schema-error tests;
