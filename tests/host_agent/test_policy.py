@@ -14,7 +14,7 @@ from ssh_over_mcp.host_agent.policy import (
 from ssh_over_mcp.ssh.protocol import ExecEnvelope, ExecutionLimits
 
 
-def test_child_limits() -> HostChildLimits:
+def _child_limits() -> HostChildLimits:
     return HostChildLimits(
         cpu_seconds=10,
         address_space_bytes=512 * 1024 * 1024,
@@ -60,7 +60,7 @@ def make_policy(
             )
         },
         allowed_profiles=frozenset({"developer"}),
-        child_limits=test_child_limits(),
+        child_limits=_child_limits(),
         env_allow=frozenset({"CI"}),
         max_timeout_seconds=60,
         max_output_bytes=1024,
@@ -421,7 +421,7 @@ def test_policy_rejects_noncanonical_requested_executable():
     with pytest.raises(ValueError):
         HostExecutionPolicy(
             allowed_profiles=frozenset({"developer"}),
-            child_limits=test_child_limits(),
+            child_limits=_child_limits(),
             commands={
                 "/usr/bin/../bin/git": HostCommandRule(
                     resolved_path="/usr/bin/git",
@@ -439,7 +439,7 @@ def test_policy_cannot_allow_hard_denied_environment():
     with pytest.raises(ValueError):
         HostExecutionPolicy(
             allowed_profiles=frozenset({"developer"}),
-            child_limits=test_child_limits(),
+            child_limits=_child_limits(),
             commands={
                 "/usr/bin/git": HostCommandRule(
                     resolved_path="/usr/bin/git",
@@ -541,7 +541,7 @@ def test_policy_rejects_double_slash_command_path():
     with pytest.raises(ValueError):
         HostExecutionPolicy(
             allowed_profiles=frozenset({"developer"}),
-            child_limits=test_child_limits(),
+            child_limits=_child_limits(),
             commands={
                 "//usr/bin/git": HostCommandRule(
                     resolved_path="/usr/bin/git",
@@ -566,7 +566,7 @@ def test_policy_rejects_double_slash_command_path():
     ],
 )
 def test_child_limit_invalid_values_are_rejected(field, value):
-    values = test_child_limits().model_dump()
+    values = _child_limits().model_dump()
     values[field] = value
 
     with pytest.raises(ValueError):
