@@ -48,7 +48,7 @@ This phase implements:
 3. serial accepted-session handling;
 4. session-local vs service-fatal error semantics;
 5. stop-request handling outside async signal-handler work;
-6. listener ownership tracking;
+6. composition with the listener's existing endpoint-ownership tracking;
 7. safe, idempotent shutdown;
 8. tests for ordering, session fault isolation and cleanup ownership.
 
@@ -170,34 +170,28 @@ The service does not switch identities in this phase. It only verifies the ident
 
 ## 7. Listener and endpoint ownership
 
-The service uses the existing secure filesystem Unix endpoint implementation.
+The service composes the existing `UnixContainmentManagerListener` rather than duplicating endpoint-ownership logic.
 
-After successful listener creation, the service records the created socket identity:
+The listener already records the socket's canonical policy path and device/inode identity and implements guarded cleanup. The service MUST treat the listener as the single ownership authority for the endpoint.
 
-- canonical pathname;
-- device;
-- inode.
+During shutdown the service calls the listener's idempotent `close()`. The listener then:
 
-The service owns only that specific socket object.
+1. closes the listening descriptor;
+2. inspects the pathname without following symlinks;
+3. removes the pathname only if it still names the socket created by that listener instance;
+4. preserves a replacement object and raises a cleanup error when the path now names a different object;
+5. treats an already-absent endpoint as already cleaned.
 
-During shutdown:
+The service MUST NOT add a second unconditional `unlink(path)` or a second independent socket-identity cache.
 
-1. close the listening descriptor;
-2. inspect the pathname without following symlinks;
-3. remove the pathname only if it still names the socket created by this service instance;
-4. otherwise leave the replacement path untouched and report a service cleanup failure.
-
-The service MUST NOT perform unconditional `unlink(path)`.
-
-The following replacements are never removed by service cleanup:
+The following replacements are preserved:
 
 - a different socket inode;
 - a regular file;
 - a directory;
-- a symlink;
-- a missing/changed parent path.
+- a symlink.
 
-Repeated `close()` calls are idempotent.
+Repeated service `close()` calls are idempotent because listener `close()` is idempotent.
 
 ## 8. Session lifecycle
 
@@ -285,7 +279,7 @@ stop accepting new sessions
   -> return/exit
 ```
 
-The implementation plan may use bounded accept polling or another wake-up mechanism so stop observation does not require unsafe signal-handler work.
+The first implementation MUST use readiness polling on the listener file descriptor with a bounded polling interval. It checks `stop_requested` between polls and calls `listener.accept()` only when the descriptor is readable. This keeps stop observation out of the signal handler without exposing or mutating the listener's private socket timeout state.
 
 ## 11. Containment-scope ownership on shutdown
 
@@ -313,7 +307,7 @@ The implementation MUST preserve all of the following:
 3. accepted and listening descriptors remain non-inheritable;
 4. malformed/unauthorized sessions cannot terminate the healthy listener;
 5. service-fatal listener/endpoint failures are not hidden by retries;
-6. service shutdown never blindly unlinks an endpoint pathname;
+6. service shutdown delegates endpoint cleanup to the existing identity-checked listener and never performs an independent unlink;
 7. service lifecycle adds no shell, executable, argv, cwd or generic filesystem-operation surface;
 8. no UID/GID switching is introduced;
 9. no ForceCommand execution path is enabled;
@@ -350,10 +344,10 @@ The implementation plan MUST include at least the following tests.
 | clean peer EOF | accepted connection closes; service remains usable |
 | dispatcher/backend request failure | bounded to session/protocol response where existing dispatcher permits |
 | listener accept infrastructure failure | service exits fail-closed |
-| stop requested while waiting to accept | accept lifecycle exits cleanly |
+| stop requested while readiness-polling for accept | loop exits without creating a new session |
 | repeated `close()` | idempotent |
-| original socket still present | owned endpoint removed |
-| endpoint replaced by different socket | replacement preserved; cleanup failure reported |
+| original socket still present | listener close removes owned endpoint |
+| endpoint replaced by different socket | listener close preserves replacement and propagates cleanup failure |
 | endpoint replaced by regular file | replacement preserved |
 | endpoint replaced by symlink | symlink preserved |
 | endpoint already absent | no unsafe recreation/unlink side effect |
