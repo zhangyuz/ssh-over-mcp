@@ -510,7 +510,47 @@ replacement instead of unlinking an unrelated object.
 
 This phase owns only endpoint creation/accept/cleanup. It does not run a daemon,
 spawn background sessions, choose production service accounts, or switch the
-workload UID. Those identity/lifecycle decisions remain the next boundary.
+workload UID.
+
+### Phase 3d2b2b2c2b2b1 Linux service identity contract
+
+Production containment uses four OS identity concepts:
+
+- a manager process identity;
+- a host-agent process identity;
+- an untrusted workload process identity;
+- a dedicated manager-client group.
+
+Manager, host-agent and workload UIDs MUST be pairwise distinct. Host-agent and
+workload UID/GID MUST be non-root, and the manager-client GID MUST not be root
+or the workload primary GID.
+
+The manager and host-agent are the only identities which may hold the
+manager-client group. The workload process policy has no supplementary groups.
+
+Runtime process validation reads Linux real/effective/saved UID and GID plus
+supplementary groups. All three UID values and all three GID values MUST match
+the configured identity. Supplementary groups, after ignoring an optional
+duplicate of the primary GID, MUST exactly match policy. This prevents a process
+from appearing unprivileged while retaining a saved privileged identity or
+unexpected powerful group.
+
+A coherent endpoint layout is therefore:
+
+```text
+manager process:        manager UID/GID + manager-client supplementary GID
+host-agent process:     host-agent UID/GID + manager-client supplementary GID
+workload process:       workload UID/GID + no supplementary groups
+endpoint directory:     manager UID : manager-client GID
+endpoint socket:        manager UID : manager-client GID, mode 0660
+```
+
+The identity plan also derives manager-side expected host-agent SO_PEERCRED and
+host-agent-side expected manager SO_PEERCRED policies.
+
+This contract defines the target state but does not itself change UID/GID or
+start the manager service. Those transitions/lifecycle checks are separate
+increments.
 
 The ForceCommand CLI remains non-executing.
 
