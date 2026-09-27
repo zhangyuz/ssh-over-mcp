@@ -27,6 +27,12 @@ def _require_unix_stream(sock: socket.socket) -> None:
         raise ValueError("cannot inspect containment manager socket type") from exc
     if socket_type != socket.SOCK_STREAM:
         raise ValueError("containment manager transport requires SOCK_STREAM")
+    try:
+        sock.getpeername()
+    except OSError as exc:
+        raise ValueError(
+            "containment manager transport requires a connected socket"
+        ) from exc
 
 
 def _validate_complete_frame(frame: bytes) -> None:
