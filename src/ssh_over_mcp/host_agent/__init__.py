@@ -26,6 +26,15 @@ from .containment_manager_endpoint import (
     UnixContainmentManagerListener,
     UnixManagerEndpointPolicy,
 )
+from .containment_manager_identity import (
+    ContainmentServiceIdentityPlan,
+    LinuxProcessIdentity,
+    LinuxProcessIdentityError,
+    LinuxProcessIdentityPolicy,
+    LinuxProcessIdentitySnapshot,
+    read_linux_process_identity,
+    require_linux_process_identity,
+)
 from .containment_manager_peer import (
     ContainmentManagerPeerAuthError,
     LinuxPeerCredentialPolicy,
@@ -74,6 +83,13 @@ from .protocol import (
 )
 
 __all__ = [
+    "ContainmentServiceIdentityPlan",
+    "LinuxProcessIdentity",
+    "LinuxProcessIdentityError",
+    "LinuxProcessIdentityPolicy",
+    "LinuxProcessIdentitySnapshot",
+    "read_linux_process_identity",
+    "require_linux_process_identity",
     "ContainmentManagerEndpointError",
     "UnixContainmentManagerListener",
     "UnixManagerEndpointPolicy",
