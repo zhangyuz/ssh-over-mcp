@@ -16,6 +16,7 @@ from ssh_over_mcp.host_agent.policy import HostChildLimits, HostObjectIdentity
 from ssh_over_mcp.host_agent.prepare import PreparedCommand
 from ssh_over_mcp.host_agent.run import (
     BoundedExecutionError,
+    _hard_kill_contained,
     _read_output,
     _reap_until,
     _signal_process_group,
@@ -422,3 +423,25 @@ def test_normal_child_exit_kills_lingering_containment(tmp_path: Path):
         assert result.containment_stats.populated is False
     finally:
         prepared.close()
+
+
+def test_successful_containment_kill_does_not_depend_on_process_group(
+    monkeypatch,
+):
+    handle = RunContainmentHandle()
+
+    class Child:
+        pid = 1234
+        containment = handle
+
+    def fail_process_group(_pid: int, _sig: int):
+        raise BoundedExecutionError("process group unavailable")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run._signal_process_group",
+        fail_process_group,
+    )
+
+    _hard_kill_contained(Child())
+
+    assert handle.kill_count == 1
