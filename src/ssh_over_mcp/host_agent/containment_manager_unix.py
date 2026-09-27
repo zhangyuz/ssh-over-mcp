@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import socket
 import struct
 import threading
@@ -19,8 +20,36 @@ _HEADER_SIZE = len(MANAGER_PROTOCOL_MAGIC) + 4
 def _require_unix_stream(sock: socket.socket) -> None:
     if sock.family != socket.AF_UNIX:
         raise ValueError("containment manager transport requires AF_UNIX")
-    if sock.type != socket.SOCK_STREAM:
+    try:
+        socket_type = sock.getsockopt(socket.SOL_SOCKET, socket.SO_TYPE)
+    except OSError as exc:
+        raise ValueError("cannot inspect containment manager socket type") from exc
+    if socket_type != socket.SOCK_STREAM:
         raise ValueError("containment manager transport requires SOCK_STREAM")
+
+
+def _validate_complete_frame(frame: bytes) -> None:
+    if len(frame) < _HEADER_SIZE:
+        raise ContainmentManagerProtocolError(
+            "invalid outbound containment-manager frame"
+        )
+    if frame[: len(MANAGER_PROTOCOL_MAGIC)] != MANAGER_PROTOCOL_MAGIC:
+        raise ContainmentManagerProtocolError(
+            "invalid outbound containment-manager magic"
+        )
+
+    (length,) = struct.unpack(
+        ">I",
+        frame[len(MANAGER_PROTOCOL_MAGIC) : _HEADER_SIZE],
+    )
+    if length > MAX_MANAGER_MESSAGE_BYTES:
+        raise ContainmentManagerProtocolError(
+            "outbound containment-manager frame exceeds maximum"
+        )
+    if len(frame) != _HEADER_SIZE + length:
+        raise ContainmentManagerProtocolError(
+            "invalid outbound containment-manager frame length"
+        )
 
 
 def _recv_exact(
@@ -104,7 +133,13 @@ class UnixContainmentManagerTransport(ContainmentManagerTransport):
         timeout_seconds: float = 2.0,
     ) -> None:
         _require_unix_stream(sock)
-        if timeout_seconds <= 0 or timeout_seconds > 30:
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or not math.isfinite(timeout_seconds)
+            or timeout_seconds <= 0
+            or timeout_seconds > 30
+        ):
             raise ValueError(
                 "containment manager timeout must be in (0, 30] seconds"
             )
@@ -129,14 +164,7 @@ class UnixContainmentManagerTransport(ContainmentManagerTransport):
                 "containment manager transport is closed"
             )
 
-        if len(frame) < _HEADER_SIZE:
-            raise ContainmentManagerProtocolError(
-                "invalid outbound containment-manager frame"
-            )
-        if frame[: len(MANAGER_PROTOCOL_MAGIC)] != MANAGER_PROTOCOL_MAGIC:
-            raise ContainmentManagerProtocolError(
-                "invalid outbound containment-manager magic"
-            )
+        _validate_complete_frame(frame)
 
         with self._lock:
             try:
