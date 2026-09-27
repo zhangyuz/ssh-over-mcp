@@ -104,8 +104,10 @@ def _hard_kill_contained(child: SpawnedChild) -> None:
     try:
         _signal_process_group(child.pid, signal.SIGKILL)
     except BoundedExecutionError:
-        if containment_error is None:
-            raise
+        # Once recursive containment kill succeeds, process-group signaling is
+        # only defense-in-depth. It must not turn successful containment cleanup
+        # into a false failure.
+        pass
 
     if containment_error is not None:
         raise BoundedExecutionError(
