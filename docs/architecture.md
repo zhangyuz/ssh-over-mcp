@@ -123,6 +123,20 @@ Obtains an allow decision before opening the transport, creates the versioned re
 
 Runs under `ForceCommand` and validates an authenticated structured request. It independently enforces host-local rules and uses `execve`-style execution for structured commands.
 
+### Containment manager
+
+A narrow local manager owns writable delegated cgroup-v2 controls for
+request-scoped descendant containment. It is a separate privilege domain from
+the executed workload.
+
+The host agent uses typed create/attach/kill/stats/close operations and retains
+the child start barrier until attachment succeeds. The workload MUST NOT inherit
+the manager's writable cgroup authority or any reusable manager capability.
+
+The direct `CgroupV2Backend` is a manager-side implementation primitive, not a
+standalone production isolation boundary when manager and workload share the
+same migration authority.
+
 ### Privileged helper
 
 Optional minimal root component for narrowly defined operations such as restarting approved services. It MUST NOT expose a generic `sudo <command>` interface to normal roles.
