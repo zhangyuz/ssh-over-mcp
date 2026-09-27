@@ -176,7 +176,7 @@ def test_wrong_capability_is_rejected_without_touching_handle():
     assert backend.handles[0].attached == []
 
 
-def test_unknown_scope_is_rejected():
+def test_unknown_scope_is_indistinguishable_from_wrong_capability():
     _client, _backend, dispatcher = make_client()
     message = StatsRequest(
         message_id="msg_12345678",
@@ -195,7 +195,7 @@ def test_unknown_scope_is_rejected():
         )
     )
     assert isinstance(decoded, ErrorResponse)
-    assert decoded.code == "not_found"
+    assert decoded.code == "not_authorized"
 
 
 def test_closed_scope_capability_cannot_be_reused():
