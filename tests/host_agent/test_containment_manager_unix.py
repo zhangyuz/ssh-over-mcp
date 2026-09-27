@@ -224,3 +224,41 @@ def test_transport_rejects_non_unix_socket():
             UnixContainmentManagerTransport(tcp)
     finally:
         tcp.close()
+
+
+def test_schema_invalid_manager_response_is_unavailable():
+    client_sock, server_sock = socket_pair()
+
+    def invalid_server() -> None:
+        try:
+            server_sock.recv(65536)
+            raw = b"{}"
+            server_sock.sendall(
+                MANAGER_PROTOCOL_MAGIC
+                + struct.pack(">I", len(raw))
+                + raw
+            )
+        finally:
+            server_sock.close()
+
+    thread = threading.Thread(
+        target=invalid_server,
+        daemon=True,
+    )
+    thread.start()
+
+    transport = UnixContainmentManagerTransport(
+        client_sock,
+        timeout_seconds=1.0,
+    )
+    client = ContainmentManagerClient(transport)
+
+    try:
+        with pytest.raises(
+            ContainmentUnavailableError,
+            match="invalid response",
+        ):
+            client.create(request())
+    finally:
+        transport.close()
+        thread.join(timeout=1.0)
