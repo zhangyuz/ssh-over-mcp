@@ -8,22 +8,23 @@ ssh-over-mcp-host-agent
 
 Normative behavior is defined in [`../../docs/ssh-host-agent.md`](../../docs/ssh-host-agent.md).
 
-## Current Phase 3d2b2b2c2b2a behavior
+## Current Phase 3d2b2b2c2b2b1 behavior
 
 The ForceCommand request path remains **non-executing**.
 
-The containment-manager package now owns a secure filesystem Unix listener
-primitive:
+The containment architecture now has an explicit Linux identity plan:
 
-- canonical absolute endpoint path;
-- secure pre-existing parent directory;
-- no automatic removal of existing paths;
-- explicit socket UID/GID and 0600/0660 mode;
-- permission/identity verification before listen;
-- non-inheritable listener/accepted descriptors;
-- device/inode-bound cleanup which never unlinks a replacement path.
+- manager UID;
+- host-agent UID;
+- workload UID;
+- dedicated manager-client GID.
 
-The listener does not yet define daemon lifecycle or production service-account
-separation. The next increment must establish distinct manager, host-agent and
-workload identities before the authenticated manager path can be used for
-hostile execution.
+The three UIDs must be distinct. Host-agent/workload and the client group must
+be non-root. Real/effective/saved IDs and supplementary groups are checked
+strictly.
+
+The plan derives endpoint ownership and both directions of SO_PEERCRED policy.
+
+No UID/GID transition or manager daemon is started yet. The next increment
+enforces the manager identity at service startup and owns listener/session
+lifecycle.
