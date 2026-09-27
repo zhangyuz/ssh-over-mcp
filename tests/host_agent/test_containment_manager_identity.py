@@ -257,3 +257,26 @@ def test_manager_primary_gid_can_be_manager_client_gid():
     )
 
     assert value.manager_process_policy().supplementary_gids == frozenset()
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"host_agent": LinuxProcessIdentity(uid=0, gid=3102)},
+        {"host_agent": LinuxProcessIdentity(uid=2102, gid=0)},
+        {"workload": LinuxProcessIdentity(uid=0, gid=3103)},
+        {"workload": LinuxProcessIdentity(uid=2103, gid=0)},
+        {"manager_client_gid": 0},
+    ],
+)
+def test_service_plan_rejects_root_execution_identities(overrides):
+    values = {
+        "manager": identity(2101, 3101),
+        "host_agent": identity(2102, 3102),
+        "workload": identity(2103, 3103),
+        "manager_client_gid": 3199,
+    }
+    values.update(overrides)
+
+    with pytest.raises(ValueError, match="non-root"):
+        ContainmentServiceIdentityPlan(**values)
