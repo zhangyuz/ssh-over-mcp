@@ -408,12 +408,12 @@ def authorize_request(
     if rule is None:
         return _deny("executable is not allowed by host policy")
 
-    if any("\x00" in arg for arg in envelope.args):
+    if any("\x00" in arg for arg in envelope.argv):
         return _deny("argv contains NUL")
     if envelope.cwd is not None and "\x00" in envelope.cwd:
         return _deny("working directory contains NUL")
 
-    if not _argv_allowed(rule.argv, envelope.args):
+    if not _argv_allowed(rule.argv, envelope.argv):
         return _deny("argv is not allowed by host policy")
 
     for name, value in envelope.env.items():
