@@ -14,6 +14,11 @@ from .containment_manager import (
     ContainmentManagerProtocolError,
     ContainmentManagerTransport,
 )
+from .containment_manager_peer import (
+    LinuxPeerCredentialPolicy,
+    LinuxPeerCredentials,
+    authenticate_linux_unix_peer,
+)
 
 _HEADER_SIZE = len(MANAGER_PROTOCOL_MAGIC) + 4
 
@@ -152,6 +157,7 @@ class UnixContainmentManagerTransport(ContainmentManagerTransport):
         self,
         sock: socket.socket,
         *,
+        peer_policy: LinuxPeerCredentialPolicy,
         timeout_seconds: float = 2.0,
     ) -> None:
         _require_unix_stream(sock)
@@ -168,9 +174,24 @@ class UnixContainmentManagerTransport(ContainmentManagerTransport):
 
         self._sock = sock
         self._sock.set_inheritable(False)
+        try:
+            self._peer_credentials = authenticate_linux_unix_peer(
+                self._sock,
+                peer_policy,
+            )
+        except Exception:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            raise
         self._timeout_seconds = float(timeout_seconds)
         self._lock = threading.Lock()
         self._closed = False
+
+    @property
+    def peer_credentials(self) -> LinuxPeerCredentials:
+        return self._peer_credentials
 
     @property
     def fileno(self) -> int:
@@ -234,6 +255,8 @@ class UnixContainmentManagerTransport(ContainmentManagerTransport):
 def serve_containment_manager_connection(
     sock: socket.socket,
     dispatcher: ContainmentManagerDispatcher,
+    *,
+    peer_policy: LinuxPeerCredentialPolicy,
 ) -> None:
     """Serve a single already-authenticated local manager connection.
 
@@ -245,6 +268,7 @@ def serve_containment_manager_connection(
     sock.set_inheritable(False)
 
     try:
+        authenticate_linux_unix_peer(sock, peer_policy)
         while True:
             try:
                 frame = _recv_frame(
