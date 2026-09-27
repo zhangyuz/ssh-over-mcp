@@ -155,7 +155,6 @@ class ErrorResponse(_Message):
     type: Literal["error"] = "error"
     code: Literal[
         "invalid_request",
-        "not_found",
         "not_authorized",
         "unavailable",
         "operation_failed",
@@ -291,7 +290,6 @@ class ContainmentManagerDispatcher:
         message_id: str,
         code: Literal[
             "invalid_request",
-            "not_found",
             "not_authorized",
             "unavailable",
             "operation_failed",
@@ -405,7 +403,7 @@ class ContainmentManagerDispatcher:
 
             return self._error(request.message_id, "invalid_request")
         except KeyError:
-            return self._error(request.message_id, "not_found")
+            return self._error(request.message_id, "not_authorized")
         except PermissionError:
             return self._error(request.message_id, "not_authorized")
         except ContainmentUnavailableError:
@@ -457,10 +455,6 @@ class ContainmentManagerClient(ContainmentBackend):
             if response.code == "not_authorized":
                 raise ContainmentError(
                     "containment manager capability rejected"
-                )
-            if response.code == "not_found":
-                raise ContainmentError(
-                    "containment manager scope not found"
                 )
             raise ContainmentError(
                 "containment manager operation failed"
