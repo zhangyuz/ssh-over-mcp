@@ -77,6 +77,41 @@ def _validate_kernel_id(value: int, label: str) -> None:
         raise ValueError(f"{label} must be a valid Linux uid/gid value")
 
 
+def _validate_ancestor_chain(
+    parent: Path,
+    *,
+    endpoint_owner_uid: int,
+) -> None:
+    current = parent.parent
+    while True:
+        try:
+            info = current.lstat()
+        except OSError as exc:
+            raise ContainmentManagerEndpointError(
+                "manager endpoint ancestor is unavailable"
+            ) from exc
+
+        if not stat.S_ISDIR(info.st_mode):
+            raise ContainmentManagerEndpointError(
+                "manager endpoint ancestor is not a directory"
+            )
+        if info.st_uid not in {0, endpoint_owner_uid}:
+            raise ContainmentManagerEndpointError(
+                "manager endpoint ancestor has untrusted ownership"
+            )
+
+        writable = info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+        sticky = info.st_mode & stat.S_ISVTX
+        if writable and not sticky:
+            raise ContainmentManagerEndpointError(
+                "manager endpoint ancestor is writable without sticky protection"
+            )
+
+        if current == current.parent:
+            return
+        current = current.parent
+
+
 def _validate_parent(policy: UnixManagerEndpointPolicy) -> Path:
     parent = policy.path.parent
 
@@ -105,6 +140,10 @@ def _validate_parent(policy: UnixManagerEndpointPolicy) -> Path:
             "manager endpoint parent must not be group/world writable"
         )
 
+    _validate_ancestor_chain(
+        parent,
+        endpoint_owner_uid=policy.directory_uid,
+    )
     return parent
 
 
