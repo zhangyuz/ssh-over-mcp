@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Through Phase 3d2b2b2b1 merged; Phase 3d2b2b2b2 implemented on phase-3d2b2b2b2-start-barrier; review/merge pending**
+Status: **Through Phase 3d2b2b2b2 merged; Phase 3d2b2b2b3 implemented on phase-3d2b2b2b3-contained-bounded-run; review/merge pending**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -224,10 +224,24 @@ Implemented:
 - successful spawned child retains the containment handle for later lifecycle integration;
 - tests prove child code cannot run during attach and cannot run after attach failure.
 
+### Phase 3d2b2b2b3 — containment-aware bounded execution
+
+Implemented:
+
+- bounded execution requires a containment backend/request;
+- contained spawn replaces the older uncontained bounded-run path;
+- timeout/output overflow retains graceful process-group SIGTERM first;
+- hard termination uses recursive containment kill plus process-group defense-in-depth;
+- process-group hard-kill failure does not override a successful containment kill;
+- direct-child normal exit checks the containment populated state;
+- lingering descendants are killed before result return;
+- memory/PID/CPU accounting is returned with the execution result;
+- containment empty-state wait and close are bounded;
+- tests cover timeout containment kill, lingering descendants after direct-child exit, and process-group fallback semantics.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2b2b2b3: switch bounded execution to contained spawn and use cgroup kill/accounting/cleanup;
-- Phase 3d2b2b2c: live delegated-cgroup descendant-kill and resource-limit integration tests;
+- Phase 3d2b2b2c: live delegated-cgroup descendant-kill/resource-limit tests, including an attempted workload self-migration through ancestor `cgroup.procs` which MUST fail;
 - Phase 3d2c: wire supervised native execution into the ForceCommand CLI only after containment is enforced;
 - typed filesystem operations;
 - execution-time resource enforcement;
