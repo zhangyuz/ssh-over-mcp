@@ -3,6 +3,7 @@ from __future__ import annotations
 import socket
 import struct
 import threading
+import time
 
 import pytest
 
@@ -308,3 +309,90 @@ def test_transport_rejects_invalid_timeouts(timeout):
     finally:
         client_sock.close()
         server_sock.close()
+
+
+def test_round_trip_timeout_is_total_deadline_not_per_recv():
+    client_sock, server_sock = socket_pair()
+
+    def drip_server() -> None:
+        try:
+            server_sock.recv(65536)
+            payload = b"{}"
+            frame = (
+                MANAGER_PROTOCOL_MAGIC
+                + struct.pack(">I", len(payload))
+                + payload
+            )
+            for byte in frame:
+                try:
+                    server_sock.sendall(bytes([byte]))
+                except OSError:
+                    return
+                time.sleep(0.015)
+        finally:
+            server_sock.close()
+
+    thread = threading.Thread(
+        target=drip_server,
+        daemon=True,
+    )
+    thread.start()
+
+    transport = UnixContainmentManagerTransport(
+        client_sock,
+        timeout_seconds=0.05,
+    )
+    client = ContainmentManagerClient(transport)
+
+    started = time.monotonic()
+    try:
+        with pytest.raises(
+            ContainmentUnavailableError,
+            match="timed out",
+        ):
+            client.create(request())
+        elapsed = time.monotonic() - started
+        assert elapsed < 0.20
+    finally:
+        transport.close()
+        thread.join(timeout=1.0)
+
+
+def test_broken_response_poisons_transport():
+    client_sock, server_sock = socket_pair()
+
+    def broken_server() -> None:
+        try:
+            server_sock.recv(65536)
+            server_sock.sendall(
+                MANAGER_PROTOCOL_MAGIC
+                + struct.pack(">I", 100)
+                + b"{}"
+            )
+        finally:
+            server_sock.close()
+
+    thread = threading.Thread(
+        target=broken_server,
+        daemon=True,
+    )
+    thread.start()
+
+    transport = UnixContainmentManagerTransport(
+        client_sock,
+        timeout_seconds=1.0,
+    )
+    client = ContainmentManagerClient(transport)
+
+    try:
+        with pytest.raises(ContainmentUnavailableError):
+            client.create(request())
+
+        with pytest.raises(
+            ContainmentUnavailableError,
+            match="closed",
+        ):
+            client.create(request())
+    finally:
+        transport.close()
+        thread.join(timeout=1.0)
