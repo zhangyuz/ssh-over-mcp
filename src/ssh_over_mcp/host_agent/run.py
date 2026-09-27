@@ -9,8 +9,18 @@ from dataclasses import dataclass
 
 from ssh_over_mcp.ssh.protocol import ExecutionLimits
 
+from .containment import (
+    ContainmentBackend,
+    ContainmentError,
+    ContainmentRequest,
+    ContainmentStats,
+)
 from .prepare import PreparedCommand
-from .supervisor import ChildSupervisorError, SpawnedChild, spawn_prepared_native
+from .supervisor import (
+    ChildSupervisorError,
+    SpawnedChild,
+    spawn_prepared_native_contained,
+)
 
 
 class BoundedExecutionError(RuntimeError):
@@ -25,6 +35,7 @@ class SupervisedExecutionResult:
     timed_out: bool
     output_exceeded: bool
     duration_seconds: float
+    containment_stats: ContainmentStats
 
 
 def _signal_process_group(pid: int, sig: int) -> None:
@@ -74,6 +85,101 @@ def _reap_until(
             return None
 
         time.sleep(min(0.005, max(0.0, deadline - now)))
+
+
+def _hard_kill_contained(child: SpawnedChild) -> None:
+    if child.containment is None:
+        raise BoundedExecutionError(
+            "supervised child lacks containment"
+        )
+
+    containment_error: ContainmentError | None = None
+    try:
+        child.containment.kill_all()
+    except ContainmentError as exc:
+        containment_error = exc
+
+    # Keep the process-group kill as defense-in-depth and as a direct-child
+    # fallback if containment control itself fails.
+    try:
+        _signal_process_group(child.pid, signal.SIGKILL)
+    except BoundedExecutionError:
+        if containment_error is None:
+            raise
+
+    if containment_error is not None:
+        raise BoundedExecutionError(
+            "cannot kill child containment scope"
+        ) from containment_error
+
+
+def _close_containment_bounded(
+    child: SpawnedChild,
+    deadline: float,
+) -> ContainmentStats:
+    if child.containment is None:
+        raise BoundedExecutionError(
+            "supervised child lacks containment"
+        )
+
+    handle = child.containment
+
+    while True:
+        try:
+            stats = handle.stats()
+        except ContainmentError as exc:
+            raise BoundedExecutionError(
+                "cannot read containment accounting"
+            ) from exc
+
+        if stats.populated is False:
+            break
+        if stats.populated is None:
+            raise BoundedExecutionError(
+                "containment populated state is unavailable"
+            )
+
+        now = time.monotonic()
+        if now >= deadline:
+            raise BoundedExecutionError(
+                "containment did not become empty"
+            )
+
+        time.sleep(min(0.005, max(0.0, deadline - now)))
+
+    try:
+        handle.close()
+    except ContainmentError as exc:
+        raise BoundedExecutionError(
+            "cannot close containment scope"
+        ) from exc
+
+    child.containment = None
+    return stats
+
+
+def _finalize_containment(
+    child: SpawnedChild,
+    deadline: float,
+) -> ContainmentStats:
+    if child.containment is None:
+        raise BoundedExecutionError(
+            "supervised child lacks containment"
+        )
+
+    try:
+        stats = child.containment.stats()
+    except ContainmentError as exc:
+        raise BoundedExecutionError(
+            "cannot read containment accounting"
+        ) from exc
+
+    # A direct child may exit while descendants remain. Never return while the
+    # request cgroup is still populated.
+    if stats.populated is not False:
+        _hard_kill_contained(child)
+
+    return _close_containment_bounded(child, deadline)
 
 
 def _unregister_close(
@@ -174,10 +280,12 @@ def run_prepared_native(
     stdin: bytes,
     limits: ExecutionLimits,
     *,
+    containment_backend: ContainmentBackend,
+    containment_request: ContainmentRequest,
     term_grace_seconds: float = 0.20,
     kill_cleanup_seconds: float = 1.0,
 ) -> SupervisedExecutionResult:
-    """Run one prepared native child under wall/output limits.
+    """Run one prepared native child under mandatory containment.
 
     This function still has no ForceCommand CLI integration.
     """
@@ -198,7 +306,11 @@ def run_prepared_native(
         raise BoundedExecutionError("cannot create I/O selector") from exc
 
     try:
-        child = spawn_prepared_native(prepared)
+        child = spawn_prepared_native_contained(
+            prepared,
+            containment_backend,
+            containment_request,
+        )
     except ChildSupervisorError as exc:
         selector.close()
         raise BoundedExecutionError("cannot spawn supervised child") from exc
@@ -243,7 +355,7 @@ def run_prepared_native(
                 and kill_sent_at is None
                 and now >= term_sent_at + term_grace_seconds
             ):
-                _signal_process_group(child.pid, signal.SIGKILL)
+                _hard_kill_contained(child)
                 kill_sent_at = now
 
             stdout_open = child.stdout_fd >= 0
@@ -260,7 +372,7 @@ def run_prepared_native(
                 if child.stderr_fd >= 0:
                     _unregister_close(selector, child, "stderr_fd")
                 if child.poll() is None:
-                    _signal_process_group(child.pid, signal.SIGKILL)
+                    _hard_kill_contained(child)
 
                 returncode = _reap_until(
                     child,
@@ -321,6 +433,10 @@ def run_prepared_native(
                     _unregister_close(selector, child, attr)
 
         returncode = child.wait()
+        containment_stats = _finalize_containment(
+            child,
+            time.monotonic() + kill_cleanup_seconds,
+        )
         return SupervisedExecutionResult(
             returncode=returncode,
             stdout=bytes(stdout),
@@ -328,19 +444,41 @@ def run_prepared_native(
             timed_out=timed_out,
             output_exceeded=output_exceeded,
             duration_seconds=max(0.0, time.monotonic() - start),
+            containment_stats=containment_stats,
         )
     except BaseException as exc:
+        cleanup_failed = False
+
         try:
-            _signal_process_group(child.pid, signal.SIGKILL)
+            _hard_kill_contained(child)
         except Exception:
-            pass
+            cleanup_failed = True
+
         child.close_stdin()
         child.close_pipes()
-        try:
-            _reap_until(child, time.monotonic() + 0.05)
-        except Exception:
-            pass
 
+        try:
+            reaped = _reap_until(
+                child,
+                time.monotonic() + min(0.20, kill_cleanup_seconds),
+            )
+            if reaped is None:
+                cleanup_failed = True
+        except Exception:
+            cleanup_failed = True
+
+        try:
+            _close_containment_bounded(
+                child,
+                time.monotonic() + min(0.20, kill_cleanup_seconds),
+            )
+        except Exception:
+            cleanup_failed = True
+
+        if cleanup_failed:
+            raise BoundedExecutionError(
+                "bounded contained-child cleanup failed"
+            ) from exc
         if isinstance(exc, BoundedExecutionError):
             raise
         raise BoundedExecutionError("bounded child supervision failed") from exc
