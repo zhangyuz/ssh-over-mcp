@@ -210,7 +210,12 @@ def test_server_closes_session_on_malformed_frame():
             + b"{}"
         )
         client_sock.settimeout(1.0)
-        assert client_sock.recv(1) == b""
+        try:
+            assert client_sock.recv(1) == b""
+        except ConnectionResetError:
+            # The server intentionally closes as soon as the invalid header is
+            # detected. Linux may report RST when unread payload bytes remain.
+            pass
     finally:
         client_sock.close()
         thread.join(timeout=1.0)
