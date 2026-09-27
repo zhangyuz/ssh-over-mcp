@@ -208,7 +208,7 @@ def test_bounded_cat_round_trip(tmp_path: Path):
         prepared.close()
 
 
-def test_wall_timeout_terminates_process_group(tmp_path: Path):
+def test_wall_timeout_can_finish_during_grace_period(tmp_path: Path):
     prepared = _prepared(
         tmp_path,
         _source("/bin/sleep", "/usr/bin/sleep"),
@@ -229,7 +229,7 @@ def test_wall_timeout_terminates_process_group(tmp_path: Path):
         assert result.timed_out is True
         assert result.output_exceeded is False
         assert result.returncode < 0
-        assert backend.handles[0].kill_count >= 1
+        assert backend.handles[0].kill_count == 0
         assert backend.handles[0].closed is True
         assert result.duration_seconds < 2.0
     finally:
@@ -445,3 +445,34 @@ def test_successful_containment_kill_does_not_depend_on_process_group(
     _hard_kill_contained(Child())
 
     assert handle.kill_count == 1
+
+
+def test_wall_timeout_escalates_to_containment_kill_when_term_is_ignored(
+    tmp_path: Path,
+):
+    prepared = _prepared(
+        tmp_path,
+        _source("/bin/sh", "/usr/bin/dash"),
+        argv=("-c", "trap '' TERM; sleep 5"),
+    )
+    backend, request = _containment(prepared)
+
+    try:
+        result = run_prepared_native(
+            prepared,
+            b"",
+            _limits(timeout=0.05),
+            containment_backend=backend,
+            containment_request=request,
+            term_grace_seconds=0.02,
+            kill_cleanup_seconds=0.5,
+        )
+
+        assert result.timed_out is True
+        assert result.output_exceeded is False
+        assert result.returncode < 0
+        assert backend.handles[0].kill_count >= 1
+        assert backend.handles[0].closed is True
+        assert result.duration_seconds < 2.0
+    finally:
+        prepared.close()
