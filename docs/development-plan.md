@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Through Phase 3d2b2b2b3 merged; Phase 3d2b2b2c0 architecture decision implemented on phase-3d2b2b2c0-containment-privilege-separation; review/merge pending**
+Status: **Through Phase 3d2b2b2c0 merged; Phase 3d2b2b2c1 implemented on phase-3d2b2b2c1-manager-protocol; review/merge pending**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -251,10 +251,27 @@ Implemented:
 - workload access to ancestor/sibling cgroup migration controls is prohibited;
 - live validation must attempt self-migration and fail if it succeeds.
 
+### Phase 3d2b2b2c1 — narrow containment-manager protocol
+
+Implemented:
+
+- versioned, bounded manager message framing;
+- strict typed operations: create / attach / kill / stats / close;
+- protocol contains no executable, argv, cwd, shell, generic path or command field;
+- manager-generated 256-bit opaque scope capability;
+- subsequent scope operations require scope ID plus capability;
+- constant-time capability comparison;
+- request/response message correlation;
+- strict JSON types and extra-field rejection;
+- generic error codes without backend exception details;
+- transactional create: unpublished scopes are closed on response/setup failure;
+- `ContainmentManagerClient` implements the existing `ContainmentBackend` interface;
+- in-memory transport/dispatcher lifecycle tests;
+- in-memory transport explicitly remains test-only and is not a privilege boundary.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2b2b2c1: narrow local containment-manager/helper protocol and fake-manager tests;
-- Phase 3d2b2b2c2: manager-backed cgroup backend integration with the existing start barrier and bounded runner;
+- Phase 3d2b2b2c2: real local containment-manager/helper transport, peer/authentication boundary, and manager-backed integration with the existing start barrier/bounded runner;
 - Phase 3d2b2b2c3: live delegated-cgroup descendant-kill/resource-limit/self-migration tests;
 - Phase 3d2c: wire supervised native execution into the ForceCommand CLI only after containment is enforced;
 - typed filesystem operations;
