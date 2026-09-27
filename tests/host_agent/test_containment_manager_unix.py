@@ -262,3 +262,43 @@ def test_schema_invalid_manager_response_is_unavailable():
     finally:
         transport.close()
         thread.join(timeout=1.0)
+
+
+def test_transport_rejects_malformed_outbound_frame_before_send():
+    client_sock, server_sock = socket_pair()
+    transport = UnixContainmentManagerTransport(client_sock)
+    try:
+        bad = (
+            MANAGER_PROTOCOL_MAGIC
+            + struct.pack(">I", 10)
+            + b"{}"
+        )
+        with pytest.raises(
+            Exception,
+            match="frame length",
+        ):
+            transport.round_trip(bad)
+
+        server_sock.setblocking(False)
+        with pytest.raises(BlockingIOError):
+            server_sock.recv(1)
+    finally:
+        transport.close()
+        server_sock.close()
+
+
+@pytest.mark.parametrize(
+    "timeout",
+    [True, 0, -1, float("inf"), float("nan"), 31],
+)
+def test_transport_rejects_invalid_timeouts(timeout):
+    client_sock, server_sock = socket_pair()
+    try:
+        with pytest.raises(ValueError, match="timeout"):
+            UnixContainmentManagerTransport(
+                client_sock,
+                timeout_seconds=timeout,
+            )
+    finally:
+        client_sock.close()
+        server_sock.close()
