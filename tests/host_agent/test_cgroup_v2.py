@@ -48,7 +48,7 @@ def make_root(tmp_path: Path) -> Path:
 
 class FakeCgroupV2Backend(CgroupV2Backend):
     def _create_scope_directory(self, scope: Path) -> None:
-        scope.mkdir(mode=0o700)
+        super()._create_scope_directory(scope)
         files = {
             "cgroup.procs": "",
             "cgroup.kill": "",
