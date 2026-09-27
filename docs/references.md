@@ -40,3 +40,9 @@ These references inform the current architecture. They are informative; the repo
 
 - Linux kernel cgroup v2 documentation: https://docs.kernel.org/admin-guide/cgroup-v2.html
 - systemd control-group delegation: https://systemd.io/CGROUP_DELEGATION/
+
+
+## Linux cgroup v2 containment
+
+- Linux kernel — Control Group v2: https://docs.kernel.org/admin-guide/cgroup-v2.html
+- systemd — Control Group APIs and Delegation: https://systemd.io/CGROUP_DELEGATION/
