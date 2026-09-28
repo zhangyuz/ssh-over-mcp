@@ -350,6 +350,11 @@ def run_prepared_native(
                     _unregister_close(selector, child, "stdin_fd")
                 _signal_process_group(child.pid, signal.SIGTERM)
 
+            stdout_open = child.stdout_fd >= 0
+            stderr_open = child.stderr_fd >= 0
+            if returncode is not None and not stdout_open and not stderr_open:
+                break
+
             if (
                 terminating
                 and term_sent_at is not None
@@ -358,11 +363,6 @@ def run_prepared_native(
             ):
                 _hard_kill_contained(child)
                 kill_sent_at = now
-
-            stdout_open = child.stdout_fd >= 0
-            stderr_open = child.stderr_fd >= 0
-            if returncode is not None and not stdout_open and not stderr_open:
-                break
 
             if (
                 kill_sent_at is not None
