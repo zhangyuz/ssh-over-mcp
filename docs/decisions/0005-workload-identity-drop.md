@@ -1,6 +1,6 @@
 # ADR 0005: Forked child performs the one-way workload identity drop
 
-- Status: Accepted
+- Status: Proposed
 - Date: 2026-09-28
 
 ## Context
@@ -44,9 +44,10 @@ After the existing containment manager confirms request-scope attachment and the
 4. removes supplementary groups;
 5. sets real/effective/saved GID to the workload GID;
 6. sets real/effective/saved UID to the workload UID;
-7. clears effective, permitted, and inheritable capability sets;
-8. reads back and verifies the complete identity/capability state;
-9. only then enters the existing pinned native exec path.
+7. relies on the Linux setresuid/setresgid contract to synchronize FSUID/FSGID to the new effective IDs, then verifies both filesystem IDs explicitly;
+8. clears effective, permitted, and inheritable capability sets;
+9. reads back and verifies the complete identity/capability state;
+10. only then enters the existing pinned native exec path.
 
 The child must fail closed before exec if the workload target is root, includes supplementary groups, reuses the current host-agent UID, or if any transition or verification step fails.
 
@@ -92,6 +93,7 @@ A successful transition requires exact read-back verification of:
 
 - real/effective/saved UID;
 - real/effective/saved GID;
+- filesystem UID and filesystem GID;
 - supplementary groups;
 - `no_new_privs`;
 - effective/permitted/inheritable capabilities;
