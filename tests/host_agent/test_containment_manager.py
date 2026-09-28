@@ -208,11 +208,9 @@ def test_closed_scope_capability_cannot_be_reused():
 
 
 def test_response_correlation_is_enforced():
-    client, _backend, dispatcher = make_client()
-
     class WrongCorrelationTransport:
         def round_trip(self, frame: bytes) -> bytes:
-            request_message = decode_manager_request(frame)
+            decode_manager_request(frame)
             return encode_manager_message(
                 AckResponse(
                     message_id="msg_different123",

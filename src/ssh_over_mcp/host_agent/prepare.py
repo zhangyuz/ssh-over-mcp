@@ -4,7 +4,7 @@ import errno
 import os
 import stat
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Self
 
 from ssh_over_mcp.ssh.protocol import ExecEnvelope
 
@@ -58,7 +58,7 @@ class PreparedCommand:
                 pass
             self._closed = True
 
-    def __enter__(self) -> PreparedCommand:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:

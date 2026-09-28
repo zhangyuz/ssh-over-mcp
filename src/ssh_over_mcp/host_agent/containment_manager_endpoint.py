@@ -5,6 +5,7 @@ import socket
 import stat
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Self
 
 from .containment import ContainmentError
 
@@ -340,7 +341,7 @@ class UnixContainmentManagerListener:
                 self._identity,
             )
 
-    def __enter__(self) -> UnixContainmentManagerListener:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:

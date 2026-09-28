@@ -4,6 +4,7 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Self
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
 REQUIRED_CGROUP_V2_CONTROLLERS = frozenset({"cpu", "memory", "pids"})
@@ -110,7 +111,7 @@ class ContainmentHandle(ABC):
     def close(self) -> None:
         """Release backend resources after the scope is empty."""
 
-    def __enter__(self) -> ContainmentHandle:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
