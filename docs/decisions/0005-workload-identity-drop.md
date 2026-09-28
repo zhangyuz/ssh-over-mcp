@@ -36,6 +36,10 @@ The production host-agent remains non-root and is granted only the identity-chan
 
 No `CAP_SYS_ADMIN`, root host-agent identity, or generic privileged execution helper is introduced by this decision.
 
+The host-agent-to-workload transition is nonroot-to-nonroot. Linux must not
+be relied upon to clear capability sets as a side effect of that UID change;
+the child explicitly clears and verifies those sets before exec.
+
 After the existing containment manager confirms request-scope attachment and the parent releases the start barrier, the child:
 
 1. completes trusted stdio/FD/rlimit setup;
