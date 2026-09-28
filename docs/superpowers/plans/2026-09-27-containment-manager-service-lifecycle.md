@@ -117,10 +117,11 @@ Using a secure temporary parent and the current process UID/GID policy, assert:
 def test_service_close_removes_still_owned_socket(tmp_path):
     # endpoint exists after create; absent after close
 
-def test_service_close_preserves_replacement_path(tmp_path):
-    # replace socket path with a regular file
+@pytest.mark.parametrize("replacement_kind", ["regular_file", "symlink", "different_socket"])
+def test_service_close_preserves_replacement_path(tmp_path, replacement_kind):
+    # replace the owned socket path with the selected different object
     # close raises ContainmentManagerEndpointError
-    # replacement contents remain unchanged
+    # replacement object remains present and unchanged
 
 def test_service_close_accepts_already_absent_endpoint(tmp_path):
     # unlink owned socket path before close
@@ -175,6 +176,10 @@ def test_unauthorized_peer_is_session_local(monkeypatch):
     # serve_one returns normally
     # second serve_one can accept/delegate another connection
 
+def test_clean_peer_eof_is_session_local(monkeypatch):
+    # connection server returns normally for EOF
+    # a second serve_one still accepts/delegates another connection
+
 def test_listener_accept_failure_is_service_fatal(monkeypatch):
     # listener.accept raises ContainmentManagerEndpointError
     # serve_one propagates; no retry
@@ -227,9 +232,15 @@ def test_malformed_session_does_not_poison_next_valid_session(tmp_path):
     # client 2 connects and sends one valid CreateRequest frame
     # service.serve_one() sends a valid CreateResponse
     # decode response and assert scope creation succeeded
+
+def test_backend_operation_error_response_does_not_poison_next_session(tmp_path):
+    # backend fails one CreateRequest with ContainmentError
+    # first client receives ErrorResponse(code="operation_failed")
+    # first client closes and serve_one returns
+    # second client uses a healthy backend path and receives CreateResponse
 ```
 
-Use bounded socket timeouts in the test so a regression cannot hang the suite.
+Use bounded socket timeouts in both integration tests so a regression cannot hang the suite.
 
 - [ ] **Step 5: Run manager session tests**
 
