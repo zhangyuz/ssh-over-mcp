@@ -1,3 +1,4 @@
+import errno
 import os
 import shutil
 import signal
@@ -355,6 +356,37 @@ def test_signal_group_falls_back_to_pid_before_setsid(monkeypatch):
     def fake_killpg(pid: int, sig: int):
         calls.append(("killpg", pid, sig))
         raise ProcessLookupError()
+
+    def fake_kill(pid: int, sig: int):
+        calls.append(("kill", pid, sig))
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run.os.killpg",
+        fake_killpg,
+    )
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run.os.kill",
+        fake_kill,
+    )
+
+    _signal_process_group(1234, signal.SIGTERM)
+
+    assert calls == [
+        ("killpg", 1234, signal.SIGTERM),
+        ("kill", 1234, signal.SIGTERM),
+    ]
+
+
+@pytest.mark.parametrize("group_errno", [errno.ESRCH, errno.EPERM, errno.EINVAL])
+def test_signal_group_falls_back_to_pid_for_expected_group_errno(
+    monkeypatch,
+    group_errno: int,
+):
+    calls: list[tuple[str, int, int]] = []
+
+    def fake_killpg(pid: int, sig: int):
+        calls.append(("killpg", pid, sig))
+        raise OSError(group_errno, "group unavailable")
 
     def fake_kill(pid: int, sig: int):
         calls.append(("kill", pid, sig))

@@ -316,11 +316,9 @@ class ContainmentManagerDispatcher:
         return managed.handle
 
     def handle_frame(self, frame: bytes) -> bytes:
-        try:
-            request = decode_manager_request(frame)
-        except ContainmentManagerProtocolError:
-            # Malformed frames do not contain a trustworthy message ID.
-            raise
+        # Malformed frames do not contain a trustworthy message ID, so protocol
+        # errors propagate before entering request-specific error normalization.
+        request = decode_manager_request(frame)
 
         try:
             if isinstance(request, CreateRequest):

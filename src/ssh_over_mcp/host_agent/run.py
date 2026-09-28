@@ -47,9 +47,7 @@ def _signal_process_group(pid: int, sig: int) -> None:
         # The child may not have reached setsid() yet.
         group_error = exc
     except OSError as exc:
-        if exc.errno == errno.ESRCH:
-            group_error = exc
-        elif exc.errno in {errno.EPERM, errno.EINVAL}:
+        if exc.errno in {errno.ESRCH, errno.EPERM, errno.EINVAL}:
             group_error = exc
         else:
             raise BoundedExecutionError(

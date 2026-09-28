@@ -124,7 +124,8 @@ class SSHConnectionManager:
                 else None
             )
 
-            kwargs = dict(
+            # Keyword form keeps the hardened SSH option allowlist explicit and auditable.
+            kwargs = dict(  # noqa: C408
                 port=host.port,
                 username=host.ssh_user,
                 client_keys=credential.explicit_keypairs(),

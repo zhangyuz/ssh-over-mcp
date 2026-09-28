@@ -242,6 +242,20 @@ def test_invalid_frames_fail_closed(frame: bytes):
         decode_manager_request(frame)
 
 
+def test_dispatcher_rejects_malformed_frame_before_backend_call():
+    backend = FakeBackend()
+    dispatcher = ContainmentManagerDispatcher(
+        backend,
+        capability_factory=lambda: "A" * 43,
+    )
+
+    with pytest.raises(ContainmentManagerProtocolError):
+        dispatcher.handle_frame(b"wrong-magic")
+
+    assert backend.requests == []
+    assert backend.handles == []
+
+
 def test_extra_message_fields_are_rejected():
     raw = (
         b'{"version":1,"message_id":"msg_12345678",'
