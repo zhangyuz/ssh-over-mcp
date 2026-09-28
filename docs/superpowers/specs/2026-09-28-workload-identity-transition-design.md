@@ -12,6 +12,7 @@ The intended outcome is that every structured workload starts under the dedicate
 
 - real, effective, and saved UID all equal to the configured workload UID;
 - real, effective, and saved GID all equal to the configured workload GID;
+- filesystem UID/GID equal to the configured workload UID/GID;
 - no supplementary groups;
 - no effective, permitted, inheritable, or ambient capabilities;
 - Linux `no_new_privs=1`;
@@ -95,7 +96,7 @@ This phase implements:
 5. real/effective/saved UID transition;
 6. clearing effective, permitted, and inheritable capability sets;
 7. clearing ambient capabilities;
-8. post-transition read-back verification;
+8. post-transition read-back verification including filesystem UID/GID;
 9. supervisor integration before native exec;
 10. fail-closed child behavior if any transition or verification step fails;
 11. tests which lock transition ordering and failure semantics;
@@ -169,9 +170,10 @@ Within the released child, the required order is:
 8. clear supplementary groups with `setgroups([])`;
 9. call `setresgid(workload_gid, workload_gid, workload_gid)`;
 10. call `setresuid(workload_uid, workload_uid, workload_uid)`;
-11. clear effective, permitted, and inheritable capabilities with `capset`;
-12. verify the complete post-drop identity contract;
-13. call the existing native execution primitive, which revalidates the pinned cwd/executable immediately before `execve`.
+11. verify that Linux filesystem UID/GID are synchronized to the workload UID/GID;
+12. clear effective, permitted, and inheritable capabilities with `capset`;
+13. verify the complete post-drop identity contract;
+14. call the existing native execution primitive, which revalidates the pinned cwd/executable immediately before `execve`.
 
 Identity transition happens after trusted rlimit/FD setup so those operations can complete using the host-agent's trusted pre-exec authority, but before any workload-selected executable begins.
 
@@ -236,8 +238,13 @@ real GID      == workload GID
 effective GID == workload GID
 saved GID     == workload GID
 
+filesystem UID == workload UID
+filesystem GID == workload GID
+
 supplementary groups == empty
 ```
+
+Linux `setresuid()` and `setresgid()` always synchronize the filesystem IDs to the resulting effective IDs. The implementation nevertheless treats FSUID/FSGID as explicit post-drop invariants because Linux filesystem permission checks use those IDs.
 
 Required privilege state:
 
@@ -269,11 +276,12 @@ Expected kernel/libc primitives include:
 - `prctl(PR_GET_NO_NEW_PRIVS)`;
 - `prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL)`;
 - `capset`;
-- `capget`.
+- `capget`;
+- Linux FSUID/FSGID read-back using the established `setfsuid(-1)` / `setfsgid(-1)` query pattern or an equivalent kernel-backed method.
 
 If a required primitive is unavailable, returns an error, or produces a state which fails read-back verification, the child MUST NOT call `execve`.
 
-The implementation must check all syscall/libc return values.
+The implementation must check all syscall/libc return values. Capability handling must not silently truncate kernel capability state: if the running kernel exposes a capability ABI/range the implementation cannot represent and verify completely, the transition fails closed.
 
 ## 12. Component boundary
 
@@ -289,13 +297,24 @@ Conceptual API:
 class WorkloadIdentityTransitionError(RuntimeError):
     ...
 
+@dataclass(frozen=True, slots=True)
+class WorkloadIdentityTransitionSnapshot:
+    identity: LinuxProcessIdentitySnapshot
+    filesystem_uid: int
+    filesystem_gid: int
+    no_new_privs: bool
+    effective_capabilities: int
+    permitted_capabilities: int
+    inheritable_capabilities: int
+    ambient_capabilities_empty: bool
+
 def transition_to_workload_identity(
     policy: LinuxProcessIdentityPolicy,
-) -> LinuxProcessIdentitySnapshot:
+) -> WorkloadIdentityTransitionSnapshot:
     ...
 ```
 
-The returned snapshot is the verified post-drop identity.
+The returned snapshot records the verified post-drop identity and privilege state. The existing `LinuxProcessIdentitySnapshot` alone is intentionally insufficient because it does not include filesystem IDs, capability state, or `no_new_privs`.
 
 The module owns only Linux identity/capability transition logic. It does not:
 
@@ -353,6 +372,7 @@ The following are fatal to the child before exec:
 - failure of `setresuid`;
 - failure to clear capability sets;
 - any UID/GID read-back mismatch;
+- any filesystem UID/GID mismatch;
 - any saved-ID mismatch;
 - any supplementary-group residue;
 - any nonzero effective/permitted/inheritable capability;
@@ -372,15 +392,17 @@ Implementation MUST preserve all of the following:
 4. the workload has no manager-client supplementary group;
 5. real/effective/saved UID all become the workload UID;
 6. real/effective/saved GID all become the workload GID;
-7. supplementary groups are empty;
-8. `no_new_privs=1` before exec;
-9. effective/permitted/inheritable capabilities are empty before exec;
-10. ambient capabilities are empty before exec;
-11. transition failure prevents exec;
-12. pinned cwd/executable validation still occurs after the drop;
-13. manager descriptors remain non-inheritable/not in the child keep-set;
-14. the containment manager gains no execution API;
-15. ForceCommand execution remains disabled after this phase.
+7. filesystem UID/GID become the workload UID/GID;
+8. supplementary groups are empty;
+9. `no_new_privs=1` before exec;
+10. effective/permitted/inheritable capabilities are empty before exec;
+11. ambient capabilities are empty before exec;
+12. transition failure prevents exec;
+13. pinned cwd/executable validation still occurs after the drop;
+14. manager descriptors remain non-inheritable/not in the child keep-set;
+15. the containment manager gains no execution API;
+16. production execution APIs expose no bypass flag, nullable workload policy, or no-op transition mode;
+17. ForceCommand execution remains disabled after this phase.
 
 ## 16. Test strategy
 
@@ -404,7 +426,10 @@ Required cases include:
 | capset-to-zero fails | transition fails |
 | saved UID mismatch on read-back | transition fails |
 | saved GID mismatch on read-back | transition fails |
+| filesystem UID mismatch on read-back | transition fails |
+| filesystem GID mismatch on read-back | transition fails |
 | supplementary group remains | transition fails |
+| capability ABI/range cannot be verified completely | transition fails |
 | capability read-back nonzero | transition fails |
 | no_new_privs read-back is zero | transition fails |
 | complete transition | verified workload identity returned |
@@ -432,6 +457,10 @@ and:
 
 All current bounded-run, supervisor, pinned-FD, containment, and manager tests must remain green under Python 3.13 and 3.14.
 
+Generic CI MUST remain unprivileged and MUST NOT gain `CAP_SETUID` or `CAP_SETGID` merely to run the ordinary suite. Tests which exercise the existing fork/exec path may replace the private supervisor-module transition symbol before `fork()`; the forked child inherits that test substitution. This is a test-only seam, not a production runtime option.
+
+Production execution APIs still require a non-null explicit workload identity policy. There is no production bypass flag, no “current identity” fallback, and no optional transition mode. The real capability-bearing transition is exercised only by the dedicated live Linux validation.
+
 ### 16.4 Dedicated Linux live validation
 
 Before merging the implementation, run a dedicated Linux validation environment which grants only the identity-transition capabilities needed for the probe.
@@ -441,10 +470,12 @@ The live probe must demonstrate:
 1. start from a non-root host-agent-like UID;
 2. transition to a distinct non-root workload UID/GID;
 3. verify real/effective/saved IDs equal the workload IDs;
-4. verify supplementary groups are empty;
-5. verify current capability sets are empty;
-6. verify `no_new_privs=1`;
-7. verify an attempt to restore the host-agent UID fails.
+4. verify filesystem UID/GID equal the workload UID/GID;
+5. verify supplementary groups are empty;
+6. verify current capability sets are empty;
+7. verify `no_new_privs=1`;
+8. verify attempts to restore the host-agent UID/GID fail;
+9. verify an attempt to restore the manager-client supplementary group fails.
 
 This probe MUST NOT make the generic self-hosted runner privileged or add `CAP_SYS_ADMIN`.
 
@@ -476,15 +507,17 @@ This phase is complete when:
 1. the child cannot enter native exec without an explicit workload identity policy;
 2. the transition is ordered after containment release and before exec;
 3. the verified child identity is exactly the configured workload UID/GID with no saved host-agent identity;
-4. supplementary groups are empty;
-5. `no_new_privs=1`;
-6. effective/permitted/inheritable/ambient capabilities are empty;
-7. transition errors fail closed before exec;
-8. pinned cwd/executable validation remains after the identity drop;
-9. dedicated live Linux validation proves the child cannot restore the host-agent UID;
-10. Ruff, compile, Python 3.13 tests, and Python 3.14 tests pass;
-11. the containment manager protocol is unchanged;
-12. ForceCommand execution remains disabled.
+4. filesystem UID/GID equal the workload UID/GID;
+5. supplementary groups are empty;
+6. `no_new_privs=1`;
+7. effective/permitted/inheritable/ambient capabilities are empty;
+8. transition errors fail closed before exec;
+9. pinned cwd/executable validation remains after the identity drop;
+10. generic CI remains unprivileged while dedicated live Linux validation proves the real transition;
+11. dedicated live Linux validation proves the child cannot restore the host-agent UID/GID or manager-client supplementary group;
+12. Ruff, compile, Python 3.13 tests, and Python 3.14 tests pass;
+13. the containment manager protocol is unchanged;
+14. ForceCommand execution remains disabled.
 
 ## 19. Follow-on phases
 
