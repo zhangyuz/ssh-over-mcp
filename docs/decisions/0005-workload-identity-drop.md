@@ -48,7 +48,7 @@ After the existing containment manager confirms request-scope attachment and the
 8. reads back and verifies the complete identity/capability state;
 9. only then enters the existing pinned native exec path.
 
-The child must fail closed before exec if any transition or verification step fails.
+The child must fail closed before exec if the workload target is root, includes supplementary groups, reuses the current host-agent UID, or if any transition or verification step fails.
 
 The containment manager remains limited to typed containment operations and does not spawn or execute workloads.
 
@@ -94,7 +94,8 @@ A successful transition requires exact read-back verification of:
 - real/effective/saved GID;
 - supplementary groups;
 - `no_new_privs`;
-- effective/permitted/inheritable capabilities.
+- effective/permitted/inheritable capabilities;
+- ambient capabilities.
 
 The workload must not execute if any of these checks fail.
 
