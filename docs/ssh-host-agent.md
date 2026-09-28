@@ -548,9 +548,46 @@ endpoint socket:        manager UID : manager-client GID, mode 0660
 The identity plan also derives manager-side expected host-agent SO_PEERCRED and
 host-agent-side expected manager SO_PEERCRED policies.
 
-This contract defines the target state but does not itself change UID/GID or
-start the manager service. Those transitions/lifecycle checks are separate
-increments.
+This contract defines the target state but does not itself change UID/GID.
+Manager service lifecycle enforcement is the next composition layer.
+
+### Phase 3d2b2b2c2b2b2 containment-manager service lifecycle
+
+The manager now has a foreground serial service lifecycle which composes the
+existing identity, endpoint, peer-authentication, transport, and dispatcher
+boundaries without duplicating them.
+
+Service startup is ordered fail-closed:
+
+1. validate the manager process real/effective/saved UID and GID plus exact
+   supplementary groups;
+2. only after identity validation succeeds, create the secure Unix listener;
+3. accept one host-agent connection at a time;
+4. authenticate the peer through the existing Linux `SO_PEERCRED` policy
+   before manager protocol I/O;
+5. serve the existing bounded manager protocol until clean EOF or a
+   session-local failure;
+6. return to the serial accept loop.
+
+An unauthorized peer is session-local and closes only that connection.
+Malformed/truncated protocol input is likewise contained to the connection by
+the existing Unix session server. Listener/endpoint failures and unavailable
+peer-credential infrastructure remain service-fatal rather than being hidden by
+retry loops.
+
+The foreground loop uses fixed 100 ms readiness polling on the listener fd. A
+caller-owned stop predicate is checked before polling and again after readiness,
+so shutdown cannot race a newly-ready connection into an unwanted accept. The
+service installs no signal handler; an outer process supervisor may make its
+handler set only the stop state.
+
+Service `close()` is idempotent and delegates endpoint cleanup to
+`UnixContainmentManagerListener`, which removes only the socket inode it
+created. The service performs no independent pathname unlink.
+
+This phase does not daemonize, add systemd packaging, introduce concurrent
+sessions, switch manager/workload UID or GID, or garbage-collect every active
+containment scope on shutdown.
 
 The ForceCommand CLI remains non-executing.
 

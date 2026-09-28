@@ -658,3 +658,14 @@ def test_serve_forever_stops_while_idle(tmp_path: Path):
         assert errors == []
     finally:
         service.close()
+
+
+def test_host_agent_package_exports_manager_service():
+    module = _service_module()
+    from ssh_over_mcp import host_agent
+
+    assert host_agent.ContainmentManagerService is module.ContainmentManagerService
+    assert (
+        host_agent.ContainmentManagerServiceError
+        is module.ContainmentManagerServiceError
+    )

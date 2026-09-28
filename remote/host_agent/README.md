@@ -8,23 +8,26 @@ ssh-over-mcp-host-agent
 
 Normative behavior is defined in [`../../docs/ssh-host-agent.md`](../../docs/ssh-host-agent.md).
 
-## Current Phase 3d2b2b2c2b2b1 behavior
+## Current Phase 3d2b2b2c2b2b2 behavior
 
 The ForceCommand request path remains **non-executing**.
 
-The containment architecture now has an explicit Linux identity plan:
+The containment manager now has a foreground serial service lifecycle. Startup
+first validates the configured manager real/effective/saved UID/GID and exact
+supplementary groups. The secure Unix endpoint is created only after that check
+succeeds.
 
-- manager UID;
-- host-agent UID;
-- workload UID;
-- dedicated manager-client GID.
+Each accepted host-agent session is authenticated with the existing
+`SO_PEERCRED` policy before protocol traffic. Unauthorized or malformed
+sessions are bounded to that connection; listener/endpoint infrastructure
+failures remain service-fatal.
 
-The three UIDs must be distinct. Host-agent/workload and the client group must
-be non-root. Real/effective/saved IDs and supplementary groups are checked
-strictly.
+The service waits for connections with fixed 100 ms listener-readiness polling
+and a caller-owned stop predicate. It installs no signal handler. Shutdown is
+idempotent and delegates pathname cleanup to the existing listener, which
+removes only the socket inode it created.
 
-The plan derives endpoint ownership and both directions of SO_PEERCRED policy.
-
-No UID/GID transition or manager daemon is started yet. The next increment
-enforces the manager identity at service startup and owns listener/session
-lifecycle.
+There is still no UID/GID transition, daemonization/systemd unit, concurrent
+manager session handling, or ForceCommand execution. The next increment drops
+the execution child to the dedicated workload identity with no saved privilege
+before exec.

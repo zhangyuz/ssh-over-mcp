@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Through Phase 3d2b2b2c2b2a merged; Phase 3d2b2b2c2b2b1 implemented on phase-3d2b2b2c2b2b1-identity-contract; review/merge pending**
+Status: **Through Phase 3d2b2b2c2b2b2 implemented; ForceCommand execution remains disabled**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -332,9 +332,24 @@ Implemented:
 - bidirectional SO_PEERCRED policies derived from the identity plan;
 - filesystem endpoint owner/group policy derived from the identity plan.
 
+### Phase 3d2b2b2c2b2b2 — containment-manager service lifecycle
+
+Implemented:
+
+- exact manager process-identity validation before any endpoint side effect;
+- foreground synchronous serial manager service;
+- secure Unix listener creation only after identity validation succeeds;
+- one authenticated host-agent session at a time;
+- unauthorized peer failures bounded to the current session;
+- malformed/truncated protocol input bounded by the existing Unix session server;
+- listener/endpoint and peer-credential infrastructure failures remain service-fatal;
+- fixed 100 ms listener-readiness polling with caller-owned stop predicate;
+- stop recheck after readiness and before accept;
+- idempotent service close delegated to the listener's inode-checked endpoint cleanup;
+- no daemonization, concurrency, UID/GID switching, or ForceCommand execution.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2b2b2c2b2b2: containment-manager service lifecycle and process-identity enforcement at startup;
 - Phase 3d2b2b2c2b2b3: workload UID/GID transition before exec with no saved privilege;
 - Phase 3d2b2b2c2c: use the authenticated manager client through the existing start barrier and bounded runner;
 - Phase 3d2b2b2c3: live delegated-cgroup descendant-kill/resource-limit/self-migration tests;

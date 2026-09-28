@@ -35,6 +35,10 @@ from .containment_manager_identity import (
     read_linux_process_identity,
     require_linux_process_identity,
 )
+from .containment_manager_service import (
+    ContainmentManagerService,
+    ContainmentManagerServiceError,
+)
 from .containment_manager_peer import (
     ContainmentManagerPeerAuthError,
     LinuxPeerCredentialPolicy,
@@ -83,6 +87,8 @@ from .protocol import (
 )
 
 __all__ = [
+    "ContainmentManagerService",
+    "ContainmentManagerServiceError",
     "ContainmentServiceIdentityPlan",
     "LinuxProcessIdentity",
     "LinuxProcessIdentityError",
