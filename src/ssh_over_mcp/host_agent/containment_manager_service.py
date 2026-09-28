@@ -10,7 +10,11 @@ from .containment_manager_identity import (
     LinuxProcessIdentityPolicy,
     require_linux_process_identity,
 )
-from .containment_manager_peer import LinuxPeerCredentialPolicy
+from .containment_manager_peer import (
+    ContainmentManagerPeerAuthError,
+    LinuxPeerCredentialPolicy,
+)
+from .containment_manager_unix import serve_containment_manager_connection
 
 
 class ContainmentManagerServiceError(ContainmentError):
@@ -48,6 +52,22 @@ class ContainmentManagerService:
             peer_policy=peer_policy,
             dispatcher=dispatcher,
         )
+
+    def serve_one(self) -> None:
+        if self._closed:
+            raise ContainmentManagerServiceError(
+                "containment manager service is closed"
+            )
+
+        connection = self._listener.accept()
+        try:
+            serve_containment_manager_connection(
+                connection,
+                self._dispatcher,
+                peer_policy=self._peer_policy,
+            )
+        except ContainmentManagerPeerAuthError:
+            return
 
     def close(self) -> None:
         if self._closed:
