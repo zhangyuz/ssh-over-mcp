@@ -329,7 +329,8 @@ def _child_main(
         _close_unrelated_fds(keep)
         _apply_child_rlimits(prepared.child_limits)
         exec_prepared_native_in_child(prepared)
-    except BaseException:
+    except BaseException:  # noqa: BLE001
+        # Fork children must never unwind through the Python runtime.
         try:
             os.write(2, b"ssh-over-mcp-host-agent: child exec failed\n")
         except OSError:
@@ -380,7 +381,8 @@ def _contained_child_entry(
 
     try:
         _wait_start_barrier(barrier_read)
-    except BaseException:
+    except BaseException:  # noqa: BLE001
+        # A broken start barrier must terminate before any untrusted code runs.
         os._exit(125)
     finally:
         try:

@@ -85,7 +85,8 @@ class SSHConnectionManager:
 
         try:
             return not bool(entry.connection.is_closed())
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # Foreign connection status failures make the cached entry unusable.
             return False
 
     async def get_connection(self, alias: str) -> Any:
@@ -190,15 +191,17 @@ class SSHConnectionManager:
     async def _close_connection(connection: Any) -> None:
         try:
             connection.close()
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # Teardown is best-effort after the pool entry has been discarded.
             return
 
         try:
             result = connection.wait_closed()
             if inspect.isawaitable(result):
                 await result
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001
+            # Teardown is best-effort after the pool entry has been discarded.
+            return
 
 
 def _is_asyncssh_host_key_error(exc: BaseException) -> bool:

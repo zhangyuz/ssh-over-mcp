@@ -364,3 +364,35 @@ def test_failed_create_response_closes_unpublished_scope():
     assert isinstance(decoded, ErrorResponse)
     assert decoded.code == "operation_failed"
     assert backend.handles[0].closed is True
+
+
+def test_unexpected_manager_backend_error_is_generic_internal_response():
+    from ssh_over_mcp.host_agent.containment_manager import (
+        ErrorResponse,
+        decode_manager_response,
+    )
+
+    class UnexpectedBackend(ContainmentBackend):
+        @property
+        def name(self) -> str:
+            return "unexpected"
+
+        def create(self, request: ContainmentRequest) -> ContainmentHandle:
+            raise RuntimeError("secret backend implementation detail")
+
+    dispatcher = ContainmentManagerDispatcher(
+        UnexpectedBackend(),
+        capability_factory=lambda: "A" * 43,
+    )
+    message = CreateRequest(
+        message_id="msg_unexpected1",
+        request_id="req_unexpected1",
+        limits=ManagerLimits.from_limits(limits()),
+    )
+
+    raw = dispatcher.handle_frame(encode_manager_message(message))
+    decoded = decode_manager_response(raw)
+
+    assert isinstance(decoded, ErrorResponse)
+    assert decoded.code == "internal"
+    assert b"secret backend implementation detail" not in raw

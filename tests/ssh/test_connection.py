@@ -114,3 +114,51 @@ async def test_closed_connection_is_replaced():
 
     assert first is not second
     assert len(made) == 2
+
+
+@pytest.mark.asyncio
+async def test_connection_status_exception_marks_cached_entry_unusable():
+    class BrokenStatusConnection(Connection):
+        def is_closed(self):
+            raise RuntimeError("foreign status failure")
+
+    creds = StaticCredentialProvider(
+        {"secret://dev": SSHCredential(client_keys=("/run/key",))}
+    )
+    made = []
+
+    async def connector(_host, **_kwargs):
+        connection = BrokenStatusConnection() if not made else Connection()
+        made.append(connection)
+        return connection
+
+    manager = SSHConnectionManager(
+        inventory=inventory(),
+        credentials=creds,
+        connector=connector,
+    )
+
+    first = await manager.get_connection("dev01")
+    second = await manager.get_connection("dev01")
+
+    assert first is not second
+    assert len(made) == 2
+    assert first.closed is True
+    await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_close_connection_swallows_foreign_teardown_exceptions():
+    class CloseFails:
+        def close(self):
+            raise RuntimeError("foreign close failure")
+
+    class WaitFails:
+        def close(self):
+            pass
+
+        async def wait_closed(self):
+            raise RuntimeError("foreign wait_closed failure")
+
+    await SSHConnectionManager._close_connection(CloseFails())
+    await SSHConnectionManager._close_connection(WaitFails())

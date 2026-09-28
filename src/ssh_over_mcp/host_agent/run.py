@@ -193,7 +193,8 @@ def _unregister_close(
 
     try:
         selector.unregister(fd)
-    except Exception:
+    except Exception:  # noqa: BLE001,S110
+        # Selector cleanup is best-effort; fd close below must still run.
         pass
 
     try:
@@ -451,7 +452,8 @@ def run_prepared_native(
 
         try:
             _hard_kill_contained(child)
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # Cleanup must continue through reaping and containment close.
             cleanup_failed = True
 
         child.close_stdin()
@@ -464,7 +466,8 @@ def run_prepared_native(
             )
             if reaped is None:
                 cleanup_failed = True
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # Cleanup must still attempt containment close if reaping fails.
             cleanup_failed = True
 
         try:
@@ -472,7 +475,8 @@ def run_prepared_native(
                 child,
                 time.monotonic() + min(0.20, kill_cleanup_seconds),
             )
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # Aggregate cleanup failures into the generic supervision boundary.
             cleanup_failed = True
 
         if cleanup_failed:

@@ -3,6 +3,7 @@ import os
 import shutil
 import signal
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -21,6 +22,7 @@ from ssh_over_mcp.host_agent.run import (
     _read_output,
     _reap_until,
     _signal_process_group,
+    _unregister_close,
     run_prepared_native,
 )
 from ssh_over_mcp.ssh.protocol import ExecutionLimits
@@ -508,3 +510,103 @@ def test_wall_timeout_escalates_to_containment_kill_when_term_is_ignored(
         assert result.duration_seconds < 2.0
     finally:
         prepared.close()
+
+
+def test_unregister_close_still_closes_fd_when_selector_unregister_raises(
+    monkeypatch,
+):
+    class BrokenSelector:
+        def unregister(self, _fd):
+            raise RuntimeError("foreign selector failure")
+
+    child = SimpleNamespace(stdin_fd=41)
+    closed: list[int] = []
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run.os.close",
+        lambda fd: closed.append(fd),
+    )
+
+    _unregister_close(BrokenSelector(), child, "stdin_fd")
+
+    assert closed == [41]
+    assert child.stdin_fd == -1
+
+
+@pytest.mark.parametrize("failing_cleanup", ["kill", "reap", "close"])
+def test_unexpected_cleanup_failure_is_normalized_and_other_cleanup_continues(
+    monkeypatch,
+    failing_cleanup: str,
+):
+    class CleanupChild:
+        pid = 1234
+        stdin_fd = 10
+        stdout_fd = 11
+        stderr_fd = 12
+        containment = object()
+
+        def close_stdin(self):
+            self.stdin_fd = -1
+
+        def close_pipes(self):
+            self.stdout_fd = -1
+            self.stderr_fd = -1
+
+    child = CleanupChild()
+    cleanup_calls: list[str] = []
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run.spawn_prepared_native_contained",
+        lambda *_args, **_kwargs: child,
+    )
+
+    def fail_primary(_fd, _blocking):
+        raise RuntimeError("primary supervision failure")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run.os.set_blocking",
+        fail_primary,
+    )
+
+    def hard_kill(_child):
+        cleanup_calls.append("kill")
+        if failing_cleanup == "kill":
+            raise RuntimeError("secret kill cleanup failure")
+
+    def reap(_child, _deadline):
+        cleanup_calls.append("reap")
+        if failing_cleanup == "reap":
+            raise RuntimeError("secret reap cleanup failure")
+        return 0
+
+    def close_containment(_child, _deadline):
+        cleanup_calls.append("close")
+        if failing_cleanup == "close":
+            raise RuntimeError("secret containment cleanup failure")
+        return ContainmentStats(populated=False)
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run._hard_kill_contained",
+        hard_kill,
+    )
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run._reap_until",
+        reap,
+    )
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run._close_containment_bounded",
+        close_containment,
+    )
+
+    with pytest.raises(
+        BoundedExecutionError,
+        match="bounded contained-child cleanup failed",
+    ):
+        run_prepared_native(
+            object(),
+            b"",
+            _limits(),
+            containment_backend=object(),
+            containment_request=object(),
+        )
+
+    assert cleanup_calls == ["kill", "reap", "close"]

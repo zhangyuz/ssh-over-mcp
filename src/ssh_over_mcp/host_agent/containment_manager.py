@@ -408,7 +408,8 @@ class ContainmentManagerDispatcher:
             return self._error(request.message_id, "unavailable")
         except (ContainmentError, ValueError):
             return self._error(request.message_id, "operation_failed")
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # Trust boundary: never expose unexpected backend implementation details.
             return self._error(request.message_id, "internal")
 
 

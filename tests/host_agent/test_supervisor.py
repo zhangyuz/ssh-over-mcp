@@ -21,6 +21,7 @@ from ssh_over_mcp.host_agent.supervisor import (
     SpawnedChild,
     _apply_child_rlimits,
     _close_unrelated_fds,
+    _contained_child_entry,
     _require_standard_fds,
     _set_bounded_rlimit,
     spawn_prepared_native,
@@ -565,3 +566,82 @@ def test_containment_request_id_mismatch_is_rejected_before_create(
         assert backend.requests == []
     finally:
         prepared.close()
+
+
+def test_child_exec_base_exception_is_generic_and_exit_125(
+    tmp_path: Path,
+    monkeypatch,
+):
+    prepared = _prepared(tmp_path)
+
+    def fail_exec(_prepared):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor.exec_prepared_native_in_child",
+        fail_exec,
+    )
+
+    child = spawn_prepared_native(prepared)
+    prepared.close()
+
+    try:
+        child.close_stdin()
+        stderr = _read_all(child.stderr_fd)
+        returncode = child.wait()
+
+        assert stderr == b"ssh-over-mcp-host-agent: child exec failed\n"
+        assert returncode == 125
+    finally:
+        child.close_pipes()
+
+
+def test_contained_child_barrier_base_exception_exits_125(monkeypatch):
+    def interrupt_barrier(_fd):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor._wait_start_barrier",
+        interrupt_barrier,
+    )
+
+    barrier_read, barrier_write = os.pipe2(os.O_CLOEXEC)
+    stdin_read, stdin_write = os.pipe2(os.O_CLOEXEC)
+    stdout_read, stdout_write = os.pipe2(os.O_CLOEXEC)
+    stderr_read, stderr_write = os.pipe2(os.O_CLOEXEC)
+    fds = (
+        barrier_read,
+        barrier_write,
+        stdin_read,
+        stdin_write,
+        stdout_read,
+        stdout_write,
+        stderr_read,
+        stderr_write,
+    )
+
+    pid = os.fork()
+    if pid == 0:
+        _contained_child_entry(
+            object(),
+            barrier_read=barrier_read,
+            barrier_write=barrier_write,
+            stdin_read=stdin_read,
+            stdin_write=stdin_write,
+            stdout_read=stdout_read,
+            stdout_write=stdout_write,
+            stderr_read=stderr_read,
+            stderr_write=stderr_write,
+        )
+        os._exit(127)
+
+    try:
+        _, status = os.waitpid(pid, 0)
+        assert os.WIFEXITED(status)
+        assert os.WEXITSTATUS(status) == 125
+    finally:
+        for fd in fds:
+            try:
+                os.close(fd)
+            except OSError:
+                pass

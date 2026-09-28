@@ -211,7 +211,8 @@ def test_native_fd_execve_works_in_disposable_child(tmp_path: Path):
     if pid == 0:
         try:
             exec_prepared_native_in_child(prepared)
-        except BaseException:
+        except BaseException:  # noqa: BLE001
+            # Disposable fork child must never unwind into the pytest process.
             os._exit(125)
         os._exit(126)
 
