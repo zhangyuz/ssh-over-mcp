@@ -93,6 +93,9 @@ jobs:
           python -m pip install -U pip
           python -m pip install -e '.[dev]'
 
+      - name: Lint source and tests
+        run: python -m ruff check src tests
+
       - name: Verify project cgroup-v2 read-only probe
         shell: bash
         run: |
