@@ -4,6 +4,8 @@ import importlib
 import os
 import socket
 import stat
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -254,6 +256,10 @@ class _QueueListener:
         if isinstance(value, BaseException):
             raise value
         return value
+
+    @property
+    def fileno(self):
+        return 123
 
     def close(self):
         pass
@@ -523,5 +529,132 @@ def test_backend_operation_error_response_does_not_poison_next_session(
         )
         assert isinstance(second, CreateResponse)
         assert backend.created == 1
+    finally:
+        service.close()
+
+
+def test_serve_forever_stops_without_accept_when_stop_already_requested(
+    monkeypatch,
+):
+    module = _service_module()
+    listener = _QueueListener([])
+    service = _unit_service(module, listener)
+    waits = []
+    monkeypatch.setattr(
+        module,
+        "_wait_listener_readable",
+        lambda fd: waits.append(fd) or True,
+        raising=False,
+    )
+
+    service.serve_forever(stop_requested=lambda: True)
+
+    assert waits == []
+    assert listener.accept_calls == 0
+
+
+def test_serve_forever_rechecks_stop_after_readiness(monkeypatch):
+    module = _service_module()
+    service = _unit_service(module, _QueueListener([]))
+    stop_states = iter([False, True])
+    served = []
+    monkeypatch.setattr(
+        module,
+        "_wait_listener_readable",
+        lambda _fd: True,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service,
+        "serve_one",
+        lambda: served.append("served"),
+    )
+
+    service.serve_forever(stop_requested=lambda: next(stop_states))
+
+    assert served == []
+
+
+def test_interrupted_readiness_poll_retries_via_stop_check(monkeypatch):
+    module = _service_module()
+
+    def interrupt(*_args):
+        raise InterruptedError
+
+    monkeypatch.setattr(module.select, "select", interrupt)
+
+    assert module._wait_listener_readable(123) is False
+
+
+def test_readiness_infrastructure_error_is_service_fatal(monkeypatch):
+    module = _service_module()
+
+    def fail(*_args):
+        raise OSError("poll failed")
+
+    monkeypatch.setattr(module.select, "select", fail)
+
+    with pytest.raises(
+        module.ContainmentManagerServiceError,
+        match="cannot poll containment manager listener",
+    ):
+        module._wait_listener_readable(123)
+
+
+def test_ready_listener_serves_one_then_returns_to_poll(monkeypatch):
+    module = _service_module()
+    service = _unit_service(module, _QueueListener([]))
+    stop_states = iter([False, False, True])
+    served = []
+
+    monkeypatch.setattr(
+        module,
+        "_wait_listener_readable",
+        lambda _fd: True,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service,
+        "serve_one",
+        lambda: served.append("served"),
+    )
+
+    service.serve_forever(stop_requested=lambda: next(stop_states))
+
+    assert served == ["served"]
+
+
+def test_serve_forever_rejects_closed_service():
+    module = _service_module()
+    service = _unit_service(module, _QueueListener([]))
+    service.close()
+
+    with pytest.raises(
+        module.ContainmentManagerServiceError,
+        match="closed",
+    ):
+        service.serve_forever(stop_requested=lambda: True)
+
+
+def test_serve_forever_stops_while_idle(tmp_path: Path):
+    service, _endpoint = _create_real_service(tmp_path)
+    stop = threading.Event()
+    errors: list[BaseException] = []
+
+    def run_service() -> None:
+        try:
+            service.serve_forever(stop_requested=stop.is_set)
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=run_service, daemon=True)
+    thread.start()
+    time.sleep(0.05)
+    stop.set()
+    thread.join(timeout=1.0)
+
+    try:
+        assert thread.is_alive() is False
+        assert errors == []
     finally:
         service.close()
