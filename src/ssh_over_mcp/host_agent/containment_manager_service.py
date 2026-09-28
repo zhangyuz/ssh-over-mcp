@@ -67,7 +67,7 @@ class ContainmentManagerService:
         endpoint_policy: UnixManagerEndpointPolicy,
         peer_policy: LinuxPeerCredentialPolicy,
         dispatcher: ContainmentManagerDispatcher,
-    ) -> "ContainmentManagerService":
+    ) -> ContainmentManagerService:
         require_linux_process_identity(identity_policy)
         listener = UnixContainmentManagerListener.create(endpoint_policy)
         return cls(

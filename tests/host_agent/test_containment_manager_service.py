@@ -20,7 +20,6 @@ from ssh_over_mcp.host_agent.containment import (
     ContainmentUnavailableError,
 )
 from ssh_over_mcp.host_agent.containment_manager import (
-    MANAGER_PROTOCOL_MAGIC,
     ContainmentManagerDispatcher,
     CreateRequest,
     CreateResponse,
@@ -644,7 +643,7 @@ def test_serve_forever_stops_while_idle(tmp_path: Path):
     def run_service() -> None:
         try:
             service.serve_forever(stop_requested=stop.is_set)
-        except BaseException as exc:
+        except ContainmentError as exc:
             errors.append(exc)
 
     thread = threading.Thread(target=run_service, daemon=True)
