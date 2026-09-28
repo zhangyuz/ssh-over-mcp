@@ -197,6 +197,12 @@ A future privileged/break-glass path must be a separate design. The normal struc
 
 The child MUST NOT rely on implicit Linux capability changes caused by UID transitions.
 
+This is especially important because the production transition is from one
+nonzero UID to a different nonzero UID. Linux's automatic capability-clearing
+rules are primarily tied to transitions involving UID 0; this nonroot-to-
+nonroot transition does not provide the security invariant we need. The child
+therefore explicitly clears and verifies its own capability sets.
+
 The implementation explicitly:
 
 1. clears ambient capabilities before the UID/GID transition;
