@@ -39,19 +39,16 @@ def rule_matches(
         return False
     if rule.tools and not _any_match(request.tool, rule.tools):
         return False
-    if rule.executables:
-        if executable is None or not _any_match(executable, rule.executables):
-            return False
+    if rule.executables and (
+        executable is None or not _any_match(executable, rule.executables)
+    ):
+        return False
     if rule.capabilities and not capabilities.intersection(rule.capabilities):
         return False
     if not _argv_prefix_matches(request.args, rule.argv_prefix):
         return False
-    if rule.cwd:
-        if cwd is None or not _any_match(cwd, rule.cwd):
-            return False
-    if rule.paths:
-        if path is None or not _any_match(path, rule.paths):
-            return False
-    if rule.privileges and not _any_match(request.privilege, rule.privileges):
+    if rule.cwd and (cwd is None or not _any_match(cwd, rule.cwd)):
         return False
-    return True
+    if rule.paths and (path is None or not _any_match(path, rule.paths)):
+        return False
+    return not rule.privileges or _any_match(request.privilege, rule.privileges)
