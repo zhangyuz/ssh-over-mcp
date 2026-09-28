@@ -47,7 +47,7 @@ The deployment grants the host-agent process:
 
 and no broader capability solely for workload identity transition.
 
-After `fork()`, only the child consumes this authority for the transition. The child then removes all current capability sets before executing workload code.
+After `fork()`, only the child consumes this authority for the transition. The child then removes all effective, permitted, inheritable, and ambient capability state before executing workload code.
 
 The containment manager does not perform the identity transition and does not spawn or exec workloads.
 
@@ -155,6 +155,8 @@ parent forks child
 
 No untrusted workload code executes before containment attachment or before the identity transition.
 
+Before any transition syscall, the helper MUST reject a workload policy whose target UID or GID is root, whose supplementary-group set is non-empty, or whose target UID equals the current host-agent UID. The workload transition is never a no-op identity path.
+
 Within the released child, the required order is:
 
 1. create the child session and reset signals;
@@ -213,6 +215,15 @@ Production deployment SHOULD constrain the host-agent's capability bounding set 
 ## 10. Post-drop verification
 
 The transition is successful only if all read-back checks pass.
+
+Required input constraints:
+
+```text
+workload UID != 0
+workload GID != 0
+workload UID != current host-agent UID
+configured supplementary groups == empty
+```
 
 Required identity state:
 
@@ -334,6 +345,7 @@ If transition fails, the existing child failure boundary emits only the existing
 The following are fatal to the child before exec:
 
 - missing required Linux credential APIs;
+- root workload UID/GID, non-empty workload supplementary groups, or no-op workload UID;
 - failure to set `no_new_privs`;
 - failure to clear ambient capabilities;
 - failure to clear supplementary groups;
@@ -381,6 +393,9 @@ Required cases include:
 | Case | Expected result |
 | --- | --- |
 | missing required Linux API | fail closed |
+| workload target is root | fail closed before mutation |
+| workload supplementary groups are non-empty | fail closed before mutation |
+| workload UID equals current host-agent UID | fail closed before mutation |
 | set no_new_privs fails | transition fails before ID change |
 | ambient clear fails | transition fails |
 | setgroups fails | no GID/UID transition proceeds |
