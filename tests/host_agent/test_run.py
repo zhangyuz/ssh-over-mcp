@@ -487,7 +487,10 @@ def test_wall_timeout_escalates_to_containment_kill_when_term_is_ignored(
     prepared = _prepared(
         tmp_path,
         _source("/bin/sh", "/usr/bin/dash"),
-        argv=("-c", "trap '' TERM; sleep 5"),
+        # Use shell builtins only: RLIMIT_NPROC is enforced per real UID on Linux,
+        # so spawning an external sleep can fail under a busy shared runner before
+        # the timeout path is exercised.
+        argv=("-c", "trap '' TERM; while :; do :; done"),
     )
     backend, request = _containment(prepared)
 
