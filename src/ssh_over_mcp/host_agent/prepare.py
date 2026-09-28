@@ -58,7 +58,7 @@ class PreparedCommand:
                 pass
             self._closed = True
 
-    def __enter__(self) -> "PreparedCommand":
+    def __enter__(self) -> PreparedCommand:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:

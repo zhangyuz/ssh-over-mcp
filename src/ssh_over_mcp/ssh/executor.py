@@ -14,9 +14,9 @@ from ssh_over_mcp.policy.models import Decision, EvaluationRequest
 from .connection import SSHConnectionManager
 from .errors import SSHApprovalRequired, SSHPolicyDenied
 from .protocol import (
+    REMOTE_PROTOCOL_COMMAND,
     ExecEnvelope,
     ExecutionLimits,
-    REMOTE_PROTOCOL_COMMAND,
     encode_request,
 )
 

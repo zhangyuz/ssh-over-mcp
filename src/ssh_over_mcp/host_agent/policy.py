@@ -48,7 +48,7 @@ class HostArgvRule(BaseModel):
     args: tuple[str, ...] = ()
 
     @model_validator(mode="after")
-    def validate_rule(self) -> "HostArgvRule":
+    def validate_rule(self) -> HostArgvRule:
         if self.mode == "prefix" and not self.args:
             raise ValueError("argv prefix rule must contain at least one argument")
         if any("\x00" in value for value in self.args):
@@ -82,7 +82,7 @@ class HostCommandRule(BaseModel):
         )
 
     @model_validator(mode="after")
-    def validate_cwd_policy(self) -> "HostCommandRule":
+    def validate_cwd_policy(self) -> HostCommandRule:
         if not self.cwd_roots and not self.allow_no_cwd:
             raise ValueError(
                 "command rule must define cwd_roots or explicitly allow no cwd"

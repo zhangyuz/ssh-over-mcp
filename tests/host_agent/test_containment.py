@@ -5,12 +5,12 @@ from pathlib import Path
 import pytest
 
 from ssh_over_mcp.host_agent.containment import (
+    REQUIRED_CGROUP_V2_CONTROLLERS,
     ContainmentBackend,
     ContainmentHandle,
     ContainmentLimits,
     ContainmentRequest,
     ContainmentStats,
-    REQUIRED_CGROUP_V2_CONTROLLERS,
     probe_cgroup_v2,
 )
 

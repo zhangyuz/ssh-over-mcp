@@ -47,7 +47,7 @@ class ManagerLimits(BaseModel):
     cpu_period_us: int
 
     @classmethod
-    def from_limits(cls, limits: ContainmentLimits) -> "ManagerLimits":
+    def from_limits(cls, limits: ContainmentLimits) -> ManagerLimits:
         return cls(
             memory_max_bytes=limits.memory_max_bytes,
             pids_max=limits.pids_max,
@@ -73,7 +73,7 @@ class ManagerStats(BaseModel):
     populated: bool | None = None
 
     @classmethod
-    def from_stats(cls, stats: ContainmentStats) -> "ManagerStats":
+    def from_stats(cls, stats: ContainmentStats) -> ManagerStats:
         return cls(
             memory_current_bytes=stats.memory_current_bytes,
             pids_current=stats.pids_current,

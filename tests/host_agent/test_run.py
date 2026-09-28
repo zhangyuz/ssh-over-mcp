@@ -1,6 +1,6 @@
 import os
-import signal
 import shutil
+import signal
 from pathlib import Path
 
 import pytest

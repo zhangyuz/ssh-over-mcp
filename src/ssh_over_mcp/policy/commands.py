@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import posixpath
 
-
 SHELLS = {"bash", "sh", "dash", "zsh", "fish", "ksh", "csh", "tcsh"}
 INTERPRETERS = {"python", "python3", "perl", "ruby", "node", "php", "lua"}
 PACKAGE_MANAGERS = {

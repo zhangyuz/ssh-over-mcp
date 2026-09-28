@@ -110,7 +110,7 @@ class ContainmentHandle(ABC):
     def close(self) -> None:
         """Release backend resources after the scope is empty."""
 
-    def __enter__(self) -> "ContainmentHandle":
+    def __enter__(self) -> ContainmentHandle:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:

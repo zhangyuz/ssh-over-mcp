@@ -231,7 +231,7 @@ class UnixContainmentManagerListener:
     def create(
         cls,
         policy: UnixManagerEndpointPolicy,
-    ) -> "UnixContainmentManagerListener":
+    ) -> UnixContainmentManagerListener:
         _validate_parent(policy)
         _require_endpoint_absent(policy.path)
 
@@ -340,7 +340,7 @@ class UnixContainmentManagerListener:
                 self._identity,
             )
 
-    def __enter__(self) -> "UnixContainmentManagerListener":
+    def __enter__(self) -> UnixContainmentManagerListener:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:

@@ -18,7 +18,6 @@ from .models import (
 from .paths import PathPolicyError, normalize_remote_path
 from .risk import classify_risk
 
-
 _ALWAYS_DENIED_ENV = (
     "LD_PRELOAD",
     "LD_LIBRARY_PATH",
