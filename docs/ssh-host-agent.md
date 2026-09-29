@@ -589,7 +589,54 @@ This phase does not daemonize, add systemd packaging, introduce concurrent
 sessions, switch manager/workload UID or GID, or garbage-collect every active
 containment scope on shutdown.
 
-The ForceCommand CLI remains non-executing.
+### Phase 3d2b2b2c2b2b3 irreversible workload identity transition
+
+Every supervisor spawn path which can reach native exec now crosses an explicit
+Linux credential boundary after containment attachment/release and trusted child setup, but
+before the pinned native ELF exec path. The host-agent service identity is
+non-root and requires only `CAP_SETUID` and `CAP_SETGID` for this transition;
+it does not receive `CAP_KILL`.
+
+The child transition is ordered fail-closed:
+
+1. containment attachment succeeds and the start barrier is released;
+2. trusted child session/signal/stdio/fd setup and host-local rlimits complete;
+3. `PR_SET_NO_NEW_PRIVS=1` is set and ambient capabilities are cleared;
+4. supplementary groups are cleared to a literally empty set;
+5. real/effective/saved GID are set to the workload GID;
+6. real/effective/saved UID are set to the workload UID;
+7. FSUID/FSGID are read back and must match the workload identity;
+8. effective/permitted/inheritable capability sets are cleared and read back;
+9. exact post-drop credentials, empty groups, zero capabilities, and
+   `no_new_privs=1` are verified;
+10. only then does final pinned cwd/executable revalidation and fd-based native
+    ELF `execve` occur.
+
+There is no optional workload policy, current-identity fallback, or bypass mode.
+A transition failure takes the existing generic child-failure path and never
+reaches native exec.
+
+After the child changes UID, parent process-group/direct signaling can
+legitimately fail with `EPERM`. The parent does not regain authority with
+`CAP_KILL` or by switching identity. Timeout/output termination therefore
+treats cross-UID signal denial as a cue to use the existing containment
+`kill_all()` operation immediately. Recursive containment kill remains the
+authoritative hard-cleanup mechanism; process-group/direct SIGKILL is only
+defense-in-depth, and containment accounting still decides whether the request
+scope is empty.
+
+The dedicated disposable Linux live probe proves the real capability-bearing
+transition, irreversibility, parent identity preservation, expected
+`kill(child_pid, 0) -> EPERM`, and persistence of the dropped state through
+the repository's pinned native ELF fd-exec path. Ordinary validation remains
+unprivileged; the live proof is run explicitly with:
+
+```bash
+./scripts/run-live-workload-identity-probe.py
+```
+
+The containment-manager protocol is unchanged by this phase, and the
+ForceCommand CLI remains non-executing.
 
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 

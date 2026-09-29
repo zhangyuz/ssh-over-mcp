@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Through Phase 3d2b2b2c2b2b2 implemented; ForceCommand execution remains disabled**
+Status: **Through Phase 3d2b2b2c2b2b3 implemented; ForceCommand execution remains disabled**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -348,9 +348,25 @@ Implemented:
 - idempotent service close delegated to the listener's inode-checked endpoint cleanup;
 - no daemonization, concurrency, UID/GID switching, or ForceCommand execution.
 
+### Phase 3d2b2b2c2b2b3 — irreversible workload identity transition
+
+Implemented:
+
+- every supervisor spawn path which can reach native exec requires an explicit workload identity policy;
+- non-root host-agent child transition uses only `CAP_SETUID` and `CAP_SETGID`;
+- `no_new_privs=1` is established before identity mutation;
+- ambient and supplementary groups are cleared before UID/GID transition;
+- real/effective/saved workload UID/GID plus FSUID/FSGID are verified;
+- effective/permitted/inheritable capability sets are explicitly cleared and read back;
+- post-drop supplementary groups must be literally empty;
+- cross-UID signal `EPERM` escalates immediately to containment-authoritative kill;
+- parent retains its original identity and does not receive `CAP_KILL`;
+- dedicated disposable Linux live proof validates irreversibility and native ELF post-exec state;
+- generic validation remains capability-free;
+- containment-manager protocol is unchanged and ForceCommand execution remains disabled.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2b2b2c2b2b3: workload UID/GID transition before exec with no saved privilege;
 - Phase 3d2b2b2c2c: use the authenticated manager client through the existing start barrier and bounded runner;
 - Phase 3d2b2b2c3: live delegated-cgroup descendant-kill/resource-limit/self-migration tests;
 - Phase 3d2c: wire supervised native execution into the ForceCommand CLI only after containment is enforced;
