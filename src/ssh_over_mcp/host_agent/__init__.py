@@ -48,6 +48,7 @@ from .containment_manager_service import (
 )
 from .containment_manager_unix import (
     UnixContainmentManagerTransport,
+    connect_authenticated_containment_manager,
     serve_containment_manager_connection,
 )
 from .execute import (
@@ -136,6 +137,7 @@ __all__ = [
     "authenticate_linux_unix_peer",
     "authorize_request",
     "build_native_exec_spec",
+    "connect_authenticated_containment_manager",
     "exec_prepared_native_in_child",
     "load_host_policy",
     "prepare_command",

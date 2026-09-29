@@ -265,6 +265,10 @@ class ContainmentManagerTransport(ABC):
     def round_trip(self, frame: bytes) -> bytes:
         """Send one complete frame and return exactly one complete response."""
 
+    @abstractmethod
+    def close(self) -> None:
+        """Release the manager transport."""
+
 
 @dataclass(slots=True)
 class _ManagedScope:
@@ -422,12 +426,16 @@ class InMemoryContainmentManagerTransport(ContainmentManagerTransport):
     def round_trip(self, frame: bytes) -> bytes:
         return self._dispatcher.handle_frame(frame)
 
+    def close(self) -> None:
+        return
+
 
 class ContainmentManagerClient(ContainmentBackend):
     """Host-agent ContainmentBackend adapter for the manager protocol."""
 
     def __init__(self, transport: ContainmentManagerTransport) -> None:
         self._transport = transport
+        self._closed = False
 
     @property
     def name(self) -> str:
@@ -437,6 +445,11 @@ class ContainmentManagerClient(ContainmentBackend):
         self,
         request: ManagerRequest,
     ) -> ManagerResponse:
+        if self._closed:
+            raise ContainmentUnavailableError(
+                "containment manager client is closed"
+            )
+
         try:
             response = decode_manager_response(
                 self._transport.round_trip(
@@ -483,6 +496,12 @@ class ContainmentManagerClient(ContainmentBackend):
             scope_id=response.scope_id,
             capability=response.capability,
         )
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._transport.close()
 
 
 class ManagedContainmentHandle(ContainmentHandle):

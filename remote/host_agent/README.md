@@ -8,7 +8,7 @@ ssh-over-mcp-host-agent
 
 Normative behavior is defined in [`../../docs/ssh-host-agent.md`](../../docs/ssh-host-agent.md).
 
-## Current Phase 3d2b2b2c2b2b3 behavior
+## Current Phase 3d2b2b2c2c behavior
 
 The ForceCommand request path remains **non-executing**.
 
@@ -40,7 +40,18 @@ The real boundary is covered by the dedicated disposable Linux probe:
 ./scripts/run-live-workload-identity-probe.py
 ```
 
-Generic tests remain unprivileged. ForceCommand execution remains disabled.
-The next increment is Phase `3d2b2b2c2c`: integrate the authenticated
-containment-manager client through the existing start barrier and bounded
-runner.
+Generic tests remain unprivileged.
+
+Phase `3d2b2b2c2c` now supplies the existing start barrier and bounded runner
+with a production authenticated `ContainmentManagerClient`:
+
+- one `ContainmentServiceIdentityPlan` derives both the required host-agent
+  process identity and expected manager `SO_PEERCRED`;
+- host-agent identity is checked before opening the Unix manager socket;
+- the manager socket is non-inheritable, uses a bounded connect/round-trip
+  timeout, and is closed by child fd sanitation before native exec;
+- the supervisor/runner containment ordering and manager protocol are unchanged.
+
+ForceCommand execution remains disabled. The next increment is Phase
+`3d2b2b2c3`: live delegated-cgroup descendant-kill, resource-limit, and
+self-migration validation.

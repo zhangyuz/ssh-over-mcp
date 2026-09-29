@@ -638,6 +638,42 @@ unprivileged; the live proof is run explicitly with:
 The containment-manager protocol is unchanged by this phase, and the
 ForceCommand CLI remains non-executing.
 
+### Phase 3d2b2b2c2c authenticated manager-client integration
+
+The host agent now has one production composition entrypoint for the local
+containment manager. `connect_authenticated_containment_manager()` accepts a
+configured Unix endpoint path plus the server-owned
+`ContainmentServiceIdentityPlan`.
+
+Before opening any socket, the connector validates the current host-agent
+real/effective/saved UID/GID and exact supplementary groups against the policy
+derived from that identity plan. It also derives the expected manager
+`SO_PEERCRED` policy from the same plan, so a caller cannot independently pair
+a manager path with a weaker or unrelated peer identity policy.
+
+The connector creates only an `AF_UNIX/SOCK_STREAM` socket, marks it
+non-inheritable, applies a bounded connect timeout, connects to the lexically
+validated endpoint path, authenticates the connected manager through the
+existing Unix transport, and returns the existing `ContainmentManagerClient`.
+That client continues to implement `ContainmentBackend`, so the established
+start barrier and bounded runner are used without a second execution path.
+
+The manager control descriptor can exist in the forked child only while the
+child is trusted and blocked before exec. It is not in the child fd keep-set;
+the existing child fd sanitation closes it before rlimits, workload credential
+transition, and native ELF exec. A dedicated regression binds the concrete
+manager transport fd to this invariant.
+
+Client transport shutdown is explicit and idempotent. Once the client is
+closed, later manager operations fail unavailable rather than reusing a test
+transport which happens to remain callable.
+
+This phase does not add a manager protocol operation, change cgroup filesystem
+authority, alter containment attach/release ordering, or enable ForceCommand
+execution. The next phase performs live delegated-cgroup descendant-kill,
+resource-limit, and self-migration validation across the separated privilege
+domains.
+
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 
 The central policy may be more expressive, but the host-local policy should preserve critical invariants if the central layer is bypassed.
