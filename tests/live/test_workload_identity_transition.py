@@ -14,6 +14,7 @@ from ssh_over_mcp.host_agent.containment_manager_identity import (
     LinuxProcessIdentityPolicy,
 )
 from ssh_over_mcp.host_agent.execute import exec_prepared_native_in_child
+from ssh_over_mcp.host_agent.file_identity import sha256_fd
 from ssh_over_mcp.host_agent.policy import HostChildLimits, HostObjectIdentity
 from ssh_over_mcp.host_agent.prepare import PreparedCommand
 from ssh_over_mcp.host_agent.workload_identity import (
