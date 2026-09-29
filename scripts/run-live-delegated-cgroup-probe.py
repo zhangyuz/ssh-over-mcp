@@ -69,7 +69,7 @@ def main() -> int:
                 "-q",
                 "tests/live/test_delegated_cgroup.py",
                 "-k",
-                "production_manager_client_barrier_and_migration_denial",
+                "production_manager_client_barrier_and_migration_denial or real_pid_and_cpu_enforcement",
             ],
             cwd=repository,
             env=env,
