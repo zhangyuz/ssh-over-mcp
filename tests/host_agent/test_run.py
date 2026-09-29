@@ -9,10 +9,15 @@ import pytest
 
 from ssh_over_mcp.host_agent.containment import (
     ContainmentBackend,
+    ContainmentError,
     ContainmentHandle,
     ContainmentLimits,
     ContainmentRequest,
     ContainmentStats,
+)
+from ssh_over_mcp.host_agent.containment_manager_identity import (
+    LinuxProcessIdentity,
+    LinuxProcessIdentityPolicy,
 )
 from ssh_over_mcp.host_agent.policy import HostChildLimits, HostObjectIdentity
 from ssh_over_mcp.host_agent.prepare import PreparedCommand
@@ -22,9 +27,11 @@ from ssh_over_mcp.host_agent.run import (
     _read_output,
     _reap_until,
     _signal_process_group,
+    _SignalOutcome,
     _unregister_close,
     run_prepared_native,
 )
+from ssh_over_mcp.host_agent.supervisor import ChildSupervisorError
 from ssh_over_mcp.ssh.protocol import ExecutionLimits
 
 pytestmark = pytest.mark.skipif(
@@ -34,6 +41,21 @@ pytestmark = pytest.mark.skipif(
     or os.execve not in os.supports_fd,
     reason="requires Linux/POSIX fork, pipe2, and fd-based execve",
 )
+
+
+def _workload_policy() -> LinuxProcessIdentityPolicy:
+    return LinuxProcessIdentityPolicy(
+        identity=LinuxProcessIdentity(uid=2103, gid=3103),
+        supplementary_gids=frozenset(),
+    )
+
+
+@pytest.fixture(autouse=True)
+def _stub_workload_identity_transition(monkeypatch):
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor.transition_to_workload_identity",
+        lambda _policy: None,
+    )
 
 
 def _child_limits() -> HostChildLimits:
@@ -194,6 +216,7 @@ def test_bounded_cat_round_trip(tmp_path: Path):
             prepared,
             b"hello bounded runner\n",
             _limits(),
+            workload_identity_policy=_workload_policy(),
             containment_backend=backend,
             containment_request=request,
             term_grace_seconds=0.05,
@@ -223,6 +246,7 @@ def test_wall_timeout_can_finish_during_grace_period(tmp_path: Path):
             prepared,
             b"",
             _limits(timeout=0.05),
+            workload_identity_policy=_workload_policy(),
             containment_backend=backend,
             containment_request=request,
             term_grace_seconds=0.02,
@@ -250,6 +274,7 @@ def test_output_budget_is_hard_combined_ceiling(tmp_path: Path):
             prepared,
             b"",
             _limits(timeout=2.0, output=1024),
+            workload_identity_policy=_workload_policy(),
             containment_backend=backend,
             containment_request=request,
             term_grace_seconds=0.02,
@@ -276,6 +301,7 @@ def test_stderr_is_captured(tmp_path: Path):
             prepared,
             b"",
             _limits(),
+            workload_identity_policy=_workload_policy(),
             containment_backend=backend,
             containment_request=request,
             term_grace_seconds=0.05,
@@ -301,6 +327,7 @@ def test_oversized_stdin_is_rejected_before_spawn(tmp_path: Path):
                 prepared,
                 b"too large",
                 _limits(stdin=1),
+                workload_identity_policy=_workload_policy(),
                 containment_backend=backend,
                 containment_request=request,
             )
@@ -371,8 +398,9 @@ def test_signal_group_falls_back_to_pid_before_setsid(monkeypatch):
         fake_kill,
     )
 
-    _signal_process_group(1234, signal.SIGTERM)
+    outcome = _signal_process_group(1234, signal.SIGTERM)
 
+    assert outcome is _SignalOutcome.DELIVERED
     assert calls == [
         ("killpg", 1234, signal.SIGTERM),
         ("kill", 1234, signal.SIGTERM),
@@ -402,12 +430,112 @@ def test_signal_group_falls_back_to_pid_for_expected_group_errno(
         fake_kill,
     )
 
-    _signal_process_group(1234, signal.SIGTERM)
+    outcome = _signal_process_group(1234, signal.SIGTERM)
 
+    assert outcome is _SignalOutcome.DELIVERED
     assert calls == [
         ("killpg", 1234, signal.SIGTERM),
         ("kill", 1234, signal.SIGTERM),
     ]
+
+
+def test_signal_group_reports_permission_denied_only_after_pid_fallback(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run.os.killpg",
+        lambda _pid, _sig: (_ for _ in ()).throw(
+            PermissionError(errno.EPERM, "group denied")
+        ),
+    )
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run.os.kill",
+        lambda _pid, _sig: (_ for _ in ()).throw(
+            PermissionError(errno.EPERM, "pid denied")
+        ),
+    )
+
+    assert (
+        _signal_process_group(1234, signal.SIGTERM)
+        is _SignalOutcome.PERMISSION_DENIED
+    )
+
+
+def test_signal_group_reports_process_gone_without_inferring_scope_empty(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run.os.killpg",
+        lambda _pid, _sig: (_ for _ in ()).throw(ProcessLookupError()),
+    )
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run.os.kill",
+        lambda _pid, _sig: (_ for _ in ()).throw(ProcessLookupError()),
+    )
+
+    assert (
+        _signal_process_group(1234, signal.SIGTERM)
+        is _SignalOutcome.PROCESS_GONE
+    )
+
+
+def test_signal_group_rejects_unexpected_direct_signal_error(monkeypatch):
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run.os.killpg",
+        lambda _pid, _sig: (_ for _ in ()).throw(ProcessLookupError()),
+    )
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run.os.kill",
+        lambda _pid, _sig: (_ for _ in ()).throw(
+            OSError(errno.EACCES, "unexpected")
+        ),
+    )
+
+    with pytest.raises(BoundedExecutionError, match="signal supervised"):
+        _signal_process_group(1234, signal.SIGTERM)
+
+
+def test_runner_requires_explicit_workload_identity_policy():
+    with pytest.raises(TypeError, match="workload_identity_policy"):
+        run_prepared_native(
+            object(),
+            b"",
+            _limits(),
+            containment_backend=object(),
+            containment_request=object(),
+        )
+
+
+def test_runner_propagates_exact_workload_identity_policy(monkeypatch):
+    policy = _workload_policy()
+    observed = {}
+
+    def stop_spawn(
+        _prepared,
+        _backend,
+        _request,
+        *,
+        workload_identity_policy,
+    ):
+        observed["policy"] = workload_identity_policy
+        raise ChildSupervisorError("stop after propagation")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run.spawn_prepared_native_contained",
+        stop_spawn,
+    )
+
+    with pytest.raises(BoundedExecutionError, match="spawn supervised"):
+        run_prepared_native(
+            object(),
+            b"",
+            _limits(),
+            workload_identity_policy=policy,
+            containment_backend=object(),
+            containment_request=object(),
+        )
+
+    assert observed["policy"] is policy
 
 
 def test_reap_until_is_bounded(monkeypatch):
@@ -443,6 +571,7 @@ def test_normal_child_exit_kills_lingering_containment(tmp_path: Path):
             prepared,
             b"",
             _limits(),
+            workload_identity_policy=_workload_policy(),
             containment_backend=backend,
             containment_request=request,
             term_grace_seconds=0.05,
@@ -468,17 +597,123 @@ def test_successful_containment_kill_does_not_depend_on_process_group(
         pid = 1234
         containment = handle
 
-    def fail_process_group(_pid: int, _sig: int):
-        raise BoundedExecutionError("process group unavailable")
+    def deny_process_group(_pid: int, _sig: int):
+        return _SignalOutcome.PERMISSION_DENIED
 
     monkeypatch.setattr(
         "ssh_over_mcp.host_agent.run._signal_process_group",
-        fail_process_group,
+        deny_process_group,
     )
 
     _hard_kill_contained(Child())
 
     assert handle.kill_count == 1
+
+
+def test_wall_timeout_permission_denial_skips_term_grace(
+    tmp_path: Path,
+    monkeypatch,
+):
+    prepared = _prepared(
+        tmp_path,
+        _source("/bin/sh", "/usr/bin/dash"),
+        argv=("-c", "trap '' TERM; while :; do :; done"),
+    )
+    backend, request = _containment(prepared)
+    original_signal = _signal_process_group
+
+    def deny_term(pid: int, sig: int):
+        if sig == signal.SIGTERM:
+            return _SignalOutcome.PERMISSION_DENIED
+        return original_signal(pid, sig)
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run._signal_process_group",
+        deny_term,
+    )
+
+    try:
+        result = run_prepared_native(
+            prepared,
+            b"",
+            _limits(timeout=0.05),
+            workload_identity_policy=_workload_policy(),
+            containment_backend=backend,
+            containment_request=request,
+            term_grace_seconds=1.0,
+            kill_cleanup_seconds=0.5,
+        )
+
+        assert result.timed_out is True
+        assert result.output_exceeded is False
+        assert backend.handles[0].kill_count >= 1
+        assert backend.handles[0].closed is True
+        assert result.duration_seconds < 0.75
+    finally:
+        prepared.close()
+
+
+def test_output_limit_permission_denial_skips_term_grace(
+    tmp_path: Path,
+    monkeypatch,
+):
+    prepared = _prepared(
+        tmp_path,
+        _source("/usr/bin/yes", "/bin/yes"),
+    )
+    backend, request = _containment(prepared)
+    original_signal = _signal_process_group
+
+    def deny_term(pid: int, sig: int):
+        if sig == signal.SIGTERM:
+            return _SignalOutcome.PERMISSION_DENIED
+        return original_signal(pid, sig)
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run._signal_process_group",
+        deny_term,
+    )
+
+    try:
+        result = run_prepared_native(
+            prepared,
+            b"",
+            _limits(timeout=2.0, output=1024),
+            workload_identity_policy=_workload_policy(),
+            containment_backend=backend,
+            containment_request=request,
+            term_grace_seconds=1.0,
+            kill_cleanup_seconds=0.5,
+        )
+
+        assert result.output_exceeded is True
+        assert result.timed_out is False
+        assert len(result.stdout) + len(result.stderr) == 1024
+        assert backend.handles[0].kill_count >= 1
+        assert backend.handles[0].closed is True
+        assert result.duration_seconds < 0.75
+    finally:
+        prepared.close()
+
+
+def test_containment_kill_failure_remains_fatal(monkeypatch):
+    class FailingHandle(RunContainmentHandle):
+        def kill_all(self) -> None:
+            raise ContainmentError("kill failed")
+
+    handle = FailingHandle()
+
+    class Child:
+        pid = 1234
+        containment = handle
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run._signal_process_group",
+        lambda _pid, _sig: _SignalOutcome.PERMISSION_DENIED,
+    )
+
+    with pytest.raises(BoundedExecutionError, match="containment scope"):
+        _hard_kill_contained(Child())
 
 
 def test_wall_timeout_escalates_to_containment_kill_when_term_is_ignored(
@@ -499,6 +734,7 @@ def test_wall_timeout_escalates_to_containment_kill_when_term_is_ignored(
             prepared,
             b"",
             _limits(timeout=0.05),
+            workload_identity_policy=_workload_policy(),
             containment_backend=backend,
             containment_request=request,
             term_grace_seconds=0.02,
@@ -608,6 +844,7 @@ def test_unexpected_cleanup_failure_is_normalized_and_other_cleanup_continues(
             object(),
             b"",
             _limits(),
+            workload_identity_policy=_workload_policy(),
             containment_backend=object(),
             containment_request=object(),
         )

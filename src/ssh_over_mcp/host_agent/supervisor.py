@@ -12,6 +12,7 @@ from .containment import (
     ContainmentHandle,
     ContainmentRequest,
 )
+from .containment_manager_identity import LinuxProcessIdentityPolicy
 from .execute import (
     NativeExecutionError,
     build_native_exec_spec,
@@ -19,6 +20,7 @@ from .execute import (
 )
 from .policy import HostChildLimits
 from .prepare import PreparedCommand
+from .workload_identity import transition_to_workload_identity
 
 
 class ChildSupervisorError(RuntimeError):
@@ -302,6 +304,7 @@ def _dup_stdio(
 def _child_main(
     prepared: PreparedCommand,
     *,
+    workload_identity_policy: LinuxProcessIdentityPolicy,
     stdin_read: int,
     stdin_write: int,
     stdout_read: int,
@@ -328,6 +331,7 @@ def _child_main(
 
         _close_unrelated_fds(keep)
         _apply_child_rlimits(prepared.child_limits)
+        transition_to_workload_identity(workload_identity_policy)
         exec_prepared_native_in_child(prepared)
     except BaseException:  # noqa: BLE001
         # Fork children must never unwind through the Python runtime.
@@ -359,6 +363,7 @@ def _validate_spawn_preconditions(prepared: PreparedCommand) -> None:
 def _contained_child_entry(
     prepared: PreparedCommand,
     *,
+    workload_identity_policy: LinuxProcessIdentityPolicy,
     barrier_read: int,
     barrier_write: int,
     stdin_read: int,
@@ -392,6 +397,7 @@ def _contained_child_entry(
 
     _child_main(
         prepared,
+        workload_identity_policy=workload_identity_policy,
         stdin_read=stdin_read,
         stdin_write=-1,
         stdout_read=-1,
@@ -402,7 +408,11 @@ def _contained_child_entry(
     os._exit(127)
 
 
-def spawn_prepared_native(prepared: PreparedCommand) -> SpawnedChild:
+def spawn_prepared_native(
+    prepared: PreparedCommand,
+    *,
+    workload_identity_policy: LinuxProcessIdentityPolicy,
+) -> SpawnedChild:
     """Fork a sanitized child wired to three parent-side stdio pipes.
 
     This does not enforce wall-clock timeout or output byte limits yet.
@@ -438,6 +448,7 @@ def spawn_prepared_native(prepared: PreparedCommand) -> SpawnedChild:
     if pid == 0:
         _child_main(
             prepared,
+            workload_identity_policy=workload_identity_policy,
             stdin_read=stdin_read,
             stdin_write=stdin_write,
             stdout_read=stdout_read,
@@ -504,6 +515,8 @@ def spawn_prepared_native_contained(
     prepared: PreparedCommand,
     backend: ContainmentBackend,
     request: ContainmentRequest,
+    *,
+    workload_identity_policy: LinuxProcessIdentityPolicy,
 ) -> SpawnedChild:
     """Fork a child which cannot exec before successful containment attach."""
 
@@ -561,6 +574,7 @@ def spawn_prepared_native_contained(
     if pid == 0:
         _contained_child_entry(
             prepared,
+            workload_identity_policy=workload_identity_policy,
             barrier_read=barrier_read,
             barrier_write=barrier_write,
             stdin_read=stdin_read,

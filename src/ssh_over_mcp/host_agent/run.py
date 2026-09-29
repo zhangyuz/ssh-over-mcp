@@ -6,6 +6,7 @@ import selectors
 import signal
 import time
 from dataclasses import dataclass
+from enum import Enum
 
 from ssh_over_mcp.ssh.protocol import ExecutionLimits
 
@@ -15,6 +16,7 @@ from .containment import (
     ContainmentRequest,
     ContainmentStats,
 )
+from .containment_manager_identity import LinuxProcessIdentityPolicy
 from .prepare import PreparedCommand
 from .supervisor import (
     ChildSupervisorError,
@@ -38,18 +40,21 @@ class SupervisedExecutionResult:
     containment_stats: ContainmentStats
 
 
-def _signal_process_group(pid: int, sig: int) -> None:
-    group_error: OSError | None = None
+class _SignalOutcome(Enum):
+    DELIVERED = "delivered"
+    PROCESS_GONE = "process-gone"
+    PERMISSION_DENIED = "permission-denied"
+
+
+def _signal_process_group(pid: int, sig: int) -> _SignalOutcome:
     try:
         os.killpg(pid, sig)
-        return
-    except ProcessLookupError as exc:
+        return _SignalOutcome.DELIVERED
+    except ProcessLookupError:
         # The child may not have reached setsid() yet.
-        group_error = exc
+        pass
     except OSError as exc:
-        if exc.errno in {errno.ESRCH, errno.EPERM, errno.EINVAL}:
-            group_error = exc
-        else:
+        if exc.errno not in {errno.ESRCH, errno.EPERM, errno.EINVAL}:
             raise BoundedExecutionError(
                 "cannot signal child process group"
             ) from exc
@@ -57,16 +62,17 @@ def _signal_process_group(pid: int, sig: int) -> None:
     try:
         os.kill(pid, sig)
     except ProcessLookupError:
-        return
+        return _SignalOutcome.PROCESS_GONE
     except OSError as exc:
-        if exc.errno != errno.ESRCH:
-            raise BoundedExecutionError(
-                "cannot signal supervised child"
-            ) from exc
+        if exc.errno == errno.ESRCH:
+            return _SignalOutcome.PROCESS_GONE
+        if exc.errno == errno.EPERM:
+            return _SignalOutcome.PERMISSION_DENIED
+        raise BoundedExecutionError(
+            "cannot signal supervised child"
+        ) from exc
 
-    # group_error is intentionally retained only for debugging/chaining in a
-    # future audit layer; a successful direct-pid fallback is acceptable here.
-    _ = group_error
+    return _SignalOutcome.DELIVERED
 
 
 def _reap_until(
@@ -281,6 +287,7 @@ def run_prepared_native(
     stdin: bytes,
     limits: ExecutionLimits,
     *,
+    workload_identity_policy: LinuxProcessIdentityPolicy,
     containment_backend: ContainmentBackend,
     containment_request: ContainmentRequest,
     term_grace_seconds: float = 0.20,
@@ -311,6 +318,7 @@ def run_prepared_native(
             prepared,
             containment_backend,
             containment_request,
+            workload_identity_policy=workload_identity_policy,
         )
     except ChildSupervisorError as exc:
         selector.close()
@@ -348,7 +356,13 @@ def run_prepared_native(
                 term_sent_at = now
                 if child.stdin_fd >= 0:
                     _unregister_close(selector, child, "stdin_fd")
-                _signal_process_group(child.pid, signal.SIGTERM)
+                signal_outcome = _signal_process_group(
+                    child.pid,
+                    signal.SIGTERM,
+                )
+                if signal_outcome is _SignalOutcome.PERMISSION_DENIED:
+                    _hard_kill_contained(child)
+                    kill_sent_at = time.monotonic()
 
             stdout_open = child.stdout_fd >= 0
             stderr_open = child.stderr_fd >= 0
@@ -427,7 +441,13 @@ def run_prepared_native(
                         term_sent_at = time.monotonic()
                         if child.stdin_fd >= 0:
                             _unregister_close(selector, child, "stdin_fd")
-                        _signal_process_group(child.pid, signal.SIGTERM)
+                        signal_outcome = _signal_process_group(
+                            child.pid,
+                            signal.SIGTERM,
+                        )
+                        if signal_outcome is _SignalOutcome.PERMISSION_DENIED:
+                            _hard_kill_contained(child)
+                            kill_sent_at = time.monotonic()
 
                 if eof:
                     attr = "stdout_fd" if kind == "stdout" else "stderr_fd"

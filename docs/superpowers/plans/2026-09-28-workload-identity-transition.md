@@ -69,7 +69,7 @@
 
 Use a private module-level syscall adapter/seam for tests. Do **not** add a public dependency-injection parameter to `transition_to_workload_identity`.
 
-- [ ] **Step 1: Write validation-order unit tests**
+- [x] **Step 1: Write validation-order unit tests**
 
 Add focused tests for:
 
@@ -83,7 +83,7 @@ def test_target_uid_equal_to_source_uid_fails_before_mutation(...): ...
 
 Assert no mutating syscall is attempted in every precondition failure.
 
-- [ ] **Step 2: Write exact transition-order tests**
+- [x] **Step 2: Write exact transition-order tests**
 
 Pin the success sequence:
 
@@ -103,7 +103,7 @@ verify exact post-drop state
 
 The test should compare a recorded operation list, not merely assert that calls happened.
 
-- [ ] **Step 3: Write failure-cutoff tests**
+- [x] **Step 3: Write failure-cutoff tests**
 
 Cover:
 
@@ -120,7 +120,7 @@ Cover:
 - `no_new_privs` read-back not equal to one -> fail;
 - unsupported/truncated capability ABI/range -> fail.
 
-- [ ] **Step 4: Implement the minimal Linux syscall boundary**
+- [x] **Step 4: Implement the minimal Linux syscall boundary**
 
 Use narrow private wrappers around libc/Linux calls. Requirements:
 
@@ -131,7 +131,7 @@ Use narrow private wrappers around libc/Linux calls. Requirements:
 - use a genuinely read-only FSUID/FSGID observation mechanism from the transition's perspective; prefer parsing the four-ID `Uid:` / `Gid:` fields from `/proc/self/status` rather than probing through `setfsuid` / `setfsgid`;
 - translate syscall failures into the transition error without exposing partially-successful state as success.
 
-- [ ] **Step 5: Verify Task 1**
+- [x] **Step 5: Verify Task 1**
 
 Run:
 
@@ -142,7 +142,7 @@ python -m compileall -q src/ssh_over_mcp/host_agent/workload_identity.py tests/h
 
 Expected: PASS without requiring runner capabilities or changing the test process identity.
 
-- [ ] **Step 6: Commit Task 1**
+- [x] **Step 6: Commit Task 1**
 
 ```bash
 git add src/ssh_over_mcp/host_agent/workload_identity.py tests/host_agent/test_workload_identity.py
@@ -163,13 +163,13 @@ git commit -m "feat: add verified workload identity transition"
 - Adds a required `workload_identity_policy: LinuxProcessIdentityPolicy` to child-spawn paths that can reach native exec
 - Keeps the test seam private by monkeypatching the supervisor module's imported transition symbol before `fork()`
 
-- [ ] **Step 1: Write API fail-closed tests**
+- [x] **Step 1: Write API fail-closed tests**
 
 Prove there is no production path that reaches native exec without an explicit workload policy.
 
 Tests should fail before implementation if the new required argument is absent.
 
-- [ ] **Step 2: Write child ordering tests**
+- [x] **Step 2: Write child ordering tests**
 
 Prove:
 
@@ -183,7 +183,7 @@ child exec_prepared_native_in_child(prepared)
 
 Use pre-fork monkeypatching so generic CI does not require `CAP_SETUID`/`CAP_SETGID`.
 
-- [ ] **Step 3: Write transition-failure test**
+- [x] **Step 3: Write transition-failure test**
 
 If the identity transition raises:
 
@@ -191,7 +191,7 @@ If the identity transition raises:
 - child exits through the existing generic fail-closed child status;
 - parent supervision semantics remain unchanged.
 
-- [ ] **Step 4: Implement mandatory supervisor integration**
+- [x] **Step 4: Implement mandatory supervisor integration**
 
 Pass the workload policy through the contained-spawn path and into the released child. Call the transition only after trusted pre-exec setup/rlimits and before `exec_prepared_native_in_child()`.
 
@@ -203,7 +203,7 @@ Do not:
 - change the containment manager protocol;
 - move pinned executable/cwd validation ahead of the transition.
 
-- [ ] **Step 5: Verify Task 2**
+- [x] **Step 5: Verify Task 2**
 
 Run:
 
@@ -213,7 +213,7 @@ python -m pytest -q   tests/host_agent/test_workload_identity.py   tests/host_ag
 
 Expected: PASS in the ordinary unprivileged environment.
 
-- [ ] **Step 6: Commit Task 2**
+- [x] **Step 6: Commit Task 2**
 
 ```bash
 git add src/ssh_over_mcp/host_agent/supervisor.py tests/host_agent/test_supervisor.py src/ssh_over_mcp/host_agent/__init__.py
@@ -221,6 +221,9 @@ git commit -m "feat: require workload identity before native exec"
 ```
 
 ---
+
+
+> **Atomic merge note:** Tasks 2 and 3 are merged as one review unit because `run_prepared_native()` is the direct production caller of `spawn_prepared_native_contained()`. Making the supervisor workload policy mandatory without propagating it through the bounded runner would leave `main` with a broken production call path. The implementation and verification remain separately scoped inside the atomic PR.
 
 ### Task 3: Preserve Bounded Runner Semantics After Cross-UID Signal Denial
 
@@ -232,13 +235,13 @@ git commit -m "feat: require workload identity before native exec"
 - `run_prepared_native(..., workload_identity_policy: LinuxProcessIdentityPolicy, ...)`
 - Existing `ContainmentHandle.kill_all()` remains the authoritative hard-kill mechanism
 
-- [ ] **Step 1: Add required workload-policy propagation tests**
+- [x] **Step 1: Add required workload-policy propagation tests**
 
 Assert `run_prepared_native` passes the exact workload policy to `spawn_prepared_native_contained`.
 
 No optional/fallback workload policy is allowed.
 
-- [ ] **Step 2: Add timeout `EPERM` regression**
+- [x] **Step 2: Add timeout `EPERM` regression**
 
 Simulate process-group/direct `SIGTERM` raising `PermissionError(errno.EPERM)`.
 
@@ -252,11 +255,11 @@ Expected:
 6. containment becomes empty and is closed;
 7. result still reports `timed_out=True`.
 
-- [ ] **Step 3: Add output-limit `EPERM` regression**
+- [x] **Step 3: Add output-limit `EPERM` regression**
 
 Same authority loss, but preserve `output_exceeded=True`.
 
-- [ ] **Step 4: Add error-boundary regressions**
+- [x] **Step 4: Add error-boundary regressions**
 
 Cover:
 
@@ -267,13 +270,13 @@ Cover:
 - direct child exited but scope still populated -> containment kill still happens;
 - cleanup failure may override the original result only under the existing bounded-cleanup failure contract.
 
-- [ ] **Step 5: Implement minimal signaling classification**
+- [x] **Step 5: Implement minimal signaling classification**
 
 Refactor the existing signal helper/termination transition so expected `EPERM` is distinguishable from other failures.
 
 Do not catch every `OSError` as equivalent. Keep containment kill authoritative and existing process-group/direct signaling defense-in-depth only.
 
-- [ ] **Step 6: Verify Task 3**
+- [x] **Step 6: Verify Task 3**
 
 Run:
 
@@ -283,7 +286,7 @@ python -m pytest -q tests/host_agent/test_run.py tests/host_agent/test_superviso
 
 Repeat the timeout/output-limit boundary cases multiple times to detect timing regressions.
 
-- [ ] **Step 7: Commit Task 3**
+- [x] **Step 7: Commit Task 3**
 
 ```bash
 git add src/ssh_over_mcp/host_agent/run.py tests/host_agent/test_run.py

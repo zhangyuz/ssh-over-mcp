@@ -14,6 +14,10 @@ from ssh_over_mcp.host_agent.containment import (
     ContainmentRequest,
     ContainmentStats,
 )
+from ssh_over_mcp.host_agent.containment_manager_identity import (
+    LinuxProcessIdentity,
+    LinuxProcessIdentityPolicy,
+)
 from ssh_over_mcp.host_agent.policy import HostChildLimits, HostObjectIdentity
 from ssh_over_mcp.host_agent.prepare import PreparedCommand
 from ssh_over_mcp.host_agent.supervisor import (
@@ -35,6 +39,21 @@ pytestmark = pytest.mark.skipif(
     or os.execve not in os.supports_fd,
     reason="requires Linux/POSIX fork, pipe2, and fd-based execve",
 )
+
+
+def _workload_policy() -> LinuxProcessIdentityPolicy:
+    return LinuxProcessIdentityPolicy(
+        identity=LinuxProcessIdentity(uid=2103, gid=3103),
+        supplementary_gids=frozenset(),
+    )
+
+
+@pytest.fixture(autouse=True)
+def _stub_workload_identity_transition(monkeypatch):
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor.transition_to_workload_identity",
+        lambda _policy: None,
+    )
 
 
 def _child_limits() -> HostChildLimits:
@@ -112,9 +131,21 @@ def _read_all(fd: int) -> bytes:
         chunks.append(chunk)
 
 
+def test_spawn_requires_explicit_workload_identity_policy(tmp_path: Path):
+    prepared = _prepared(tmp_path)
+    try:
+        with pytest.raises(TypeError, match="workload_identity_policy"):
+            spawn_prepared_native(prepared)
+    finally:
+        prepared.close()
+
+
 def test_spawned_child_wires_stdin_stdout_and_exit(tmp_path: Path):
     prepared = _prepared(tmp_path)
-    child = spawn_prepared_native(prepared)
+    child = spawn_prepared_native(
+        prepared,
+        workload_identity_policy=_workload_policy(),
+    )
     prepared.close()
 
     try:
@@ -138,7 +169,10 @@ def test_invalid_exec_spec_is_rejected_before_fork(tmp_path: Path):
 
     try:
         with pytest.raises(ChildSupervisorError, match="cannot enter"):
-            spawn_prepared_native(prepared)
+            spawn_prepared_native(
+                prepared,
+                workload_identity_policy=_workload_policy(),
+            )
     finally:
         prepared.close()
 
@@ -157,7 +191,10 @@ def test_child_exec_failure_is_generic_and_exit_125(
         fail_exec,
     )
 
-    child = spawn_prepared_native(prepared)
+    child = spawn_prepared_native(
+        prepared,
+        workload_identity_policy=_workload_policy(),
+    )
     prepared.close()
 
     try:
@@ -210,7 +247,10 @@ def test_close_unrelated_fds_closes_inheritable_descriptor():
 
 def test_spawned_child_creates_own_session(tmp_path: Path):
     prepared = _prepared(tmp_path)
-    child = spawn_prepared_native(prepared)
+    child = spawn_prepared_native(
+        prepared,
+        workload_identity_policy=_workload_policy(),
+    )
     prepared.close()
 
     try:
@@ -351,7 +391,10 @@ def test_child_rlimit_failure_is_generic_exit_125(
         fail_limits,
     )
 
-    child = spawn_prepared_native(prepared)
+    child = spawn_prepared_native(
+        prepared,
+        workload_identity_policy=_workload_policy(),
+    )
     prepared.close()
 
     try:
@@ -389,7 +432,10 @@ def test_file_size_rlimit_is_enforced_in_real_child(tmp_path: Path):
         child_limits=limits,
     )
     output_path = Path(prepared.cwd_path) / "too-large.bin"
-    child = spawn_prepared_native(prepared)
+    child = spawn_prepared_native(
+        prepared,
+        workload_identity_policy=_workload_policy(),
+    )
     prepared.close()
 
     try:
@@ -476,6 +522,125 @@ def _containment_request(
     )
 
 
+def test_contained_spawn_requires_explicit_workload_identity_policy(
+    tmp_path: Path,
+):
+    prepared = _prepared(tmp_path)
+    backend = BarrierBackend(tmp_path / "unused")
+    try:
+        with pytest.raises(TypeError, match="workload_identity_policy"):
+            spawn_prepared_native_contained(
+                prepared,
+                backend,
+                _containment_request(prepared.request_id),
+            )
+    finally:
+        prepared.close()
+
+
+def test_contained_child_orders_attach_rlimits_identity_then_exec(
+    tmp_path: Path,
+    monkeypatch,
+):
+    prepared = _prepared(tmp_path)
+    policy = _workload_policy()
+    marker = tmp_path / "ordering.log"
+    backend = BarrierBackend(tmp_path / "unused")
+
+    def append(event: str) -> None:
+        with marker.open("a", encoding="ascii") as stream:
+            stream.write(event + "\n")
+
+    original_attach = backend.handle.attach
+
+    def attach(pid: int) -> None:
+        original_attach(pid)
+        append("attach")
+
+    backend.handle.attach = attach
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor._apply_child_rlimits",
+        lambda _limits: append("rlimits"),
+    )
+
+    def transition(observed_policy):
+        assert observed_policy is policy
+        append("transition")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor.transition_to_workload_identity",
+        transition,
+    )
+
+    def fake_exec(_prepared):
+        append("exec")
+        os._exit(0)
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor.exec_prepared_native_in_child",
+        fake_exec,
+    )
+
+    child = spawn_prepared_native_contained(
+        prepared,
+        backend,
+        _containment_request(prepared.request_id),
+        workload_identity_policy=policy,
+    )
+    prepared.close()
+
+    try:
+        assert child.wait() == 0
+        assert marker.read_text(encoding="ascii").splitlines() == [
+            "attach",
+            "rlimits",
+            "transition",
+            "exec",
+        ]
+        child.close_containment()
+    finally:
+        child.close_pipes()
+
+
+def test_identity_transition_failure_never_reaches_exec(
+    tmp_path: Path,
+    monkeypatch,
+):
+    prepared = _prepared(tmp_path)
+    marker = tmp_path / "exec-ran"
+    backend = BarrierBackend(tmp_path / "unused")
+
+    def fail_transition(_policy):
+        raise RuntimeError("sensitive identity transition failure")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor.transition_to_workload_identity",
+        fail_transition,
+    )
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.supervisor.exec_prepared_native_in_child",
+        lambda _prepared: marker.write_text("ran", encoding="ascii"),
+    )
+
+    child = spawn_prepared_native_contained(
+        prepared,
+        backend,
+        _containment_request(prepared.request_id),
+        workload_identity_policy=_workload_policy(),
+    )
+    prepared.close()
+
+    try:
+        child.close_stdin()
+        stderr = _read_all(child.stderr_fd)
+        assert child.wait() == 125
+        assert stderr == b"ssh-over-mcp-host-agent: child exec failed\n"
+        assert marker.exists() is False
+        child.close_containment()
+    finally:
+        child.close_pipes()
+
+
 def test_contained_child_does_not_exec_before_attach(
     tmp_path: Path,
     monkeypatch,
@@ -497,6 +662,7 @@ def test_contained_child_does_not_exec_before_attach(
         prepared,
         backend,
         _containment_request(prepared.request_id),
+        workload_identity_policy=_workload_policy(),
     )
     prepared.close()
 
@@ -537,6 +703,7 @@ def test_containment_attach_failure_never_releases_child(
                 prepared,
                 backend,
                 _containment_request(prepared.request_id),
+                workload_identity_policy=_workload_policy(),
             )
 
         assert marker.exists() is False
@@ -561,6 +728,7 @@ def test_containment_request_id_mismatch_is_rejected_before_create(
                 prepared,
                 backend,
                 _containment_request("req_different"),
+                workload_identity_policy=_workload_policy(),
             )
 
         assert backend.requests == []
@@ -582,7 +750,10 @@ def test_child_exec_base_exception_is_generic_and_exit_125(
         fail_exec,
     )
 
-    child = spawn_prepared_native(prepared)
+    child = spawn_prepared_native(
+        prepared,
+        workload_identity_policy=_workload_policy(),
+    )
     prepared.close()
 
     try:
@@ -624,6 +795,7 @@ def test_contained_child_barrier_base_exception_exits_125(monkeypatch):
     if pid == 0:
         _contained_child_entry(
             object(),
+            workload_identity_policy=_workload_policy(),
             barrier_read=barrier_read,
             barrier_write=barrier_write,
             stdin_read=stdin_read,
