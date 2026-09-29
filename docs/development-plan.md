@@ -105,7 +105,7 @@ Implemented:
 
 Implemented:
 
-- authorization-time executable device+inode+ctime and cwd device+inode identities;
+- authorization-time executable device+inode+ctime+mtime+size plus SHA-256 content binding, and cwd device+inode identity;
 - host authorization repeated immediately before fd preparation;
 - canonical executable opened with `O_NOFOLLOW|O_CLOEXEC`;
 - canonical cwd opened as a directory fd with `O_NOFOLLOW|O_CLOEXEC`;
@@ -123,7 +123,7 @@ Implemented:
 - native ELF-only execution gate;
 - fd-based `os.execve()` requirement;
 - pinned cwd requirement; no ambient cwd inheritance;
-- final executable identity revalidation using device+inode+ctime;
+- final executable identity revalidation using device+inode+ctime+mtime+size plus SHA-256 content binding;
 - final cwd identity revalidation using device+inode;
 - explicit argv construction;
 - explicit request environment only; no ambient `os.environ`;
