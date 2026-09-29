@@ -25,11 +25,17 @@ def _same_identity(
     info: os.stat_result,
     identity: HostObjectIdentity,
     *,
-    include_ctime: bool,
+    include_change_metadata: bool,
 ) -> bool:
     if info.st_dev != identity.device or info.st_ino != identity.inode:
         return False
-    return not include_ctime or info.st_ctime_ns == identity.ctime_ns
+    if not include_change_metadata:
+        return True
+    return (
+        info.st_ctime_ns == identity.ctime_ns
+        and info.st_mtime_ns == identity.mtime_ns
+        and info.st_size == identity.size
+    )
 
 
 def _validate_fd_identity(
@@ -37,14 +43,14 @@ def _validate_fd_identity(
     identity: HostObjectIdentity,
     *,
     require_directory: bool,
-    include_ctime: bool,
+    include_change_metadata: bool,
 ) -> None:
     try:
         info = os.fstat(fd)
     except OSError as exc:
         raise NativeExecutionError("pinned descriptor is unavailable") from exc
 
-    if not _same_identity(info, identity, include_ctime=include_ctime):
+    if not _same_identity(info, identity, include_change_metadata=include_change_metadata):
         raise NativeExecutionError("pinned object changed before exec")
 
     if require_directory:
@@ -86,7 +92,7 @@ def build_native_exec_spec(prepared: PreparedCommand) -> NativeExecSpec:
         prepared.executable_fd,
         prepared.executable_identity,
         require_directory=False,
-        include_ctime=True,
+        include_change_metadata=True,
     )
 
     if prepared.cwd_fd is None:
@@ -97,7 +103,7 @@ def build_native_exec_spec(prepared: PreparedCommand) -> NativeExecSpec:
         prepared.cwd_fd,
         prepared.cwd_identity,
         require_directory=True,
-        include_ctime=False,
+        include_change_metadata=False,
     )
 
     # argv[0] is descriptive only. The executable itself is selected by fd.
@@ -141,14 +147,14 @@ def exec_prepared_native_in_child(
         spec.cwd_fd,
         prepared.cwd_identity,
         require_directory=True,
-        include_ctime=False,
+        include_change_metadata=False,
     )
 
     _validate_fd_identity(
         spec.executable_fd,
         prepared.executable_identity,
         require_directory=False,
-        include_ctime=True,
+        include_change_metadata=True,
     )
 
     try:
