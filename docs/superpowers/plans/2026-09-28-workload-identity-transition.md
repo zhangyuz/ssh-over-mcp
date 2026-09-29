@@ -64,7 +64,7 @@
   - explicit FSUID/FSGID read-back
 - Produces:
   - `class WorkloadIdentityTransitionError(RuntimeError)`
-  - `WorkloadIdentityTransitionSnapshot` matching the accepted design: `identity: LinuxProcessIdentitySnapshot`, `filesystem_uid`, `filesystem_gid`, `no_new_privs`, `effective_capabilities`, `permitted_capabilities`, and `inheritable_capabilities`
+  - `WorkloadIdentityTransitionSnapshot` matching the accepted design: `identity: LinuxProcessIdentitySnapshot`, `filesystem_uid`, `filesystem_gid`, `no_new_privs`, `effective_capabilities`, `permitted_capabilities`, `inheritable_capabilities`, and `ambient_capabilities_empty`
   - `transition_to_workload_identity(policy: LinuxProcessIdentityPolicy) -> WorkloadIdentityTransitionSnapshot`
 
 Use a private module-level syscall adapter/seam for tests. Do **not** add a public dependency-injection parameter to `transition_to_workload_identity`.

@@ -274,7 +274,7 @@ def _parse_status_ids(line: str, label: str) -> tuple[int, int, int, int]:
             "cannot read Linux filesystem identity"
         )
 
-    return values  # type: ignore[return-value]
+    return values[0], values[1], values[2], values[3]
 
 
 def _create_linux_syscalls() -> _IdentitySyscalls:
