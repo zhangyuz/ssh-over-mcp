@@ -32,6 +32,7 @@ from ssh_over_mcp.host_agent.containment_manager_unix import (
     UnixContainmentManagerTransport,
     serve_containment_manager_connection,
 )
+from ssh_over_mcp.host_agent.file_identity import sha256_fd
 from ssh_over_mcp.host_agent.policy import HostChildLimits, HostObjectIdentity
 from ssh_over_mcp.host_agent.prepare import PreparedCommand
 from ssh_over_mcp.host_agent.run import (
