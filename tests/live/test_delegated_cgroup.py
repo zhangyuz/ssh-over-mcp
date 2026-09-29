@@ -4,12 +4,18 @@ import errno
 import os
 import stat
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
-from ssh_over_mcp.host_agent.containment import REQUIRED_CGROUP_V2_CONTROLLERS
+from ssh_over_mcp.host_agent.cgroup_v2 import CgroupV2Backend
+from ssh_over_mcp.host_agent.containment import (
+    REQUIRED_CGROUP_V2_CONTROLLERS,
+    ContainmentLimits,
+    ContainmentRequest,
+)
 from ssh_over_mcp.host_agent.containment_manager_identity import (
     ContainmentServiceIdentityPlan,
     LinuxProcessIdentity,
@@ -24,6 +30,7 @@ pytestmark = pytest.mark.skipif(
 
 _ROOT_ENV = "SSH_OVER_MCP_LIVE_CGROUP_ROOT"
 _HOST_SOURCE_ENV = "SSH_OVER_MCP_LIVE_CGROUP_HOST_SOURCE"
+_SOURCE_PID_ENV = "SSH_OVER_MCP_LIVE_CGROUP_SOURCE_PID"
 _MANAGER_UID_ENV = "SSH_OVER_MCP_LIVE_CGROUP_MANAGER_UID"
 _MANAGER_GID_ENV = "SSH_OVER_MCP_LIVE_CGROUP_MANAGER_GID"
 _HOST_UID_ENV = "SSH_OVER_MCP_LIVE_CGROUP_HOST_UID"
@@ -93,6 +100,17 @@ def _fixture() -> _LiveFixture:
     )
 
 
+def _required_pid(name: str) -> int:
+    raw = os.environ.get(name)
+    assert raw is not None and raw != "", f"{name} is required for the live cgroup fixture"
+    try:
+        value = int(raw, 10)
+    except ValueError as exc:
+        raise AssertionError(f"{name} must be a decimal integer") from exc
+    assert value > 1, f"{name} must be a positive non-init PID"
+    return value
+
+
 def _decode_mountinfo_path(raw: str) -> Path:
     decoded = (
         raw.replace(r"\040", " ")
@@ -123,9 +141,12 @@ def _cgroup2_mount_for(root: Path) -> _Cgroup2Mount:
     return max(candidates, key=lambda item: len(item.mountpoint.parts))
 
 
-def _current_cgroup_path(mount: _Cgroup2Mount) -> Path:
+def _cgroup_path_from_proc_file(
+    proc_cgroup: Path,
+    mount: _Cgroup2Mount,
+) -> Path:
     unified_path: Path | None = None
-    raw = Path("/proc/self/cgroup").read_text(encoding="ascii")
+    raw = proc_cgroup.read_text(encoding="ascii")
     for line in raw.splitlines():
         hierarchy, controllers, value = line.split(":", 2)
         if hierarchy == "0" and controllers == "":
@@ -140,6 +161,63 @@ def _current_cgroup_path(mount: _Cgroup2Mount) -> Path:
             "current process cgroup is outside the selected cgroup-v2 mount root"
         ) from exc
     return (mount.mountpoint / relative).resolve(strict=True)
+
+
+def _current_cgroup_path(mount: _Cgroup2Mount) -> Path:
+    return _cgroup_path_from_proc_file(Path("/proc/self/cgroup"), mount)
+
+
+def _pid_cgroup_path(pid: int, mount: _Cgroup2Mount) -> Path:
+    return _cgroup_path_from_proc_file(Path(f"/proc/{pid}/cgroup"), mount)
+
+
+def _read_proc_status(pid: int) -> dict[str, str]:
+    rows: dict[str, str] = {}
+    raw = Path(f"/proc/{pid}/status").read_text(encoding="ascii")
+    for line in raw.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        rows[key] = value.strip()
+    return rows
+
+
+def _assert_source_process(
+    fixture: _LiveFixture,
+    pid: int,
+    mount: _Cgroup2Mount,
+    source: Path,
+) -> None:
+    rows = _read_proc_status(pid)
+    assert rows["State"].split()[0] == "T", (
+        "operator source PID must already be stopped"
+    )
+
+    host = fixture.identities.host_agent
+    assert tuple(int(value) for value in rows["Uid"].split()) == (host.uid,) * 4
+    assert tuple(int(value) for value in rows["Gid"].split()) == (host.gid,) * 4
+
+    observed_groups = set(int(value) for value in rows["Groups"].split())
+    observed_extra = observed_groups - {host.gid}
+    expected_extra = set(
+        fixture.identities.host_agent_process_policy().supplementary_gids
+    )
+    assert observed_extra == expected_extra, (
+        "source PID supplementary groups do not match host-agent policy"
+    )
+    assert _pid_cgroup_path(pid, mount) == source, (
+        "operator source PID is not resident in host-agent source cgroup"
+    )
+
+
+def _wait_until_scope_empty(handle, *, timeout_seconds: float = 2.0) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        if handle.stats().populated is False:
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError("request cgroup did not become empty before deadline")
+        time.sleep(0.01)
 
 
 def _assert_no_runtime_capabilities() -> None:
@@ -282,3 +360,129 @@ def test_preflight_live_delegated_cgroup_fixture() -> None:
 
     assert not cleanup_errors, f"preflight cleanup failed: {cleanup_errors!r}"
     assert _read_tokens(subtree_path) == originally_enabled
+
+
+
+def test_real_cgroup_backend_create_attach_limits_and_cleanup() -> None:
+    fixture = _fixture()
+    root = fixture.root.resolve(strict=True)
+    source = fixture.host_source.resolve(strict=True)
+    source_pid = _required_pid(_SOURCE_PID_ENV)
+
+    mount = _cgroup2_mount_for(root)
+    identities = fixture.identities
+    require_linux_process_identity(identities.manager_process_policy())
+    _assert_no_runtime_capabilities()
+    assert not _current_cgroup_path(mount).is_relative_to(root)
+    assert source.parent == root
+
+    _assert_source_process(fixture, source_pid, mount, source)
+
+    subtree_path = root / "cgroup.subtree_control"
+    originally_enabled = _read_tokens(subtree_path)
+    enabled_by_backend = REQUIRED_CGROUP_V2_CONTROLLERS.difference(
+        originally_enabled
+    )
+
+    limits = ContainmentLimits(
+        memory_max_bytes=512 * 1024 * 1024,
+        pids_max=64,
+        cpu_quota_us=50_000,
+        cpu_period_us=100_000,
+    )
+    request = ContainmentRequest(
+        request_id=f"req_live_backend_{os.getpid()}_{source_pid}",
+        limits=limits,
+    )
+    backend = CgroupV2Backend(root)
+    handle = None
+    scope: Path | None = None
+    cleanup_errors: list[BaseException] = []
+
+    try:
+        handle = backend.create(request)
+        scope = handle.path.resolve(strict=True)
+        assert scope.parent == root
+        assert scope.name == f"ssh-over-mcp-{request.request_id}"
+
+        assert (scope / "memory.max").read_text(encoding="ascii").strip() == str(
+            limits.memory_max_bytes
+        )
+        assert (scope / "pids.max").read_text(encoding="ascii").strip() == str(
+            limits.pids_max
+        )
+        assert (scope / "cpu.max").read_text(encoding="ascii").strip() == (
+            f"{limits.cpu_quota_us} {limits.cpu_period_us}"
+        )
+
+        empty_stats = handle.stats()
+        assert empty_stats.populated is False
+        assert empty_stats.pids_current == 0
+        assert empty_stats.memory_current_bytes is not None
+        assert empty_stats.cpu_usage_usec is not None
+
+        handle.attach(source_pid)
+        assert _pid_cgroup_path(source_pid, mount) == scope
+        _assert_source_process(
+            _LiveFixture(
+                root=fixture.root,
+                host_source=scope,
+                identities=fixture.identities,
+            ),
+            source_pid,
+            mount,
+            scope,
+        )
+
+        attached_stats = handle.stats()
+        assert attached_stats.populated is True
+        assert attached_stats.pids_current is not None
+        assert attached_stats.pids_current >= 1
+        assert attached_stats.memory_current_bytes is not None
+        assert attached_stats.cpu_usage_usec is not None
+
+        _write_control(source / "cgroup.procs", f"{source_pid}\n")
+        _assert_source_process(fixture, source_pid, mount, source)
+        _wait_until_scope_empty(handle)
+
+        handle.close()
+        handle = None
+        assert scope.exists() is False
+    finally:
+        active_exception = sys.exception()
+
+        if handle is not None:
+            try:
+                if Path(f"/proc/{source_pid}").exists():
+                    _write_control(source / "cgroup.procs", f"{source_pid}\n")
+            except BaseException as exc:  # noqa: BLE001
+                cleanup_errors.append(exc)
+
+            try:
+                _wait_until_scope_empty(handle)
+                handle.close()
+            except BaseException as exc:  # noqa: BLE001
+                cleanup_errors.append(exc)
+
+        if enabled_by_backend:
+            try:
+                request_value = " ".join(
+                    f"-{name}" for name in sorted(enabled_by_backend)
+                )
+                _write_control(subtree_path, f"{request_value}\n")
+            except BaseException as exc:  # noqa: BLE001
+                cleanup_errors.append(exc)
+
+        if _read_tokens(subtree_path) != originally_enabled:
+            cleanup_errors.append(
+                AssertionError(
+                    "cgroup.subtree_control was not restored after backend proof"
+                )
+            )
+
+        if cleanup_errors:
+            message = f"real backend cleanup failed: {cleanup_errors!r}"
+            if active_exception is not None:
+                active_exception.add_note(message)
+            else:
+                raise AssertionError(message)
