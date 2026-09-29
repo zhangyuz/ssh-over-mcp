@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -9,12 +10,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
 #define MAX_GROUPS 256
+#define MAX_SOCKET_INODES 256
 #define MAX_DESCENDANTS 16
 #define MAX_FORK_ATTEMPTS 64
 #define MAX_HOLD_MS 30000ULL
@@ -166,6 +169,71 @@ static bool read_unified_cgroup(char *output, size_t output_size) {
     return false;
 }
 
+extern char **environ;
+static int process_argc = 0;
+
+static size_t environment_count(void) {
+    size_t count = 0;
+    while (environ[count] != NULL) {
+        count++;
+    }
+    return count;
+}
+
+static int compare_u64(const void *left, const void *right) {
+    uint64_t a = *(const uint64_t *)left;
+    uint64_t b = *(const uint64_t *)right;
+    return (a > b) - (a < b);
+}
+
+static bool read_socket_inodes(uint64_t *output, size_t *count) {
+    DIR *directory = opendir("/proc/self/fd");
+    struct dirent *entry;
+    size_t used = 0;
+
+    if (directory == NULL) {
+        return false;
+    }
+    while ((entry = readdir(directory)) != NULL) {
+        char *end = NULL;
+        long raw_fd;
+        struct stat info;
+
+        if (entry->d_name[0] < '0' || entry->d_name[0] > '9') {
+            continue;
+        }
+        errno = 0;
+        raw_fd = strtol(entry->d_name, &end, 10);
+        if (errno != 0 || end == entry->d_name || *end != '\0' ||
+            raw_fd < 0 || raw_fd > INT_MAX) {
+            closedir(directory);
+            return false;
+        }
+        if ((int)raw_fd == dirfd(directory)) {
+            continue;
+        }
+        if (fstat((int)raw_fd, &info) != 0) {
+            if (errno == EBADF || errno == ENOENT) {
+                continue;
+            }
+            closedir(directory);
+            return false;
+        }
+        if (!S_ISSOCK(info.st_mode)) {
+            continue;
+        }
+        if (used >= MAX_SOCKET_INODES) {
+            closedir(directory);
+            return false;
+        }
+        output[used++] = (uint64_t)info.st_ino;
+    }
+    closedir(directory);
+    qsort(output, used, sizeof(output[0]), compare_u64);
+    *count = used;
+    return true;
+}
+
 static int compare_gid(const void *left, const void *right) {
     gid_t a = *(const gid_t *)left;
     gid_t b = *(const gid_t *)right;
@@ -179,6 +247,8 @@ static int emit_state(void) {
     int group_count;
     char cgroup[PATH_MAX];
     char cap_inh[64], cap_prm[64], cap_eff[64], cap_amb[64], no_new_privs[64];
+    uint64_t socket_inodes[MAX_SOCKET_INODES];
+    size_t socket_inode_count = 0;
 
     if (getresuid(&ruid, &euid, &suid) != 0 || getresgid(&rgid, &egid, &sgid) != 0) {
         perror("getresuid/getresgid");
@@ -199,16 +269,28 @@ static int emit_state(void) {
         fprintf(stderr, "cannot read process state\n");
         return 70;
     }
+    if (!read_socket_inodes(socket_inodes, &socket_inode_count)) {
+        fprintf(stderr, "cannot inspect process file descriptors\n");
+        return 70;
+    }
 
-    printf("{\"event\":\"state\",\"pid\":%ld,\"ruid\":%u,\"euid\":%u,\"suid\":%u,"
+    printf("{\"event\":\"state\",\"pid\":%ld,\"argc\":%d,\"env_count\":%zu,\"ruid\":%u,\"euid\":%u,\"suid\":%u,"
            "\"rgid\":%u,\"egid\":%u,\"sgid\":%u,\"groups\":[",
-           (long)getpid(), (unsigned int)ruid, (unsigned int)euid, (unsigned int)suid,
+           (long)getpid(), process_argc, environment_count(),
+           (unsigned int)ruid, (unsigned int)euid, (unsigned int)suid,
            (unsigned int)rgid, (unsigned int)egid, (unsigned int)sgid);
     for (int index = 0; index < group_count; index++) {
         if (index != 0) {
             putchar(',');
         }
         printf("%u", (unsigned int)groups[index]);
+    }
+    fputs("],\"socket_inodes\":[", stdout);
+    for (size_t index = 0; index < socket_inode_count; index++) {
+        if (index != 0) {
+            putchar(',');
+        }
+        printf("%" PRIu64, socket_inodes[index]);
     }
     fputs("],\"cap_inh\":", stdout);
     print_json_string(cap_inh);
@@ -489,6 +571,7 @@ static int action_fork_limit(uint64_t attempts, uint64_t hold_ms) {
 
 int main(int argc, char **argv) {
     uint64_t first, second;
+    process_argc = argc;
     setvbuf(stdout, NULL, _IONBF, 0);
 
     if (argc < 2) {

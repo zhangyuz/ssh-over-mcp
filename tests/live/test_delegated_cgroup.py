@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import ctypes
 import errno
+import json
 import os
+import select
+import signal
 import stat
 import sys
 import time
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,11 +21,25 @@ from ssh_over_mcp.host_agent.containment import (
     ContainmentLimits,
     ContainmentRequest,
 )
+from ssh_over_mcp.host_agent.containment_manager import (
+    ContainmentManagerDispatcher,
+)
 from ssh_over_mcp.host_agent.containment_manager_identity import (
     ContainmentServiceIdentityPlan,
     LinuxProcessIdentity,
     require_linux_process_identity,
 )
+from ssh_over_mcp.host_agent.containment_manager_service import (
+    ContainmentManagerService,
+)
+from ssh_over_mcp.host_agent.containment_manager_unix import (
+    connect_authenticated_containment_manager,
+)
+from ssh_over_mcp.host_agent.file_identity import sha256_fd
+from ssh_over_mcp.host_agent.policy import HostChildLimits, HostObjectIdentity
+from ssh_over_mcp.host_agent.prepare import PreparedCommand
+from ssh_over_mcp.host_agent.run import run_prepared_native
+from ssh_over_mcp.ssh.protocol import ExecutionLimits
 
 _RUN_LIVE = os.environ.get("SSH_OVER_MCP_RUN_LIVE_CGROUP") == "1"
 pytestmark = pytest.mark.skipif(
@@ -537,3 +556,619 @@ def test_real_cgroup_backend_create_attach_limits_and_cleanup() -> None:
                 active_exception.add_note(message)
             else:
                 raise AssertionError(message)
+
+
+_PROBE_ELF_ENV = "SSH_OVER_MCP_LIVE_CGROUP_PROBE_ELF"
+_SIBLING_PROCS_ENV = "SSH_OVER_MCP_LIVE_CGROUP_SIBLING_PROCS"
+_CAP_SETGID = 6
+_CAP_SETUID = 7
+_CAP_KILL = 5
+_CAP_SYS_ADMIN = 21
+_EXPECTED_HOST_CAPS = (1 << _CAP_SETGID) | (1 << _CAP_SETUID)
+_LINUX_CAPABILITY_VERSION_3 = 0x20080522
+_PR_SET_KEEPCAPS = 8
+
+
+class _CapHeader(ctypes.Structure):
+    _fields_ = [
+        ("version", ctypes.c_uint32),
+        ("pid", ctypes.c_int),
+    ]
+
+
+class _CapData(ctypes.Structure):
+    _fields_ = [
+        ("effective", ctypes.c_uint32),
+        ("permitted", ctypes.c_uint32),
+        ("inheritable", ctypes.c_uint32),
+    ]
+
+
+def _write_pipe_json(fd: int, payload: dict[str, object]) -> None:
+    data = json.dumps(payload, sort_keys=True).encode("utf-8")
+    assert len(data) <= 16384, "live fixture message exceeds pipe bound"
+    offset = 0
+    while offset < len(data):
+        written = os.write(fd, data[offset:])
+        assert written > 0, "short live fixture pipe write"
+        offset += written
+
+
+def _read_pipe_json(fd: int, *, timeout_seconds: float) -> dict[str, object]:
+    readable, _writable, _exceptional = select.select(
+        [fd],
+        [],
+        [],
+        timeout_seconds,
+    )
+    assert readable, "live fixture process did not report before deadline"
+    data = os.read(fd, 16384)
+    assert data, "live fixture process closed status pipe without a report"
+    value = json.loads(data.decode("utf-8"))
+    assert isinstance(value, dict)
+    return value
+
+
+def _waitpid_bounded(pid: int, *, timeout_seconds: float) -> int | None:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        waited, status = os.waitpid(pid, os.WNOHANG)
+        if waited == pid:
+            return status
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(0.01)
+
+
+def _set_keepcaps(libc: ctypes.CDLL, enabled: bool) -> None:
+    prctl = libc.prctl
+    prctl.restype = ctypes.c_int
+    ctypes.set_errno(0)
+    if prctl(_PR_SET_KEEPCAPS, int(enabled), 0, 0, 0) != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number))
+
+
+def _set_host_transition_capabilities(libc: ctypes.CDLL) -> None:
+    capset = libc.capset
+    capset.restype = ctypes.c_int
+    header = _CapHeader(version=_LINUX_CAPABILITY_VERSION_3, pid=0)
+    data = (_CapData * 2)()
+    data[0].effective = _EXPECTED_HOST_CAPS
+    data[0].permitted = _EXPECTED_HOST_CAPS
+
+    ctypes.set_errno(0)
+    if capset(ctypes.byref(header), data) != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number))
+
+
+def _drop_to_manager_identity(plan: ContainmentServiceIdentityPlan) -> None:
+    manager = plan.manager
+    groups = (
+        [plan.manager_client_gid]
+        if plan.manager_client_gid != manager.gid
+        else []
+    )
+    os.setgroups(groups)
+    os.setresgid(manager.gid, manager.gid, manager.gid)
+    os.setresuid(manager.uid, manager.uid, manager.uid)
+    require_linux_process_identity(plan.manager_process_policy())
+    _assert_no_runtime_capabilities()
+
+
+def _drop_to_host_agent_identity(plan: ContainmentServiceIdentityPlan) -> None:
+    host = plan.host_agent
+    libc = ctypes.CDLL(None, use_errno=True)
+    _set_keepcaps(libc, True)
+    groups = (
+        [plan.manager_client_gid]
+        if plan.manager_client_gid != host.gid
+        else []
+    )
+    os.setgroups(groups)
+    os.setresgid(host.gid, host.gid, host.gid)
+    os.setresuid(host.uid, host.uid, host.uid)
+    _set_host_transition_capabilities(libc)
+    _set_keepcaps(libc, False)
+    require_linux_process_identity(plan.host_agent_process_policy())
+
+    rows = _read_proc_status(os.getpid())
+    effective = int(rows["CapEff"], 16)
+    permitted = int(rows["CapPrm"], 16)
+    inheritable = int(rows["CapInh"], 16)
+    ambient = int(rows["CapAmb"], 16)
+    assert effective == _EXPECTED_HOST_CAPS
+    assert permitted == _EXPECTED_HOST_CAPS
+    assert inheritable == 0
+    assert ambient == 0
+    assert not effective & (1 << _CAP_KILL)
+    assert not effective & (1 << _CAP_SYS_ADMIN)
+    assert rows["NoNewPrivs"] == "0"
+
+
+def _object_identity(fd: int, *, bind_content: bool) -> HostObjectIdentity:
+    info = os.fstat(fd)
+    return HostObjectIdentity(
+        device=info.st_dev,
+        inode=info.st_ino,
+        ctime_ns=info.st_ctime_ns,
+        mtime_ns=info.st_mtime_ns,
+        size=info.st_size,
+        content_sha256=(
+            sha256_fd(fd, expected_size=info.st_size)
+            if bind_content
+            else None
+        ),
+    )
+
+
+def _live_child_limits() -> HostChildLimits:
+    return HostChildLimits(
+        cpu_seconds=10,
+        address_space_bytes=256 * 1024 * 1024,
+        max_processes=32,
+        file_size_bytes=16 * 1024 * 1024,
+        open_files=64,
+    )
+
+
+def _prepared_escape_probe(
+    probe: Path,
+    *,
+    request_id: str,
+    root: Path,
+    sibling_procs: Path,
+) -> PreparedCommand:
+    executable_fd = os.open(
+        probe,
+        os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+    )
+    cwd_fd = os.open(
+        "/tmp",
+        os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_DIRECTORY,
+    )
+    try:
+        return PreparedCommand(
+            request_id=request_id,
+            executable_fd=executable_fd,
+            cwd_fd=cwd_fd,
+            executable_path=str(probe),
+            executable_identity=_object_identity(
+                executable_fd,
+                bind_content=True,
+            ),
+            cwd_path="/tmp",
+            cwd_identity=_object_identity(cwd_fd, bind_content=False),
+            executable_format="elf",
+            argv=("escape-check",),
+            env={
+                _ROOT_ENV: str(root),
+                _SIBLING_PROCS_ENV: str(sibling_procs),
+            },
+            fd_exec_supported=os.execve in os.supports_fd,
+            child_limits=_live_child_limits(),
+        )
+    except BaseException:
+        os.close(cwd_fd)
+        os.close(executable_fd)
+        raise
+
+
+def _unified_membership_for(scope: Path, mount: _Cgroup2Mount) -> str:
+    relative = scope.relative_to(mount.mountpoint)
+    return str(mount.root / relative)
+
+
+def _cleanup_dispatcher_scopes(
+    dispatcher: ContainmentManagerDispatcher,
+) -> None:
+    cleanup_errors: list[BaseException] = []
+    for scope_id, managed in list(dispatcher._scopes.items()):
+        handle = managed.handle
+        try:
+            if handle.stats().populated:
+                handle.kill_all()
+                _wait_until_scope_empty(handle)
+            handle.close()
+            del dispatcher._scopes[scope_id]
+        except BaseException as exc:  # noqa: BLE001
+            cleanup_errors.append(exc)
+    if cleanup_errors:
+        raise AssertionError(
+            f"manager dispatcher cleanup failed: {cleanup_errors!r}"
+        )
+
+
+def _manager_process(
+    fixture: _LiveFixture,
+    endpoint: Path,
+    ready_fd: int,
+) -> None:
+    service = None
+    sentinel = None
+    dispatcher = None
+    sent_ready = False
+    subtree_path = fixture.root / "cgroup.subtree_control"
+    originally_enabled: frozenset[str] | None = None
+    enabled_by_backend: frozenset[str] = frozenset()
+
+    try:
+        _drop_to_manager_identity(fixture.identities)
+        mount = _cgroup2_mount_for(fixture.root)
+        assert not _current_cgroup_path(mount).is_relative_to(fixture.root)
+
+        originally_enabled = _read_tokens(subtree_path)
+        enabled_by_backend = REQUIRED_CGROUP_V2_CONTROLLERS.difference(
+            originally_enabled
+        )
+        backend = CgroupV2Backend(fixture.root)
+        sentinel_request = ContainmentRequest(
+            request_id=f"req_live_sentinel_{os.getpid()}",
+            limits=ContainmentLimits(
+                memory_max_bytes=128 * 1024 * 1024,
+                pids_max=16,
+                cpu_quota_us=50_000,
+                cpu_period_us=100_000,
+            ),
+        )
+        sentinel = backend.create(sentinel_request)
+        sentinel_path = sentinel.path.resolve(strict=True)
+        assert sentinel_path.parent == fixture.root
+        os.chmod(sentinel_path, 0o711)
+
+        dispatcher = ContainmentManagerDispatcher(backend)
+        service = ContainmentManagerService.create(
+            identity_policy=fixture.identities.manager_process_policy(),
+            endpoint_policy=fixture.identities.endpoint_policy(endpoint),
+            peer_policy=fixture.identities.manager_accept_peer_policy(),
+            dispatcher=dispatcher,
+        )
+        _write_pipe_json(
+            ready_fd,
+            {
+                "ok": True,
+                "sentinel_path": str(sentinel_path),
+            },
+        )
+        sent_ready = True
+
+        service.serve_one()
+        assert dispatcher._scopes == {}
+
+        assert sentinel.stats().populated is False
+        sentinel.close()
+        sentinel = None
+        service.close()
+        service = None
+
+        if enabled_by_backend:
+            value = " ".join(
+                f"-{name}" for name in sorted(enabled_by_backend)
+            )
+            _write_control(subtree_path, f"{value}\n")
+        assert _read_tokens(subtree_path) == originally_enabled
+        os._exit(0)
+    except BaseException:  # noqa: BLE001
+        if not sent_ready:
+            try:
+                _write_pipe_json(
+                    ready_fd,
+                    {
+                        "ok": False,
+                        "error": traceback.format_exc()[-8000:],
+                    },
+                )
+            except BaseException as report_exc:  # noqa: BLE001
+                print(
+                    f"cannot report manager fixture failure: {report_exc!r}",
+                    file=sys.stderr,
+                )
+        traceback.print_exc()
+        cleanup_errors: list[BaseException] = []
+        try:
+            if service is not None:
+                service.close()
+        except BaseException as cleanup_exc:  # noqa: BLE001
+            cleanup_errors.append(cleanup_exc)
+        try:
+            if dispatcher is not None:
+                _cleanup_dispatcher_scopes(dispatcher)
+        except BaseException as cleanup_exc:  # noqa: BLE001
+            cleanup_errors.append(cleanup_exc)
+        try:
+            if sentinel is not None:
+                if sentinel.stats().populated:
+                    sentinel.kill_all()
+                    _wait_until_scope_empty(sentinel)
+                sentinel.close()
+        except BaseException as cleanup_exc:  # noqa: BLE001
+            cleanup_errors.append(cleanup_exc)
+        if originally_enabled is not None and enabled_by_backend:
+            try:
+                value = " ".join(
+                    f"-{name}" for name in sorted(enabled_by_backend)
+                )
+                _write_control(subtree_path, f"{value}\n")
+            except BaseException as cleanup_exc:  # noqa: BLE001
+                cleanup_errors.append(cleanup_exc)
+        if originally_enabled is not None:
+            try:
+                if _read_tokens(subtree_path) != originally_enabled:
+                    cleanup_errors.append(
+                        AssertionError(
+                            "cgroup.subtree_control was not restored"
+                        )
+                    )
+            except BaseException as cleanup_exc:  # noqa: BLE001
+                cleanup_errors.append(cleanup_exc)
+        for cleanup_exc in cleanup_errors:
+            print(
+                f"manager fixture cleanup failed: {cleanup_exc!r}",
+                file=sys.stderr,
+            )
+        os._exit(125)
+
+
+def _host_agent_process(
+    fixture: _LiveFixture,
+    endpoint: Path,
+    sentinel_path: Path,
+    probe: Path,
+    start_fd: int,
+    result_fd: int,
+) -> None:
+    client = None
+    prepared = None
+    try:
+        token = os.read(start_fd, 1)
+        assert token == b"R", "host-agent bootstrap barrier was not released"
+
+        _drop_to_host_agent_identity(fixture.identities)
+        mount = _cgroup2_mount_for(fixture.root)
+        assert _current_cgroup_path(mount) == fixture.host_source
+
+        request_id = f"req_live_composition_{os.getpid()}"
+        request_scope = fixture.root / f"ssh-over-mcp-{request_id}"
+        prepared = _prepared_escape_probe(
+            probe,
+            request_id=request_id,
+            root=fixture.root,
+            sibling_procs=sentinel_path / "cgroup.procs",
+        )
+        assert prepared.argv == ("escape-check",)
+        assert set(prepared.env) == {_ROOT_ENV, _SIBLING_PROCS_ENV}
+
+        client = connect_authenticated_containment_manager(
+            endpoint,
+            identity_plan=fixture.identities,
+            timeout_seconds=2.0,
+        )
+        request = ContainmentRequest(
+            request_id=request_id,
+            limits=ContainmentLimits(
+                memory_max_bytes=128 * 1024 * 1024,
+                pids_max=16,
+                cpu_quota_us=50_000,
+                cpu_period_us=100_000,
+            ),
+        )
+        result = run_prepared_native(
+            prepared,
+            b"",
+            ExecutionLimits(
+                timeout_seconds=5.0,
+                max_output_bytes=64 * 1024,
+                max_stdin_bytes=0,
+            ),
+            workload_identity_policy=fixture.identities.workload_process_policy(),
+            containment_backend=client,
+            containment_request=request,
+            term_grace_seconds=0.05,
+            kill_cleanup_seconds=1.0,
+        )
+
+        assert result.returncode == 0
+        assert result.stderr == b""
+        records = [
+            json.loads(line)
+            for line in result.stdout.decode("utf-8").splitlines()
+            if line
+        ]
+        assert len(records) == 3
+        state, root_migration, sibling_migration = records
+        assert state["event"] == "state"
+        assert state["argc"] == 2
+        assert state["env_count"] == 2
+        assert state["cgroup"] == _unified_membership_for(
+            request_scope,
+            mount,
+        )
+
+        workload = fixture.identities.workload
+        assert (state["ruid"], state["euid"], state["suid"]) == (
+            workload.uid,
+            workload.uid,
+            workload.uid,
+        )
+        assert (state["rgid"], state["egid"], state["sgid"]) == (
+            workload.gid,
+            workload.gid,
+            workload.gid,
+        )
+        assert state["groups"] == []
+        for name in ("cap_inh", "cap_prm", "cap_eff", "cap_amb"):
+            assert int(state[name], 16) == 0
+        assert state["no_new_privs"] == "1"
+        assert state["socket_inodes"] == []
+
+        for record, target in (
+            (root_migration, "root"),
+            (sibling_migration, "sibling"),
+        ):
+            assert record["event"] == "migration"
+            assert record["target"] == target
+            assert record["outcome"] == "denied"
+            assert record["errno"] in {errno.EACCES, errno.EPERM}
+
+        assert _current_cgroup_path(mount) == fixture.host_source
+        _write_pipe_json(result_fd, {"ok": True})
+        os._exit(0)
+    except BaseException:  # noqa: BLE001
+        try:
+            _write_pipe_json(
+                result_fd,
+                {
+                    "ok": False,
+                    "error": traceback.format_exc()[-12000:],
+                },
+            )
+        except BaseException as report_exc:  # noqa: BLE001
+            print(
+                f"cannot report host-agent fixture failure: {report_exc!r}",
+                file=sys.stderr,
+            )
+        traceback.print_exc()
+        os._exit(125)
+    finally:
+        if client is not None:
+            client.close()
+        if prepared is not None:
+            prepared.close()
+
+
+def test_production_manager_client_barrier_and_migration_denial() -> None:
+    assert os.geteuid() == 0, (
+        "Task 4 composition proof requires the dedicated root bootstrap launcher"
+    )
+    fixture = _fixture()
+    root = fixture.root.resolve(strict=True)
+    source = fixture.host_source.resolve(strict=True)
+    assert root == fixture.root
+    assert source == fixture.host_source
+    assert source.parent == root
+    assert root.stat().st_mode & stat.S_IXOTH, (
+        "delegated root must be searchable by the workload for denial probes"
+    )
+    assert (source / "cgroup.procs").read_text(encoding="ascii").strip() == ""
+
+    raw_probe = os.environ.get(_PROBE_ELF_ENV)
+    assert raw_probe, f"{_PROBE_ELF_ENV} is required"
+    probe = Path(raw_probe).resolve(strict=True)
+    assert probe == Path(raw_probe)
+    assert probe.is_file()
+    assert os.execve in os.supports_fd
+
+    mount = _cgroup2_mount_for(root)
+    assert not _current_cgroup_path(mount).is_relative_to(root)
+
+    runtime_dir = Path(f"/tmp/ssh-over-mcp-live-manager-{os.getpid()}")
+    assert not runtime_dir.exists()
+    runtime_dir.mkdir(mode=0o700)
+    os.chown(
+        runtime_dir,
+        fixture.identities.manager.uid,
+        fixture.identities.manager_client_gid,
+    )
+    os.chmod(runtime_dir, 0o710)
+    endpoint = runtime_dir / "manager.sock"
+
+    manager_read, manager_write = os.pipe()
+    manager_pid = os.fork()
+    if manager_pid == 0:
+        os.close(manager_read)
+        _manager_process(fixture, endpoint, manager_write)
+        os._exit(126)
+
+    os.close(manager_write)
+    host_pid: int | None = None
+    host_start_write = -1
+    host_result_read = -1
+    sentinel_path: Path | None = None
+
+    try:
+        manager_ready = _read_pipe_json(
+            manager_read,
+            timeout_seconds=5.0,
+        )
+        assert manager_ready.get("ok") is True, manager_ready.get("error")
+        sentinel_path = Path(str(manager_ready["sentinel_path"])).resolve(
+            strict=True
+        )
+        assert sentinel_path.parent == root
+        assert (sentinel_path / "cgroup.procs").exists()
+        assert stat.S_IMODE(sentinel_path.stat().st_mode) == 0o711
+
+        host_start_read, host_start_write = os.pipe()
+        host_result_read, host_result_write = os.pipe()
+        host_pid = os.fork()
+        if host_pid == 0:
+            os.close(host_start_write)
+            os.close(host_result_read)
+            _host_agent_process(
+                fixture,
+                endpoint,
+                sentinel_path,
+                probe,
+                host_start_read,
+                host_result_write,
+            )
+            os._exit(126)
+
+        os.close(host_start_read)
+        os.close(host_result_write)
+
+        _write_control(source / "cgroup.procs", f"{host_pid}\n")
+        assert _pid_cgroup_path(host_pid, mount) == source
+        os.write(host_start_write, b"R")
+        os.close(host_start_write)
+        host_start_write = -1
+
+        host_result = _read_pipe_json(
+            host_result_read,
+            timeout_seconds=12.0,
+        )
+        assert host_result.get("ok") is True, host_result.get("error")
+
+        host_status = _waitpid_bounded(host_pid, timeout_seconds=2.0)
+        assert host_status is not None
+        assert os.WIFEXITED(host_status)
+        assert os.WEXITSTATUS(host_status) == 0
+        host_pid = None
+
+        manager_status = _waitpid_bounded(manager_pid, timeout_seconds=3.0)
+        assert manager_status is not None
+        assert os.WIFEXITED(manager_status)
+        assert os.WEXITSTATUS(manager_status) == 0
+        manager_pid = -1
+
+        assert (source / "cgroup.procs").read_text(
+            encoding="ascii"
+        ).strip() == ""
+        assert sentinel_path.exists() is False
+        assert endpoint.exists() is False
+    finally:
+        os.close(manager_read)
+        if host_start_write >= 0:
+            os.close(host_start_write)
+        if host_result_read >= 0:
+            os.close(host_result_read)
+
+        if host_pid is not None:
+            try:
+                os.kill(host_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            _waitpid_bounded(host_pid, timeout_seconds=1.0)
+
+        if manager_pid > 0:
+            try:
+                os.kill(manager_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            _waitpid_bounded(manager_pid, timeout_seconds=1.0)
+
+        if endpoint.exists():
+            endpoint.unlink()
+        if runtime_dir.exists():
+            runtime_dir.rmdir()
