@@ -19,6 +19,8 @@ from pydantic import (
 from ssh_over_mcp.policy.commands import normalize_executable
 from ssh_over_mcp.ssh.protocol import ExecEnvelope
 
+from .file_identity import sha256_fd
+
 MAX_POLICY_BYTES = 256 * 1024
 DEFAULT_POLICY_PATH = Path("/etc/ssh-over-mcp/host-policy.yaml")
 
