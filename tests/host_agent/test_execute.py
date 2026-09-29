@@ -35,7 +35,7 @@ def _copy_native_elf(tmp_path: Path) -> Path:
     return target
 
 
-def _identity(fd: int) -> HostObjectIdentity:
+def _identity(fd: int, *, bind_content: bool = False) -> HostObjectIdentity:
     info = os.fstat(fd)
     return HostObjectIdentity(
         device=info.st_dev,
@@ -43,6 +43,11 @@ def _identity(fd: int) -> HostObjectIdentity:
         ctime_ns=info.st_ctime_ns,
         mtime_ns=info.st_mtime_ns,
         size=info.st_size,
+        content_sha256=(
+            sha256_fd(fd, expected_size=info.st_size)
+            if bind_content
+            else None
+        ),
     )
 
 
@@ -147,6 +152,47 @@ def test_executable_mutation_after_preparation_is_denied(tmp_path: Path):
             stream.write(b"x")
 
         with pytest.raises(NativeExecutionError, match="changed before exec"):
+            build_native_exec_spec(prepared)
+    finally:
+        prepared.close()
+
+
+def test_same_size_executable_rewrite_after_preparation_is_denied(
+    tmp_path: Path,
+):
+    prepared = _prepared(tmp_path)
+
+    try:
+        path = Path(prepared.executable_path)
+        original = path.read_bytes()
+        mutated = bytearray(original)
+        mutated[-1] ^= 0x01
+        assert len(mutated) == len(original)
+        path.write_bytes(mutated)
+
+        current = path.stat()
+        prepared.executable_identity = prepared.executable_identity.model_copy(
+            update={
+                "ctime_ns": current.st_ctime_ns,
+                "mtime_ns": current.st_mtime_ns,
+                "size": current.st_size,
+            }
+        )
+
+        with pytest.raises(NativeExecutionError, match="changed before exec"):
+            build_native_exec_spec(prepared)
+    finally:
+        prepared.close()
+
+
+def test_missing_executable_content_binding_fails_closed(tmp_path: Path):
+    prepared = _prepared(tmp_path)
+
+    try:
+        prepared.executable_identity = prepared.executable_identity.model_copy(
+            update={"content_sha256": None}
+        )
+        with pytest.raises(NativeExecutionError, match="content binding"):
             build_native_exec_spec(prepared)
     finally:
         prepared.close()
