@@ -56,8 +56,28 @@ def _validate_fd_identity(
     if require_directory:
         if not stat.S_ISDIR(info.st_mode):
             raise NativeExecutionError("pinned cwd is not a directory")
-    elif not stat.S_ISREG(info.st_mode):
+        return
+
+    if not stat.S_ISREG(info.st_mode):
         raise NativeExecutionError("pinned executable is not a regular file")
+    if identity.content_sha256 is None:
+        raise NativeExecutionError("pinned executable lacks content binding")
+
+    try:
+        content_sha256 = sha256_fd(fd, expected_size=info.st_size)
+        after = os.fstat(fd)
+    except OSError as exc:
+        raise NativeExecutionError("cannot verify pinned executable content") from exc
+
+    if (
+        not _same_identity(
+            after,
+            identity,
+            include_change_metadata=include_change_metadata,
+        )
+        or content_sha256 != identity.content_sha256
+    ):
+        raise NativeExecutionError("pinned object changed before exec")
 
 
 def _validate_argv_env(
