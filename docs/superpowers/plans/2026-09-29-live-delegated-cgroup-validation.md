@@ -11,9 +11,11 @@ Date: 2026-09-29
 - Generic GitHub-hosted CI and the existing hardened Docker runner remain unchanged and receive no writable cgroup access.
 - Accepted live evidence requires Linux cgroup v2 and an operator-provided, disposable delegated root.
 - The delegated root is absolute, canonical, empty of member processes, and exposes `cpu`, `memory`, and `pids` to child cgroups.
+- The containment-manager process itself remains outside the delegated root; the delegated root is an internal node used only to create request/sentinel child scopes.
 - Manager, host-agent, and workload UIDs are distinct.
 - Only the manager identity may write the delegated cgroup subtree.
 - Host agent keeps the existing narrow identity-transition authority and does not gain `CAP_KILL` or `CAP_SYS_ADMIN`.
+- Any privileged bootstrap authority is confined to fixture setup/cleanup and is not retained by the manager, host-agent, or workload processes whose state is being asserted.
 - Workload receives no supplementary groups and no capabilities.
 - The manager protocol remains create / attach / kill / stats / close only.
 - No live-only execution path may bypass the production start barrier, workload transition, or pinned native ELF exec path.
@@ -25,6 +27,7 @@ Date: 2026-09-29
 Every review must explicitly check:
 
 - no generic-runner privilege widening;
+- no manager process placed inside the delegated root or tested principal retaining bootstrap/root authority;
 - no Docker socket or `--privileged` requirement;
 - no model-controlled cgroup path;
 - no manager scope capability in argv/env/log output;
@@ -124,7 +127,7 @@ This task validates the manager-side primitive only. It does not yet claim full 
 
 **Files:**
 - Modify: `tests/live/test_delegated_cgroup.py`
-- Modify/create dedicated live-fixture launcher as required
+- Create: `scripts/run-live-delegated-cgroup-probe.py`
 
 Compose the already-implemented production boundaries:
 
@@ -135,6 +138,10 @@ Compose the already-implemented production boundaries:
 5. existing start barrier;
 6. real workload UID/GID transition;
 7. pinned native ELF execution of the cgroup probe.
+
+The fixture must also prove that the manager process remains outside the delegated root, that the host-agent begins with only the already-approved identity-transition authority (`CAP_SETUID`/`CAP_SETGID`, no `CAP_KILL`/`CAP_SYS_ADMIN`), and that neither manager nor workload retains bootstrap capabilities.
+
+The first machine-readable record emitted by the executed native ELF must report membership in the expected request scope. That observation is the live evidence that manager-confirmed attach and start-barrier release happened before workload exec; a later membership check alone is insufficient.
 
 Create a sibling sentinel scope before the workload executes.
 
@@ -226,7 +233,7 @@ Do not use process-group SIGKILL as the passing evidence. Direct signaling may r
 
 **Files:**
 - Create: `.github/workflows/live-cgroup-security.yml`
-- Create/modify: dedicated operator documentation/script
+- Modify: `scripts/run-live-delegated-cgroup-probe.py`
 - Modify: `docs/self-hosted-runner.md`
 - Modify: `tests/live/README.md`
 
