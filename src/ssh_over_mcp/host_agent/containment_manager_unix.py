@@ -1,18 +1,25 @@
 from __future__ import annotations
 
 import math
+import os
 import socket
 import struct
 import threading
 import time
+from pathlib import Path
 
 from .containment import ContainmentUnavailableError
 from .containment_manager import (
     MANAGER_PROTOCOL_MAGIC,
     MAX_MANAGER_MESSAGE_BYTES,
+    ContainmentManagerClient,
     ContainmentManagerDispatcher,
     ContainmentManagerProtocolError,
     ContainmentManagerTransport,
+)
+from .containment_manager_identity import (
+    ContainmentServiceIdentityPlan,
+    require_linux_process_identity,
 )
 from .containment_manager_peer import (
     LinuxPeerCredentialPolicy,
@@ -21,6 +28,20 @@ from .containment_manager_peer import (
 )
 
 _HEADER_SIZE = len(MANAGER_PROTOCOL_MAGIC) + 4
+
+
+def _normalize_timeout_seconds(timeout_seconds: float) -> float:
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or not math.isfinite(timeout_seconds)
+        or timeout_seconds <= 0
+        or timeout_seconds > 30
+    ):
+        raise ValueError(
+            "containment manager timeout must be in (0, 30] seconds"
+        )
+    return float(timeout_seconds)
 
 
 def _require_unix_stream(sock: socket.socket) -> None:
@@ -162,16 +183,7 @@ class UnixContainmentManagerTransport(ContainmentManagerTransport):
         timeout_seconds: float = 2.0,
     ) -> None:
         _require_unix_stream(sock)
-        if (
-            isinstance(timeout_seconds, bool)
-            or not isinstance(timeout_seconds, (int, float))
-            or not math.isfinite(timeout_seconds)
-            or timeout_seconds <= 0
-            or timeout_seconds > 30
-        ):
-            raise ValueError(
-                "containment manager timeout must be in (0, 30] seconds"
-            )
+        timeout_seconds = _normalize_timeout_seconds(timeout_seconds)
 
         self._sock = sock
         self._sock.set_inheritable(False)
@@ -251,6 +263,60 @@ class UnixContainmentManagerTransport(ContainmentManagerTransport):
     def close(self) -> None:
         with self._lock:
             self._close_unlocked()
+
+
+def connect_authenticated_containment_manager(
+    path: str | Path,
+    *,
+    identity_plan: ContainmentServiceIdentityPlan,
+    timeout_seconds: float = 2.0,
+) -> ContainmentManagerClient:
+    """Open one authenticated host-agent session to the local manager."""
+
+    if not isinstance(identity_plan, ContainmentServiceIdentityPlan):
+        raise TypeError("identity_plan must be ContainmentServiceIdentityPlan")
+
+    timeout_seconds = _normalize_timeout_seconds(timeout_seconds)
+    endpoint_path = identity_plan.endpoint_policy(path).path
+
+    # Refuse to open a manager control channel from an unexpected process
+    # identity. This check must happen before socket creation/connection.
+    require_linux_process_identity(
+        identity_plan.host_agent_process_policy()
+    )
+
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    except OSError as exc:
+        raise ContainmentUnavailableError(
+            "cannot create containment manager socket"
+        ) from exc
+
+    try:
+        sock.set_inheritable(False)
+        sock.settimeout(timeout_seconds)
+        sock.connect(os.fspath(endpoint_path))
+        transport = UnixContainmentManagerTransport(
+            sock,
+            peer_policy=identity_plan.host_agent_connect_peer_policy(),
+            timeout_seconds=timeout_seconds,
+        )
+    except (OSError, ValueError) as exc:
+        try:
+            sock.close()
+        except OSError:
+            pass
+        raise ContainmentUnavailableError(
+            "cannot connect to containment manager"
+        ) from exc
+    except Exception:
+        try:
+            sock.close()
+        except OSError:
+            pass
+        raise
+
+    return ContainmentManagerClient(transport)
 
 
 def serve_containment_manager_connection(

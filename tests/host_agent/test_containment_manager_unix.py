@@ -22,12 +22,18 @@ from ssh_over_mcp.host_agent.containment_manager import (
     ContainmentManagerDispatcher,
     ContainmentManagerProtocolError,
 )
+from ssh_over_mcp.host_agent.containment_manager_identity import (
+    ContainmentServiceIdentityPlan,
+    LinuxProcessIdentity,
+    LinuxProcessIdentityError,
+)
 from ssh_over_mcp.host_agent.containment_manager_peer import (
     ContainmentManagerPeerAuthError,
     LinuxPeerCredentialPolicy,
 )
 from ssh_over_mcp.host_agent.containment_manager_unix import (
     UnixContainmentManagerTransport,
+    connect_authenticated_containment_manager,
     serve_containment_manager_connection,
 )
 
@@ -93,6 +99,15 @@ def peer_policy() -> LinuxPeerCredentialPolicy:
     )
 
 
+def service_identity_plan() -> ContainmentServiceIdentityPlan:
+    return ContainmentServiceIdentityPlan(
+        manager=LinuxProcessIdentity(uid=2101, gid=3101),
+        host_agent=LinuxProcessIdentity(uid=2102, gid=3102),
+        workload=LinuxProcessIdentity(uid=2103, gid=3103),
+        manager_client_gid=3199,
+    )
+
+
 def socket_pair() -> tuple[socket.socket, socket.socket]:
     return socket.socketpair(
         socket.AF_UNIX,
@@ -116,6 +131,223 @@ def start_server(
     )
     thread.start()
     return thread
+
+
+def test_connect_validates_host_agent_identity_before_socket_open(
+    tmp_path,
+    monkeypatch,
+):
+    plan = service_identity_plan()
+    observed = {}
+
+    def reject_identity(policy):
+        observed["policy"] = policy
+        raise LinuxProcessIdentityError("wrong host-agent identity")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.containment_manager_unix.require_linux_process_identity",
+        reject_identity,
+    )
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.containment_manager_unix.socket.socket",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("socket opened before identity validation")
+        ),
+    )
+
+    with pytest.raises(
+        LinuxProcessIdentityError,
+        match="wrong host-agent identity",
+    ):
+        connect_authenticated_containment_manager(
+            tmp_path / "manager.sock",
+            identity_plan=plan,
+        )
+
+    assert observed["policy"] == plan.host_agent_process_policy()
+
+
+def test_connect_uses_identity_plan_and_owns_transport_lifecycle(
+    tmp_path,
+    monkeypatch,
+):
+    plan = service_identity_plan()
+    observed = {}
+
+    class FakeSocket:
+        def __init__(self):
+            self.inheritable = True
+            self.timeout = None
+            self.connected_path = None
+            self.closed = False
+
+        def set_inheritable(self, value):
+            self.inheritable = value
+
+        def settimeout(self, value):
+            self.timeout = value
+
+        def connect(self, value):
+            self.connected_path = value
+
+        def close(self):
+            self.closed = True
+
+    sock = FakeSocket()
+
+    def socket_factory(family, socket_type):
+        observed["socket_args"] = (family, socket_type)
+        return sock
+
+    class FakeTransport:
+        def __init__(
+            self,
+            connected_sock,
+            *,
+            peer_policy,
+            timeout_seconds,
+        ):
+            observed["transport_sock"] = connected_sock
+            observed["peer_policy"] = peer_policy
+            observed["transport_timeout"] = timeout_seconds
+            self._sock = connected_sock
+
+        def close(self):
+            self._sock.close()
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.containment_manager_unix.require_linux_process_identity",
+        lambda policy: observed.setdefault("identity_policy", policy),
+    )
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.containment_manager_unix.socket.socket",
+        socket_factory,
+    )
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.containment_manager_unix.UnixContainmentManagerTransport",
+        FakeTransport,
+    )
+
+    endpoint = tmp_path / "manager.sock"
+    client = connect_authenticated_containment_manager(
+        endpoint,
+        identity_plan=plan,
+        timeout_seconds=1.25,
+    )
+
+    assert isinstance(client, ContainmentManagerClient)
+    assert observed["identity_policy"] == plan.host_agent_process_policy()
+    assert observed["peer_policy"] == plan.host_agent_connect_peer_policy()
+    assert observed["socket_args"] == (socket.AF_UNIX, socket.SOCK_STREAM)
+    assert observed["transport_sock"] is sock
+    assert observed["transport_timeout"] == 1.25
+    assert sock.inheritable is False
+    assert sock.timeout == 1.25
+    assert sock.connected_path == os.fspath(endpoint)
+    assert sock.closed is False
+
+    client.close()
+    assert sock.closed is True
+
+    with pytest.raises(
+        ContainmentUnavailableError,
+        match="client is closed",
+    ):
+        client.create(request())
+
+
+def test_connect_preserves_peer_auth_failure_and_closes_socket(
+    tmp_path,
+    monkeypatch,
+):
+    plan = service_identity_plan()
+
+    class FakeSocket:
+        def __init__(self):
+            self.closed = False
+
+        def set_inheritable(self, _value):
+            return
+
+        def settimeout(self, _value):
+            return
+
+        def connect(self, _path):
+            return
+
+        def close(self):
+            self.closed = True
+
+    sock = FakeSocket()
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.containment_manager_unix.require_linux_process_identity",
+        lambda _policy: None,
+    )
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.containment_manager_unix.socket.socket",
+        lambda *_args, **_kwargs: sock,
+    )
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.containment_manager_unix.UnixContainmentManagerTransport",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ContainmentManagerPeerAuthError("manager peer rejected")
+        ),
+    )
+
+    with pytest.raises(
+        ContainmentManagerPeerAuthError,
+        match="manager peer rejected",
+    ):
+        connect_authenticated_containment_manager(
+            tmp_path / "manager.sock",
+            identity_plan=plan,
+        )
+
+    assert sock.closed is True
+
+
+def test_connect_failure_closes_socket_and_fails_unavailable(
+    tmp_path,
+    monkeypatch,
+):
+    plan = service_identity_plan()
+
+    class FailingSocket:
+        def __init__(self):
+            self.closed = False
+
+        def set_inheritable(self, _value):
+            return
+
+        def settimeout(self, _value):
+            return
+
+        def connect(self, _path):
+            raise FileNotFoundError("manager endpoint unavailable")
+
+        def close(self):
+            self.closed = True
+
+    sock = FailingSocket()
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.containment_manager_unix.require_linux_process_identity",
+        lambda _policy: None,
+    )
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.containment_manager_unix.socket.socket",
+        lambda *_args, **_kwargs: sock,
+    )
+
+    with pytest.raises(
+        ContainmentUnavailableError,
+        match="cannot connect to containment manager",
+    ):
+        connect_authenticated_containment_manager(
+            tmp_path / "manager.sock",
+            identity_plan=plan,
+        )
+
+    assert sock.closed is True
 
 
 def test_unix_transport_full_manager_lifecycle():
@@ -162,6 +394,48 @@ def test_transport_socket_is_non_inheritable():
         transport.close()
     finally:
         server_sock.close()
+
+
+def test_manager_transport_fd_is_closed_by_child_fd_sanitation():
+    if not hasattr(socket, "SO_PEERCRED") or not hasattr(os, "fork"):
+        pytest.skip("requires Linux SO_PEERCRED and fork")
+
+    from ssh_over_mcp.host_agent.supervisor import _close_unrelated_fds
+
+    client_sock, server_sock = socket_pair()
+    transport = UnixContainmentManagerTransport(
+        client_sock,
+        peer_policy=peer_policy(),
+    )
+    manager_fd = transport.fileno
+    result_read, result_write = os.pipe()
+
+    pid = os.fork()
+    if pid == 0:
+        try:
+            os.close(result_read)
+            _close_unrelated_fds({result_write})
+            try:
+                os.fstat(manager_fd)
+            except OSError:
+                os.write(result_write, b"closed")
+            else:
+                os.write(result_write, b"open")
+        finally:
+            os._exit(0)
+
+    os.close(result_write)
+    try:
+        result = os.read(result_read, 16)
+        _, status = os.waitpid(pid, 0)
+    finally:
+        os.close(result_read)
+        transport.close()
+        server_sock.close()
+
+    assert result == b"closed"
+    assert os.WIFEXITED(status)
+    assert os.WEXITSTATUS(status) == 0
 
 
 def test_transport_timeout_fails_closed():

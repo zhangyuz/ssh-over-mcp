@@ -2,6 +2,7 @@ import errno
 import os
 import shutil
 import signal
+import socket
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,9 +16,21 @@ from ssh_over_mcp.host_agent.containment import (
     ContainmentRequest,
     ContainmentStats,
 )
+from ssh_over_mcp.host_agent.containment_manager import (
+    ContainmentManagerClient,
+    ContainmentManagerDispatcher,
+    ContainmentManagerTransport,
+)
 from ssh_over_mcp.host_agent.containment_manager_identity import (
     LinuxProcessIdentity,
     LinuxProcessIdentityPolicy,
+)
+from ssh_over_mcp.host_agent.containment_manager_peer import (
+    LinuxPeerCredentialPolicy,
+)
+from ssh_over_mcp.host_agent.containment_manager_unix import (
+    UnixContainmentManagerTransport,
+    serve_containment_manager_connection,
 )
 from ssh_over_mcp.host_agent.policy import HostChildLimits, HostObjectIdentity
 from ssh_over_mcp.host_agent.prepare import PreparedCommand
@@ -536,6 +549,133 @@ def test_runner_propagates_exact_workload_identity_policy(monkeypatch):
         )
 
     assert observed["policy"] is policy
+
+
+def test_runner_passes_manager_client_through_contained_spawn(
+    monkeypatch,
+):
+    observed = {}
+
+    class NoopTransport(ContainmentManagerTransport):
+        def round_trip(self, _frame: bytes) -> bytes:
+            raise AssertionError("manager protocol should not run in this test")
+
+        def close(self) -> None:
+            return
+
+    client = ContainmentManagerClient(NoopTransport())
+
+    def stop_spawn(
+        _prepared,
+        backend,
+        _request,
+        *,
+        workload_identity_policy,
+    ):
+        observed["backend"] = backend
+        observed["policy"] = workload_identity_policy
+        raise ChildSupervisorError("stop after manager backend propagation")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.run.spawn_prepared_native_contained",
+        stop_spawn,
+    )
+
+    policy = _workload_policy()
+    try:
+        with pytest.raises(BoundedExecutionError, match="spawn supervised"):
+            run_prepared_native(
+                object(),
+                b"",
+                _limits(),
+                workload_identity_policy=policy,
+                containment_backend=client,
+                containment_request=object(),
+            )
+    finally:
+        client.close()
+
+    assert observed["backend"] is client
+    assert observed["policy"] is policy
+
+
+def test_bounded_runner_uses_authenticated_manager_client_end_to_end(
+    tmp_path: Path,
+):
+    if not hasattr(socket, "SO_PEERCRED"):
+        pytest.skip("requires Linux SO_PEERCRED")
+
+    prepared = _prepared(tmp_path, _source("/bin/cat", "/usr/bin/cat"))
+    backend, request = _containment(prepared)
+    client_sock, server_sock = socket.socketpair(
+        socket.AF_UNIX,
+        socket.SOCK_STREAM,
+    )
+    events_read, events_write = os.pipe()
+    peer_policy = LinuxPeerCredentialPolicy(
+        expected_uid=os.getuid(),
+        expected_gid=os.getgid(),
+    )
+    dispatcher = ContainmentManagerDispatcher(
+        backend,
+        capability_factory=lambda: "A" * 43,
+    )
+
+    manager_pid = os.fork()
+    if manager_pid == 0:
+        try:
+            client_sock.close()
+            os.close(events_read)
+            serve_containment_manager_connection(
+                server_sock,
+                dispatcher,
+                peer_policy=peer_policy,
+            )
+            handle = backend.handles[0]
+            events = (
+                f"{len(backend.requests)}:"
+                f"{int(handle.attached_pid is not None)}:"
+                f"{int(handle.closed)}"
+            ).encode("ascii")
+            os.write(events_write, events)
+        finally:
+            os._exit(0)
+
+    server_sock.close()
+    os.close(events_write)
+    transport = UnixContainmentManagerTransport(
+        client_sock,
+        peer_policy=peer_policy,
+        timeout_seconds=1.0,
+    )
+    client = ContainmentManagerClient(transport)
+
+    try:
+        result = run_prepared_native(
+            prepared,
+            b"manager-backed runner\n",
+            _limits(),
+            workload_identity_policy=_workload_policy(),
+            containment_backend=client,
+            containment_request=request,
+            term_grace_seconds=0.05,
+            kill_cleanup_seconds=0.5,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout == b"manager-backed runner\n"
+        assert result.stderr == b""
+    finally:
+        prepared.close()
+        client.close()
+
+    events = os.read(events_read, 64)
+    os.close(events_read)
+    _, manager_status = os.waitpid(manager_pid, 0)
+
+    assert events == b"1:1:1"
+    assert os.WIFEXITED(manager_status)
+    assert os.WEXITSTATUS(manager_status) == 0
 
 
 def test_reap_until_is_bounded(monkeypatch):

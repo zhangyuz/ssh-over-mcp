@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Through Phase 3d2b2b2c2b2b3 implemented; ForceCommand execution remains disabled**
+Status: **Through Phase 3d2b2b2c2c implemented; ForceCommand execution remains disabled**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -365,9 +365,22 @@ Implemented:
 - generic validation remains capability-free;
 - containment-manager protocol is unchanged and ForceCommand execution remains disabled.
 
+### Phase 3d2b2b2c2c — authenticated manager-client integration
+
+Implemented:
+
+- host-agent connector accepts one server-owned `ContainmentServiceIdentityPlan` plus a configured Unix endpoint path;
+- endpoint path is validated through the existing endpoint-policy lexical/Linux AF_UNIX constraints before connection;
+- exact host-agent real/effective/saved UID/GID and supplementary groups are validated before any manager socket is opened;
+- client socket is AF_UNIX/SOCK_STREAM, explicitly non-inheritable, and uses the same bounded timeout for connect and manager round trips;
+- expected manager `SO_PEERCRED` policy is derived from the same identity plan rather than supplied independently at the call site;
+- authenticated `ContainmentManagerClient` remains the existing `ContainmentBackend` consumed unchanged by the start barrier and bounded runner;
+- the manager control fd is not in the child keep-set and is closed by child fd sanitation before workload identity transition/native exec;
+- client transport lifecycle is explicit and idempotent; calls after close fail unavailable;
+- no manager protocol operation, supervisor ordering, cgroup filesystem authority, or ForceCommand execution surface was added.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2b2b2c2c: use the authenticated manager client through the existing start barrier and bounded runner;
 - Phase 3d2b2b2c3: live delegated-cgroup descendant-kill/resource-limit/self-migration tests;
 - Phase 3d2c: wire supervised native execution into the ForceCommand CLI only after containment is enforced;
 - typed filesystem operations;
