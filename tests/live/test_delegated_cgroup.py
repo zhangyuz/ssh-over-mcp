@@ -1637,3 +1637,516 @@ def test_real_pid_and_cpu_enforcement() -> None:
             endpoint.unlink()
         if runtime_dir.exists():
             runtime_dir.rmdir()
+
+
+class _CloseObservationHandle:
+    def __init__(
+        self,
+        handle,
+        *,
+        ready_fd: int,
+        release_fd: int,
+    ) -> None:
+        self._handle = handle
+        self._ready_fd = ready_fd
+        self._release_fd = release_fd
+        self._closed = False
+
+    @property
+    def scope_id(self) -> str:
+        return self._handle.scope_id
+
+    def attach(self, pid: int) -> None:
+        self._handle.attach(pid)
+
+    def kill_all(self) -> None:
+        self._handle.kill_all()
+
+    def stats(self):
+        return self._handle.stats()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        try:
+            _write_pipe_json(
+                self._ready_fd,
+                {"scope_id": self.scope_id},
+            )
+            token = os.read(self._release_fd, 1)
+            assert token == b"R", (
+                "memory observer did not release request close barrier"
+            )
+        finally:
+            try:
+                self._handle.close()
+            finally:
+                self._closed = True
+                os.close(self._ready_fd)
+                os.close(self._release_fd)
+                self._ready_fd = -1
+                self._release_fd = -1
+
+
+class _CreateObservationBackend:
+    def __init__(
+        self,
+        backend,
+        *,
+        create_ready_fd: int,
+        create_release_fd: int,
+        close_ready_fd: int,
+        close_release_fd: int,
+    ) -> None:
+        self._backend = backend
+        self._create_ready_fd = create_ready_fd
+        self._create_release_fd = create_release_fd
+        self._close_ready_fd = close_ready_fd
+        self._close_release_fd = close_release_fd
+
+    @property
+    def name(self) -> str:
+        return self._backend.name
+
+    def create(self, request: ContainmentRequest):
+        handle = self._backend.create(request)
+        try:
+            _write_pipe_json(
+                self._create_ready_fd,
+                {"scope_id": handle.scope_id},
+            )
+            token = os.read(self._create_release_fd, 1)
+            assert token == b"R", (
+                "memory observer did not release request creation barrier"
+            )
+        except BaseException:
+            try:
+                if handle.stats().populated:
+                    handle.kill_all()
+                    _wait_until_scope_empty(handle)
+                handle.close()
+            finally:
+                os.close(self._close_ready_fd)
+                os.close(self._close_release_fd)
+            raise
+        finally:
+            os.close(self._create_ready_fd)
+            os.close(self._create_release_fd)
+            self._create_ready_fd = -1
+            self._create_release_fd = -1
+
+        return _CloseObservationHandle(
+            handle,
+            ready_fd=self._close_ready_fd,
+            release_fd=self._close_release_fd,
+        )
+
+def _memory_observation_baseline(
+    scope: Path,
+    *,
+    sentinel_scope: Path,
+    expected_max_bytes: int,
+) -> tuple[dict[str, int], int, dict[str, int]]:
+    _wait_for_scope(scope)
+    _wait_for_control_value(
+        scope / "memory.max",
+        str(expected_max_bytes),
+    )
+    assert sentinel_scope.is_dir(), "sibling sentinel scope disappeared"
+
+    baseline_events = _read_cpu_stat(scope / "memory.events")
+    baseline_current = _read_int_file(scope / "memory.current")
+    sentinel_baseline = _read_cpu_stat(sentinel_scope / "memory.events")
+    for name in ("oom", "oom_kill"):
+        assert name in baseline_events
+        assert name in sentinel_baseline
+        assert baseline_events[name] == 0, (
+            "new request scope already recorded OOM before workload release"
+        )
+    return baseline_events, baseline_current, sentinel_baseline
+
+
+def _memory_observation_after(
+    scope: Path,
+    *,
+    sentinel_scope: Path,
+    baseline_events: dict[str, int],
+    baseline_current: int,
+    sentinel_baseline: dict[str, int],
+) -> dict[str, int]:
+    assert scope.is_dir(), (
+        "request scope disappeared before final memory accounting"
+    )
+    assert sentinel_scope.is_dir(), (
+        "sibling sentinel scope disappeared during memory pressure"
+    )
+
+    after_events = _read_cpu_stat(scope / "memory.events")
+    after_current = _read_int_file(scope / "memory.current")
+    sentinel_events = _read_cpu_stat(sentinel_scope / "memory.events")
+    for name in ("oom", "oom_kill"):
+        assert after_events[name] >= baseline_events[name]
+        assert sentinel_events[name] == sentinel_baseline[name]
+
+    assert (
+        after_events["oom"] > baseline_events["oom"]
+        or after_events["oom_kill"] > baseline_events["oom_kill"]
+    ), "final memory.events snapshot contains no request-scope OOM evidence"
+
+    return {
+        "baseline_current": baseline_current,
+        "after_current": after_current,
+        "baseline_oom": baseline_events["oom"],
+        "after_oom": after_events["oom"],
+        "baseline_oom_kill": baseline_events["oom_kill"],
+        "after_oom_kill": after_events["oom_kill"],
+        "sentinel_oom": sentinel_events["oom"],
+        "sentinel_oom_kill": sentinel_events["oom_kill"],
+    }
+
+def _host_agent_memory_process(
+    fixture: _LiveFixture,
+    endpoint: Path,
+    probe: Path,
+    start_fd: int,
+    result_fd: int,
+    create_ready_fd: int,
+    create_release_fd: int,
+    close_ready_fd: int,
+    close_release_fd: int,
+) -> None:
+    client = None
+    prepared = None
+    try:
+        token = os.read(start_fd, 1)
+        assert token == b"R", "host-agent bootstrap barrier was not released"
+
+        _drop_to_host_agent_identity(fixture.identities)
+        mount = _cgroup2_mount_for(fixture.root)
+        assert _current_cgroup_path(mount) == fixture.host_source
+
+        client = connect_authenticated_containment_manager(
+            endpoint,
+            identity_plan=fixture.identities,
+            timeout_seconds=2.0,
+        )
+
+        request_id = f"req_live_memory_{os.getpid()}"
+        memory_max_bytes = 32 * 1024 * 1024
+        allocation_bytes = 64 * 1024 * 1024
+        prepared = _prepared_probe(
+            probe,
+            request_id=request_id,
+            argv=("memory", str(allocation_bytes), "100"),
+        )
+        observed_backend = _CreateObservationBackend(
+            client,
+            create_ready_fd=create_ready_fd,
+            create_release_fd=create_release_fd,
+            close_ready_fd=close_ready_fd,
+            close_release_fd=close_release_fd,
+        )
+        result = run_prepared_native(
+            prepared,
+            b"",
+            ExecutionLimits(
+                timeout_seconds=5.0,
+                max_output_bytes=64 * 1024,
+                max_stdin_bytes=0,
+            ),
+            workload_identity_policy=fixture.identities.workload_process_policy(),
+            containment_backend=observed_backend,
+            containment_request=ContainmentRequest(
+                request_id=request_id,
+                limits=ContainmentLimits(
+                    memory_max_bytes=memory_max_bytes,
+                    pids_max=16,
+                    cpu_quota_us=50_000,
+                    cpu_period_us=100_000,
+                ),
+            ),
+            term_grace_seconds=0.02,
+            kill_cleanup_seconds=1.0,
+        )
+        prepared.close()
+        prepared = None
+
+        assert result.timed_out is False
+        assert result.output_exceeded is False
+        assert result.containment_stats is not None
+        assert result.containment_stats.populated is False
+
+        records = _parse_probe_records(result.stdout)
+        state = next(
+            record
+            for record in records
+            if record.get("event") == "state"
+        )
+        assert state["cgroup"] == _unified_membership_for(
+            fixture.root / f"ssh-over-mcp-{request_id}",
+            mount,
+        )
+
+        allocation_failures = [
+            record
+            for record in records
+            if record.get("event") == "memory_alloc"
+            and record.get("outcome") == "failed"
+        ]
+        completed = any(
+            record.get("event") == "memory_done"
+            for record in records
+        )
+        killed_by_sigkill = result.returncode == -signal.SIGKILL
+
+        assert not completed, (
+            "memory workload unexpectedly completed beyond memory.max"
+        )
+        assert killed_by_sigkill or (
+            result.returncode == 71 and len(allocation_failures) == 1
+        ), (
+            "memory workload termination was not consistent with "
+            "cgroup OOM or allocation failure"
+        )
+        assert _current_cgroup_path(mount) == fixture.host_source
+
+        _write_pipe_json(
+            result_fd,
+            {
+                "ok": True,
+                "returncode": result.returncode,
+                "killed_by_sigkill": killed_by_sigkill,
+                "allocation_failure": len(allocation_failures) == 1,
+            },
+        )
+        os._exit(0)
+    except BaseException:  # noqa: BLE001
+        try:
+            _write_pipe_json(
+                result_fd,
+                {
+                    "ok": False,
+                    "error": traceback.format_exc()[-12000:],
+                },
+            )
+        except BaseException as report_exc:  # noqa: BLE001
+            print(
+                f"cannot report memory host-agent failure: {report_exc!r}",
+                file=sys.stderr,
+            )
+        traceback.print_exc()
+        os._exit(125)
+    finally:
+        if prepared is not None:
+            prepared.close()
+        if client is not None:
+            client.close()
+
+
+def test_real_memory_enforcement_with_request_scope_oom_attribution() -> None:
+    assert os.geteuid() == 0, (
+        "Task 6 memory proof requires the dedicated root bootstrap launcher"
+    )
+    fixture = _fixture()
+    root = fixture.root.resolve(strict=True)
+    source = fixture.host_source.resolve(strict=True)
+    assert root == fixture.root
+    assert source == fixture.host_source
+    assert source.parent == root
+    assert (source / "cgroup.procs").read_text(encoding="ascii").strip() == ""
+
+    raw_probe = os.environ.get(_PROBE_ELF_ENV)
+    assert raw_probe, f"{_PROBE_ELF_ENV} is required"
+    probe = Path(raw_probe).resolve(strict=True)
+    assert probe == Path(raw_probe)
+    assert probe.is_file()
+    assert os.execve in os.supports_fd
+
+    mount = _cgroup2_mount_for(root)
+    assert not _current_cgroup_path(mount).is_relative_to(root)
+
+    runtime_dir = Path(f"/tmp/ssh-over-mcp-live-manager-task6-{os.getpid()}")
+    assert not runtime_dir.exists()
+    runtime_dir.mkdir(mode=0o700)
+    os.chown(
+        runtime_dir,
+        fixture.identities.manager.uid,
+        fixture.identities.manager_client_gid,
+    )
+    os.chmod(runtime_dir, 0o710)
+    endpoint = runtime_dir / "manager.sock"
+
+    manager_read, manager_write = os.pipe()
+    manager_pid = os.fork()
+    if manager_pid == 0:
+        os.close(manager_read)
+        _manager_process(fixture, endpoint, manager_write)
+        os._exit(126)
+
+    os.close(manager_write)
+    host_pid: int | None = None
+    host_start_write = -1
+    host_result_read = -1
+    create_ready_read = -1
+    create_release_write = -1
+    close_ready_read = -1
+    close_release_write = -1
+
+    try:
+        manager_ready = _read_pipe_json(
+            manager_read,
+            timeout_seconds=5.0,
+        )
+        assert manager_ready.get("ok") is True, manager_ready.get("error")
+        sentinel_path = Path(str(manager_ready["sentinel_path"])).resolve(
+            strict=True
+        )
+        assert sentinel_path.parent == root
+        assert (sentinel_path / "memory.events").exists()
+
+        host_start_read, host_start_write = os.pipe()
+        host_result_read, host_result_write = os.pipe()
+        create_ready_read, create_ready_write = os.pipe()
+        create_release_read, create_release_write = os.pipe()
+        close_ready_read, close_ready_write = os.pipe()
+        close_release_read, close_release_write = os.pipe()
+        host_pid = os.fork()
+        if host_pid == 0:
+            os.close(host_start_write)
+            os.close(host_result_read)
+            os.close(create_ready_read)
+            os.close(create_release_write)
+            os.close(close_ready_read)
+            os.close(close_release_write)
+            _host_agent_memory_process(
+                fixture,
+                endpoint,
+                probe,
+                host_start_read,
+                host_result_write,
+                create_ready_write,
+                create_release_read,
+                close_ready_write,
+                close_release_read,
+            )
+            os._exit(126)
+
+        os.close(host_start_read)
+        os.close(host_result_write)
+        os.close(create_ready_write)
+        os.close(create_release_read)
+        os.close(close_ready_write)
+        os.close(close_release_read)
+
+        _write_control(source / "cgroup.procs", f"{host_pid}\n")
+        assert _pid_cgroup_path(host_pid, mount) == source
+
+        memory_scope = root / f"ssh-over-mcp-req_live_memory_{host_pid}"
+        os.write(host_start_write, b"R")
+        os.close(host_start_write)
+        host_start_write = -1
+
+        created = _read_pipe_json(
+            create_ready_read,
+            timeout_seconds=3.0,
+        )
+        assert created["scope_id"] == memory_scope.name
+        (
+            baseline_events,
+            baseline_current,
+            sentinel_baseline,
+        ) = _memory_observation_baseline(
+            memory_scope,
+            sentinel_scope=sentinel_path,
+            expected_max_bytes=32 * 1024 * 1024,
+        )
+        os.write(create_release_write, b"R")
+        os.close(create_release_write)
+        create_release_write = -1
+
+        closing = _read_pipe_json(
+            close_ready_read,
+            timeout_seconds=4.0,
+        )
+        assert closing["scope_id"] == memory_scope.name
+        observation = _memory_observation_after(
+            memory_scope,
+            sentinel_scope=sentinel_path,
+            baseline_events=baseline_events,
+            baseline_current=baseline_current,
+            sentinel_baseline=sentinel_baseline,
+        )
+        assert observation["after_current"] <= 32 * 1024 * 1024
+        assert observation["sentinel_oom"] == 0
+        assert observation["sentinel_oom_kill"] == 0
+        assert sentinel_path.is_dir(), (
+            "sibling sentinel did not survive request-scope OOM"
+        )
+        os.write(close_release_write, b"R")
+        os.close(close_release_write)
+        close_release_write = -1
+
+        host_result = _read_pipe_json(
+            host_result_read,
+            timeout_seconds=4.0,
+        )
+        assert host_result.get("ok") is True, host_result.get("error")
+        killed_by_sigkill = bool(host_result["killed_by_sigkill"])
+        allocation_failure = bool(host_result["allocation_failure"])
+        assert killed_by_sigkill or allocation_failure
+        if killed_by_sigkill:
+            assert observation["after_oom_kill"] > observation["baseline_oom_kill"]
+        if allocation_failure:
+            assert observation["after_oom"] > observation["baseline_oom"]
+
+        host_status = _waitpid_bounded(host_pid, timeout_seconds=2.0)
+        assert host_status is not None
+        assert os.WIFEXITED(host_status)
+        assert os.WEXITSTATUS(host_status) == 0
+        host_pid = None
+
+        manager_status = _waitpid_bounded(manager_pid, timeout_seconds=3.0)
+        assert manager_status is not None
+        assert os.WIFEXITED(manager_status)
+        assert os.WEXITSTATUS(manager_status) == 0
+        manager_pid = -1
+
+        assert memory_scope.exists() is False
+        assert sentinel_path.exists() is False
+        assert endpoint.exists() is False
+        assert (source / "cgroup.procs").read_text(
+            encoding="ascii"
+        ).strip() == ""
+    finally:
+        os.close(manager_read)
+        if host_start_write >= 0:
+            os.close(host_start_write)
+        if host_result_read >= 0:
+            os.close(host_result_read)
+        if create_ready_read >= 0:
+            os.close(create_ready_read)
+        if create_release_write >= 0:
+            os.close(create_release_write)
+        if close_ready_read >= 0:
+            os.close(close_ready_read)
+        if close_release_write >= 0:
+            os.close(close_release_write)
+
+        if host_pid is not None:
+            try:
+                os.kill(host_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            _waitpid_bounded(host_pid, timeout_seconds=1.0)
+
+        if manager_pid > 0:
+            try:
+                os.kill(manager_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            _waitpid_bounded(manager_pid, timeout_seconds=1.0)
+
+        if endpoint.exists():
+            endpoint.unlink()
+        if runtime_dir.exists():
+            runtime_dir.rmdir()
