@@ -445,9 +445,12 @@ Verified locally in capability-free Linux containers:
 - both ordinary runtimes: non-root with `CapEff=0` and `CapPrm=0`;
 - dedicated live probe remains opt-in and is skipped by ordinary validation.
 
-- [ ] **Step 5: Run the dedicated live capability-transition proof**
+- [x] **Step 5: Run the dedicated live capability-transition proof**
 
 Required: PASS on the exact implementation head SHA.
+
+Dedicated live probe: PASS on source-of-truth implementation commit
+`acdb63522e03e58073470ac0b6bac8e88fccb3c5`.
 
 Do not substitute mocked unit tests for this gate.
 
@@ -467,7 +470,7 @@ Review specifically for:
 
 Fix every issue found, rerun the affected verification, then re-review.
 
-- [ ] **Step 7: Open/merge implementation PR only after all gates pass**
+- [x] **Step 7: Open/merge implementation PR only after all gates pass**
 
 PR summary must include:
 
