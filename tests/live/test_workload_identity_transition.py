@@ -152,6 +152,8 @@ def _identity(fd: int) -> HostObjectIdentity:
         device=info.st_dev,
         inode=info.st_ino,
         ctime_ns=info.st_ctime_ns,
+        mtime_ns=info.st_mtime_ns,
+        size=info.st_size,
     )
 
 
