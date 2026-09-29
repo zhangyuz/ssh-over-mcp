@@ -170,9 +170,9 @@ def test_invalid_exec_spec_is_rejected_before_fork(tmp_path: Path):
     try:
         with pytest.raises(ChildSupervisorError, match="cannot enter"):
             spawn_prepared_native(
-        prepared,
-        workload_identity_policy=_workload_policy(),
-    )
+                prepared,
+                workload_identity_policy=_workload_policy(),
+            )
     finally:
         prepared.close()
 

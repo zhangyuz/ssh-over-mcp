@@ -328,7 +328,7 @@ def test_oversized_stdin_is_rejected_before_spawn(tmp_path: Path):
                 b"too large",
                 _limits(stdin=1),
                 workload_identity_policy=_workload_policy(),
-            containment_backend=backend,
+                containment_backend=backend,
                 containment_request=request,
             )
         assert backend.requests == []
