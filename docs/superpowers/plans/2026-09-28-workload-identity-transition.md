@@ -58,14 +58,14 @@
   - `LinuxProcessIdentityPolicy`
   - Linux `getresuid/getresgid/getgroups`
   - Linux `setgroups/setresgid/setresuid`
-  - `prctl(PR_SET_NO_NEW_PRIVS)`
+  - `prctl(PR_SET_NO_NEW_PRIVS)` and `prctl(PR_GET_NO_NEW_PRIVS)`
   - `prctl(PR_CAP_AMBIENT_CLEAR_ALL)`
   - `capget/capset`
   - explicit FSUID/FSGID read-back
 - Produces:
-  - `class WorkloadIdentityTransitionError(ChildSupervisorError or RuntimeError-derived local error)`
-  - immutable verified post-drop snapshot containing real/effective/saved UID/GID, FSUID/FSGID, literal supplementary groups, `no_new_privs`, and capability-set read-back
-  - `transition_to_workload_identity(policy: LinuxProcessIdentityPolicy) -> VerifiedWorkloadIdentity`
+  - `class WorkloadIdentityTransitionError(RuntimeError)`
+  - `WorkloadIdentityTransitionSnapshot` matching the accepted design: `identity: LinuxProcessIdentitySnapshot`, `filesystem_uid`, `filesystem_gid`, `no_new_privs`, `effective_capabilities`, `permitted_capabilities`, and `inheritable_capabilities`
+  - `transition_to_workload_identity(policy: LinuxProcessIdentityPolicy) -> WorkloadIdentityTransitionSnapshot`
 
 Use a private module-level syscall adapter/seam for tests. Do **not** add a public dependency-injection parameter to `transition_to_workload_identity`.
 
@@ -128,7 +128,7 @@ Use narrow private wrappers around libc/Linux calls. Requirements:
 - use capability ABI v3 data wide enough for capabilities 0..63;
 - read `/proc/sys/kernel/cap_last_cap` or an equivalent authoritative kernel value and reject a capability range the implementation cannot represent completely;
 - clear both 32-bit capability words for effective/permitted/inheritable sets;
-- use a read-only FSUID/FSGID observation mechanism from the transition's perspective;
+- use a genuinely read-only FSUID/FSGID observation mechanism from the transition's perspective; prefer parsing the four-ID `Uid:` / `Gid:` fields from `/proc/self/status` rather than probing through `setfsuid` / `setfsgid`;
 - translate syscall failures into the transition error without exposing partially-successful state as success.
 
 - [ ] **Step 5: Verify Task 1**
@@ -330,6 +330,7 @@ A root container/bootstrap process may be used only to construct the disposable 
 The live test must prove before native exec:
 
 - source process is non-root;
+- pre-transition `no_new_privs` is exactly `0`, then the transition changes it to `1`;
 - only `CAP_SETUID`/`CAP_SETGID` are active;
 - transition reaches the distinct workload UID/GID;
 - real/effective/saved UID/GID all match workload;
@@ -349,9 +350,9 @@ After the drop, assert:
 
 - [ ] **Step 4: Prove state after native ELF exec**
 
-Run the existing pinned native exec path into a small probe executable/script fixture and report the same identity/capability/`no_new_privs` state from the executed image.
+Run the existing pinned **native ELF** exec path into a small probe executable and report the same identity/capability/`no_new_privs` state from the executed image.
 
-Use a native ELF probe when needed to avoid interpreter ambiguity.
+A script/interpreter fixture is not sufficient for this gate; the probe must exercise the repository's native fd-based ELF exec path so interpreter behavior cannot mask the credential boundary.
 
 - [ ] **Step 5: Prove parent remained unchanged and cannot signal**
 
