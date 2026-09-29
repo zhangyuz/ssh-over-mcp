@@ -45,6 +45,8 @@ Manager, host-agent, and workload UIDs remain distinct. The workload has no supp
 
 The manager is the only runtime principal granted write authority over the delegated cgroup subtree. The host-agent and workload identities MUST fail write attempts to request, sibling, and delegated-root membership/control interfaces.
 
+The delegated root MUST satisfy cgroup-v2 domain-controller preconditions before the proof begins: `cpu`, `memory`, and `pids` are available to delegate to children, and the root contains no member processes when those controllers are enabled. The manager process itself therefore runs outside the delegated root rather than occupying the internal node used to create request scopes.
+
 A privileged bootstrap may prepare users, groups, endpoint directories, or the delegated subtree before the assertions begin. That bootstrap authority MUST not remain in the manager, host-agent, or workload processes being tested.
 
 ## 4. Prohibited fixture shortcuts
@@ -110,7 +112,7 @@ The host agent requests the existing manager `kill_all()` operation. The proof p
 - `cgroup.kill` is used by the real backend;
 - every reported process in the request scope disappears;
 - `cgroup.events` reaches `populated 0` within a bounded deadline;
-- an unrelated sentinel process outside the request scope remains alive;
+- an unrelated sentinel process in a separate sibling child scope remains alive;
 - the empty request scope is successfully removed.
 
 Direct process-group signaling is not accepted as the evidence for this test.
