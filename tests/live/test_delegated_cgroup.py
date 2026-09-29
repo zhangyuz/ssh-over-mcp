@@ -713,12 +713,12 @@ def _live_child_limits() -> HostChildLimits:
     )
 
 
-def _prepared_escape_probe(
+def _prepared_probe(
     probe: Path,
     *,
     request_id: str,
-    root: Path,
-    sibling_procs: Path,
+    argv: tuple[str, ...],
+    env: dict[str, str] | None = None,
 ) -> PreparedCommand:
     executable_fd = os.open(
         probe,
@@ -741,11 +741,8 @@ def _prepared_escape_probe(
             cwd_path="/tmp",
             cwd_identity=_object_identity(cwd_fd, bind_content=False),
             executable_format="elf",
-            argv=("escape-check",),
-            env={
-                _ROOT_ENV: str(root),
-                _SIBLING_PROCS_ENV: str(sibling_procs),
-            },
+            argv=argv,
+            env=dict(env or {}),
             fd_exec_supported=os.execve in os.supports_fd,
             child_limits=_live_child_limits(),
         )
@@ -753,6 +750,24 @@ def _prepared_escape_probe(
         os.close(cwd_fd)
         os.close(executable_fd)
         raise
+
+
+def _prepared_escape_probe(
+    probe: Path,
+    *,
+    request_id: str,
+    root: Path,
+    sibling_procs: Path,
+) -> PreparedCommand:
+    return _prepared_probe(
+        probe,
+        request_id=request_id,
+        argv=("escape-check",),
+        env={
+            _ROOT_ENV: str(root),
+            _SIBLING_PROCS_ENV: str(sibling_procs),
+        },
+    )
 
 
 def _unified_membership_for(scope: Path, mount: _Cgroup2Mount) -> str:
@@ -1147,6 +1162,456 @@ def test_production_manager_client_barrier_and_migration_denial() -> None:
         ).strip() == ""
         assert sentinel_path.exists() is False
         assert endpoint.exists() is False
+    finally:
+        os.close(manager_read)
+        if host_start_write >= 0:
+            os.close(host_start_write)
+        if host_result_read >= 0:
+            os.close(host_result_read)
+
+        if host_pid is not None:
+            try:
+                os.kill(host_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            _waitpid_bounded(host_pid, timeout_seconds=1.0)
+
+        if manager_pid > 0:
+            try:
+                os.kill(manager_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            _waitpid_bounded(manager_pid, timeout_seconds=1.0)
+
+        if endpoint.exists():
+            endpoint.unlink()
+        if runtime_dir.exists():
+            runtime_dir.rmdir()
+
+
+def _read_int_file(path: Path) -> int:
+    return int(path.read_text(encoding="ascii").strip(), 10)
+
+
+def _read_cpu_stat(path: Path) -> dict[str, int]:
+    rows: dict[str, int] = {}
+    for line in path.read_text(encoding="ascii").splitlines():
+        name, raw_value = line.split(None, 1)
+        rows[name] = int(raw_value, 10)
+    return rows
+
+
+def _wait_for_scope(path: Path, *, timeout_seconds: float = 2.0) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        if path.is_dir():
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"request scope did not appear: {path}")
+        time.sleep(0.002)
+
+
+def _wait_for_control_value(
+    path: Path,
+    expected: str,
+    *,
+    timeout_seconds: float = 2.0,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last_value: str | None = None
+    while True:
+        try:
+            last_value = path.read_text(encoding="ascii").strip()
+        except FileNotFoundError:
+            last_value = None
+        if last_value == expected:
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"{path} did not reach expected value {expected!r}; "
+                f"last observed {last_value!r}"
+            )
+        time.sleep(0.002)
+
+
+def _observe_pid_enforcement(
+    scope: Path,
+    *,
+    expected_max: int,
+    timeout_seconds: float = 5.0,
+) -> dict[str, int]:
+    _wait_for_scope(scope)
+    _wait_for_control_value(scope / "pids.max", str(expected_max))
+
+    observed: list[int] = []
+    max_events: list[int] = []
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        if not scope.exists():
+            break
+        try:
+            current = _read_int_file(scope / "pids.current")
+            events = _read_cpu_stat(scope / "pids.events")
+        except OSError as exc:
+            if exc.errno in {errno.ENOENT, errno.ENODEV}:
+                break
+            raise
+        observed.append(current)
+        assert "max" in events
+        max_events.append(events["max"])
+        assert current <= expected_max, (
+            f"pids.current exceeded pids.max: {current} > {expected_max}"
+        )
+        if time.monotonic() >= deadline:
+            raise AssertionError("PID enforcement scope exceeded observer deadline")
+        time.sleep(0.002)
+
+    assert observed, "PID enforcement observer captured no kernel samples"
+    assert max(max_events) > 0, (
+        "pids.events did not attribute a fork refusal to pids.max"
+    )
+    return {
+        "min": min(observed),
+        "max": max(observed),
+        "max_events": max(max_events),
+        "samples": len(observed),
+    }
+
+
+def _observe_cpu_enforcement(
+    scope: Path,
+    *,
+    quota_us: int,
+    period_us: int,
+    timeout_seconds: float = 5.0,
+) -> dict[str, int]:
+    _wait_for_scope(scope)
+    _wait_for_control_value(
+        scope / "cpu.max",
+        f"{quota_us} {period_us}",
+    )
+
+    samples: list[dict[str, int]] = []
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        if not scope.exists():
+            break
+        try:
+            sample = _read_cpu_stat(scope / "cpu.stat")
+        except OSError as exc:
+            if exc.errno in {errno.ENOENT, errno.ENODEV}:
+                break
+            raise
+        assert "nr_throttled" in sample
+        assert "throttled_usec" in sample
+        if samples:
+            assert sample["nr_throttled"] >= samples[-1]["nr_throttled"]
+            assert sample["throttled_usec"] >= samples[-1]["throttled_usec"]
+        samples.append(sample)
+        if time.monotonic() >= deadline:
+            raise AssertionError("CPU enforcement scope exceeded observer deadline")
+        time.sleep(0.005)
+
+    assert len(samples) >= 2, "CPU observer captured too few kernel samples"
+    first = samples[0]
+    last = samples[-1]
+    assert last["nr_throttled"] > first["nr_throttled"], (
+        "cpu.stat nr_throttled did not increase under CPU saturation"
+    )
+    assert last["throttled_usec"] >= first["throttled_usec"]
+    return {
+        "first_nr_throttled": first["nr_throttled"],
+        "last_nr_throttled": last["nr_throttled"],
+        "first_throttled_usec": first["throttled_usec"],
+        "last_throttled_usec": last["throttled_usec"],
+        "samples": len(samples),
+    }
+
+
+def _parse_probe_records(stdout: bytes) -> list[dict[str, object]]:
+    records = [
+        json.loads(line)
+        for line in stdout.decode("utf-8").splitlines()
+        if line
+    ]
+    assert all(isinstance(record, dict) for record in records)
+    return records
+
+
+def _host_agent_pid_cpu_process(
+    fixture: _LiveFixture,
+    endpoint: Path,
+    probe: Path,
+    start_fd: int,
+    result_fd: int,
+) -> None:
+    client = None
+    prepared = None
+    try:
+        token = os.read(start_fd, 1)
+        assert token == b"R", "host-agent bootstrap barrier was not released"
+
+        _drop_to_host_agent_identity(fixture.identities)
+        mount = _cgroup2_mount_for(fixture.root)
+        assert _current_cgroup_path(mount) == fixture.host_source
+
+        client = connect_authenticated_containment_manager(
+            endpoint,
+            identity_plan=fixture.identities,
+            timeout_seconds=2.0,
+        )
+
+        pid_request_id = f"req_live_pid_{os.getpid()}"
+        pid_limit = 4
+        prepared = _prepared_probe(
+            probe,
+            request_id=pid_request_id,
+            argv=("fork", "16", "5000"),
+        )
+        pid_result = run_prepared_native(
+            prepared,
+            b"",
+            ExecutionLimits(
+                timeout_seconds=0.75,
+                max_output_bytes=64 * 1024,
+                max_stdin_bytes=0,
+            ),
+            workload_identity_policy=fixture.identities.workload_process_policy(),
+            containment_backend=client,
+            containment_request=ContainmentRequest(
+                request_id=pid_request_id,
+                limits=ContainmentLimits(
+                    memory_max_bytes=128 * 1024 * 1024,
+                    pids_max=pid_limit,
+                    cpu_quota_us=50_000,
+                    cpu_period_us=100_000,
+                ),
+            ),
+            term_grace_seconds=0.02,
+            kill_cleanup_seconds=1.0,
+        )
+        prepared.close()
+        prepared = None
+
+        assert pid_result.timed_out is True
+        assert pid_result.containment_stats is not None
+        assert pid_result.containment_stats.populated is False
+        pid_records = _parse_probe_records(pid_result.stdout)
+        pid_summary = next(
+            record for record in pid_records
+            if record.get("event") == "fork_summary"
+        )
+        assert int(pid_summary["attempts"]) == 16
+        assert int(pid_summary["created"]) == pid_limit - 1
+        assert int(pid_summary["errno"]) == errno.EAGAIN
+
+        cpu_request_id = f"req_live_cpu_{os.getpid()}"
+        cpu_quota_us = 10_000
+        cpu_period_us = 100_000
+        prepared = _prepared_probe(
+            probe,
+            request_id=cpu_request_id,
+            argv=("cpu", "1500"),
+        )
+        cpu_result = run_prepared_native(
+            prepared,
+            b"",
+            ExecutionLimits(
+                timeout_seconds=4.0,
+                max_output_bytes=64 * 1024,
+                max_stdin_bytes=0,
+            ),
+            workload_identity_policy=fixture.identities.workload_process_policy(),
+            containment_backend=client,
+            containment_request=ContainmentRequest(
+                request_id=cpu_request_id,
+                limits=ContainmentLimits(
+                    memory_max_bytes=128 * 1024 * 1024,
+                    pids_max=16,
+                    cpu_quota_us=cpu_quota_us,
+                    cpu_period_us=cpu_period_us,
+                ),
+            ),
+            term_grace_seconds=0.02,
+            kill_cleanup_seconds=1.0,
+        )
+        prepared.close()
+        prepared = None
+
+        assert cpu_result.returncode == 0
+        assert cpu_result.timed_out is False
+        assert cpu_result.stderr == b""
+        cpu_records = _parse_probe_records(cpu_result.stdout)
+        assert any(
+            record.get("event") == "cpu_done"
+            for record in cpu_records
+        )
+        assert cpu_result.containment_stats is not None
+        assert cpu_result.containment_stats.populated is False
+        assert _current_cgroup_path(mount) == fixture.host_source
+
+        _write_pipe_json(
+            result_fd,
+            {
+                "ok": True,
+                "pid_created": int(pid_summary["created"]),
+                "pid_errno": int(pid_summary["errno"]),
+            },
+        )
+        os._exit(0)
+    except BaseException:  # noqa: BLE001
+        try:
+            _write_pipe_json(
+                result_fd,
+                {
+                    "ok": False,
+                    "error": traceback.format_exc()[-12000:],
+                },
+            )
+        except BaseException as report_exc:  # noqa: BLE001
+            print(
+                f"cannot report PID/CPU host-agent failure: {report_exc!r}",
+                file=sys.stderr,
+            )
+        traceback.print_exc()
+        os._exit(125)
+    finally:
+        if prepared is not None:
+            prepared.close()
+        if client is not None:
+            client.close()
+
+
+def test_real_pid_and_cpu_enforcement() -> None:
+    assert os.geteuid() == 0, (
+        "Task 5 PID/CPU proof requires the dedicated root bootstrap launcher"
+    )
+    fixture = _fixture()
+    root = fixture.root.resolve(strict=True)
+    source = fixture.host_source.resolve(strict=True)
+    assert root == fixture.root
+    assert source == fixture.host_source
+    assert source.parent == root
+    assert (source / "cgroup.procs").read_text(encoding="ascii").strip() == ""
+
+    raw_probe = os.environ.get(_PROBE_ELF_ENV)
+    assert raw_probe, f"{_PROBE_ELF_ENV} is required"
+    probe = Path(raw_probe).resolve(strict=True)
+    assert probe == Path(raw_probe)
+    assert probe.is_file()
+    assert os.execve in os.supports_fd
+
+    mount = _cgroup2_mount_for(root)
+    assert not _current_cgroup_path(mount).is_relative_to(root)
+
+    runtime_dir = Path(f"/tmp/ssh-over-mcp-live-manager-task5-{os.getpid()}")
+    assert not runtime_dir.exists()
+    runtime_dir.mkdir(mode=0o700)
+    os.chown(
+        runtime_dir,
+        fixture.identities.manager.uid,
+        fixture.identities.manager_client_gid,
+    )
+    os.chmod(runtime_dir, 0o710)
+    endpoint = runtime_dir / "manager.sock"
+
+    manager_read, manager_write = os.pipe()
+    manager_pid = os.fork()
+    if manager_pid == 0:
+        os.close(manager_read)
+        _manager_process(fixture, endpoint, manager_write)
+        os._exit(126)
+
+    os.close(manager_write)
+    host_pid: int | None = None
+    host_start_write = -1
+    host_result_read = -1
+
+    try:
+        manager_ready = _read_pipe_json(
+            manager_read,
+            timeout_seconds=5.0,
+        )
+        assert manager_ready.get("ok") is True, manager_ready.get("error")
+        sentinel_path = Path(str(manager_ready["sentinel_path"])).resolve(
+            strict=True
+        )
+        assert sentinel_path.parent == root
+        assert (sentinel_path / "cgroup.procs").exists()
+
+        host_start_read, host_start_write = os.pipe()
+        host_result_read, host_result_write = os.pipe()
+        host_pid = os.fork()
+        if host_pid == 0:
+            os.close(host_start_write)
+            os.close(host_result_read)
+            _host_agent_pid_cpu_process(
+                fixture,
+                endpoint,
+                probe,
+                host_start_read,
+                host_result_write,
+            )
+            os._exit(126)
+
+        os.close(host_start_read)
+        os.close(host_result_write)
+
+        _write_control(source / "cgroup.procs", f"{host_pid}\n")
+        assert _pid_cgroup_path(host_pid, mount) == source
+
+        pid_scope = root / f"ssh-over-mcp-req_live_pid_{host_pid}"
+        cpu_scope = root / f"ssh-over-mcp-req_live_cpu_{host_pid}"
+
+        os.write(host_start_write, b"R")
+        os.close(host_start_write)
+        host_start_write = -1
+
+        pid_observation = _observe_pid_enforcement(
+            pid_scope,
+            expected_max=4,
+            timeout_seconds=4.0,
+        )
+        assert pid_observation["max"] == 4
+
+        cpu_observation = _observe_cpu_enforcement(
+            cpu_scope,
+            quota_us=10_000,
+            period_us=100_000,
+            timeout_seconds=4.0,
+        )
+        assert cpu_observation["last_throttled_usec"] >= (
+            cpu_observation["first_throttled_usec"]
+        )
+
+        host_result = _read_pipe_json(
+            host_result_read,
+            timeout_seconds=3.0,
+        )
+        assert host_result.get("ok") is True, host_result.get("error")
+        assert int(host_result["pid_created"]) == 3
+        assert int(host_result["pid_errno"]) == errno.EAGAIN
+        assert pid_observation["max_events"] > 0
+
+        host_status = _waitpid_bounded(host_pid, timeout_seconds=2.0)
+        assert host_status is not None
+        assert os.WIFEXITED(host_status)
+        assert os.WEXITSTATUS(host_status) == 0
+        host_pid = None
+
+        manager_status = _waitpid_bounded(manager_pid, timeout_seconds=3.0)
+        assert manager_status is not None
+        assert os.WIFEXITED(manager_status)
+        assert os.WEXITSTATUS(manager_status) == 0
+        manager_pid = -1
+
+        assert pid_scope.exists() is False
+        assert cpu_scope.exists() is False
+        assert sentinel_path.exists() is False
+        assert endpoint.exists() is False
+        assert (source / "cgroup.procs").read_text(
+            encoding="ascii"
+        ).strip() == ""
     finally:
         os.close(manager_read)
         if host_start_write >= 0:
