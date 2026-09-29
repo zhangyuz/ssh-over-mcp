@@ -92,6 +92,7 @@ def _same_authorized_identity(
         left.ctime_ns == right.ctime_ns
         and left.mtime_ns == right.mtime_ns
         and left.size == right.size
+        and left.content_sha256 == right.content_sha256
     )
 
 
@@ -184,8 +185,32 @@ def _validate_executable_fd(
         raise CommandPreparationError(
             "pinned executable has no execute bits"
         )
+    if identity.content_sha256 is None:
+        raise CommandPreparationError(
+            "authorized executable lacks content binding"
+        )
 
-    return info
+    try:
+        content_sha256 = sha256_fd(fd, expected_size=info.st_size)
+        after = os.fstat(fd)
+    except OSError as exc:
+        raise CommandPreparationError(
+            "cannot verify pinned executable content"
+        ) from exc
+
+    if (
+        not _same_identity(
+            after,
+            identity,
+            include_change_metadata=True,
+        )
+        or content_sha256 != identity.content_sha256
+    ):
+        raise CommandPreparationError(
+            "executable changed after authorization"
+        )
+
+    return after
 
 
 def _detect_executable_format(fd: int) -> ExecutableFormat:
