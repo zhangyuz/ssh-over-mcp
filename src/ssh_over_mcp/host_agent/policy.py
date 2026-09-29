@@ -158,6 +158,10 @@ class HostObjectIdentity(BaseModel):
     ctime_ns: int
     mtime_ns: int
     size: int
+    content_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
 
 
 class HostAuthorizationResult(BaseModel):
