@@ -80,24 +80,36 @@ def _same_authorized_identity(
     left: HostObjectIdentity | None,
     right: HostObjectIdentity | None,
     *,
-    include_ctime: bool,
+    include_change_metadata: bool,
 ) -> bool:
     if left is None or right is None:
         return left is right
     if left.device != right.device or left.inode != right.inode:
         return False
-    return not include_ctime or left.ctime_ns == right.ctime_ns
+    if not include_change_metadata:
+        return True
+    return (
+        left.ctime_ns == right.ctime_ns
+        and left.mtime_ns == right.mtime_ns
+        and left.size == right.size
+    )
 
 
 def _same_identity(
     info: os.stat_result,
     identity: HostObjectIdentity,
     *,
-    include_ctime: bool,
+    include_change_metadata: bool,
 ) -> bool:
     if info.st_dev != identity.device or info.st_ino != identity.inode:
         return False
-    return not include_ctime or info.st_ctime_ns == identity.ctime_ns
+    if not include_change_metadata:
+        return True
+    return (
+        info.st_ctime_ns == identity.ctime_ns
+        and info.st_mtime_ns == identity.mtime_ns
+        and info.st_size == identity.size
+    )
 
 
 def _read_file_capability(fd: int) -> bytes:
@@ -137,7 +149,7 @@ def _validate_executable_fd(
             "cannot inspect pinned executable"
         ) from exc
 
-    if not _same_identity(info, identity, include_ctime=True):
+    if not _same_identity(info, identity, include_change_metadata=True):
         raise CommandPreparationError(
             "executable changed after authorization"
         )
@@ -253,7 +265,7 @@ def _open_cwd(decision: HostAuthorizationResult) -> int | None:
         if not _same_identity(
             info,
             decision.cwd_identity,
-            include_ctime=False,
+            include_change_metadata=False,
         ):
             raise CommandPreparationError(
                 "working directory changed after authorization"
@@ -291,13 +303,13 @@ def prepare_command(
         or not _same_authorized_identity(
             fresh.executable_identity,
             decision.executable_identity,
-            include_ctime=True,
+            include_change_metadata=True,
         )
         or fresh.resolved_cwd != decision.resolved_cwd
         or not _same_authorized_identity(
             fresh.cwd_identity,
             decision.cwd_identity,
-            include_ctime=False,
+            include_change_metadata=False,
         )
     ):
         raise CommandPreparationError(
