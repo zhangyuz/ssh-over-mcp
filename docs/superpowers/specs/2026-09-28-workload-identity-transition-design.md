@@ -2,7 +2,7 @@
 
 Date: 2026-09-28
 
-Status: proposed for implementation planning
+Status: accepted for implementation planning (2026-09-28)
 
 ## 1. Purpose
 

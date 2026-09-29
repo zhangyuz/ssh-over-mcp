@@ -1,6 +1,6 @@
 # ADR 0005: Forked child performs the one-way workload identity drop
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-28
 
 ## Context
