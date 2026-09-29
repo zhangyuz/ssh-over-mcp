@@ -182,6 +182,28 @@ def _read_proc_status(pid: int) -> dict[str, str]:
     return rows
 
 
+def _pid_start_time_ticks(pid: int) -> int:
+    raw = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+    command_end = raw.rfind(")")
+    assert command_end >= 0, "invalid /proc/<pid>/stat record"
+    fields = raw[command_end + 2 :].split()
+    assert len(fields) > 19, "truncated /proc/<pid>/stat record"
+    return int(fields[19], 10)
+
+
+def _pid_matches_start_time(pid: int, expected_start_time: int) -> bool:
+    try:
+        return _pid_start_time_ticks(pid) == expected_start_time
+    except FileNotFoundError:
+        return False
+
+
+def _assert_same_process(pid: int, expected_start_time: int) -> None:
+    assert _pid_matches_start_time(pid, expected_start_time), (
+        "operator source PID exited or was reused during the live proof"
+    )
+
+
 def _assert_stopped_host_agent_fixture_process(
     fixture: _LiveFixture,
     pid: int,
@@ -376,12 +398,14 @@ def test_real_cgroup_backend_create_attach_limits_and_cleanup() -> None:
     assert not _current_cgroup_path(mount).is_relative_to(root)
     assert source.parent == root
 
+    source_start_time = _pid_start_time_ticks(source_pid)
     _assert_stopped_host_agent_fixture_process(
         fixture,
         source_pid,
         mount,
         source,
     )
+    _assert_same_process(source_pid, source_start_time)
 
     subtree_path = root / "cgroup.subtree_control"
     originally_enabled = _read_tokens(subtree_path)
@@ -426,7 +450,9 @@ def test_real_cgroup_backend_create_attach_limits_and_cleanup() -> None:
         assert empty_stats.memory_current_bytes is not None
         assert empty_stats.cpu_usage_usec is not None
 
+        _assert_same_process(source_pid, source_start_time)
         handle.attach(source_pid)
+        _assert_same_process(source_pid, source_start_time)
         assert _pid_cgroup_path(source_pid, mount) == scope
         _assert_stopped_host_agent_fixture_process(
             fixture,
@@ -442,7 +468,9 @@ def test_real_cgroup_backend_create_attach_limits_and_cleanup() -> None:
         assert attached_stats.memory_current_bytes is not None
         assert attached_stats.cpu_usage_usec is not None
 
+        _assert_same_process(source_pid, source_start_time)
         _write_control(source / "cgroup.procs", f"{source_pid}\n")
+        _assert_same_process(source_pid, source_start_time)
         _assert_stopped_host_agent_fixture_process(
             fixture,
             source_pid,
@@ -459,7 +487,7 @@ def test_real_cgroup_backend_create_attach_limits_and_cleanup() -> None:
 
         if handle is not None:
             try:
-                if Path(f"/proc/{source_pid}").exists():
+                if _pid_matches_start_time(source_pid, source_start_time):
                     _write_control(source / "cgroup.procs", f"{source_pid}\n")
             except BaseException as exc:  # noqa: BLE001
                 cleanup_errors.append(exc)
