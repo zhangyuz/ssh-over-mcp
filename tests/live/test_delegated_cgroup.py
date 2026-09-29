@@ -197,7 +197,7 @@ def _assert_stopped_host_agent_fixture_process(
     assert tuple(int(value) for value in rows["Uid"].split()) == (host.uid,) * 4
     assert tuple(int(value) for value in rows["Gid"].split()) == (host.gid,) * 4
 
-    observed_groups = set(int(value) for value in rows["Groups"].split())
+    observed_groups = {int(value) for value in rows["Groups"].split()}
     observed_extra = observed_groups - {host.gid}
     expected_extra = set(
         fixture.identities.host_agent_process_policy().supplementary_gids
