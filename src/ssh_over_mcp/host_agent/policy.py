@@ -154,6 +154,8 @@ class HostObjectIdentity(BaseModel):
     device: int
     inode: int
     ctime_ns: int
+    mtime_ns: int
+    size: int
 
 
 class HostAuthorizationResult(BaseModel):
@@ -344,6 +346,8 @@ def _resolve_executable(
             device=info.st_dev,
             inode=info.st_ino,
             ctime_ns=info.st_ctime_ns,
+            mtime_ns=info.st_mtime_ns,
+            size=info.st_size,
         ),
         None,
     )
@@ -388,6 +392,8 @@ def _resolve_cwd(
                     device=candidate_info.st_dev,
                     inode=candidate_info.st_ino,
                     ctime_ns=candidate_info.st_ctime_ns,
+                    mtime_ns=candidate_info.st_mtime_ns,
+                    size=candidate_info.st_size,
                 ),
                 None,
             )
