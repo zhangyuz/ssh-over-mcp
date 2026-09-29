@@ -398,7 +398,7 @@ git commit -m "test: validate live workload identity transition"
 - Modify: `remote/host_agent/README.md`
 - Test all files touched in Tasks 1-4
 
-- [ ] **Step 1: Update host-agent security boundary documentation**
+- [x] **Step 1: Update host-agent security boundary documentation**
 
 Document:
 
@@ -410,7 +410,7 @@ Document:
 - containment manager API unchanged;
 - ForceCommand still disabled.
 
-- [ ] **Step 2: Advance the roadmap**
+- [x] **Step 2: Advance the roadmap**
 
 Update `docs/development-plan.md`:
 
@@ -419,7 +419,7 @@ Update `docs/development-plan.md`:
 
 Update `remote/host_agent/README.md` with the same operator-visible boundary.
 
-- [ ] **Step 3: Run static/focused verification**
+- [x] **Step 3: Run static/focused verification**
 
 ```bash
 python -m compileall -q src tests
@@ -428,7 +428,7 @@ python -m pytest -q   tests/host_agent/test_workload_identity.py   tests/host_ag
 
 Run Ruff/format checks configured by the repository.
 
-- [ ] **Step 4: Run the full ordinary suite on supported Python versions**
+- [x] **Step 4: Run the full ordinary suite on supported Python versions**
 
 Required:
 
@@ -438,13 +438,20 @@ Python 3.14 full suite: PASS
 generic runner effective capabilities: unchanged/unprivileged
 ```
 
+Verified locally in capability-free Linux containers:
+
+- Python 3.13.15: Ruff PASS, compileall PASS, focused suites PASS, full suite PASS;
+- Python 3.14.7: Ruff PASS, compileall PASS, focused suites PASS, full suite PASS;
+- both ordinary runtimes: non-root with `CapEff=0` and `CapPrm=0`;
+- dedicated live probe remains opt-in and is skipped by ordinary validation.
+
 - [ ] **Step 5: Run the dedicated live capability-transition proof**
 
 Required: PASS on the exact implementation head SHA.
 
 Do not substitute mocked unit tests for this gate.
 
-- [ ] **Step 6: Review the complete implementation diff**
+- [x] **Step 6: Review the complete implementation diff**
 
 Review specifically for:
 
