@@ -174,7 +174,7 @@ Use separate request scopes.
 - configure a restrictive finite `cpu.max`;
 - run bounded CPU saturation;
 - compare `cpu.stat` before/after;
-- require `nr_throttled` and/or throttling time to increase;
+- require `nr_throttled` to increase and require `throttled_usec` to be present and nondecreasing;
 - keep wall-clock duration bounded.
 
 Do not infer enforcement only from limit-file read-back.
@@ -188,7 +188,7 @@ Do not infer enforcement only from limit-file read-back.
 
 Use an isolated request scope with a deliberately small `memory.max`.
 
-The native helper allocates memory in bounded increments beyond that ceiling. Require kernel evidence attributable to the request scope, such as request-scope memory event/OOM accounting plus expected workload termination or allocation failure.
+The native helper allocates memory in bounded increments beyond that ceiling. Require request-scope `memory.events` evidence: the `oom` and/or `oom_kill` counter must increase from its baseline, and the workload must terminate or report allocation failure consistently with that kernel event. Limit-file read-back or process death alone is insufficient.
 
 Requirements:
 
@@ -211,11 +211,12 @@ The workload creates a bounded process tree with descendants that remain alive.
 
 Then:
 
-1. invoke the existing manager `kill_all()`;
-2. prove all reported request-scope PIDs disappear;
-3. require `cgroup.events populated 0` before deadline;
-4. prove the sibling sentinel remains alive;
-5. close/remove the empty request scope.
+1. retain pidfds for reported descendants when available, or record PID plus `/proc/<pid>/stat` start time as a stable process identity;
+2. invoke the existing manager `kill_all()`;
+3. prove the recorded descendant identities are gone without confusing PID reuse for survival;
+4. require `cgroup.events populated 0` before deadline as the authoritative scope-empty signal;
+5. prove the sibling sentinel remains alive;
+6. close/remove the empty request scope.
 
 Do not use process-group SIGKILL as the passing evidence. Direct signaling may remain defense-in-depth, but the proof must be attributable to request-scope `cgroup.kill`.
 
@@ -237,7 +238,9 @@ The accepted workflow is manual/trusted and uses a separate custom label such as
 
 It must:
 
-- execute only on a Linux host with the pre-delegated disposable subtree;
+- execute only on a disposable, isolated Linux fixture with no production secrets or host credentials;
+- have users/groups and the delegated subtree prepared by the operator outside the checked-out test code, so the job does not gain a generic root setup path;
+- execute only with the pre-delegated disposable subtree intended for this proof;
 - expose no Docker socket to the job;
 - not require `--privileged`;
 - pass only server/operator-controlled fixture paths and identity configuration;
