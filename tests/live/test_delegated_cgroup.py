@@ -493,6 +493,18 @@ def test_real_cgroup_backend_create_attach_limits_and_cleanup() -> None:
                 cleanup_errors.append(exc)
 
             try:
+                populated = handle.stats().populated
+            except BaseException as exc:  # noqa: BLE001
+                cleanup_errors.append(exc)
+                populated = True
+
+            if populated:
+                try:
+                    handle.kill_all()
+                except BaseException as exc:  # noqa: BLE001
+                    cleanup_errors.append(exc)
+
+            try:
                 _wait_until_scope_empty(handle)
                 handle.close()
             except BaseException as exc:  # noqa: BLE001
