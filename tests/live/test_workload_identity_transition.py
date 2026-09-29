@@ -146,7 +146,7 @@ def _bootstrap_host_agent() -> None:
     os.setresuid(_HOST_UID, _HOST_UID, _HOST_UID)
     _set_source_capabilities(libc)
     _set_keepcaps(libc, False)
-def _identity(fd: int) -> HostObjectIdentity:
+def _identity(fd: int, *, bind_content: bool = False) -> HostObjectIdentity:
     info = os.fstat(fd)
     return HostObjectIdentity(
         device=info.st_dev,
@@ -154,6 +154,11 @@ def _identity(fd: int) -> HostObjectIdentity:
         ctime_ns=info.st_ctime_ns,
         mtime_ns=info.st_mtime_ns,
         size=info.st_size,
+        content_sha256=(
+            sha256_fd(fd, expected_size=info.st_size)
+            if bind_content
+            else None
+        ),
     )
 
 
