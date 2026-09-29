@@ -148,7 +148,7 @@ Executable authorization resolves the requested path and requires it to match th
 
 `exact` argv rules are the safer default. A `prefix` rule authorizes every trailing token after the configured prefix and MUST only be used when that wider argument surface is intentionally acceptable; it does not interpret shell syntax or constrain command-specific path/helper semantics.
 
-Authorization records canonical executable/cwd paths. Executable identity uses device+inode+ctime; cwd replacement identity uses device+inode because directory ctime changes during ordinary content updates.
+Authorization records canonical executable/cwd paths. Executable identity uses device+inode+ctime+mtime+size plus a SHA-256 content digest; cwd replacement identity uses device+inode because directory metadata changes during ordinary content updates.
 
 ### Phase 3d1 fd preparation
 
@@ -166,7 +166,7 @@ The executable descriptor is independently rechecked for:
 
 The cwd descriptor is independently checked for the authorized device/inode identity and directory type. Directory ctime is intentionally not part of execution identity because legitimate creation/removal of children changes directory ctime without replacing the directory object.
 
-This closes pathname replacement between authorization and later execution: a renamed or substituted pathname does not change the already opened object. Executable change identity combines device/inode/ctime/mtime/size with a SHA-256 digest captured from a securely opened descriptor. Fresh authorization and pinned-fd revalidation recompute that digest, so persistent same-inode content mutations are rejected even when size or timestamp metadata does not distinguish them. The child rehashes the pinned executable fd again immediately before native exec. This is still not an atomic immutability mechanism against a privileged writer racing a mutation after the final digest check and before exec; the execution profile must therefore retain trusted ownership and write restrictions.
+This closes pathname replacement between authorization and later execution: a renamed or substituted pathname does not change the already opened object. Executable change identity combines device/inode/ctime/mtime/size with a SHA-256 digest captured from a securely opened descriptor. Fresh authorization and pinned-fd revalidation recompute that digest, so persistent same-inode content mutations are rejected even when size or timestamp metadata does not distinguish them. The child rehashes the pinned executable fd again immediately before native exec. This is still not an atomic immutability mechanism against a privileged writer racing mutations during the final verification/exec boundary; the execution profile must therefore retain trusted ownership and write restrictions.
 
 The preparation layer records whether Python reports fd-based `os.execve()` support and classifies the opened file as ELF, shebang script, or other.
 
