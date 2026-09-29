@@ -125,6 +125,10 @@ def _prepared(
             ctime_ns=executable_info.st_ctime_ns,
             mtime_ns=executable_info.st_mtime_ns,
             size=executable_info.st_size,
+            content_sha256=sha256_fd(
+                executable_fd,
+                expected_size=executable_info.st_size,
+            ),
         ),
         cwd_path=str(cwd),
         cwd_identity=HostObjectIdentity(
