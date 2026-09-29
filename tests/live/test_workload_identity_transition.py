@@ -189,7 +189,7 @@ def _prepared(report_fd: int) -> PreparedCommand:
         executable_fd=executable_fd,
         cwd_fd=cwd_fd,
         executable_path=str(_PROBE_ELF),
-        executable_identity=_identity(executable_fd),
+        executable_identity=_identity(executable_fd, bind_content=True),
         cwd_path="/tmp",
         cwd_identity=_identity(cwd_fd),
         executable_format="elf",
