@@ -82,3 +82,46 @@ python -m pytest -q tests/live/test_delegated_cgroup.py -k preflight
 If opt-in is enabled, missing or unsafe fixture state is a hard failure rather
 than a skip. The cgroup-v2 mount root itself is explicitly rejected as a
 delegated test root.
+
+
+## Native delegated-cgroup workload probe
+
+`cgroup_workload_probe.c` is the fixed-action native ELF used by later Phase
+`3d2b2b2c3` live assertions. It intentionally exposes no shell, command
+execution, or generic file-operation surface.
+
+Build it with warnings treated as errors:
+
+```bash
+cc -std=c11 -O2 -Wall -Wextra -Werror -pedantic \
+  -o /tmp/ssh-over-mcp-cgroup-workload-probe \
+  tests/live/cgroup_workload_probe.c
+```
+
+Supported actions are bounded and explicit:
+
+- `state`: emit one JSON record with PID, real/effective/saved UID/GID,
+  supplementary groups, capability masks, `NoNewPrivs`, and unified cgroup
+  membership;
+- `escape-check`: emit `state` first, then attempt self-migration only to
+  the configured delegated-root `cgroup.procs` and one configured sibling
+  `cgroup.procs`;
+- `descendants COUNT HOLD_MS`: create at most 16 descendants which close
+  stdio and outlive the direct probe process for a bounded interval;
+- `cpu DURATION_MS`: run bounded CPU saturation for at most 10 seconds;
+- `memory BYTES HOLD_MS`: fault in at most 128 MiB using volatile page
+  touches, then hold for at most 30 seconds;
+- `fork ATTEMPTS HOLD_MS`: perform at most 64 fork attempts while successful
+  children remain alive for a bounded interval.
+
+All records written to stdout are machine-readable JSON lines. Malformed,
+unknown, signed, or out-of-range action arguments fail with usage exit status
+`64` before the requested action runs.
+
+The migration action accepts no path argument. It reads only the
+operator-controlled `SSH_OVER_MCP_LIVE_CGROUP_ROOT` and
+`SSH_OVER_MCP_LIVE_CGROUP_SIBLING_PROCS` fixture values, resolves both
+targets, requires them to be existing `cgroup.procs` files under the
+configured delegated root, and treats `ENOENT` or any unexpected error as a
+hard failure. A successful self-migration exits nonzero so it cannot be
+mistaken for the expected permission-denial proof.
