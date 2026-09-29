@@ -23,6 +23,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 _ROOT_ENV = "SSH_OVER_MCP_LIVE_CGROUP_ROOT"
+_HOST_SOURCE_ENV = "SSH_OVER_MCP_LIVE_CGROUP_HOST_SOURCE"
 _MANAGER_UID_ENV = "SSH_OVER_MCP_LIVE_CGROUP_MANAGER_UID"
 _MANAGER_GID_ENV = "SSH_OVER_MCP_LIVE_CGROUP_MANAGER_GID"
 _HOST_UID_ENV = "SSH_OVER_MCP_LIVE_CGROUP_HOST_UID"
@@ -41,6 +42,7 @@ class _Cgroup2Mount:
 @dataclass(frozen=True, slots=True)
 class _LiveFixture:
     root: Path
+    host_source: Path
     identities: ContainmentServiceIdentityPlan
 
 
@@ -63,6 +65,11 @@ def _fixture() -> _LiveFixture:
     root = Path(raw_root)
     assert root.is_absolute(), f"{_ROOT_ENV} must be absolute"
 
+    raw_source = os.environ.get(_HOST_SOURCE_ENV)
+    assert raw_source, f"{_HOST_SOURCE_ENV} is required for the live cgroup fixture"
+    host_source = Path(raw_source)
+    assert host_source.is_absolute(), f"{_HOST_SOURCE_ENV} must be absolute"
+
     identities = ContainmentServiceIdentityPlan(
         manager=LinuxProcessIdentity(
             uid=_required_id(_MANAGER_UID_ENV),
@@ -79,7 +86,11 @@ def _fixture() -> _LiveFixture:
         manager_client_gid=_required_id(_MANAGER_CLIENT_GID_ENV),
     )
     assert identities.manager.uid != 0 and identities.manager.gid != 0
-    return _LiveFixture(root=root, identities=identities)
+    return _LiveFixture(
+        root=root,
+        host_source=host_source,
+        identities=identities,
+    )
 
 
 def _decode_mountinfo_path(raw: str) -> Path:
@@ -191,6 +202,15 @@ def test_preflight_live_delegated_cgroup_fixture() -> None:
     assert resolved == fixture.root, "delegated root must already be canonical"
     assert resolved.is_dir(), "delegated root must be a directory"
 
+    host_source = fixture.host_source.resolve(strict=True)
+    assert host_source == fixture.host_source, (
+        "host-agent source cgroup must already be canonical"
+    )
+    assert host_source.is_dir(), "host-agent source cgroup must be a directory"
+    assert host_source.parent == resolved, (
+        "host-agent source cgroup must be a direct child of delegated root"
+    )
+
     mount = _cgroup2_mount_for(resolved)
     assert resolved != mount.mountpoint, "the cgroup-v2 mount root itself must never be delegated"
 
@@ -213,10 +233,15 @@ def test_preflight_live_delegated_cgroup_fixture() -> None:
         "delegated root must contain no member processes"
     )
 
+    source_procs_path = host_source / "cgroup.procs"
+    assert source_procs_path.exists(), "host-agent source cgroup.procs is unavailable"
+
     for path, directory in (
         (resolved, True),
         (procs_path, False),
         (subtree_path, False),
+        (host_source, True),
+        (source_procs_path, False),
     ):
         _assert_manager_only_write(
             path,

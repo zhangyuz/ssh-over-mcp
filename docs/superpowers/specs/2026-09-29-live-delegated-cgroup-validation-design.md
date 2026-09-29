@@ -47,7 +47,11 @@ The manager is the only runtime principal granted write authority over the deleg
 
 The delegated root MUST satisfy cgroup-v2 domain-controller preconditions before the proof begins: `cpu`, `memory`, and `pids` are available to delegate to children, and the root contains no member processes when those controllers are enabled. The manager process itself therefore runs outside the delegated root rather than occupying the internal node used to create request scopes.
 
-A privileged bootstrap may prepare users, groups, endpoint directories, or the delegated subtree before the assertions begin. That bootstrap authority MUST not remain in the manager, host-agent, or workload processes being tested.
+The fixture MUST also contain one operator-created host-agent source cgroup directly below the delegated root. Before bootstrap authority is dropped, the delegator places the host-agent process in that source cgroup. The delegated root itself stays empty. Forked execution children inherit source-cgroup membership and the manager later moves only the execution child from the source cgroup to a sibling request scope. This makes the delegated root the nearest common ancestor for the move, so the manager needs write authority only inside the subtree it was delegated.
+
+The host-agent source cgroup is not a second management domain. Its directory and `cgroup.procs` remain writable only by the manager identity; the host-agent/workload identities MUST NOT be able to move themselves out of that source or back into it after request attachment.
+
+A privileged bootstrap may prepare users, groups, endpoint directories, the delegated subtree, and the initial host-agent source-cgroup placement before the assertions begin. That bootstrap authority MUST not remain in the manager, host-agent, or workload processes being tested. The proof MUST NOT rely on `CLONE_INTO_CGROUP` to bypass cgroup-v2 delegation containment; the same cgroup placement permission rules apply.
 
 ## 4. Prohibited fixture shortcuts
 
@@ -58,6 +62,8 @@ The proof MUST NOT be made green by:
 - granting the generic runner host cgroup write access;
 - granting `CAP_SYS_ADMIN` to the host agent or workload;
 - granting `CAP_KILL` to the host agent;
+- granting the manager write authority to cgroup membership controls above the delegated root;
+- using `CLONE_INTO_CGROUP` as a shortcut around delegated-placement permissions;
 - running manager and workload under the same UID;
 - bind-mounting a writable cgroup tree into the workload;
 - changing permissions so the workload can write ancestor or sibling `cgroup.procs`;
@@ -69,16 +75,18 @@ macOS Docker Desktop remains useful for ordinary Linux semantics but is not acce
 
 The live proof uses the production composition rather than calling the cgroup backend only in isolation:
 
-1. manager process validates its configured identity;
-2. manager owns a `CgroupV2Backend` rooted at the delegated subtree;
-3. manager serves the existing authenticated Unix protocol;
-4. host agent validates its identity and connects through `connect_authenticated_containment_manager()`;
-5. bounded execution creates the scope through `ContainmentManagerClient`;
-6. the existing start barrier blocks the child until manager-confirmed attach;
-7. trusted child setup closes unrelated FDs and applies rlimits;
-8. the child irreversibly transitions to the workload identity;
-9. the pinned native ELF path executes the live workload probe;
-10. bounded cleanup uses manager-authoritative stats/kill/close operations.
+1. manager process validates its configured identity and remains outside the delegated root;
+2. the operator has already placed the host-agent process in the dedicated source child cgroup below the delegated root;
+3. manager owns a `CgroupV2Backend` rooted at the delegated subtree;
+4. manager serves the existing authenticated Unix protocol;
+5. host agent validates its identity and connects through `connect_authenticated_containment_manager()`;
+6. the execution child forks while inheriting the host-agent source-cgroup membership;
+7. bounded execution creates the sibling request scope through `ContainmentManagerClient`;
+8. the existing start barrier blocks the child until the manager moves it from source to request scope and confirms attachment;
+9. trusted child setup closes unrelated FDs and applies rlimits;
+10. the child irreversibly transitions to the workload identity;
+11. the pinned native ELF path executes the live workload probe;
+12. bounded cleanup uses manager-authoritative stats/kill/close operations.
 
 No alternate live-only execution path may bypass these production boundaries.
 
@@ -159,7 +167,7 @@ The phase may be marked implemented only after one exact commit passes:
 
 - ordinary Python 3.13 and 3.14 repository gates;
 - dedicated live delegated-cgroup preflight;
-- real manager/client/start-barrier/workload composition;
+- real source-cgroup -> request-cgroup attach through the production manager/client/start-barrier/workload composition;
 - root and sibling self-migration denial;
 - PID, CPU, and memory enforcement proofs;
 - recursive descendant kill proof;

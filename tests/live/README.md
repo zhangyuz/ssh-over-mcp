@@ -45,6 +45,7 @@ numeric identities used by the fixture:
 
 ```text
 SSH_OVER_MCP_LIVE_CGROUP_ROOT=/sys/fs/cgroup/<operator-delegated-subtree>
+SSH_OVER_MCP_LIVE_CGROUP_HOST_SOURCE=/sys/fs/cgroup/<operator-delegated-subtree>/host-agent-source
 SSH_OVER_MCP_LIVE_CGROUP_MANAGER_UID=<non-root uid>
 SSH_OVER_MCP_LIVE_CGROUP_MANAGER_GID=<non-root gid>
 SSH_OVER_MCP_LIVE_CGROUP_HOST_UID=<distinct non-root uid>
@@ -59,14 +60,23 @@ same `ContainmentServiceIdentityPlan` used by production and requires the test
 process to already match the configured non-root manager process policy, with
 zero inheritable/permitted/effective/ambient Linux capabilities.
 
+The operator also creates the configured `host-agent-source` cgroup as a
+direct child of the delegated root. Later live composition runs place the
+host-agent process there before bootstrap authority is dropped. Execution
+children then inherit source membership and the manager moves them from that
+source child to sibling request scopes. The manager remains outside the
+delegated root; no manager write access above the delegated root is required.
+
 Before any later live execution proof is accepted, the preflight requires:
 
 - a unified cgroup-v2 mount and a delegated root strictly below the mount root;
 - an absolute, canonical delegated path with empty `cgroup.procs`;
 - the manager process itself is outside the delegated subtree;
+- the configured host-agent source cgroup exists as a canonical direct child of
+  the delegated root;
 - `cpu`, `memory`, and `pids` available and enable-able for children;
-- manager-UID ownership of the delegated directory, `cgroup.procs`, and
-  `cgroup.subtree_control`;
+- manager-UID ownership of the delegated directory, root `cgroup.procs`,
+  `cgroup.subtree_control`, source directory, and source `cgroup.procs`;
 - no group/other write bit and no POSIX access ACL on those delegated write
   surfaces, so the distinct host-agent/workload identities have no direct DAC
   write path;
@@ -82,6 +92,11 @@ python -m pytest -q tests/live/test_delegated_cgroup.py -k preflight
 If opt-in is enabled, missing or unsafe fixture state is a hard failure rather
 than a skip. The cgroup-v2 mount root itself is explicitly rejected as a
 delegated test root.
+
+The first process that enters the delegated subtree must be placed there by the
+operator/delegator. The live suite does not use `CLONE_INTO_CGROUP` or grant
+the manager authority above the delegated root to bypass cgroup-v2 delegation
+containment.
 
 
 ## Native delegated-cgroup workload probe
