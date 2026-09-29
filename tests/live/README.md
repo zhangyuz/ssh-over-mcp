@@ -50,19 +50,22 @@ SSH_OVER_MCP_LIVE_CGROUP_MANAGER_GID=<non-root gid>
 SSH_OVER_MCP_LIVE_CGROUP_HOST_UID=<distinct non-root uid>
 SSH_OVER_MCP_LIVE_CGROUP_HOST_GID=<distinct non-root gid>
 SSH_OVER_MCP_LIVE_CGROUP_WORKLOAD_UID=<distinct non-root uid>
-SSH_OVER_MCP_LIVE_CGROUP_WORKLOAD_GID=<distinct non-root gid>
+SSH_OVER_MCP_LIVE_CGROUP_WORKLOAD_GID=<non-root gid>
+SSH_OVER_MCP_LIVE_CGROUP_MANAGER_CLIENT_GID=<non-root supplementary gid>
 ```
 
-The preflight does not search the host for a writable cgroup. It requires the
-test process to already be running as the configured non-root manager identity
-with zero inheritable/permitted/effective/ambient Linux capabilities.
+The preflight does not search the host for a writable cgroup. It builds the
+same `ContainmentServiceIdentityPlan` used by production and requires the test
+process to already match the configured non-root manager process policy, with
+zero inheritable/permitted/effective/ambient Linux capabilities.
 
 Before any later live execution proof is accepted, the preflight requires:
 
 - a unified cgroup-v2 mount and a delegated root strictly below the mount root;
 - an absolute, canonical delegated path with empty `cgroup.procs`;
+- the manager process itself is outside the delegated subtree;
 - `cpu`, `memory`, and `pids` available and enable-able for children;
-- manager ownership of the delegated directory, `cgroup.procs`, and
+- manager-UID ownership of the delegated directory, `cgroup.procs`, and
   `cgroup.subtree_control`;
 - no group/other write bit and no POSIX access ACL on those delegated write
   surfaces, so the distinct host-agent/workload identities have no direct DAC
