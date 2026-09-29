@@ -5,6 +5,7 @@ import stat
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from .file_identity import sha256_fd
 from .policy import HostObjectIdentity
 from .prepare import PreparedCommand
 
