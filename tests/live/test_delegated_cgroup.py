@@ -10,6 +10,11 @@ from pathlib import Path
 import pytest
 
 from ssh_over_mcp.host_agent.containment import REQUIRED_CGROUP_V2_CONTROLLERS
+from ssh_over_mcp.host_agent.containment_manager_identity import (
+    ContainmentServiceIdentityPlan,
+    LinuxProcessIdentity,
+    require_linux_process_identity,
+)
 
 _RUN_LIVE = os.environ.get("SSH_OVER_MCP_RUN_LIVE_CGROUP") == "1"
 pytestmark = pytest.mark.skipif(
@@ -24,17 +29,19 @@ _HOST_UID_ENV = "SSH_OVER_MCP_LIVE_CGROUP_HOST_UID"
 _HOST_GID_ENV = "SSH_OVER_MCP_LIVE_CGROUP_HOST_GID"
 _WORKLOAD_UID_ENV = "SSH_OVER_MCP_LIVE_CGROUP_WORKLOAD_UID"
 _WORKLOAD_GID_ENV = "SSH_OVER_MCP_LIVE_CGROUP_WORKLOAD_GID"
+_MANAGER_CLIENT_GID_ENV = "SSH_OVER_MCP_LIVE_CGROUP_MANAGER_CLIENT_GID"
+
+
+@dataclass(frozen=True, slots=True)
+class _Cgroup2Mount:
+    root: Path
+    mountpoint: Path
 
 
 @dataclass(frozen=True, slots=True)
 class _LiveFixture:
     root: Path
-    manager_uid: int
-    manager_gid: int
-    host_uid: int
-    host_gid: int
-    workload_uid: int
-    workload_gid: int
+    identities: ContainmentServiceIdentityPlan
 
 
 def _required_id(name: str) -> int:
@@ -44,7 +51,9 @@ def _required_id(name: str) -> int:
         value = int(raw, 10)
     except ValueError as exc:
         raise AssertionError(f"{name} must be a decimal integer") from exc
-    assert value > 0, f"{name} must be a non-root positive ID"
+    assert 0 < value < (1 << 32) - 1, (
+        f"{name} must be a non-root, non-sentinel Linux uid/gid"
+    )
     return value
 
 
@@ -54,18 +63,23 @@ def _fixture() -> _LiveFixture:
     root = Path(raw_root)
     assert root.is_absolute(), f"{_ROOT_ENV} must be absolute"
 
-    fixture = _LiveFixture(
-        root=root,
-        manager_uid=_required_id(_MANAGER_UID_ENV),
-        manager_gid=_required_id(_MANAGER_GID_ENV),
-        host_uid=_required_id(_HOST_UID_ENV),
-        host_gid=_required_id(_HOST_GID_ENV),
-        workload_uid=_required_id(_WORKLOAD_UID_ENV),
-        workload_gid=_required_id(_WORKLOAD_GID_ENV),
+    identities = ContainmentServiceIdentityPlan(
+        manager=LinuxProcessIdentity(
+            uid=_required_id(_MANAGER_UID_ENV),
+            gid=_required_id(_MANAGER_GID_ENV),
+        ),
+        host_agent=LinuxProcessIdentity(
+            uid=_required_id(_HOST_UID_ENV),
+            gid=_required_id(_HOST_GID_ENV),
+        ),
+        workload=LinuxProcessIdentity(
+            uid=_required_id(_WORKLOAD_UID_ENV),
+            gid=_required_id(_WORKLOAD_GID_ENV),
+        ),
+        manager_client_gid=_required_id(_MANAGER_CLIENT_GID_ENV),
     )
-    assert len({fixture.manager_uid, fixture.host_uid, fixture.workload_uid}) == 3
-    assert len({fixture.manager_gid, fixture.host_gid, fixture.workload_gid}) == 3
-    return fixture
+    assert identities.manager.uid != 0 and identities.manager.gid != 0
+    return _LiveFixture(root=root, identities=identities)
 
 
 def _decode_mountinfo_path(raw: str) -> Path:
@@ -78,8 +92,8 @@ def _decode_mountinfo_path(raw: str) -> Path:
     return Path(decoded)
 
 
-def _cgroup2_mount_for(root: Path) -> Path:
-    candidates: list[Path] = []
+def _cgroup2_mount_for(root: Path) -> _Cgroup2Mount:
+    candidates: list[_Cgroup2Mount] = []
     raw = Path("/proc/self/mountinfo").read_text(encoding="ascii")
     for line in raw.splitlines():
         if " - cgroup2 " not in line:
@@ -87,12 +101,34 @@ def _cgroup2_mount_for(root: Path) -> Path:
         before, _separator, _after = line.partition(" - ")
         fields = before.split()
         assert len(fields) >= 5, "invalid /proc/self/mountinfo cgroup2 record"
-        mountpoint = _decode_mountinfo_path(fields[4]).resolve(strict=True)
-        if root == mountpoint or root.is_relative_to(mountpoint):
-            candidates.append(mountpoint)
+        mount = _Cgroup2Mount(
+            root=_decode_mountinfo_path(fields[3]),
+            mountpoint=_decode_mountinfo_path(fields[4]).resolve(strict=True),
+        )
+        if root == mount.mountpoint or root.is_relative_to(mount.mountpoint):
+            candidates.append(mount)
 
     assert candidates, "configured delegated root is not inside a cgroup-v2 mount"
-    return max(candidates, key=lambda path: len(path.parts))
+    return max(candidates, key=lambda item: len(item.mountpoint.parts))
+
+
+def _current_cgroup_path(mount: _Cgroup2Mount) -> Path:
+    unified_path: Path | None = None
+    raw = Path("/proc/self/cgroup").read_text(encoding="ascii")
+    for line in raw.splitlines():
+        hierarchy, controllers, value = line.split(":", 2)
+        if hierarchy == "0" and controllers == "":
+            unified_path = Path(value)
+            break
+
+    assert unified_path is not None, "unified cgroup-v2 membership is unavailable"
+    try:
+        relative = unified_path.relative_to(mount.root)
+    except ValueError as exc:
+        raise AssertionError(
+            "current process cgroup is outside the selected cgroup-v2 mount root"
+        ) from exc
+    return (mount.mountpoint / relative).resolve(strict=True)
 
 
 def _assert_no_runtime_capabilities() -> None:
@@ -117,10 +153,9 @@ def _assert_no_posix_access_acl(path: Path) -> None:
     assert "system.posix_acl_access" not in names, f"unexpected access ACL on {path}"
 
 
-def _assert_manager_only_write(path: Path, *, uid: int, gid: int, directory: bool) -> None:
+def _assert_manager_only_write(path: Path, *, uid: int, directory: bool) -> None:
     info = path.stat()
     assert info.st_uid == uid, f"{path} must be owned by manager UID {uid}"
-    assert info.st_gid == gid, f"{path} must be owned by manager GID {gid}"
     assert info.st_mode & stat.S_IWUSR, f"{path} must be owner-writable"
     assert not info.st_mode & (stat.S_IWGRP | stat.S_IWOTH), (
         f"{path} must not be group/other writable"
@@ -156,12 +191,17 @@ def test_preflight_live_delegated_cgroup_fixture() -> None:
     assert resolved == fixture.root, "delegated root must already be canonical"
     assert resolved.is_dir(), "delegated root must be a directory"
 
-    cgroup2_mount = _cgroup2_mount_for(resolved)
-    assert resolved != cgroup2_mount, "the cgroup-v2 mount root itself must never be delegated"
+    mount = _cgroup2_mount_for(resolved)
+    assert resolved != mount.mountpoint, "the cgroup-v2 mount root itself must never be delegated"
 
-    assert os.getresuid() == (fixture.manager_uid,) * 3
-    assert os.getresgid() == (fixture.manager_gid,) * 3
+    identities = fixture.identities
+    require_linux_process_identity(identities.manager_process_policy())
     _assert_no_runtime_capabilities()
+
+    manager_cgroup = _current_cgroup_path(mount)
+    assert manager_cgroup != resolved and not manager_cgroup.is_relative_to(resolved), (
+        "containment manager process must remain outside the delegated root"
+    )
 
     controllers_path = resolved / "cgroup.controllers"
     procs_path = resolved / "cgroup.procs"
@@ -173,24 +213,16 @@ def test_preflight_live_delegated_cgroup_fixture() -> None:
         "delegated root must contain no member processes"
     )
 
-    _assert_manager_only_write(
-        resolved,
-        uid=fixture.manager_uid,
-        gid=fixture.manager_gid,
-        directory=True,
-    )
-    _assert_manager_only_write(
-        procs_path,
-        uid=fixture.manager_uid,
-        gid=fixture.manager_gid,
-        directory=False,
-    )
-    _assert_manager_only_write(
-        subtree_path,
-        uid=fixture.manager_uid,
-        gid=fixture.manager_gid,
-        directory=False,
-    )
+    for path, directory in (
+        (resolved, True),
+        (procs_path, False),
+        (subtree_path, False),
+    ):
+        _assert_manager_only_write(
+            path,
+            uid=identities.manager.uid,
+            directory=directory,
+        )
 
     originally_enabled = _read_tokens(subtree_path)
     enabled_by_test = REQUIRED_CGROUP_V2_CONTROLLERS.difference(originally_enabled)
