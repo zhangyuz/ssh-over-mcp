@@ -137,6 +137,8 @@ The host-agent process MUST NOT be made root merely to make the transition work.
 
 The implementation must not require `CAP_SETPCAP` or `CAP_SYS_ADMIN`.
 
+`CAP_SETUID` and `CAP_SETGID` are not kernel-restricted to the configured workload IDs. A compromised host agent can change credentials to other identities within its user namespace, including privileged identities. The host agent is therefore a privileged trusted component despite having a nonzero UID. The workload must not control its code, imports, configuration, or target-identity selection. The post-drop guarantee protects against workload code; it does not contain compromise of the capability-bearing host agent. `no_new_privs` does not remove capabilities or prohibit credential-changing syscalls while the process still holds the necessary authority.
+
 A future deployment-hardening increment may add startup verification of the host-agent's exact capability bounding/permitted/effective sets. This phase's normative security boundary is the verified post-drop child state.
 
 ## 7. Child transition ordering
@@ -156,7 +158,9 @@ parent forks child
 
 No untrusted workload code executes before containment attachment or before the identity transition.
 
-Before any transition syscall, the helper MUST reject a workload policy whose target UID or GID is root, whose supplementary-group set is non-empty, or whose target UID equals the current host-agent UID. The workload transition is never a no-op identity path.
+Before any transition syscall, the helper MUST read the source real/effective/saved UID and GID. Each source triple must be internally equal and nonzero; an unavailable read, mixed source identity, or root source fails before mutation. This enforces the non-root source contract without expanding this phase into exact parent capability-set validation.
+
+The helper MUST reject a workload policy whose target UID or GID is root or the reserved all-ones UID/GID sentinel, whose supplementary-group set is non-empty, or whose target UID equals that verified source UID. The workload transition is never a no-op identity path. The target policy is trusted server-side input derived from the service identity plan, not a model-supplied UID/GID.
 
 Within the released child, the required order is:
 
@@ -249,6 +253,8 @@ filesystem GID == workload GID
 
 supplementary groups == empty
 ```
+
+Supplementary-group verification MUST require an actually empty kernel-reported group list. Reusing `require_linux_process_identity()` alone is insufficient: that existing general-purpose validator normalizes away a duplicate primary GID. This transition's stronger empty-list contract must reject even a remaining supplementary entry equal to the workload primary GID.
 
 Linux `setresuid()` and `setresgid()` always synchronize the filesystem IDs to the resulting effective IDs. The implementation nevertheless treats FSUID/FSGID as explicit post-drop invariants because Linux filesystem permission checks use those IDs.
 
@@ -351,7 +357,14 @@ spawn_prepared_native(
     ...,
     workload_identity_policy=policy,
 )
+
+spawn_prepared_native_contained(
+    ...,
+    workload_identity_policy=policy,
+)
 ```
+
+The bounded runner must propagate the policy through the contained spawn and barrier entry into the shared child setup. The existing uncontained spawn primitive remains an internal/test primitive and must perform the same identity transition; it is not a production alternative to mandatory containment.
 
 The exact naming may change during implementation planning, but an explicit identity input is normative.
 
@@ -365,12 +378,29 @@ trusted setup
 
 If transition fails, the existing child failure boundary emits only the existing generic child-exec failure message and exits with the existing failure code. Sensitive syscall or capability details are not exposed to the workload protocol.
 
+### 13.1 Supervision after the UID change
+
+The parent-child relationship does not grant signal permission across different UIDs. With only `CAP_SETUID` and `CAP_SETGID`, the unchanged host-agent parent cannot assume that `killpg()` or its direct-PID fallback can send `SIGTERM` to the dropped workload. The current `_signal_process_group()` raises `BoundedExecutionError` when the direct fallback receives `EPERM`; leaving this unchanged would turn an ordinary timeout or output-limit event into a supervision error.
+
+For timeout and output-limit termination:
+
+1. retain the existing result flag and close stdin;
+2. attempt the existing bounded graceful signal path;
+3. if permission denial prevents graceful delivery, immediately invoke the existing containment-authoritative hard-kill path and start its cleanup deadline; do not wait a grace period for a signal which was not delivered;
+4. retain bounded output draining, child reaping, populated-scope verification, and scope close;
+5. return the original timeout/output-limit result only when containment cleanup succeeds.
+
+`EPERM` must be distinguishable from other signal failures. Do not broadly suppress `BoundedExecutionError`. Unexpected signaling errors and failed containment kill/accounting/reap/close retain their existing failure semantics. A successful containment kill must not become a false failure merely because the defense-in-depth direct/process-group `SIGKILL` also lacks permission. `ESRCH` remains a process-exit race, not proof that the containment scope is empty.
+
+Do not add `CAP_KILL`, switch the parent UID to signal a workload, retain the host-agent saved UID in the child, or extend the manager protocol with a generic signal/exec operation. Pre-release spawn-failure cleanup still operates on a child which has not changed identity. This phase uses the existing `ContainmentBackend` abstraction; production manager-client wiring and live cgroup validation remain follow-on phases.
+
 ## 14. Failure semantics
 
 The following are fatal to the child before exec:
 
 - missing required Linux credential APIs;
-- root workload UID/GID, non-empty workload supplementary groups, or no-op workload UID;
+- invalid, root, or mixed source credentials;
+- root/reserved-sentinel workload UID/GID, non-empty workload supplementary groups, or no-op workload UID;
 - failure to set `no_new_privs`;
 - failure to clear ambient capabilities;
 - failure to clear supplementary groups;
@@ -408,7 +438,8 @@ Implementation MUST preserve all of the following:
 14. manager descriptors remain non-inheritable/not in the child keep-set;
 15. the containment manager gains no execution API;
 16. production execution APIs expose no bypass flag, nullable workload policy, or no-op transition mode;
-17. ForceCommand execution remains disabled after this phase.
+17. ForceCommand execution remains disabled after this phase;
+18. expected cross-UID signal denial cannot bypass containment cleanup or erase timeout/output-limit results.
 
 ## 16. Test strategy
 
@@ -421,7 +452,8 @@ Required cases include:
 | Case | Expected result |
 | --- | --- |
 | missing required Linux API | fail closed |
-| workload target is root | fail closed before mutation |
+| source identity is root, mixed, or unreadable | fail closed before mutation |
+| workload target is root or the reserved all-ones ID | fail closed before mutation |
 | workload supplementary groups are non-empty | fail closed before mutation |
 | workload UID equals current host-agent UID | fail closed before mutation |
 | set no_new_privs fails | transition fails before ID change |
@@ -434,7 +466,7 @@ Required cases include:
 | saved GID mismatch on read-back | transition fails |
 | filesystem UID mismatch on read-back | transition fails |
 | filesystem GID mismatch on read-back | transition fails |
-| supplementary group remains | transition fails |
+| supplementary group remains, including a duplicate primary GID | transition fails |
 | capability ABI/range cannot be verified completely | transition fails |
 | capability read-back nonzero | transition fails |
 | no_new_privs read-back is zero | transition fails |
@@ -467,13 +499,15 @@ Generic CI MUST remain unprivileged and MUST NOT gain `CAP_SETUID` or `CAP_SETGI
 
 Production execution APIs still require a non-null explicit workload identity policy. There is no production bypass flag, no “current identity” fallback, and no optional transition mode. The real capability-bearing transition is exercised only by the dedicated live Linux validation.
 
+The test substitution must not hide changed signal permissions. Add runner regressions for both timeout and output-limit paths where group and direct-PID `SIGTERM` return `EPERM`. Assert immediate containment kill, bounded draining/reaping/close, and the preserved result flag. Also cover successful containment kill plus denied defense-in-depth `SIGKILL`, containment-kill failure, non-`EPERM` signaling failure, and direct-child exit with a still-populated scope. Containment doubles must model their own kill authority independently of the denied parent signal calls.
+
 ### 16.4 Dedicated Linux live validation
 
 Before merging the implementation, run a dedicated Linux validation environment which grants only the identity-transition capabilities needed for the probe.
 
 The live probe must demonstrate:
 
-1. start from a non-root host-agent-like UID;
+1. start from a non-root host-agent-like UID with only `CAP_SETUID`/`CAP_SETGID` effective/permitted authority, and a manager-client supplementary group;
 2. transition to a distinct non-root workload UID/GID;
 3. verify real/effective/saved IDs equal the workload IDs;
 4. verify filesystem UID/GID equal the workload UID/GID;
@@ -481,7 +515,11 @@ The live probe must demonstrate:
 6. verify current capability sets are empty;
 7. verify `no_new_privs=1`;
 8. verify attempts to restore the host-agent UID/GID fail;
-9. verify an attempt to restore the manager-client supplementary group fails.
+9. verify an attempt to restore the manager-client supplementary group fails;
+10. complete the existing pinned native ELF exec path and observe the same required identity, empty capability/group state, and `no_new_privs` in the executed probe;
+11. verify the unchanged parent has no `CAP_KILL` and cannot signal the live, dropped child (a synchronized signal-zero permission check must fail with `EPERM`, not `ESRCH`); record parent credentials before and after to prove only the child changed identity.
+
+Use distinct host-agent and workload primary GIDs for this dedicated probe, with a separate manager-client GID, so the GID-restoration rejection is meaningful. The existing service identity contract permits shared non-manager-client primary GIDs; setting a GID which is already the workload GID is not privilege restoration and must not be expected to fail. The live probe must have bounded lifetime/cleanup in its disposable validation environment. This probe validates the real identity/exec/signal-permission boundary; actual manager-backed termination remains part of the follow-on live containment validation.
 
 This probe MUST NOT make the generic self-hosted runner privileged or add `CAP_SYS_ADMIN`.
 
@@ -510,7 +548,7 @@ Unrelated privilege or deployment refactors are out of scope.
 
 This phase is complete when:
 
-1. the child cannot enter native exec without an explicit workload identity policy;
+1. the supervised child cannot enter native exec without an explicit workload identity policy;
 2. the transition is ordered after containment release and before exec;
 3. the verified child identity is exactly the configured workload UID/GID with no saved host-agent identity;
 4. filesystem UID/GID equal the workload UID/GID;
@@ -520,10 +558,11 @@ This phase is complete when:
 8. transition errors fail closed before exec;
 9. pinned cwd/executable validation remains after the identity drop;
 10. generic CI remains unprivileged while dedicated live Linux validation proves the real transition;
-11. dedicated live Linux validation proves the child cannot restore the host-agent UID/GID or manager-client supplementary group;
+11. dedicated live Linux validation proves the child cannot restore the distinct host-agent UID/GID or manager-client supplementary group, preserves the parent identity, and verifies state after native exec;
 12. Ruff, compile, Python 3.13 tests, and Python 3.14 tests pass;
 13. the containment manager protocol is unchanged;
-14. ForceCommand execution remains disabled.
+14. ForceCommand execution remains disabled;
+15. timeout/output-limit handling survives expected cross-UID `EPERM` through bounded containment-authoritative cleanup.
 
 ## 19. Follow-on phases
 
@@ -532,3 +571,10 @@ After this phase:
 1. Phase `3d2b2b2c2c`: use the authenticated containment-manager client through the existing start barrier and bounded runner;
 2. Phase `3d2b2b2c3`: live delegated-cgroup descendant-kill/resource-limit/self-migration tests;
 3. Phase `3d2c`: wire supervised native execution into the ForceCommand CLI only after containment and identity boundaries are enforced.
+
+## 20. Linux contract references
+
+- [kill(2)](https://man7.org/linux/man-pages/man2/kill.2.html): signal permission depends on credentials/capabilities, not parenthood.
+- [setresuid(2) / setresgid(2)](https://man7.org/linux/man-pages/man2/setresuid.2.html): saved-ID replacement, filesystem-ID synchronization, reserved sentinel semantics, and checked return values.
+- [capabilities(7)](https://man7.org/linux/man-pages/man7/capabilities.7.html): identity-changing authority, non-root UID-transition behavior, and the ambient subset invariant.
+- [Kernel no_new_privs documentation](https://docs.kernel.org/userspace-api/no_new_privs.html): irreversible exec-time privilege restriction and its limits for other privileged operations.

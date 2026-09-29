@@ -36,6 +36,8 @@ The production host-agent remains non-root and is granted only the identity-chan
 
 No `CAP_SYS_ADMIN`, root host-agent identity, or generic privileged execution helper is introduced by this decision.
 
+These capabilities are not restricted by the kernel to the configured workload IDs. The host agent remains a privileged trusted component: compromise of its capability-bearing code can permit impersonation of other identities in its user namespace. A non-root UID and child-side `no_new_privs` do not contain that compromise. Trusted host-agent code/configuration and server-selected target identities are required; the guarantee here applies to the workload after the verified drop.
+
 The host-agent-to-workload transition is nonroot-to-nonroot. Linux must not
 be relied upon to clear capability sets as a side effect of that UID change;
 the child explicitly clears and verifies those sets before exec.
@@ -64,6 +66,8 @@ The child does not require its capability bounding set to be empty. Instead, the
 - zero ambient capabilities.
 
 This avoids adding `CAP_SETPCAP` merely to modify the bounding set.
+
+After the drop, the non-root parent has no guaranteed permission to signal the child. Timeout/output-limit handling must treat `EPERM` on graceful signaling as a trigger for immediate existing containment-authoritative kill and bounded cleanup, preserving the original result only if cleanup succeeds. Other signal errors and containment failures remain errors. This does not grant `CAP_KILL`, temporarily change the parent identity, or expand the manager protocol. The spec defines the required supervision regressions.
 
 Production deployment should constrain the host-agent capability bounding set to the minimum required authority.
 
