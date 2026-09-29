@@ -39,6 +39,7 @@ from ssh_over_mcp.host_agent.file_identity import sha256_fd
 from ssh_over_mcp.host_agent.policy import HostChildLimits, HostObjectIdentity
 from ssh_over_mcp.host_agent.prepare import PreparedCommand
 from ssh_over_mcp.host_agent.run import run_prepared_native
+from ssh_over_mcp.host_agent.supervisor import spawn_prepared_native_contained
 from ssh_over_mcp.ssh.protocol import ExecutionLimits
 
 _RUN_LIVE = os.environ.get("SSH_OVER_MCP_RUN_LIVE_CGROUP") == "1"
@@ -2131,6 +2132,426 @@ def test_real_memory_enforcement_with_request_scope_oom_attribution() -> None:
             os.close(close_ready_read)
         if close_release_write >= 0:
             os.close(close_release_write)
+
+        if host_pid is not None:
+            try:
+                os.kill(host_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            _waitpid_bounded(host_pid, timeout_seconds=1.0)
+
+        if manager_pid > 0:
+            try:
+                os.kill(manager_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            _waitpid_bounded(manager_pid, timeout_seconds=1.0)
+
+        if endpoint.exists():
+            endpoint.unlink()
+        if runtime_dir.exists():
+            runtime_dir.rmdir()
+
+
+def _read_probe_records_until(
+    fd: int,
+    *,
+    event: str,
+    timeout_seconds: float = 3.0,
+    max_bytes: int = 64 * 1024,
+) -> list[dict[str, object]]:
+    deadline = time.monotonic() + timeout_seconds
+    buffer = bytearray()
+    records: list[dict[str, object]] = []
+
+    while True:
+        remaining = deadline - time.monotonic()
+        assert remaining > 0, f"native probe did not emit {event!r} before deadline"
+        readable, _writable, _exceptional = select.select(
+            [fd],
+            [],
+            [],
+            remaining,
+        )
+        assert readable, f"native probe did not emit {event!r} before deadline"
+
+        chunk = os.read(fd, 4096)
+        assert chunk, f"native probe closed stdout before {event!r}"
+        buffer.extend(chunk)
+        assert len(buffer) <= max_bytes, "native probe output exceeded live-test bound"
+
+        while b"\n" in buffer:
+            raw_line, _separator, remainder = buffer.partition(b"\n")
+            buffer = bytearray(remainder)
+            if not raw_line:
+                continue
+            value = json.loads(raw_line.decode("utf-8"))
+            assert isinstance(value, dict)
+            records.append(value)
+            if value.get("event") == event:
+                return records
+
+
+def _wait_process_identity_gone(
+    pid: int,
+    start_time: int,
+    *,
+    timeout_seconds: float = 2.0,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        if not _pid_matches_start_time(pid, start_time):
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"process identity survived recursive cgroup kill: pid={pid}"
+            )
+        time.sleep(0.005)
+
+
+def _wait_spawned_child_exit(child, *, timeout_seconds: float = 2.0) -> int:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        returncode = child.poll()
+        if returncode is not None:
+            return returncode
+        if time.monotonic() >= deadline:
+            raise AssertionError("supervised live child did not exit before deadline")
+        time.sleep(0.005)
+
+
+def _cleanup_task7_child(child) -> list[BaseException]:
+    if child is None:
+        return []
+
+    errors: list[BaseException] = []
+    child.close_stdin()
+    if child.containment is not None:
+        try:
+            if child.containment.stats().populated:
+                child.containment.kill_all()
+            _wait_until_scope_empty(child.containment)
+            child.close_containment()
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    try:
+        _wait_spawned_child_exit(child, timeout_seconds=1.0)
+    except BaseException as exc:  # noqa: BLE001
+        errors.append(exc)
+    child.close_pipes()
+    return errors
+
+
+def _host_agent_recursive_kill_process(
+    fixture: _LiveFixture,
+    endpoint: Path,
+    probe: Path,
+    start_fd: int,
+    result_fd: int,
+) -> None:
+    client = None
+    sentinel = None
+    workload = None
+    sentinel_prepared = None
+    workload_prepared = None
+    cleanup_errors: list[BaseException] = []
+    failure: str | None = None
+
+    try:
+        token = os.read(start_fd, 1)
+        assert token == b"R", "host-agent bootstrap barrier was not released"
+
+        _drop_to_host_agent_identity(fixture.identities)
+        mount = _cgroup2_mount_for(fixture.root)
+        assert _current_cgroup_path(mount) == fixture.host_source
+
+        client = connect_authenticated_containment_manager(
+            endpoint,
+            identity_plan=fixture.identities,
+            timeout_seconds=2.0,
+        )
+
+        sentinel_request_id = f"req_live_kill_sentinel_{os.getpid()}"
+        sentinel_prepared = _prepared_probe(
+            probe,
+            request_id=sentinel_request_id,
+            argv=("memory", "4096", "30000"),
+        )
+        sentinel = spawn_prepared_native_contained(
+            sentinel_prepared,
+            client,
+            ContainmentRequest(
+                request_id=sentinel_request_id,
+                limits=ContainmentLimits(
+                    memory_max_bytes=64 * 1024 * 1024,
+                    pids_max=8,
+                    cpu_quota_us=50_000,
+                    cpu_period_us=100_000,
+                ),
+            ),
+            workload_identity_policy=fixture.identities.workload_process_policy(),
+        )
+        sentinel_prepared.close()
+        sentinel_prepared = None
+        sentinel.close_stdin()
+
+        sentinel_records = _read_probe_records_until(
+            sentinel.stdout_fd,
+            event="memory_ready",
+        )
+        assert any(
+            record.get("event") == "memory_ready"
+            for record in sentinel_records
+        )
+        sentinel_start_time = _pid_start_time_ticks(sentinel.pid)
+        sentinel_scope = (
+            fixture.root / f"ssh-over-mcp-{sentinel_request_id}"
+        ).resolve(strict=True)
+        assert _pid_cgroup_path(sentinel.pid, mount) == sentinel_scope
+        assert sentinel.containment is not None
+        assert sentinel.containment.stats().populated is True
+
+        workload_request_id = f"req_live_recursive_kill_{os.getpid()}"
+        workload_prepared = _prepared_probe(
+            probe,
+            request_id=workload_request_id,
+            argv=("descendants", "3", "10000"),
+        )
+        workload = spawn_prepared_native_contained(
+            workload_prepared,
+            client,
+            ContainmentRequest(
+                request_id=workload_request_id,
+                limits=ContainmentLimits(
+                    memory_max_bytes=64 * 1024 * 1024,
+                    pids_max=8,
+                    cpu_quota_us=50_000,
+                    cpu_period_us=100_000,
+                ),
+            ),
+            workload_identity_policy=fixture.identities.workload_process_policy(),
+        )
+        workload_prepared.close()
+        workload_prepared = None
+        workload.close_stdin()
+
+        records = _read_probe_records_until(
+            workload.stdout_fd,
+            event="descendants_ready",
+        )
+        descendant_pids = [
+            int(record["pid"])
+            for record in records
+            if record.get("event") == "descendant"
+        ]
+        ready = next(
+            record
+            for record in records
+            if record.get("event") == "descendants_ready"
+        )
+        assert int(ready["count"]) == 3
+        assert len(descendant_pids) == 3
+        assert len(set(descendant_pids)) == 3
+
+        workload_scope = (
+            fixture.root / f"ssh-over-mcp-{workload_request_id}"
+        ).resolve(strict=True)
+        descendant_identities: list[tuple[int, int]] = []
+        for descendant_pid in descendant_pids:
+            start_time = _pid_start_time_ticks(descendant_pid)
+            descendant_identities.append((descendant_pid, start_time))
+            assert _pid_cgroup_path(descendant_pid, mount) == workload_scope
+
+        assert workload.wait() == 0
+        assert workload.containment is not None
+        assert workload.containment.scope_id == workload_scope.name
+        assert workload.containment.stats().populated is True
+
+        # Passing evidence is the production manager-backed cgroup.kill path.
+        # Do not send any direct or process-group signal to these descendants.
+        workload.containment.kill_all()
+        _wait_until_scope_empty(workload.containment)
+        assert workload.containment.stats().populated is False
+
+        for descendant_pid, start_time in descendant_identities:
+            _wait_process_identity_gone(descendant_pid, start_time)
+
+        assert _pid_matches_start_time(sentinel.pid, sentinel_start_time)
+        assert _pid_cgroup_path(sentinel.pid, mount) == sentinel_scope
+        assert sentinel.containment is not None
+        assert sentinel.containment.stats().populated is True
+
+        workload.close_containment()
+        assert workload_scope.exists() is False
+        workload.close_pipes()
+        workload = None
+
+        sentinel.containment.kill_all()
+        _wait_until_scope_empty(sentinel.containment)
+        assert sentinel.containment.stats().populated is False
+        sentinel_returncode = _wait_spawned_child_exit(
+            sentinel,
+            timeout_seconds=2.0,
+        )
+        assert sentinel_returncode == -signal.SIGKILL
+        sentinel.close_containment()
+        assert sentinel_scope.exists() is False
+        sentinel.close_pipes()
+        sentinel = None
+
+        assert _current_cgroup_path(mount) == fixture.host_source
+        _write_pipe_json(
+            result_fd,
+            {
+                "ok": True,
+                "descendant_count": len(descendant_identities),
+                "sentinel_survived_request_kill": True,
+            },
+        )
+        os._exit(0)
+    except BaseException:  # noqa: BLE001
+        failure = traceback.format_exc()[-12000:]
+        traceback.print_exc()
+    finally:
+        if workload_prepared is not None:
+            workload_prepared.close()
+        if sentinel_prepared is not None:
+            sentinel_prepared.close()
+        cleanup_errors.extend(_cleanup_task7_child(workload))
+        cleanup_errors.extend(_cleanup_task7_child(sentinel))
+        if client is not None:
+            client.close()
+
+        for cleanup_exc in cleanup_errors:
+            print(
+                f"recursive-kill cleanup failed: {cleanup_exc!r}",
+                file=sys.stderr,
+            )
+
+    try:
+        _write_pipe_json(
+            result_fd,
+            {
+                "ok": False,
+                "error": failure or "recursive-kill host-agent failed",
+                "cleanup_errors": [repr(exc) for exc in cleanup_errors],
+            },
+        )
+    except BaseException as report_exc:  # noqa: BLE001
+        print(
+            f"cannot report recursive-kill host-agent failure: {report_exc!r}",
+            file=sys.stderr,
+        )
+    os._exit(125)
+
+
+def test_recursive_cgroup_kill_removes_descendants_and_preserves_sibling() -> None:
+    assert os.geteuid() == 0, (
+        "Task 7 recursive-kill proof requires dedicated root bootstrap"
+    )
+    fixture = _fixture()
+    root = fixture.root.resolve(strict=True)
+    source = fixture.host_source.resolve(strict=True)
+    assert root == fixture.root
+    assert source == fixture.host_source
+    assert source.parent == root
+    assert (source / "cgroup.procs").read_text(encoding="ascii").strip() == ""
+
+    raw_probe = os.environ.get(_PROBE_ELF_ENV)
+    assert raw_probe, f"{_PROBE_ELF_ENV} is required"
+    probe = Path(raw_probe).resolve(strict=True)
+    assert probe == Path(raw_probe)
+    assert probe.is_file()
+    assert os.execve in os.supports_fd
+
+    mount = _cgroup2_mount_for(root)
+    assert not _current_cgroup_path(mount).is_relative_to(root)
+
+    runtime_dir = Path(f"/tmp/ssh-over-mcp-live-manager-task7-{os.getpid()}")
+    assert not runtime_dir.exists()
+    runtime_dir.mkdir(mode=0o700)
+    os.chown(
+        runtime_dir,
+        fixture.identities.manager.uid,
+        fixture.identities.manager_client_gid,
+    )
+    os.chmod(runtime_dir, 0o710)
+    endpoint = runtime_dir / "manager.sock"
+
+    manager_read, manager_write = os.pipe()
+    manager_pid = os.fork()
+    if manager_pid == 0:
+        os.close(manager_read)
+        _manager_process(fixture, endpoint, manager_write)
+        os._exit(126)
+
+    os.close(manager_write)
+    host_pid: int | None = None
+    host_start_write = -1
+    host_result_read = -1
+
+    try:
+        manager_ready = _read_pipe_json(
+            manager_read,
+            timeout_seconds=5.0,
+        )
+        assert manager_ready.get("ok") is True, manager_ready.get("error")
+
+        host_start_read, host_start_write = os.pipe()
+        host_result_read, host_result_write = os.pipe()
+        host_pid = os.fork()
+        if host_pid == 0:
+            os.close(host_start_write)
+            os.close(host_result_read)
+            _host_agent_recursive_kill_process(
+                fixture,
+                endpoint,
+                probe,
+                host_start_read,
+                host_result_write,
+            )
+            os._exit(126)
+
+        os.close(host_start_read)
+        os.close(host_result_write)
+
+        _write_control(source / "cgroup.procs", f"{host_pid}\n")
+        assert _pid_cgroup_path(host_pid, mount) == source
+        os.write(host_start_write, b"R")
+        os.close(host_start_write)
+        host_start_write = -1
+
+        host_result = _read_pipe_json(
+            host_result_read,
+            timeout_seconds=8.0,
+        )
+        assert host_result.get("ok") is True, host_result.get("error")
+        assert int(host_result["descendant_count"]) == 3
+        assert host_result["sentinel_survived_request_kill"] is True
+
+        host_status = _waitpid_bounded(host_pid, timeout_seconds=2.0)
+        assert host_status is not None
+        assert os.WIFEXITED(host_status)
+        assert os.WEXITSTATUS(host_status) == 0
+        host_pid = None
+
+        manager_status = _waitpid_bounded(manager_pid, timeout_seconds=3.0)
+        assert manager_status is not None
+        assert os.WIFEXITED(manager_status)
+        assert os.WEXITSTATUS(manager_status) == 0
+        manager_pid = -1
+
+        assert endpoint.exists() is False
+        assert (source / "cgroup.procs").read_text(
+            encoding="ascii"
+        ).strip() == ""
+    finally:
+        os.close(manager_read)
+        if host_start_write >= 0:
+            os.close(host_start_write)
+        if host_result_read >= 0:
+            os.close(host_result_read)
 
         if host_pid is not None:
             try:
