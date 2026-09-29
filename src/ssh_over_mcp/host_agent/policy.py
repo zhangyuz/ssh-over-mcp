@@ -340,14 +340,50 @@ def _resolve_executable(
     if not os.access(expected, os.X_OK):
         return None, None, "resolved executable is not executable"
 
+    if not all(hasattr(os, name) for name in ("O_CLOEXEC", "O_NOFOLLOW", "pread")):
+        return None, None, "secure executable content binding is unavailable"
+
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+    try:
+        fd = os.open(expected, flags)
+    except OSError:
+        return None, None, "resolved executable cannot be opened for content binding"
+
+    try:
+        before = os.fstat(fd)
+        if (
+            before.st_dev != info.st_dev
+            or before.st_ino != info.st_ino
+            or before.st_ctime_ns != info.st_ctime_ns
+            or before.st_mtime_ns != info.st_mtime_ns
+            or before.st_size != info.st_size
+        ):
+            return None, None, "resolved executable changed during authorization"
+
+        content_sha256 = sha256_fd(fd, expected_size=before.st_size)
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_ctime_ns != before.st_ctime_ns
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_size != before.st_size
+        ):
+            return None, None, "resolved executable changed during authorization"
+    except OSError:
+        return None, None, "resolved executable cannot be content-bound"
+    finally:
+        os.close(fd)
+
     return (
         str(expected),
         HostObjectIdentity(
-            device=info.st_dev,
-            inode=info.st_ino,
-            ctime_ns=info.st_ctime_ns,
-            mtime_ns=info.st_mtime_ns,
-            size=info.st_size,
+            device=before.st_dev,
+            inode=before.st_ino,
+            ctime_ns=before.st_ctime_ns,
+            mtime_ns=before.st_mtime_ns,
+            size=before.st_size,
+            content_sha256=content_sha256,
         ),
         None,
     )
