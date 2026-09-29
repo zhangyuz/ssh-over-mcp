@@ -8,6 +8,7 @@ from typing import Literal, Self
 
 from ssh_over_mcp.ssh.protocol import ExecEnvelope
 
+from .file_identity import sha256_fd
 from .policy import (
     HostAuthorizationResult,
     HostChildLimits,
