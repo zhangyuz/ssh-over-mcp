@@ -34,8 +34,13 @@ static bool parse_u64(const char *raw, uint64_t minimum, uint64_t maximum,
     char *end = NULL;
     unsigned long long value;
 
-    if (raw == NULL || raw[0] == '\0' || raw[0] == '-' || raw[0] == '+') {
+    if (raw == NULL || raw[0] == '\0') {
         return false;
+    }
+    for (const char *cursor = raw; *cursor != '\0'; cursor++) {
+        if (*cursor < '0' || *cursor > '9') {
+            return false;
+        }
     }
     errno = 0;
     value = strtoull(raw, &end, 10);
@@ -102,7 +107,7 @@ static void print_json_string(const char *value) {
 }
 
 static bool read_status_value(const char *key, char *output, size_t output_size) {
-    FILE *stream = fopen("/proc/self/status", "re");
+    FILE *stream = fopen("/proc/self/status", "r");
     char line[512];
     size_t key_length = strlen(key);
 
@@ -134,7 +139,7 @@ static bool read_status_value(const char *key, char *output, size_t output_size)
 }
 
 static bool read_unified_cgroup(char *output, size_t output_size) {
-    FILE *stream = fopen("/proc/self/cgroup", "re");
+    FILE *stream = fopen("/proc/self/cgroup", "r");
     char line[PATH_MAX + 32];
 
     if (stream == NULL) {
@@ -161,6 +166,12 @@ static bool read_unified_cgroup(char *output, size_t output_size) {
     return false;
 }
 
+static int compare_gid(const void *left, const void *right) {
+    gid_t a = *(const gid_t *)left;
+    gid_t b = *(const gid_t *)right;
+    return (a > b) - (a < b);
+}
+
 static int emit_state(void) {
     uid_t ruid, euid, suid;
     gid_t rgid, egid, sgid;
@@ -178,6 +189,7 @@ static int emit_state(void) {
         perror("getgroups");
         return 70;
     }
+    qsort(groups, (size_t)group_count, sizeof(groups[0]), compare_gid);
     if (!read_unified_cgroup(cgroup, sizeof(cgroup)) ||
         !read_status_value("CapInh", cap_inh, sizeof(cap_inh)) ||
         !read_status_value("CapPrm", cap_prm, sizeof(cap_prm)) ||
