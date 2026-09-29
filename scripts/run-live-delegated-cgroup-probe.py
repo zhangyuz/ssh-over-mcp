@@ -69,7 +69,7 @@ def main() -> int:
                 "-q",
                 "tests/live/test_delegated_cgroup.py",
                 "-k",
-                "production_manager_client_barrier_and_migration_denial or real_pid_and_cpu_enforcement or real_memory_enforcement_with_request_scope_oom_attribution",
+                "production_manager_client_barrier_and_migration_denial or real_pid_and_cpu_enforcement or real_memory_enforcement_with_request_scope_oom_attribution or recursive_cgroup_kill_removes_descendants_and_preserves_sibling",
             ],
             cwd=repository,
             env=env,
