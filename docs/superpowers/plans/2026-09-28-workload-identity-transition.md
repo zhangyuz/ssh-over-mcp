@@ -313,7 +313,7 @@ Use four distinct numeric IDs:
 
 The host-agent and workload primary GIDs must also be distinct for this probe.
 
-- [ ] **Step 1: Build the disposable capability fixture**
+- [x] **Step 1: Build the disposable capability fixture**
 
 Launch the actual probe process as a **non-root** UID with only:
 
@@ -328,7 +328,7 @@ The parent must not have `CAP_KILL`.
 
 A root container/bootstrap process may be used only to construct the disposable fixture and then drop into the non-root host-agent process before the probe assertions begin.
 
-- [ ] **Step 2: Exercise the real transition**
+- [x] **Step 2: Exercise the real transition**
 
 The live test must prove before native exec:
 
@@ -343,7 +343,7 @@ The live test must prove before native exec:
 - ambient capabilities are empty;
 - `no_new_privs=1`.
 
-- [ ] **Step 3: Prove irreversibility**
+- [x] **Step 3: Prove irreversibility**
 
 After the drop, assert:
 
@@ -351,13 +351,13 @@ After the drop, assert:
 - restoring host-agent GID fails;
 - restoring manager-client supplementary group fails.
 
-- [ ] **Step 4: Prove state after native ELF exec**
+- [x] **Step 4: Prove state after native ELF exec**
 
 Run the existing pinned **native ELF** exec path into a small probe executable and report the same identity/capability/`no_new_privs` state from the executed image.
 
 A script/interpreter fixture is not sufficient for this gate; the probe must exercise the repository's native fd-based ELF exec path so interpreter behavior cannot mask the credential boundary.
 
-- [ ] **Step 5: Prove parent remained unchanged and cannot signal**
+- [x] **Step 5: Prove parent remained unchanged and cannot signal**
 
 Synchronize parent/child so the child is alive after dropping identity.
 
@@ -368,13 +368,19 @@ Assert:
 - only the child changed identity;
 - disposable cleanup remains bounded.
 
-- [ ] **Step 6: Verify the live probe is isolated from generic validation**
+- [x] **Step 6: Verify the live probe is isolated from generic validation**
 
 The ordinary full suite must still pass without `CAP_SETUID`/`CAP_SETGID`.
 
 Document the exact dedicated command/workflow required for the live proof.
 
-- [ ] **Step 7: Commit Task 4**
+Dedicated command:
+
+```bash
+./scripts/run-live-workload-identity-probe.py
+```
+
+- [x] **Step 7: Commit Task 4**
 
 ```bash
 git add <live-probe-files>

@@ -1,0 +1,17 @@
+FROM python:3.13-bookworm
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /repo
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN python -m pip install --no-cache-dir -e '.[dev]'
+
+COPY tests/live ./tests/live
+RUN cc -O2 -Wall -Wextra -Werror \
+    -o /usr/local/bin/ssh-over-mcp-identity-state-probe \
+    tests/live/workload_identity_state_probe.c
+
+CMD ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/live/test_workload_identity_transition.py"]
