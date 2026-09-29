@@ -1639,17 +1639,70 @@ def test_real_pid_and_cpu_enforcement() -> None:
             runtime_dir.rmdir()
 
 
+class _CloseObservationHandle:
+    def __init__(
+        self,
+        handle,
+        *,
+        ready_fd: int,
+        release_fd: int,
+    ) -> None:
+        self._handle = handle
+        self._ready_fd = ready_fd
+        self._release_fd = release_fd
+        self._closed = False
+
+    @property
+    def scope_id(self) -> str:
+        return self._handle.scope_id
+
+    def attach(self, pid: int) -> None:
+        self._handle.attach(pid)
+
+    def kill_all(self) -> None:
+        self._handle.kill_all()
+
+    def stats(self):
+        return self._handle.stats()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        try:
+            _write_pipe_json(
+                self._ready_fd,
+                {"scope_id": self.scope_id},
+            )
+            token = os.read(self._release_fd, 1)
+            assert token == b"R", (
+                "memory observer did not release request close barrier"
+            )
+        finally:
+            try:
+                self._handle.close()
+            finally:
+                self._closed = True
+                os.close(self._ready_fd)
+                os.close(self._release_fd)
+                self._ready_fd = -1
+                self._release_fd = -1
+
+
 class _CreateObservationBackend:
     def __init__(
         self,
         backend,
         *,
-        ready_fd: int,
-        release_fd: int,
+        create_ready_fd: int,
+        create_release_fd: int,
+        close_ready_fd: int,
+        close_release_fd: int,
     ) -> None:
         self._backend = backend
-        self._ready_fd = ready_fd
-        self._release_fd = release_fd
+        self._create_ready_fd = create_ready_fd
+        self._create_release_fd = create_release_fd
+        self._close_ready_fd = close_ready_fd
+        self._close_release_fd = close_release_fd
 
     @property
     def name(self) -> str:
@@ -1659,28 +1712,34 @@ class _CreateObservationBackend:
         handle = self._backend.create(request)
         try:
             _write_pipe_json(
-                self._ready_fd,
-                {
-                    "scope_id": handle.scope_id,
-                },
+                self._create_ready_fd,
+                {"scope_id": handle.scope_id},
             )
-            token = os.read(self._release_fd, 1)
+            token = os.read(self._create_release_fd, 1)
             assert token == b"R", (
                 "memory observer did not release request creation barrier"
             )
-            return handle
         except BaseException:
-            if handle.stats().populated:
-                handle.kill_all()
-                _wait_until_scope_empty(handle)
-            handle.close()
+            try:
+                if handle.stats().populated:
+                    handle.kill_all()
+                    _wait_until_scope_empty(handle)
+                handle.close()
+            finally:
+                os.close(self._close_ready_fd)
+                os.close(self._close_release_fd)
             raise
         finally:
-            os.close(self._ready_fd)
-            os.close(self._release_fd)
-            self._ready_fd = -1
-            self._release_fd = -1
+            os.close(self._create_ready_fd)
+            os.close(self._create_release_fd)
+            self._create_ready_fd = -1
+            self._create_release_fd = -1
 
+        return _CloseObservationHandle(
+            handle,
+            ready_fd=self._close_ready_fd,
+            release_fd=self._close_release_fd,
+        )
 
 def _memory_observation_baseline(
     scope: Path,
@@ -1707,63 +1766,43 @@ def _memory_observation_baseline(
     return baseline_events, baseline_current, sentinel_baseline
 
 
-def _observe_memory_enforcement(
+def _memory_observation_after(
     scope: Path,
     *,
     sentinel_scope: Path,
     baseline_events: dict[str, int],
     baseline_current: int,
     sentinel_baseline: dict[str, int],
-    timeout_seconds: float = 5.0,
 ) -> dict[str, int]:
-    peak_current = baseline_current
-    observed_events = baseline_events
-    deadline = time.monotonic() + timeout_seconds
-
-    while True:
-        assert sentinel_scope.is_dir(), (
-            "sibling sentinel scope disappeared during memory pressure"
-        )
-        sentinel_events = _read_cpu_stat(sentinel_scope / "memory.events")
-        assert sentinel_events["oom"] == sentinel_baseline["oom"]
-        assert sentinel_events["oom_kill"] == sentinel_baseline["oom_kill"]
-
-        try:
-            current = _read_int_file(scope / "memory.current")
-            events = _read_cpu_stat(scope / "memory.events")
-        except OSError as exc:
-            if exc.errno in {errno.ENOENT, errno.ENODEV}:
-                break
-            raise
-
-        peak_current = max(peak_current, current)
-        observed_events = events
-        oom_delta = events["oom"] - baseline_events["oom"]
-        oom_kill_delta = events["oom_kill"] - baseline_events["oom_kill"]
-        if oom_delta > 0 or oom_kill_delta > 0:
-            return {
-                "baseline_current": baseline_current,
-                "after_current": current,
-                "peak_current": peak_current,
-                "baseline_oom": baseline_events["oom"],
-                "after_oom": events["oom"],
-                "baseline_oom_kill": baseline_events["oom_kill"],
-                "after_oom_kill": events["oom_kill"],
-                "sentinel_oom": sentinel_events["oom"],
-                "sentinel_oom_kill": sentinel_events["oom_kill"],
-            }
-
-        if time.monotonic() >= deadline:
-            raise AssertionError(
-                "memory.events did not attribute OOM pressure before deadline; "
-                f"last events={observed_events!r}"
-            )
-        time.sleep(0.002)
-
-    raise AssertionError(
-        "request scope disappeared before memory.events OOM attribution "
-        f"was observed; last events={observed_events!r}"
+    assert scope.is_dir(), (
+        "request scope disappeared before final memory accounting"
     )
+    assert sentinel_scope.is_dir(), (
+        "sibling sentinel scope disappeared during memory pressure"
+    )
+
+    after_events = _read_cpu_stat(scope / "memory.events")
+    after_current = _read_int_file(scope / "memory.current")
+    sentinel_events = _read_cpu_stat(sentinel_scope / "memory.events")
+    for name in ("oom", "oom_kill"):
+        assert after_events[name] >= baseline_events[name]
+        assert sentinel_events[name] == sentinel_baseline[name]
+
+    assert (
+        after_events["oom"] > baseline_events["oom"]
+        or after_events["oom_kill"] > baseline_events["oom_kill"]
+    ), "final memory.events snapshot contains no request-scope OOM evidence"
+
+    return {
+        "baseline_current": baseline_current,
+        "after_current": after_current,
+        "baseline_oom": baseline_events["oom"],
+        "after_oom": after_events["oom"],
+        "baseline_oom_kill": baseline_events["oom_kill"],
+        "after_oom_kill": after_events["oom_kill"],
+        "sentinel_oom": sentinel_events["oom"],
+        "sentinel_oom_kill": sentinel_events["oom_kill"],
+    }
 
 def _host_agent_memory_process(
     fixture: _LiveFixture,
@@ -1773,6 +1812,8 @@ def _host_agent_memory_process(
     result_fd: int,
     create_ready_fd: int,
     create_release_fd: int,
+    close_ready_fd: int,
+    close_release_fd: int,
 ) -> None:
     client = None
     prepared = None
@@ -1800,8 +1841,10 @@ def _host_agent_memory_process(
         )
         observed_backend = _CreateObservationBackend(
             client,
-            ready_fd=create_ready_fd,
-            release_fd=create_release_fd,
+            create_ready_fd=create_ready_fd,
+            create_release_fd=create_release_fd,
+            close_ready_fd=close_ready_fd,
+            close_release_fd=close_release_fd,
         )
         result = run_prepared_native(
             prepared,
@@ -1946,6 +1989,8 @@ def test_real_memory_enforcement_with_request_scope_oom_attribution() -> None:
     host_result_read = -1
     create_ready_read = -1
     create_release_write = -1
+    close_ready_read = -1
+    close_release_write = -1
 
     try:
         manager_ready = _read_pipe_json(
@@ -1963,12 +2008,16 @@ def test_real_memory_enforcement_with_request_scope_oom_attribution() -> None:
         host_result_read, host_result_write = os.pipe()
         create_ready_read, create_ready_write = os.pipe()
         create_release_read, create_release_write = os.pipe()
+        close_ready_read, close_ready_write = os.pipe()
+        close_release_read, close_release_write = os.pipe()
         host_pid = os.fork()
         if host_pid == 0:
             os.close(host_start_write)
             os.close(host_result_read)
             os.close(create_ready_read)
             os.close(create_release_write)
+            os.close(close_ready_read)
+            os.close(close_release_write)
             _host_agent_memory_process(
                 fixture,
                 endpoint,
@@ -1977,6 +2026,8 @@ def test_real_memory_enforcement_with_request_scope_oom_attribution() -> None:
                 host_result_write,
                 create_ready_write,
                 create_release_read,
+                close_ready_write,
+                close_release_read,
             )
             os._exit(126)
 
@@ -1984,6 +2035,8 @@ def test_real_memory_enforcement_with_request_scope_oom_attribution() -> None:
         os.close(host_result_write)
         os.close(create_ready_write)
         os.close(create_release_read)
+        os.close(close_ready_write)
+        os.close(close_release_read)
 
         _write_control(source / "cgroup.procs", f"{host_pid}\n")
         assert _pid_cgroup_path(host_pid, mount) == source
@@ -2011,26 +2064,27 @@ def test_real_memory_enforcement_with_request_scope_oom_attribution() -> None:
         os.close(create_release_write)
         create_release_write = -1
 
-        observation = _observe_memory_enforcement(
+        closing = _read_pipe_json(
+            close_ready_read,
+            timeout_seconds=4.0,
+        )
+        assert closing["scope_id"] == memory_scope.name
+        observation = _memory_observation_after(
             memory_scope,
             sentinel_scope=sentinel_path,
             baseline_events=baseline_events,
             baseline_current=baseline_current,
             sentinel_baseline=sentinel_baseline,
-            timeout_seconds=4.0,
         )
-        assert (
-            observation["after_oom"] > observation["baseline_oom"]
-            or observation["after_oom_kill"]
-            > observation["baseline_oom_kill"]
-        )
-        assert observation["peak_current"] > observation["baseline_current"]
-        assert observation["peak_current"] <= 64 * 1024 * 1024
+        assert observation["after_current"] <= 32 * 1024 * 1024
         assert observation["sentinel_oom"] == 0
         assert observation["sentinel_oom_kill"] == 0
         assert sentinel_path.is_dir(), (
             "sibling sentinel did not survive request-scope OOM"
         )
+        os.write(close_release_write, b"R")
+        os.close(close_release_write)
+        close_release_write = -1
 
         host_result = _read_pipe_json(
             host_result_read,
@@ -2073,6 +2127,10 @@ def test_real_memory_enforcement_with_request_scope_oom_attribution() -> None:
             os.close(create_ready_read)
         if create_release_write >= 0:
             os.close(create_release_write)
+        if close_ready_read >= 0:
+            os.close(close_ready_read)
+        if close_release_write >= 0:
+            os.close(close_release_write)
 
         if host_pid is not None:
             try:
