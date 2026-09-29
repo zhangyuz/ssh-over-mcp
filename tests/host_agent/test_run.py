@@ -32,6 +32,7 @@ from ssh_over_mcp.host_agent.containment_manager_unix import (
     UnixContainmentManagerTransport,
     serve_containment_manager_connection,
 )
+from ssh_over_mcp.host_agent.file_identity import sha256_fd
 from ssh_over_mcp.host_agent.policy import HostChildLimits, HostObjectIdentity
 from ssh_over_mcp.host_agent.prepare import PreparedCommand
 from ssh_over_mcp.host_agent.run import (
@@ -125,6 +126,10 @@ def _prepared(
             ctime_ns=executable_info.st_ctime_ns,
             mtime_ns=executable_info.st_mtime_ns,
             size=executable_info.st_size,
+            content_sha256=sha256_fd(
+                executable_fd,
+                expected_size=executable_info.st_size,
+            ),
         ),
         cwd_path=str(cwd),
         cwd_identity=HostObjectIdentity(

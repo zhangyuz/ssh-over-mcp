@@ -14,6 +14,7 @@ from ssh_over_mcp.host_agent.containment_manager_identity import (
     LinuxProcessIdentityPolicy,
 )
 from ssh_over_mcp.host_agent.execute import exec_prepared_native_in_child
+from ssh_over_mcp.host_agent.file_identity import sha256_fd
 from ssh_over_mcp.host_agent.policy import HostChildLimits, HostObjectIdentity
 from ssh_over_mcp.host_agent.prepare import PreparedCommand
 from ssh_over_mcp.host_agent.workload_identity import (
@@ -146,7 +147,7 @@ def _bootstrap_host_agent() -> None:
     os.setresuid(_HOST_UID, _HOST_UID, _HOST_UID)
     _set_source_capabilities(libc)
     _set_keepcaps(libc, False)
-def _identity(fd: int) -> HostObjectIdentity:
+def _identity(fd: int, *, bind_content: bool = False) -> HostObjectIdentity:
     info = os.fstat(fd)
     return HostObjectIdentity(
         device=info.st_dev,
@@ -154,6 +155,11 @@ def _identity(fd: int) -> HostObjectIdentity:
         ctime_ns=info.st_ctime_ns,
         mtime_ns=info.st_mtime_ns,
         size=info.st_size,
+        content_sha256=(
+            sha256_fd(fd, expected_size=info.st_size)
+            if bind_content
+            else None
+        ),
     )
 
 
@@ -183,7 +189,7 @@ def _prepared(report_fd: int) -> PreparedCommand:
         executable_fd=executable_fd,
         cwd_fd=cwd_fd,
         executable_path=str(_PROBE_ELF),
-        executable_identity=_identity(executable_fd),
+        executable_identity=_identity(executable_fd, bind_content=True),
         cwd_path="/tmp",
         cwd_identity=_identity(cwd_fd),
         executable_format="elf",

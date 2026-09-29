@@ -215,6 +215,42 @@ def test_same_inode_content_change_after_authorization_is_denied(tmp_path: Path)
         prepare_command(policy, envelope, decision)
 
 
+def test_same_size_content_change_after_authorization_is_denied_by_digest(
+    tmp_path: Path,
+):
+    executable = make_executable(tmp_path)
+    policy = make_policy(executable, None)
+    envelope = make_envelope(executable, None)
+    decision = authorize(policy, envelope)
+    assert decision.executable_identity is not None
+    assert decision.executable_identity.content_sha256 is not None
+
+    original = executable.read_bytes()
+    mutated = original.replace(b"exit 0", b"exit 1")
+    assert mutated != original
+    assert len(mutated) == len(original)
+    executable.write_bytes(mutated)
+
+    current = executable.stat()
+    decision = decision.model_copy(
+        update={
+            "executable_identity": decision.executable_identity.model_copy(
+                update={
+                    "ctime_ns": current.st_ctime_ns,
+                    "mtime_ns": current.st_mtime_ns,
+                    "size": current.st_size,
+                }
+            )
+        }
+    )
+
+    with pytest.raises(
+        CommandPreparationError,
+        match="filesystem objects changed",
+    ):
+        prepare_command(policy, envelope, decision)
+
+
 def test_cwd_content_change_between_authorize_and_prepare_is_allowed(tmp_path: Path):
     executable = make_executable(tmp_path)
     cwd = tmp_path / "work"
