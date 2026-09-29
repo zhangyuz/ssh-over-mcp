@@ -46,6 +46,7 @@ numeric identities used by the fixture:
 ```text
 SSH_OVER_MCP_LIVE_CGROUP_ROOT=/sys/fs/cgroup/<operator-delegated-subtree>
 SSH_OVER_MCP_LIVE_CGROUP_HOST_SOURCE=/sys/fs/cgroup/<operator-delegated-subtree>/host-agent-source
+SSH_OVER_MCP_LIVE_CGROUP_SOURCE_PID=<stopped disposable host-agent-identity pid>
 SSH_OVER_MCP_LIVE_CGROUP_MANAGER_UID=<non-root uid>
 SSH_OVER_MCP_LIVE_CGROUP_MANAGER_GID=<non-root gid>
 SSH_OVER_MCP_LIVE_CGROUP_HOST_UID=<distinct non-root uid>
@@ -61,11 +62,17 @@ process to already match the configured non-root manager process policy, with
 zero inheritable/permitted/effective/ambient Linux capabilities.
 
 The operator also creates the configured `host-agent-source` cgroup as a
-direct child of the delegated root. Later live composition runs place the
-host-agent process there before bootstrap authority is dropped. Execution
-children then inherit source membership and the manager moves them from that
-source child to sibling request scopes. The manager remains outside the
-delegated root; no manager write access above the delegated root is required.
+direct child of the delegated root. For the real-backend primitive proof, the
+operator supplies one disposable process through
+`SSH_OVER_MCP_LIVE_CGROUP_SOURCE_PID`. That process must already be stopped,
+must match the configured host-agent UID/GID and supplementary-group policy,
+and must already reside in `host-agent-source`.
+
+Later production-composition runs place the actual host-agent process there
+before bootstrap authority is dropped. Execution children then inherit source
+membership and the manager moves them from that source child to sibling request
+scopes. The manager remains outside the delegated root; no manager write access
+above the delegated root is required.
 
 Before any later live execution proof is accepted, the preflight requires:
 
@@ -140,3 +147,32 @@ targets, requires them to be existing `cgroup.procs` files under the
 configured delegated root, and treats `ENOENT` or any unexpected error as a
 hard failure. A successful self-migration exits nonzero so it cannot be
 mistaken for the expected permission-denial proof.
+
+
+## Real CgroupV2Backend primitive proof
+
+With the dedicated fixture opt-in enabled, Task 3 exercises the actual
+`CgroupV2Backend` rather than temporary-file cgroup fakes:
+
+```bash
+python -m pytest -q \
+  tests/live/test_delegated_cgroup.py \
+  -k real_cgroup_backend_create_attach_limits_and_cleanup
+```
+
+The test requires the operator-supplied source PID described above. It proves:
+
+- the source PID is stopped, has the configured host-agent identity/groups, and
+  is resident in the direct-child source cgroup;
+- the backend creates the request scope only below the configured delegated
+  root and applies exact finite `memory.max`, `pids.max`, and `cpu.max`;
+- manager-side `attach()` moves the stopped PID source → request on the real
+  kernel and real stats report the populated scope;
+- the manager moves the same stopped PID request → source without signaling it,
+  waits for `populated 0`, and removes the request scope;
+- any controllers enabled by this proof are restored to the original
+  `cgroup.subtree_control` state.
+
+The manager remains non-root with zero inheritable/permitted/effective/ambient
+capabilities. The proof does not require `CAP_KILL` and does not signal the
+operator-owned source PID.
