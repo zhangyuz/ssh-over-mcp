@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import selectors
 import sys
@@ -10,10 +11,13 @@ from typing import BinaryIO, TextIO
 
 from .containment import ContainmentRequest
 from .containment_manager_unix import connect_authenticated_containment_manager
+from .filesystem import FilesystemAccessError, ReadOnlyFileStat, read_file, stat_path
 from .policy import (
     DEFAULT_POLICY_PATH,
     HostExecutionPolicy,
     HostPolicyError,
+    authorize_filesystem_read,
+    authorize_filesystem_stat,
     authorize_request,
     load_host_policy,
 )
@@ -25,6 +29,7 @@ from .protocol import (
     validate_ssh_context,
 )
 from .run import run_prepared_native
+from ssh_over_mcp.ssh.protocol import FsReadEnvelope, FsStatEnvelope
 
 EX_PROTOCOL = 65
 EX_UNAVAILABLE = 69
@@ -68,6 +73,16 @@ def run(
     except HostAgentProtocolError as exc:
         print(f"ssh-over-mcp-host-agent: rejected: {exc}", file=stderr)
         return EX_PROTOCOL
+
+    if isinstance(envelope, (FsStatEnvelope, FsReadEnvelope)):
+        return _run_filesystem_request(
+            envelope=envelope,
+            policy=policy,
+            stdin=stdin,
+            stdout=stdout,
+            stderr=stderr,
+            execution_stderr=execution_stderr,
+        )
 
     decision = authorize_request(policy, envelope)
     if not decision.allowed:
@@ -155,6 +170,96 @@ def run(
             # risk another potentially blocking write to report this condition.
             return EX_UNAVAILABLE
         return _ssh_exit_status(result.returncode)
+
+
+def _filesystem_stat_payload(result: ReadOnlyFileStat) -> bytes:
+    return json.dumps(
+        {
+            "gid": result.gid,
+            "kind": result.kind,
+            "mode": result.mode,
+            "mtime_ns": result.mtime_ns,
+            "path": result.path,
+            "size": result.size,
+            "uid": result.uid,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def _run_filesystem_request(
+    *,
+    envelope: FsStatEnvelope | FsReadEnvelope,
+    policy: HostExecutionPolicy,
+    stdin: BinaryIO,
+    stdout: BinaryIO | None,
+    stderr: TextIO,
+    execution_stderr: BinaryIO | None,
+) -> int:
+    if isinstance(envelope, FsStatEnvelope):
+        decision = authorize_filesystem_stat(
+            policy,
+            profile=envelope.profile,
+            path=envelope.path,
+        )
+    else:
+        decision = authorize_filesystem_read(
+            policy,
+            profile=envelope.profile,
+            path=envelope.path,
+            max_bytes=envelope.max_bytes,
+        )
+
+    if not decision.allowed:
+        print("ssh-over-mcp-host-agent: filesystem denied", file=stderr)
+        return EX_NOPERM
+
+    try:
+        trailing = read_application_stdin(stdin, 0)
+    except HostAgentProtocolError as exc:
+        print(f"ssh-over-mcp-host-agent: rejected: {exc}", file=stderr)
+        return EX_PROTOCOL
+    if trailing:
+        # Defensive only: read_application_stdin(..., 0) already rejects data.
+        print("ssh-over-mcp-host-agent: rejected: unexpected stdin", file=stderr)
+        return EX_PROTOCOL
+
+    if stdout is None or execution_stderr is None:
+        print(
+            "ssh-over-mcp-host-agent: filesystem operation unavailable",
+            file=stderr,
+        )
+        return EX_UNAVAILABLE
+
+    try:
+        if isinstance(envelope, FsStatEnvelope):
+            output = _filesystem_stat_payload(stat_path(envelope.path))
+        else:
+            max_bytes = decision.effective_max_read_bytes
+            if max_bytes is None:
+                raise FilesystemAccessError("missing authorized read bound")
+            output = read_file(
+                envelope.path,
+                max_bytes=max_bytes,
+            ).data
+    except FilesystemAccessError:
+        print(
+            "ssh-over-mcp-host-agent: filesystem operation failed",
+            file=stderr,
+        )
+        return EX_UNAVAILABLE
+
+    try:
+        _deliver_execution_output(
+            stdout,
+            execution_stderr,
+            output,
+            b"",
+        )
+    except OutputDeliveryError:
+        return EX_UNAVAILABLE
+    return 0
 
 
 def _write_test_stream(stream: BinaryIO, data: bytes) -> None:
