@@ -13,6 +13,7 @@ from ssh_over_mcp.host_agent.policy import (
     HostLinuxIdentity,
     HostPolicyError,
     authorize_filesystem_mkdir,
+    authorize_filesystem_write_create,
     authorize_filesystem_read,
     authorize_filesystem_stat,
     authorize_request,
@@ -1000,3 +1001,223 @@ def test_filesystem_mkdir_authorization_does_not_touch_filesystem(
         profile="developer",
         path="/srv/app/new-directory",
     ).allowed is True
+
+
+
+def test_filesystem_write_create_policy_is_profile_scoped_and_root_bounded(
+    tmp_path: Path,
+) -> None:
+    executable = make_executable(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    policy = _with_filesystem_policy(
+        make_policy(executable, cwd),
+        allowed_profiles=frozenset({"developer", "observer"}),
+        filesystem={
+            "developer": HostFilesystemProfilePolicy(
+                write_create_roots=("/srv/projects/app",),
+                max_write_bytes=4096,
+            )
+        },
+    )
+
+    allowed = authorize_filesystem_write_create(
+        policy,
+        profile="developer",
+        path="/srv/projects/app/new.bin",
+        content_length=1024,
+    )
+    sibling = authorize_filesystem_write_create(
+        policy,
+        profile="developer",
+        path="/srv/projects/application/new.bin",
+        content_length=1024,
+    )
+    observer = authorize_filesystem_write_create(
+        policy,
+        profile="observer",
+        path="/srv/projects/app/new.bin",
+        content_length=1024,
+    )
+
+    assert allowed.allowed is True
+    assert allowed.effective_max_write_bytes == 1024
+    assert sibling.allowed is False
+    assert observer.allowed is False
+
+
+def test_filesystem_write_create_policy_enforces_server_owned_ceiling(
+    tmp_path: Path,
+) -> None:
+    executable = make_executable(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    policy = _with_filesystem_policy(
+        make_policy(executable, cwd),
+        filesystem={
+            "developer": HostFilesystemProfilePolicy(
+                write_create_roots=("/srv/app",),
+                max_write_bytes=4,
+            )
+        },
+    )
+
+    empty = authorize_filesystem_write_create(
+        policy,
+        profile="developer",
+        path="/srv/app/empty.bin",
+        content_length=0,
+    )
+    exact = authorize_filesystem_write_create(
+        policy,
+        profile="developer",
+        path="/srv/app/data.bin",
+        content_length=4,
+    )
+    too_large = authorize_filesystem_write_create(
+        policy,
+        profile="developer",
+        path="/srv/app/data.bin",
+        content_length=5,
+    )
+
+    assert empty.allowed is True
+    assert exact.allowed is True
+    assert too_large.allowed is False
+    assert "ceiling" in too_large.reason
+
+
+@pytest.mark.parametrize("content_length", [-1, True, 1.5])
+def test_filesystem_write_create_policy_rejects_invalid_length(
+    tmp_path: Path,
+    content_length,
+) -> None:
+    executable = make_executable(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    policy = _with_filesystem_policy(
+        make_policy(executable, cwd),
+        filesystem={
+            "developer": HostFilesystemProfilePolicy(
+                write_create_roots=("/srv/app",),
+                max_write_bytes=16,
+            )
+        },
+    )
+
+    decision = authorize_filesystem_write_create(
+        policy,
+        profile="developer",
+        path="/srv/app/data.bin",
+        content_length=content_length,
+    )
+
+    assert decision.allowed is False
+
+
+def test_filesystem_write_create_only_policy_is_valid() -> None:
+    rules = HostFilesystemProfilePolicy(
+        write_create_roots=("/srv/app",),
+        max_write_bytes=0,
+    )
+
+    assert rules.stat_roots == ()
+    assert rules.read_roots == ()
+    assert rules.mkdir_roots == ()
+    assert rules.write_create_roots == ("/srv/app",)
+    assert rules.max_read_bytes is None
+    assert rules.max_write_bytes == 0
+
+
+def test_filesystem_write_create_policy_requires_matching_limit() -> None:
+    with pytest.raises(ValueError, match="require max_write_bytes"):
+        HostFilesystemProfilePolicy(
+            write_create_roots=("/srv/app",),
+        )
+
+    with pytest.raises(ValueError, match="requires filesystem write-create roots"):
+        HostFilesystemProfilePolicy(
+            stat_roots=("/srv/app",),
+            max_write_bytes=1,
+        )
+
+    with pytest.raises(ValueError):
+        HostFilesystemProfilePolicy(
+            write_create_roots=("/srv/app",),
+            max_write_bytes=True,
+        )
+
+    with pytest.raises(ValueError):
+        HostFilesystemProfilePolicy(
+            write_create_roots=("/srv/app",),
+            max_write_bytes=64 * 1024 * 1024 + 1,
+        )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "relative/path",
+        "//srv/app/data.bin",
+        "/srv/app/../app/data.bin",
+        "/srv/app/data.bin/",
+    ],
+)
+def test_filesystem_write_create_policy_rejects_noncanonical_path(
+    tmp_path: Path,
+    path: str,
+) -> None:
+    executable = make_executable(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    policy = _with_filesystem_policy(
+        make_policy(executable, cwd),
+        filesystem={
+            "developer": HostFilesystemProfilePolicy(
+                write_create_roots=("/srv/app",),
+                max_write_bytes=1024,
+            )
+        },
+    )
+
+    assert authorize_filesystem_write_create(
+        policy,
+        profile="developer",
+        path=path,
+        content_length=1,
+    ).allowed is False
+
+
+def test_filesystem_write_create_authorization_does_not_touch_filesystem(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = make_executable(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    policy = _with_filesystem_policy(
+        make_policy(executable, cwd),
+        filesystem={
+            "developer": HostFilesystemProfilePolicy(
+                write_create_roots=("/srv/app",),
+                max_write_bytes=1024,
+            )
+        },
+    )
+
+    def forbidden_open(*_args, **_kwargs):
+        raise AssertionError(
+            "write-create authorization must not open filesystem objects"
+        )
+
+    monkeypatch.setattr("os.open", forbidden_open)
+
+    decision = authorize_filesystem_write_create(
+        policy,
+        profile="developer",
+        path="/srv/app/data.bin",
+        content_length=512,
+    )
+
+    assert decision.allowed is True
+    assert decision.effective_max_write_bytes == 512
