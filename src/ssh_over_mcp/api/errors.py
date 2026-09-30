@@ -12,3 +12,7 @@ class HostNotVisibleError(ApiError):
 
 class InvalidExplainToolError(ApiError):
     """Raised when policy explanation receives an unsupported tool identifier."""
+
+
+class RuntimeConfigurationError(ApiError):
+    """Raised when local MCP runtime settings are invalid."""
