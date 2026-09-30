@@ -670,9 +670,38 @@ transport which happens to remain callable.
 
 This phase does not add a manager protocol operation, change cgroup filesystem
 authority, alter containment attach/release ordering, or enable ForceCommand
-execution. The next phase performs live delegated-cgroup descendant-kill,
-resource-limit, and self-migration validation across the separated privilege
-domains.
+execution.
+
+### Phase 3d2b2b2c3 live delegated-cgroup validation
+
+The separated containment design now has accepted real-kernel evidence on a
+dedicated Ubuntu 26.04 x86_64 Linux fixture rather than Docker Desktop cgroup
+simulation.
+
+The live gate proves the full production ordering and authority split:
+
+- the non-root manager owns only the delegated cgroup-management surfaces;
+- the host agent enters through the authenticated Unix manager client;
+- the execution child remains blocked until manager-confirmed attachment;
+- the workload reaches native ELF exec only after irreversible UID/GID drop,
+  empty supplementary groups, zero capabilities, and `no_new_privs=1`;
+- self-migration to the delegated root and a sibling request scope is denied;
+- PID, CPU, and memory limits produce real cgroup-v2 accounting/enforcement;
+- request-scope OOM evidence is read from `memory.events`;
+- recursive descendant cleanup is attributable to manager-backed
+  `cgroup.kill`, not process-group SIGKILL;
+- a sibling request survives recursive kill;
+- request/source scopes are removed after success/failure while the delegated
+  root itself is never targeted with `cgroup.kill`.
+
+The accepted merged-main evidence is commit
+`22e298fec42d92a963f093a6a073de622589dfc0` on kernel
+`7.0.0-28-generic`: the non-root manager phase reports `2 passed` and the
+production/resource/recursive-kill phase reports `4 passed`.
+
+This closes Phase `3d2b2b2c3`. The ForceCommand request path is still
+non-executing; Phase `3d2c` is the first phase allowed to wire this supervised
+native execution path into the ForceCommand CLI.
 
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 
