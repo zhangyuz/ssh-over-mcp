@@ -699,9 +699,43 @@ The accepted merged-main evidence is commit
 `7.0.0-28-generic`: the non-root manager phase reports `2 passed` and the
 production/resource/recursive-kill phase reports `4 passed`.
 
-This closes Phase `3d2b2b2c3`. The ForceCommand request path is still
-non-executing; Phase `3d2c` is the first phase allowed to wire this supervised
-native execution path into the ForceCommand CLI.
+This closes Phase `3d2b2b2c3`.
+
+### Phase 3d2c contained ForceCommand execution
+
+Policy version 3 remains deliberately non-executing. Policy version 4 is the
+first host-policy schema which may execute a structured ForceCommand request,
+and it requires the server-owned containment block introduced for this phase.
+
+The ForceCommand path reuses the already-validated execution composition rather
+than adding a second runner:
+
+1. validate the fixed `SSH_ORIGINAL_COMMAND=mcp-v1` context;
+2. load and validate the root-owned host policy;
+3. parse and authorize request metadata;
+4. pin/revalidate the exact executable and cwd objects;
+5. read application stdin within the already-authorized request bound;
+6. for policy v4 only, derive the manager endpoint, service identity plan,
+   workload identity, and cgroup limits exclusively from host policy;
+7. open the authenticated containment-manager session;
+8. run the prepared native ELF through the existing bounded runner,
+   attach-before-exec barrier, workload identity transition, and manager-backed
+   containment request;
+9. close the manager session before returning captured output to the SSH peer;
+10. deliver captured stdout/stderr through distinct nonblocking fds with one
+    fixed five-second delivery deadline.
+
+A manager/backend/supervisor failure returns only the generic
+`execution failed` diagnostic. Internal exception details are never written to
+the SSH channel. If the SSH peer stops draining result output, delivery fails
+closed at the bounded deadline instead of blocking the host-agent indefinitely.
+A signal-terminated workload maps to conventional SSH exit status
+`128 + signal`; ordinary child exit statuses are forwarded directly.
+
+Request envelopes still cannot choose the manager endpoint, service identities,
+workload identity, or cgroup resource limits. The manager protocol, cgroup
+filesystem authority, attach-before-exec ordering, and workload transition are
+unchanged by this wiring.
 
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 
