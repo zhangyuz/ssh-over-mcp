@@ -13,6 +13,7 @@ from ssh_over_mcp.ssh.protocol import (
     MAX_METADATA_BYTES,
     ExecEnvelope,
     ExecutionLimits,
+    FsWriteEnvelope,
     encode_request,
 )
 
@@ -96,3 +97,31 @@ def test_short_reads_are_handled_correctly():
 
     assert actual.request_id == "req_12345678"
     assert stdin == b"hello"
+
+
+def fs_write_envelope(content_length: int = 4) -> FsWriteEnvelope:
+    return FsWriteEnvelope(
+        request_id="req_fs_write_1234",
+        profile="developer",
+        path="/srv/app/new.bin",
+        content_length=content_length,
+    )
+
+
+def test_fs_write_streaming_body_is_exact_length():
+    payload = encode_request(fs_write_envelope(), b"ABCD")
+
+    actual, body = read_request(ShortReadStream(payload, chunk_size=1))
+
+    assert actual.operation == "fs_write"
+    assert body == b"ABCD"
+
+
+def test_fs_write_streaming_body_rejects_underrun_and_overrun():
+    payload = encode_request(fs_write_envelope(), b"ABCD")
+
+    with pytest.raises(HostAgentProtocolError, match="body length mismatch"):
+        read_request(io.BytesIO(payload[:-1]))
+
+    with pytest.raises(HostAgentProtocolError, match="body length mismatch"):
+        read_request(io.BytesIO(payload + b"x"))

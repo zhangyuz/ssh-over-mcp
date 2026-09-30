@@ -169,11 +169,13 @@ blindly unlink the final pathname on a later failure because another authorized
 namespace writer may already have replaced that directory entry.
 
 A parent-directory fsync failure after successful publication is therefore a
-distinct committed-but-durability-uncertain outcome. The primitive must report
-that state separately from a pre-publication failure, and callers must not
-blindly retry it as though no object was created. A later wire slice must define
-how this indeterminate durability state is represented before `fs_write` may
-be remotely enabled.
+distinct committed-but-durability-uncertain outcome. The primitive reports that
+state separately from a pre-publication failure, and callers must not blindly
+retry it as though no object was created. The SMCP v1 `fs_write` wire contract
+maps this state to dedicated SSH status 74 plus one fixed host-owned diagnostic
+which explicitly says the write committed, durability is uncertain, and blind
+retry is prohibited. Status 74 is reserved for this `fs_write` outcome and is
+not a child-process exit status.
 
 If the target filesystem, kernel, Python runtime, or `/proc/self/fd` linking
 path cannot safely publish the unnamed inode without extra ambient privilege,
@@ -182,7 +184,7 @@ in the security contract.
 
 ## 8. Write request framing
 
-A future `fs_write` create-only SMCP request carries metadata only for:
+The create-only `fs_write` SMCP request carries metadata only for:
 
 - version;
 - request ID;
@@ -220,7 +222,10 @@ Successful create-only mutations return SSH exit status 0 and no stdout body.
 
 Policy denial returns the existing generic filesystem denial.
 
-Kernel/object/primitive failures return a generic filesystem-operation failure.
+Pre-publication kernel/object/primitive failures return the generic
+filesystem-operation failure. A post-publication parent-fsync failure returns
+dedicated `fs_write` status 74 and the fixed diagnostic
+`filesystem write committed; durability uncertain; do not retry blindly`.
 The SSH peer must not receive:
 
 - configured mutation roots;

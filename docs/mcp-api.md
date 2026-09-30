@@ -112,6 +112,18 @@ calling the one-level create-only directory primitive. Success returns status 0
 with no stdout body. Policy denial and primitive failure remain generic. This is
 not yet an MCP `fs_mkdir` tool.
 
+The host agent also exposes create-only `fs_write` as typed SMCP v1. Metadata
+contains request ID, profile, operation, path, and one strict non-negative
+`content_length`; overwrite, append, mode, and owner semantics are absent and
+extra fields are rejected. The raw request body must match the declared length
+exactly. Host-local write-create policy is evaluated before body read, and the
+create-only primitive is not called until the complete authorized body and EOF
+have been observed. Success returns status 0 with empty stdout. Pre-publication
+failures use the generic filesystem failure. If publication committed but the
+parent-directory fsync fails, status 74 plus a fixed host-owned diagnostic means
+durability is uncertain and the caller MUST NOT blindly retry. This is not yet
+an MCP `fs_write` tool.
+
 ### Processes
 
 - `process_list`

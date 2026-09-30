@@ -10,6 +10,7 @@ MAGIC = b"SMCP\x00\x01"
 REMOTE_PROTOCOL_COMMAND = "mcp-v1"
 MAX_METADATA_BYTES = 64 * 1024
 MAX_FILESYSTEM_READ_BYTES = 64 * 1024 * 1024
+MAX_FILESYSTEM_WRITE_BYTES = 64 * 1024 * 1024
 
 
 class ExecutionLimits(BaseModel):
@@ -59,8 +60,18 @@ class FsMkdirEnvelope(_RequestEnvelopeBase):
     path: str = Field(min_length=1)
 
 
+class FsWriteEnvelope(_RequestEnvelopeBase):
+    operation: Literal["fs_write"] = "fs_write"
+    path: str = Field(min_length=1)
+    content_length: int = Field(
+        strict=True,
+        ge=0,
+        le=MAX_FILESYSTEM_WRITE_BYTES,
+    )
+
+
 RequestEnvelope = Annotated[
-    ExecEnvelope | FsStatEnvelope | FsReadEnvelope | FsMkdirEnvelope,
+    ExecEnvelope | FsStatEnvelope | FsReadEnvelope | FsMkdirEnvelope | FsWriteEnvelope,
     Field(discriminator="operation"),
 ]
 _REQUEST_ADAPTER = TypeAdapter(RequestEnvelope)
@@ -81,7 +92,10 @@ def encode_request(
     envelope: RequestEnvelope,
     stdin: bytes = b"",
 ) -> bytes:
-    if not isinstance(envelope, ExecEnvelope) and stdin:
+    if isinstance(envelope, FsWriteEnvelope):
+        if len(stdin) != envelope.content_length:
+            raise ProtocolError("filesystem write body length mismatch")
+    elif not isinstance(envelope, ExecEnvelope) and stdin:
         raise ProtocolError("filesystem operations do not accept stdin")
 
     metadata = json.dumps(
@@ -124,6 +138,9 @@ def decode_request(payload: bytes) -> tuple[RequestEnvelope, bytes]:
     if isinstance(envelope, ExecEnvelope):
         if len(stdin) > envelope.limits.max_stdin_bytes:
             raise ProtocolError("stdin exceeds configured maximum")
+    elif isinstance(envelope, FsWriteEnvelope):
+        if len(stdin) != envelope.content_length:
+            raise ProtocolError("filesystem write body length mismatch")
     elif stdin:
         raise ProtocolError("filesystem operations do not accept stdin")
 

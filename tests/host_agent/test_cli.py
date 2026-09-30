@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from ssh_over_mcp.host_agent.cli import (
+    EX_FS_COMMITTED,
     EX_NOPERM,
     EX_PROTOCOL,
     EX_UNAVAILABLE,
@@ -19,7 +20,10 @@ from ssh_over_mcp.host_agent.filesystem import (
     ReadFileResult,
     ReadOnlyFileStat,
 )
-from ssh_over_mcp.host_agent.filesystem_mutation import FilesystemMutationError
+from ssh_over_mcp.host_agent.filesystem_mutation import (
+    FilesystemMutationCommittedError,
+    FilesystemMutationError,
+)
 from ssh_over_mcp.host_agent.policy import (
     HostArgvRule,
     HostChildLimits,
@@ -37,6 +41,7 @@ from ssh_over_mcp.ssh.protocol import (
     FsMkdirEnvelope,
     FsReadEnvelope,
     FsStatEnvelope,
+    FsWriteEnvelope,
     encode_request,
 )
 
@@ -127,7 +132,9 @@ def filesystem_policy(
     stat_roots: tuple[str, ...] = (),
     read_roots: tuple[str, ...] = (),
     mkdir_roots: tuple[str, ...] = (),
+    write_create_roots: tuple[str, ...] = (),
     max_read_bytes: int | None = None,
+    max_write_bytes: int | None = None,
 ) -> HostExecutionPolicy:
     values = policy(executable).model_dump()
     values["filesystem"] = {
@@ -135,7 +142,9 @@ def filesystem_policy(
             stat_roots=stat_roots,
             read_roots=read_roots,
             mkdir_roots=mkdir_roots,
+            write_create_roots=write_create_roots,
             max_read_bytes=max_read_bytes,
+            max_write_bytes=max_write_bytes,
         ).model_dump()
     }
     return HostExecutionPolicy.model_validate(values)
@@ -169,6 +178,18 @@ def fs_mkdir_payload(path: str) -> bytes:
             profile="developer",
             path=path,
         )
+    )
+
+
+def fs_write_payload(path: str, body: bytes) -> bytes:
+    return encode_request(
+        FsWriteEnvelope(
+            request_id="req_fs_write_1234",
+            profile="developer",
+            path=path,
+            content_length=len(body),
+        ),
+        body,
     )
 
 
@@ -842,5 +863,217 @@ def test_fs_mkdir_primitive_failure_is_generic(
     assert status == EX_UNAVAILABLE
     assert stderr.getvalue() == (
         "ssh-over-mcp-host-agent: filesystem operation failed\n"
+    )
+    assert "sensitive" not in stderr.getvalue()
+
+
+def test_fs_write_authorizes_and_reads_complete_body_before_create(
+    tmp_path: Path,
+    monkeypatch,
+):
+    executable = make_executable(tmp_path)
+    observed: dict[str, object] = {}
+
+    def fake_create(path: str, data: bytes, *, expected_length: int) -> None:
+        observed["path"] = path
+        observed["data"] = data
+        observed["expected_length"] = expected_length
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.cli.create_regular_file",
+        fake_create,
+    )
+
+    stdout = io.BytesIO()
+    control_stderr = io.StringIO()
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=io.BytesIO(fs_write_payload("/srv/app/new.bin", b"\x00\xffAB")),
+        stdout=stdout,
+        stderr=control_stderr,
+        execution_stderr=io.BytesIO(),
+        policy=filesystem_policy(
+            executable,
+            write_create_roots=("/srv/app",),
+            max_write_bytes=1024,
+        ),
+    )
+
+    assert status == 0
+    assert observed == {
+        "path": "/srv/app/new.bin",
+        "data": b"\x00\xffAB",
+        "expected_length": 4,
+    }
+    assert stdout.getvalue() == b""
+    assert control_stderr.getvalue() == ""
+
+
+def test_fs_write_policy_denial_does_not_read_body_or_mutate(
+    tmp_path: Path,
+    monkeypatch,
+):
+    executable = make_executable(tmp_path)
+    framed = fs_write_payload("/srv/private/new.bin", b"secret")
+    stream = io.BytesIO(framed)
+
+    def forbidden_create(*_args, **_kwargs):
+        raise AssertionError("write primitive must not run after policy denial")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.cli.create_regular_file",
+        forbidden_create,
+    )
+
+    stderr = io.StringIO()
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=stream,
+        stdout=io.BytesIO(),
+        stderr=stderr,
+        execution_stderr=io.BytesIO(),
+        policy=filesystem_policy(
+            executable,
+            write_create_roots=("/srv/app",),
+            max_write_bytes=1024,
+        ),
+    )
+
+    assert status == EX_NOPERM
+    assert stream.tell() < len(framed)
+    assert stderr.getvalue() == "ssh-over-mcp-host-agent: filesystem denied\n"
+
+
+@pytest.mark.parametrize("delta", [-1, 1])
+def test_fs_write_body_mismatch_stops_before_mutation(
+    tmp_path: Path,
+    monkeypatch,
+    delta: int,
+):
+    executable = make_executable(tmp_path)
+    valid = fs_write_payload("/srv/app/new.bin", b"ABCD")
+    framed = valid[:-1] if delta < 0 else valid + b"x"
+
+    def forbidden_create(*_args, **_kwargs):
+        raise AssertionError("write primitive must not run with mismatched body")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.cli.create_regular_file",
+        forbidden_create,
+    )
+
+    stderr = io.StringIO()
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=io.BytesIO(framed),
+        stdout=io.BytesIO(),
+        stderr=stderr,
+        execution_stderr=io.BytesIO(),
+        policy=filesystem_policy(
+            executable,
+            write_create_roots=("/srv/app",),
+            max_write_bytes=1024,
+        ),
+    )
+
+    assert status == EX_PROTOCOL
+    assert "body length mismatch" in stderr.getvalue()
+
+
+def test_fs_write_missing_output_stream_stops_before_mutation(
+    tmp_path: Path,
+    monkeypatch,
+):
+    executable = make_executable(tmp_path)
+
+    def forbidden_create(*_args, **_kwargs):
+        raise AssertionError("write primitive must not run without output streams")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.cli.create_regular_file",
+        forbidden_create,
+    )
+
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=io.BytesIO(fs_write_payload("/srv/app/new.bin", b"ABCD")),
+        stderr=io.StringIO(),
+        policy=filesystem_policy(
+            executable,
+            write_create_roots=("/srv/app",),
+            max_write_bytes=1024,
+        ),
+    )
+
+    assert status == EX_UNAVAILABLE
+
+
+def test_fs_write_prepublication_failure_is_generic(
+    tmp_path: Path,
+    monkeypatch,
+):
+    executable = make_executable(tmp_path)
+
+    def fail_create(*_args, **_kwargs):
+        raise FilesystemMutationError("sensitive prepublication detail")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.cli.create_regular_file",
+        fail_create,
+    )
+
+    stderr = io.StringIO()
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=io.BytesIO(fs_write_payload("/srv/app/new.bin", b"ABCD")),
+        stdout=io.BytesIO(),
+        stderr=stderr,
+        execution_stderr=io.BytesIO(),
+        policy=filesystem_policy(
+            executable,
+            write_create_roots=("/srv/app",),
+            max_write_bytes=1024,
+        ),
+    )
+
+    assert status == EX_UNAVAILABLE
+    assert stderr.getvalue() == (
+        "ssh-over-mcp-host-agent: filesystem operation failed\n"
+    )
+    assert "sensitive" not in stderr.getvalue()
+
+
+def test_fs_write_committed_outcome_is_distinct_and_not_retryable(
+    tmp_path: Path,
+    monkeypatch,
+):
+    executable = make_executable(tmp_path)
+
+    def committed_create(*_args, **_kwargs):
+        raise FilesystemMutationCommittedError("sensitive fsync detail")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.cli.create_regular_file",
+        committed_create,
+    )
+
+    stderr = io.StringIO()
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=io.BytesIO(fs_write_payload("/srv/app/new.bin", b"ABCD")),
+        stdout=io.BytesIO(),
+        stderr=stderr,
+        execution_stderr=io.BytesIO(),
+        policy=filesystem_policy(
+            executable,
+            write_create_roots=("/srv/app",),
+            max_write_bytes=1024,
+        ),
+    )
+
+    assert status == EX_FS_COMMITTED
+    assert stderr.getvalue() == (
+        "ssh-over-mcp-host-agent: filesystem write committed; "
+        "durability uncertain; do not retry blindly\n"
     )
     assert "sensitive" not in stderr.getvalue()
