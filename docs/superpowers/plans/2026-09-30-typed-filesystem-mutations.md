@@ -25,19 +25,21 @@ Requirements:
 - Linux pathname hard bound;
 - existing parent traversal through pinned directory fds and `O_NOFOLLOW`;
 - final destination absent;
-- fixed server-owned mode `0700`;
+- fixed server-owned maximum mode `0700`;
+- process umask/default ACL may only make the result more restrictive;
 - no recursive parents;
+- no post-create reopen/chmod/stat/remove of the final pathname;
 - no cleanup by blind pathname unlink/rmdir;
-- final directory identity verified before success;
 - no SMCP exposure.
 
 Verification:
 
 - regular create;
+- restrictive umask never gets widened;
 - existing file/directory/symlink denial;
 - intermediate symlink denial;
 - missing parent denial;
-- final identity replacement detected;
+- proof that the final name is not reopened after successful mkdir;
 - no shell/PATH/subprocess path.
 
 ## Task 2 — mkdir host policy

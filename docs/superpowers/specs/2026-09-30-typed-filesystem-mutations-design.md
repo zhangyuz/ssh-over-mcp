@@ -83,10 +83,14 @@ Each already-allowed SSH profile may eventually receive:
 
 Request data does not choose ownership or permission policy.
 
-Initial server-owned modes:
+Initial server-owned maximum modes:
 
 - directory creation: `0700`;
 - regular-file creation: `0600`.
+
+The process umask or default ACL may make a newly created object more
+restrictive. The host agent does not widen it afterward merely to obtain an
+exact mode.
 
 A later policy revision may add a bounded server-owned mode allowlist. The
 initial wire format MUST NOT accept arbitrary chmod/chown metadata.
@@ -124,19 +128,20 @@ Requirements:
 1. the parent directory already exists and is pinned;
 2. the final entry must be absent;
 3. creation uses `mkdirat` semantics through Python's `dir_fd` interface;
-4. the initial requested mode is fixed by server policy, never caller input;
-5. the created directory is reopened through the pinned parent with
-   `O_DIRECTORY|O_NOFOLLOW` and inspected before success is returned;
-6. the final entry must still name the created directory identity when success
-   is reported;
+4. the requested mode is the fixed server-owned maximum `0700`, never caller
+   input;
+5. after the successful `mkdirat`, the primitive does not reopen, chmod,
+   stat, rename, or remove the final pathname;
+6. success means the kernel atomically created an absent directory entry at the
+   time of that syscall; it does not claim that another authorized namespace
+   writer cannot rename or replace the entry afterward;
 7. an existing file, directory, or symlink at the final name fails closed.
 
 The primitive MUST NOT recursively create missing parents.
 
-Failure after a successful kernel create MUST NOT trigger a blind pathname
-cleanup which could delete a concurrently replaced entry. If safe
-identity-bound cleanup cannot be proven, the operation fails and leaves the
-created object for explicit operator recovery.
+The no-post-create-pathname rule is intentional. `mkdirat` does not return an
+fd for the newly created directory. Reopening the final name to verify or chmod
+it would create a new pathname race and could operate on a replacement object.
 
 ## 7. Regular-file create primitive
 
