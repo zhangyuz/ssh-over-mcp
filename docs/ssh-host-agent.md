@@ -824,29 +824,33 @@ rejects any trailing body before mutation, then invokes only
 denial and primitive failure are normalized to the existing generic filesystem
 diagnostics. This is still below the MCP tool layer.
 
-Create-only regular-file mutation now has an internal primitive but no host
-policy or SMCP operation yet. The primitive pins the destination parent, creates
-an unnamed inode with `O_TMPFILE`, writes an exact bounded byte body, fsyncs and
-verifies the unnamed regular inode, then publishes it only if the final name is
-absent. Existing destinations are never replaced and there is no named-temp
-fallback.
+Create-only regular-file mutation is now reachable through typed SMCP v1
+`fs_write`. The primitive pins the destination parent, creates an unnamed inode
+with `O_TMPFILE`, writes an exact bounded byte body, fsyncs and verifies the
+unnamed regular inode, then publishes it only if the final name is absent.
+Existing destinations are never replaced and there is no named-temp fallback.
+
+The envelope contains request ID, profile, operation, path, and one strict
+non-negative `content_length`. Overwrite, append, mode, owner, and truncate
+semantics are not represented. Host-local write-create authorization is applied
+before reading the body. Only after authorization does the host agent read the
+exact declared body plus EOF; underrun or overrun is a protocol error before
+the primitive is called.
 
 The publish link is the namespace commit point. Any failure before that point
-leaves no final pathname. If the parent-directory fsync fails after publication,
-the primitive reports a distinct committed-but-durability-uncertain error and
-does not unlink the final pathname: blind cleanup could otherwise delete a
-replacement installed by another authorized namespace writer. A future
-`fs_write` wire slice must explicitly represent or otherwise safely handle
-that committed outcome before remote enablement.
+uses the generic filesystem-operation failure and leaves no final pathname.
+If the parent-directory fsync fails after publication, the host agent returns
+dedicated `fs_write` status 74 and the fixed diagnostic
+`filesystem write committed; durability uncertain; do not retry blindly`.
+That status is not a workload exit code and the caller MUST NOT blindly retry.
+The primitive never unlinks the final pathname in this state because another
+authorized namespace writer could already have replaced it.
 
-Host-local write-create authorization is now defined but remains disconnected
-from SMCP. Each already-allowed profile may receive independent canonical
+Each already-allowed profile may receive independent canonical
 `write_create_roots` and a strict server-owned `max_write_bytes` ceiling no
-larger than the primitive 64 MiB hard bound. Authorization accepts exact
-non-negative declared lengths, including zero, and performs lexical root and
-limit checks only; it does not resolve, open, create, or remove caller-selected
-filesystem objects. The create-only primitive remains the object/publication
-boundary after authorization.
+larger than the primitive 64 MiB hard bound. Authorization is lexical-only and
+does not resolve, open, create, or remove caller-selected filesystem objects.
+This remains below the MCP tool layer.
 
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 
