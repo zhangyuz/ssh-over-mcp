@@ -158,15 +158,27 @@ Preferred Linux sequence:
 5. fsync the file;
 6. verify regular-file type and server-owned mode;
 7. publish the inode into the final name only if that name is absent;
-8. fsync the parent directory before success.
+8. fsync the parent directory.
 
 The publish step MUST be create-if-absent. It MUST NOT replace an existing
 entry.
 
+Failures before the publish syscall MUST leave no final pathname. Publication
+is the namespace commit point. After publication, the implementation MUST NOT
+blindly unlink the final pathname on a later failure because another authorized
+namespace writer may already have replaced that directory entry.
+
+A parent-directory fsync failure after successful publication is therefore a
+distinct committed-but-durability-uncertain outcome. The primitive must report
+that state separately from a pre-publication failure, and callers must not
+blindly retry it as though no object was created. A later wire slice must define
+how this indeterminate durability state is represented before `fs_write` may
+be remotely enabled.
+
 If the target filesystem, kernel, Python runtime, or `/proc/self/fd` linking
 path cannot safely publish the unnamed inode without extra ambient privilege,
-the primitive fails closed. There is no named-temp fallback in the security
-contract.
+the primitive fails closed before publication. There is no named-temp fallback
+in the security contract.
 
 ## 8. Write request framing
 
