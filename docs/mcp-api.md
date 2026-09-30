@@ -71,9 +71,10 @@ Typed filesystem tools provide better audit semantics and path policy than equiv
 
 Remote filesystem enforcement MUST NOT rely on a normalized path string alone.
 After policy allows a path, the host boundary must independently pin path
-components without following symlinks before touching the object. Read-only
-operations are bounded and structured; they do not invoke shell commands or
-PATH lookup.
+components without following symlinks before touching the object. Paths are
+absolute, lexically canonical, and hard-bounded to the Linux 4096-byte pathname
+limit. Read-only operations are bounded and structured; they do not invoke
+shell commands or PATH lookup.
 
 The first host-agent filesystem slice supports only regular files and
 directories for stat, and regular files for read. Symlinks and special objects
