@@ -6,6 +6,7 @@ from ssh_over_mcp.ssh.protocol import (
     FsMkdirEnvelope,
     FsReadEnvelope,
     FsStatEnvelope,
+    FsWriteEnvelope,
     ProtocolError,
     decode_envelope_metadata,
     decode_request,
@@ -139,3 +140,81 @@ def test_fs_mkdir_rejects_mode_or_recursive_metadata():
     ):
         with pytest.raises(ProtocolError):
             decode_envelope_metadata(extra)
+
+
+def test_fs_write_frame_roundtrip_requires_exact_body():
+    expected = FsWriteEnvelope(
+        request_id="req_fs_write_1234",
+        profile="developer",
+        path="/srv/app/new.bin",
+        content_length=4,
+    )
+
+    actual, body = decode_request(encode_request(expected, b"\x00\xffAB"))
+
+    assert actual == expected
+    assert body == b"\x00\xffAB"
+
+
+@pytest.mark.parametrize("body", [b"abc", b"abcde"])
+def test_fs_write_encode_rejects_body_length_mismatch(body: bytes):
+    request = FsWriteEnvelope(
+        request_id="req_fs_write_1234",
+        profile="developer",
+        path="/srv/app/new.bin",
+        content_length=4,
+    )
+
+    with pytest.raises(ProtocolError, match="body length mismatch"):
+        encode_request(request, body)
+
+
+def test_fs_write_decode_rejects_body_length_mismatch():
+    request = FsWriteEnvelope(
+        request_id="req_fs_write_1234",
+        profile="developer",
+        path="/srv/app/new.bin",
+        content_length=4,
+    )
+    framed = encode_request(request, b"ABCD")
+
+    with pytest.raises(ProtocolError, match="body length mismatch"):
+        decode_request(framed[:-1])
+
+    with pytest.raises(ProtocolError, match="body length mismatch"):
+        decode_request(framed + b"x")
+
+
+def test_fs_write_content_length_is_strict_and_nonnegative():
+    with pytest.raises(ValueError):
+        FsWriteEnvelope(
+            request_id="req_fs_write_1234",
+            profile="developer",
+            path="/srv/app/new.bin",
+            content_length=True,
+        )
+
+    with pytest.raises(ValueError):
+        FsWriteEnvelope(
+            request_id="req_fs_write_1234",
+            profile="developer",
+            path="/srv/app/new.bin",
+            content_length=-1,
+        )
+
+
+def test_fs_write_rejects_overwrite_or_mode_metadata():
+    for metadata in (
+        (
+            b'{"content_length":0,"operation":"fs_write","path":"/srv/app/new",'
+            b'"profile":"developer","request_id":"req_fs_write_1234","version":1,'
+            b'"overwrite":true}'
+        ),
+        (
+            b'{"content_length":0,"operation":"fs_write","path":"/srv/app/new",'
+            b'"profile":"developer","request_id":"req_fs_write_1234","version":1,'
+            b'"mode":384}'
+        ),
+    ):
+        with pytest.raises(ProtocolError):
+            decode_envelope_metadata(metadata)
