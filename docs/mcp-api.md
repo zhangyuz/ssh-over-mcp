@@ -77,8 +77,11 @@ limit. Read-only operations are bounded and structured; they do not invoke
 shell commands or PATH lookup.
 
 The first host-agent filesystem slice supports only regular files and
-directories for stat, and regular files for read. Symlinks and special objects
-(FIFO, socket, block/character device) fail closed. File reads have a hard
+directories for stat, and regular files for read. The final object is first
+pinned and classified with an `O_PATH` descriptor; a read-capable descriptor is
+opened only after the pinned inode is proven regular. Symlinks and special
+objects (FIFO, socket, block/character device) therefore fail closed before a
+data-capable open. File reads have a hard
 64 MiB ceiling in addition to the caller/server policy bound. This primitive is
 not yet exposed as an SMCP operation or MCP tool.
 
