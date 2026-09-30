@@ -8,12 +8,13 @@ ssh-over-mcp-host-agent
 
 Normative behavior is defined in [`../../docs/ssh-host-agent.md`](../../docs/ssh-host-agent.md).
 
-## Current Phase 3d2b2b2c3 behavior
+## Current Phase 3d2c behavior
 
-The ForceCommand request path remains **non-executing**.
-
-The containment-manager service and authenticated Unix endpoint remain the
-manager-side privilege boundary. The manager protocol itself is unchanged.
+Policy v3 ForceCommand requests remain **non-executing**. Policy v4 requests
+may execute only through the existing authenticated containment-manager client
+and supervised native runner. The containment-manager service and authenticated
+Unix endpoint remain the manager-side privilege boundary; the manager protocol
+itself is unchanged.
 
 For native supervised execution, the child is released only after containment
 attachment and trusted child setup. Immediately before the pinned native ELF
@@ -66,6 +67,8 @@ The accepted merged-main evidence is
 `7.0.0-28-generic` (`2 passed` manager phase, `4 passed`
 production/resource/recursive-kill phase).
 
-ForceCommand execution remains disabled. The next increment is Phase `3d2c`,
-which may wire the already-contained supervised native execution path into the
-ForceCommand CLI.
+Phase `3d2c` now wires policy-v4 requests into that existing path. Manager
+endpoint, service/workload identities, and cgroup limits remain server-owned.
+The manager session is closed before captured output is returned, and result
+delivery to SSH stdout/stderr is nonblocking with a fixed five-second deadline.
+Policy v3 remains the compatibility/non-executing mode.

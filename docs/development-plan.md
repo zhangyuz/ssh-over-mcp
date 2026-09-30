@@ -395,11 +395,29 @@ Implemented:
 - sibling request survival during recursive kill;
 - bounded success/failure cleanup which removes request/source scopes without calling `cgroup.kill` on the delegated root;
 - exact merged-main evidence at `22e298fec42d92a963f093a6a073de622589dfc0` on Ubuntu 26.04 x86_64, kernel `7.0.0-28-generic`: manager phase `2 passed`, production/resource/recursive-kill phase `4 passed`;
-- ForceCommand execution remains disabled.
+- ForceCommand execution remains disabled through this phase.
+
+### Phase 3d2c — contained ForceCommand execution wiring
+
+Implemented first wiring slice:
+
+- policy v3 remains non-executing;
+- policy v4 requires server-owned containment configuration;
+- ForceCommand v4 connects through the authenticated manager client and reuses
+  the existing bounded supervised native runner;
+- containment request limits and workload identity come only from host policy;
+- manager protocol and attach-before-exec ordering are unchanged;
+- manager/backend/supervisor failures are normalized to one generic SSH-visible
+  error;
+- signal exits map to `128 + signal`;
+- captured stdout/stderr delivery is nonblocking with a fixed five-second
+  deadline so a peer which stops reading cannot indefinitely block the host
+  agent.
 
 ### Remaining Phase 3 work
 
-- Phase 3d2c: wire supervised native execution into the ForceCommand CLI now that containment has real-kernel validation;
+- Phase 3d2c follow-up: real end-to-end ForceCommand/live-manager proof and
+  final execution-response semantics review;
 - typed filesystem operations;
 - execution-time resource enforcement;
 - optional privileged helper protocol.
