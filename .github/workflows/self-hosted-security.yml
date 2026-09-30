@@ -1,4 +1,4 @@
-name: Self-hosted Docker validation
+name: Self-hosted Ubuntu 26.04 x86 validation
 
 on:
   workflow_dispatch:
@@ -13,18 +13,18 @@ permissions:
   contents: read
 
 concurrency:
-  group: ssh-over-mcp-self-hosted-docker
+  group: ssh-over-mcp-self-hosted-x86
   cancel-in-progress: false
 
 jobs:
   validate:
-    name: Ubuntu 24.04 Docker validation
+    name: Ubuntu 26.04 x86 Docker validation
     if: github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, linux, ssh-over-mcp-docker]
+    runs-on: [self-hosted, linux, x64, ssh-over-mcp-mac-x86]
     timeout-minutes: 20
 
     steps:
-      - name: Verify hardened Ubuntu 24.04 runner container
+      - name: Verify hardened Ubuntu 26.04 x86 runner container
         shell: bash
         run: |
           set -euo pipefail
@@ -35,8 +35,13 @@ jobs:
           fi
 
           . /etc/os-release
-          if [ "${ID}" != "ubuntu" ] || [ "${VERSION_ID}" != "24.04" ]; then
-            echo "::error::Expected Ubuntu 24.04, got ${PRETTY_NAME:-unknown}"
+          if [ "${ID}" != "ubuntu" ] || [ "${VERSION_ID}" != "26.04" ]; then
+            echo "::error::Expected Ubuntu 26.04, got ${PRETTY_NAME:-unknown}"
+            exit 1
+          fi
+
+          if [ "$(uname -m)" != "x86_64" ]; then
+            echo "::error::Expected x86_64 runner, got $(uname -m)"
             exit 1
           fi
 

@@ -20,7 +20,8 @@ runner_labels="${RUNNER_LABELS:-ssh-over-mcp-docker}"
 runner_token="${RUNNER_TOKEN:-}"
 runner_version="${RUNNER_VERSION:-${DEFAULT_RUNNER_VERSION}}"
 runner_sha256="${RUNNER_SHA256:-}"
-image="${RUNNER_IMAGE:-ssh-over-mcp-actions-runner:ubuntu24.04}"
+ubuntu_version="${RUNNER_UBUNTU_VERSION:-26.04}"
+image="${RUNNER_IMAGE:-ssh-over-mcp-actions-runner:ubuntu${ubuntu_version}}"
 container_name="${RUNNER_CONTAINER_NAME:-ssh-over-mcp-runner}"
 cpus="${RUNNER_CPUS:-2}"
 memory="${RUNNER_MEMORY:-4g}"
@@ -35,7 +36,7 @@ Usage:
 
 Commands:
   up       Build (by default) and start the runner container.
-  build    Build the Ubuntu 24.04 runner image only.
+  build    Build the configured Ubuntu runner image only.
   down     Stop and remove the runner container.
   status   Show runner container status.
   logs     Follow runner container logs.
@@ -51,6 +52,7 @@ Options:
   --cpus N              Docker CPU limit (default: 2).
   --memory SIZE         Docker memory limit (default: 4g).
   --pids-limit N        Docker PID limit (default: 1024).
+  --ubuntu-version VER  Ubuntu base image version (default: 26.04).
   --runner-version VER  GitHub Actions runner version.
   --runner-sha256 SHA   SHA-256 for a non-default runner version.
   -h, --help            Show this help.
@@ -108,6 +110,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --pids-limit)
       pids_limit="${2:?missing value for --pids-limit}"
+      shift 2
+      ;;
+    --ubuntu-version)
+      ubuntu_version="${2:?missing value for --ubuntu-version}"
       shift 2
       ;;
     --runner-version)
@@ -188,9 +194,10 @@ resolve_runner_sha() {
 }
 
 build_runner_image() {
-  echo "Building ${image} for ${docker_platform} (Actions Runner ${runner_version})"
+  echo "Building ${image} for ${docker_platform} (Ubuntu ${ubuntu_version}; Actions Runner ${runner_version})"
   docker build \
     --platform "${docker_platform}" \
+    --build-arg "UBUNTU_VERSION=${ubuntu_version}" \
     --build-arg "RUNNER_VERSION=${runner_version}" \
     --build-arg "RUNNER_ARCH=${runner_arch}" \
     --build-arg "RUNNER_SHA256=${runner_sha256}" \
@@ -288,7 +295,7 @@ start_runner() {
   container_id="$(docker "${run_args[@]}")"
 
   echo "Started runner container: ${container_name} (${container_id:0:12})"
-  echo "Host: ${host_kernel}; container platform: ${docker_platform}"
+  echo "Host: ${host_kernel}; container platform: ${docker_platform}; Ubuntu: ${ubuntu_version}"
   echo "Runner labels: ${runner_labels}"
   if [[ "${ephemeral}" == "true" ]]; then
     echo "Mode: ephemeral (container exits/removes after one GitHub Actions job)"
