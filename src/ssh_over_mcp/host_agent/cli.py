@@ -13,6 +13,7 @@ from ssh_over_mcp.ssh.protocol import (
     FsMkdirEnvelope,
     FsReadEnvelope,
     FsStatEnvelope,
+    FsWriteEnvelope,
 )
 
 from .containment import ContainmentRequest
@@ -24,8 +25,10 @@ from .filesystem import (
     stat_path,
 )
 from .filesystem_mutation import (
+    FilesystemMutationCommittedError,
     FilesystemMutationError,
     create_directory,
+    create_regular_file,
 )
 from .policy import (
     DEFAULT_POLICY_PATH,
@@ -34,6 +37,7 @@ from .policy import (
     authorize_filesystem_mkdir,
     authorize_filesystem_read,
     authorize_filesystem_stat,
+    authorize_filesystem_write_create,
     authorize_request,
     load_host_policy,
 )
@@ -42,12 +46,14 @@ from .protocol import (
     HostAgentProtocolError,
     read_application_stdin,
     read_envelope,
+    read_exact_application_body,
     validate_ssh_context,
 )
 from .run import run_prepared_native
 
 EX_PROTOCOL = 65
 EX_UNAVAILABLE = 69
+EX_FS_COMMITTED = 74
 EX_NOPERM = 77
 EX_CONFIG = 78
 _OUTPUT_DELIVERY_TIMEOUT_SECONDS = 5.0
@@ -89,7 +95,10 @@ def run(
         print(f"ssh-over-mcp-host-agent: rejected: {exc}", file=stderr)
         return EX_PROTOCOL
 
-    if isinstance(envelope, (FsStatEnvelope, FsReadEnvelope, FsMkdirEnvelope)):
+    if isinstance(
+        envelope,
+        (FsStatEnvelope, FsReadEnvelope, FsMkdirEnvelope, FsWriteEnvelope),
+    ):
         return _run_filesystem_request(
             envelope=envelope,
             policy=policy,
@@ -205,7 +214,7 @@ def _filesystem_stat_payload(result: ReadOnlyFileStat) -> bytes:
 
 def _run_filesystem_request(
     *,
-    envelope: FsStatEnvelope | FsReadEnvelope | FsMkdirEnvelope,
+    envelope: FsStatEnvelope | FsReadEnvelope | FsMkdirEnvelope | FsWriteEnvelope,
     policy: HostExecutionPolicy,
     stdin: BinaryIO,
     stdout: BinaryIO | None,
@@ -225,25 +234,39 @@ def _run_filesystem_request(
             path=envelope.path,
             max_bytes=envelope.max_bytes,
         )
-    else:
+    elif isinstance(envelope, FsMkdirEnvelope):
         decision = authorize_filesystem_mkdir(
             policy,
             profile=envelope.profile,
             path=envelope.path,
+        )
+    else:
+        decision = authorize_filesystem_write_create(
+            policy,
+            profile=envelope.profile,
+            path=envelope.path,
+            content_length=envelope.content_length,
         )
 
     if not decision.allowed:
         print("ssh-over-mcp-host-agent: filesystem denied", file=stderr)
         return EX_NOPERM
 
+    write_body: bytes | None = None
+    write_length: int | None = None
     try:
-        trailing = read_application_stdin(stdin, 0)
+        if isinstance(envelope, FsWriteEnvelope):
+            write_length = decision.effective_max_write_bytes
+            if write_length is None:
+                raise HostAgentProtocolError("missing authorized write length")
+            write_body = read_exact_application_body(stdin, write_length)
+        else:
+            trailing = read_application_stdin(stdin, 0)
+            if trailing:
+                # Defensive only: the bounded reader already rejects data.
+                raise HostAgentProtocolError("unexpected stdin")
     except HostAgentProtocolError as exc:
         print(f"ssh-over-mcp-host-agent: rejected: {exc}", file=stderr)
-        return EX_PROTOCOL
-    if trailing:
-        # Defensive only: read_application_stdin(..., 0) already rejects data.
-        print("ssh-over-mcp-host-agent: rejected: unexpected stdin", file=stderr)
         return EX_PROTOCOL
 
     if stdout is None or execution_stderr is None:
@@ -264,9 +287,25 @@ def _run_filesystem_request(
                 envelope.path,
                 max_bytes=max_bytes,
             ).data
-        else:
+        elif isinstance(envelope, FsMkdirEnvelope):
             create_directory(envelope.path)
             output = b""
+        else:
+            if write_body is None or write_length is None:
+                raise FilesystemMutationError("missing authorized write body")
+            create_regular_file(
+                envelope.path,
+                write_body,
+                expected_length=write_length,
+            )
+            output = b""
+    except FilesystemMutationCommittedError:
+        print(
+            "ssh-over-mcp-host-agent: filesystem write committed; "
+            "durability uncertain; do not retry blindly",
+            file=stderr,
+        )
+        return EX_FS_COMMITTED
     except (FilesystemAccessError, FilesystemMutationError):
         print(
             "ssh-over-mcp-host-agent: filesystem operation failed",
