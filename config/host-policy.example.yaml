@@ -1,4 +1,4 @@
-version: 3
+version: 4
 
 # Install as /etc/ssh-over-mcp/host-policy.yaml.
 # Production loader requires a regular, root-owned file which is not
@@ -13,6 +13,25 @@ child_limits:
   max_processes: 64
   file_size_bytes: 268435456
   open_files: 256
+
+# Server-owned execution containment. Request envelopes cannot override these.
+containment:
+  manager_endpoint: /run/ssh-over-mcp/containment-manager.sock
+  manager:
+    uid: 2101
+    gid: 3101
+  host_agent:
+    uid: 2102
+    gid: 3102
+  workload:
+    uid: 2103
+    gid: 3103
+  manager_client_gid: 3199
+  limits:
+    memory_max_bytes: 536870912
+    pids_max: 64
+    cpu_quota_us: 50000
+    cpu_period_us: 100000
 
 commands:
   /usr/bin/git:
