@@ -1,0 +1,49 @@
+from __future__ import annotations
+
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp
+
+from ssh_over_mcp.config.loader import load_config
+from ssh_over_mcp.policy.engine import PolicyEngine
+
+from .principal import StaticPrincipalProvider
+from .runtime import MCPRuntimeSettings
+from .server import build_mcp_server
+from .service import MCPService
+
+
+def build_application(
+    settings: MCPRuntimeSettings,
+) -> ASGIApp:
+    bundle = load_config(settings.config_path)
+    policy = PolicyEngine(
+        inventory=bundle.inventory,
+        policy=bundle.policy,
+    )
+    principal_provider = StaticPrincipalProvider(
+        profile=settings.profile,
+        policy=bundle.policy,
+    )
+    service = MCPService(
+        inventory=bundle.inventory,
+        policy=policy,
+    )
+    mcp = build_mcp_server(
+        service=service,
+        principal_provider=principal_provider,
+    )
+
+    @mcp.custom_route("/healthz", methods=["GET"])
+    async def healthz(_request: Request) -> JSONResponse:
+        return JSONResponse({"status": "ok"})
+
+    @mcp.custom_route("/readyz", methods=["GET"])
+    async def readyz(_request: Request) -> JSONResponse:
+        return JSONResponse({"status": "ready"})
+
+    return mcp.streamable_http_app(
+        stateless_http=True,
+        json_response=True,
+        host="127.0.0.1",
+    )
