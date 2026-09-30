@@ -152,6 +152,13 @@ Success:
 - status 0;
 - empty stdout.
 
+Committed/durability-uncertain outcome:
+
+- dedicated SSH status 74;
+- fixed host-owned diagnostic states that publication committed and blind retry
+  is prohibited;
+- this outcome is distinct from generic pre-publication failure.
+
 No overwrite semantics.
 
 ## Task 7 — adversarial Linux validation
