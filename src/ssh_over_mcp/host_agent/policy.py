@@ -180,12 +180,13 @@ class HostContainmentPolicy(BaseModel):
 
 
 class HostFilesystemProfilePolicy(BaseModel):
-    """Server-owned read-only filesystem policy for one SSH profile."""
+    """Server-owned filesystem policy for one SSH profile."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     stat_roots: tuple[str, ...] = ()
     read_roots: tuple[str, ...] = ()
+    mkdir_roots: tuple[str, ...] = ()
     max_read_bytes: int | None = Field(
         default=None,
         strict=True,
@@ -193,7 +194,7 @@ class HostFilesystemProfilePolicy(BaseModel):
         le=MAX_FS_READ_BYTES,
     )
 
-    @field_validator("stat_roots", "read_roots")
+    @field_validator("stat_roots", "read_roots", "mkdir_roots")
     @classmethod
     def validate_roots(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         validated = tuple(
@@ -206,8 +207,8 @@ class HostFilesystemProfilePolicy(BaseModel):
 
     @model_validator(mode="after")
     def validate_read_contract(self) -> HostFilesystemProfilePolicy:
-        if not self.stat_roots and not self.read_roots:
-            raise ValueError("filesystem policy must allow stat or read")
+        if not self.stat_roots and not self.read_roots and not self.mkdir_roots:
+            raise ValueError("filesystem policy must allow an operation")
         if self.read_roots and self.max_read_bytes is None:
             raise ValueError("filesystem read roots require max_read_bytes")
         if not self.read_roots and self.max_read_bytes is not None:
@@ -392,6 +393,33 @@ def authorize_filesystem_stat(
     return HostFilesystemAuthorizationResult(
         allowed=True,
         reason="host policy allowed filesystem stat",
+    )
+
+
+def authorize_filesystem_mkdir(
+    policy: HostExecutionPolicy,
+    *,
+    profile: str,
+    path: str,
+) -> HostFilesystemAuthorizationResult:
+    """Authorize a lexical fs_mkdir request without touching the filesystem."""
+
+    if profile not in policy.allowed_profiles:
+        return _filesystem_deny("profile is not allowed by host policy")
+    rules = policy.filesystem.get(profile)
+    if rules is None or not rules.mkdir_roots:
+        return _filesystem_deny(
+            "profile has no filesystem mkdir permission in host policy"
+        )
+    try:
+        canonical = _validate_filesystem_path(path, "filesystem path")
+    except (TypeError, ValueError):
+        return _filesystem_deny("filesystem path is not canonical")
+    if not _filesystem_path_allowed(canonical, rules.mkdir_roots):
+        return _filesystem_deny("filesystem mkdir path is outside allowed roots")
+    return HostFilesystemAuthorizationResult(
+        allowed=True,
+        reason="host policy allowed filesystem mkdir",
     )
 
 

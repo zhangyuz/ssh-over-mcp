@@ -810,6 +810,13 @@ This is still below the MCP tool layer; Phase 4 must expose and parse the typed
 MCP `fs_stat`/`fs_read` tools separately. OS filesystem permissions remain
 the final access boundary.
 
+Create-only mutation is being added behind a separate policy boundary. The
+internal mkdir primitive performs one pinned-parent create-if-absent mutation
+and never reopens/chmods/removes the final pathname afterward. Host policy now
+supports profile-scoped canonical `mkdir_roots`, authorized lexically without
+touching the filesystem. There is still no `fs_mkdir` SMCP operation in this
+slice.
+
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 
 The central policy may be more expressive, but the host-local policy should preserve critical invariants if the central layer is bypassed.

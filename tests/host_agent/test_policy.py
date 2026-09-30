@@ -12,6 +12,7 @@ from ssh_over_mcp.host_agent.policy import (
     HostFilesystemProfilePolicy,
     HostLinuxIdentity,
     HostPolicyError,
+    authorize_filesystem_mkdir,
     authorize_filesystem_read,
     authorize_filesystem_stat,
     authorize_request,
@@ -889,4 +890,113 @@ def test_filesystem_authorization_does_not_touch_filesystem(
         profile="developer",
         path="/srv/app/config",
         max_bytes=512,
+    ).allowed is True
+
+
+
+def test_filesystem_mkdir_policy_is_profile_scoped_and_root_bounded(
+    tmp_path: Path,
+) -> None:
+    executable = make_executable(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    policy = _with_filesystem_policy(
+        make_policy(executable, cwd),
+        allowed_profiles=frozenset({"developer", "observer"}),
+        filesystem={
+            "developer": HostFilesystemProfilePolicy(
+                mkdir_roots=("/srv/projects/app",),
+            )
+        },
+    )
+
+    allowed = authorize_filesystem_mkdir(
+        policy,
+        profile="developer",
+        path="/srv/projects/app/new-directory",
+    )
+    sibling = authorize_filesystem_mkdir(
+        policy,
+        profile="developer",
+        path="/srv/projects/application/new-directory",
+    )
+    observer = authorize_filesystem_mkdir(
+        policy,
+        profile="observer",
+        path="/srv/projects/app/new-directory",
+    )
+
+    assert allowed.allowed is True
+    assert sibling.allowed is False
+    assert observer.allowed is False
+
+
+def test_filesystem_mkdir_only_policy_is_valid() -> None:
+    rules = HostFilesystemProfilePolicy(
+        mkdir_roots=("/srv/projects/app",),
+    )
+
+    assert rules.stat_roots == ()
+    assert rules.read_roots == ()
+    assert rules.mkdir_roots == ("/srv/projects/app",)
+    assert rules.max_read_bytes is None
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "relative/path",
+        "//srv/projects/app",
+        "/srv/projects/../app",
+        "/srv/projects/app/",
+    ],
+)
+def test_filesystem_mkdir_policy_rejects_noncanonical_request_path(
+    tmp_path: Path,
+    path: str,
+) -> None:
+    executable = make_executable(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    policy = _with_filesystem_policy(
+        make_policy(executable, cwd),
+        filesystem={
+            "developer": HostFilesystemProfilePolicy(
+                mkdir_roots=("/srv/projects",),
+            )
+        },
+    )
+
+    assert authorize_filesystem_mkdir(
+        policy,
+        profile="developer",
+        path=path,
+    ).allowed is False
+
+
+def test_filesystem_mkdir_authorization_does_not_touch_filesystem(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = make_executable(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    policy = _with_filesystem_policy(
+        make_policy(executable, cwd),
+        filesystem={
+            "developer": HostFilesystemProfilePolicy(
+                mkdir_roots=("/srv/app",),
+            )
+        },
+    )
+
+    def forbidden_open(*_args, **_kwargs):
+        raise AssertionError("mkdir authorization must not open filesystem objects")
+
+    monkeypatch.setattr("os.open", forbidden_open)
+
+    assert authorize_filesystem_mkdir(
+        policy,
+        profile="developer",
+        path="/srv/app/new-directory",
     ).allowed is True

@@ -485,6 +485,15 @@ a concurrently writable POSIX directory.
 Implementation follows
 `docs/superpowers/plans/2026-09-30-typed-filesystem-mutations.md`.
 
+Create-only mutation progress:
+
+- Task 1 implemented: internal one-level `create_directory()` primitive using
+  one pinned-parent `mkdirat`-style mutation, with no post-create pathname
+  reopen/chmod/remove;
+- Task 2 implemented: profile-scoped lexical `mkdir_roots` authorization;
+- `fs_mkdir` is still not remotely reachable; typed SMCP wiring is the next
+  separately reviewed slice.
+
 ### Remaining Phase 3 work
 
 - Phase 3e create-only mutation implementation and review;
