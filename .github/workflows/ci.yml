@@ -9,20 +9,116 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.13", "3.14"]
+  validate:
+    name: Ubuntu 26.04 x86 validation
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, x64, ssh-over-mcp-mac-x86]
+    timeout-minutes: 20
+
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+      - name: Verify hardened Ubuntu 26.04 x86 runner container
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$(id -u)" -eq 0 ]; then
+            echo "::error::Runner container must execute jobs as non-root"
+            exit 1
+          fi
+
+          . /etc/os-release
+          if [ "${ID}" != "ubuntu" ] || [ "${VERSION_ID}" != "26.04" ]; then
+            echo "::error::Expected Ubuntu 26.04, got ${PRETTY_NAME:-unknown}"
+            exit 1
+          fi
+
+          if [ "$(uname -m)" != "x86_64" ]; then
+            echo "::error::Expected x86_64 runner, got $(uname -m)"
+            exit 1
+          fi
+
+          cap_eff="$(awk '/^CapEff:/ { print $2 }' /proc/self/status)"
+          if [ "${cap_eff}" != "0000000000000000" ]; then
+            echo "::error::Runner container must have all Linux capabilities dropped"
+            exit 1
+          fi
+
+          no_new_privs="$(awk '/^NoNewPrivs:/ { print $2 }' /proc/self/status)"
+          if [ "${no_new_privs}" != "1" ]; then
+            echo "::error::Runner container must have no-new-privileges enabled"
+            exit 1
+          fi
+
+          if [ -S /var/run/docker.sock ]; then
+            echo "::error::Docker socket must not be mounted into the runner"
+            exit 1
+          fi
+
+          if [ ! -r /sys/fs/cgroup/cgroup.controllers ]; then
+            echo "::error::Unified cgroup v2 controllers file is unavailable"
+            exit 1
+          fi
+
+          controllers="$(cat /sys/fs/cgroup/cgroup.controllers)"
+          for controller in cpu memory pids; do
+            if ! grep -qw "${controller}" <<<"${controllers}"; then
+              echo "::error::Missing cgroup v2 controller: ${controller}"
+              exit 1
+            fi
+          done
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          python-version: ${{ matrix.python-version }}
+          persist-credentials: false
+          clean: true
+          fetch-depth: 0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.13"
           cache: pip
-      - run: python -m pip install -U pip
-      - run: pip install -e '.[dev]'
+
+      - name: Install test dependencies on Python 3.13
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e '.[dev]'
+
       - name: Lint source and tests
         run: python -m ruff check src tests
-      - run: python -m compileall -q src tests
-      - run: pytest
+
+      - name: Verify project cgroup-v2 read-only probe
+        shell: bash
+        run: |
+          python - <<'PY'
+          from ssh_over_mcp.host_agent.containment import probe_cgroup_v2
+
+          probe = probe_cgroup_v2("/sys/fs/cgroup")
+          print(probe)
+          if not probe.ready_for_containment:
+              raise SystemExit("project cgroup-v2 probe failed")
+          PY
+
+      - name: Compile on Python 3.13
+        run: python -m compileall -q src tests
+
+      - name: Test on Python 3.13
+        run: python -m pytest -q
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install test dependencies on Python 3.14
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e '.[dev]'
+
+      - name: Compile on Python 3.14
+        run: python -m compileall -q src tests
+
+      - name: Test on Python 3.14
+        run: python -m pytest -q
