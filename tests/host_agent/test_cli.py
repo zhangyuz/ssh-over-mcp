@@ -1,4 +1,5 @@
 import io
+import json
 import os
 from pathlib import Path
 
@@ -13,6 +14,11 @@ from ssh_over_mcp.host_agent.cli import (
     run,
 )
 from ssh_over_mcp.host_agent.containment import ContainmentStats
+from ssh_over_mcp.host_agent.filesystem import (
+    FilesystemAccessError,
+    ReadFileResult,
+    ReadOnlyFileStat,
+)
 from ssh_over_mcp.host_agent.policy import (
     HostArgvRule,
     HostChildLimits,
@@ -20,10 +26,17 @@ from ssh_over_mcp.host_agent.policy import (
     HostContainmentLimits,
     HostContainmentPolicy,
     HostExecutionPolicy,
+    HostFilesystemProfilePolicy,
     HostLinuxIdentity,
 )
 from ssh_over_mcp.host_agent.run import SupervisedExecutionResult
-from ssh_over_mcp.ssh.protocol import ExecEnvelope, ExecutionLimits, encode_request
+from ssh_over_mcp.ssh.protocol import (
+    ExecEnvelope,
+    ExecutionLimits,
+    FsReadEnvelope,
+    FsStatEnvelope,
+    encode_request,
+)
 
 
 def _child_limits() -> HostChildLimits:
@@ -103,6 +116,45 @@ def policy(
         max_timeout_seconds=30,
         max_output_bytes=4096,
         max_stdin_bytes=max_stdin_bytes,
+    )
+
+
+def filesystem_policy(
+    executable: Path,
+    *,
+    stat_roots: tuple[str, ...] = (),
+    read_roots: tuple[str, ...] = (),
+    max_read_bytes: int | None = None,
+) -> HostExecutionPolicy:
+    values = policy(executable).model_dump()
+    values["filesystem"] = {
+        "developer": HostFilesystemProfilePolicy(
+            stat_roots=stat_roots,
+            read_roots=read_roots,
+            max_read_bytes=max_read_bytes,
+        ).model_dump()
+    }
+    return HostExecutionPolicy.model_validate(values)
+
+
+def fs_stat_payload(path: str) -> bytes:
+    return encode_request(
+        FsStatEnvelope(
+            request_id="req_fs_stat_1234",
+            profile="developer",
+            path=path,
+        )
+    )
+
+
+def fs_read_payload(path: str, *, max_bytes: int) -> bytes:
+    return encode_request(
+        FsReadEnvelope(
+            request_id="req_fs_read_1234",
+            profile="developer",
+            path=path,
+            max_bytes=max_bytes,
+        )
     )
 
 
@@ -399,3 +451,245 @@ def test_output_delivery_times_out_when_ssh_peer_stops_reading():
         execution_stderr.close()
         os.close(stdout_read)
         os.close(stderr_read)
+
+
+
+def test_fs_stat_runs_policy_then_typed_primitive(
+    tmp_path: Path,
+    monkeypatch,
+):
+    executable = make_executable(tmp_path)
+    observed: dict[str, object] = {}
+
+    def fake_stat(path: str) -> ReadOnlyFileStat:
+        observed["path"] = path
+        return ReadOnlyFileStat(
+            path=path,
+            kind="regular",
+            size=7,
+            mode=0o640,
+            uid=2103,
+            gid=3103,
+            mtime_ns=123456,
+        )
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.cli.stat_path",
+        fake_stat,
+    )
+
+    stdout = io.BytesIO()
+    execution_stderr = io.BytesIO()
+    control_stderr = io.StringIO()
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=io.BytesIO(fs_stat_payload("/srv/app/config.yaml")),
+        stdout=stdout,
+        stderr=control_stderr,
+        execution_stderr=execution_stderr,
+        policy=filesystem_policy(
+            executable,
+            stat_roots=("/srv/app",),
+        ),
+    )
+
+    assert status == 0
+    assert observed["path"] == "/srv/app/config.yaml"
+    assert json.loads(stdout.getvalue()) == {
+        "gid": 3103,
+        "kind": "regular",
+        "mode": 0o640,
+        "mtime_ns": 123456,
+        "path": "/srv/app/config.yaml",
+        "size": 7,
+        "uid": 2103,
+    }
+    assert execution_stderr.getvalue() == b""
+    assert control_stderr.getvalue() == ""
+
+
+def test_fs_read_returns_raw_binary_bytes_with_authorized_bound(
+    tmp_path: Path,
+    monkeypatch,
+):
+    executable = make_executable(tmp_path)
+    observed: dict[str, object] = {}
+    stat = ReadOnlyFileStat(
+        path="/srv/app/data.bin",
+        kind="regular",
+        size=4,
+        mode=0o600,
+        uid=2103,
+        gid=3103,
+        mtime_ns=1,
+    )
+
+    def fake_read(path: str, *, max_bytes: int) -> ReadFileResult:
+        observed["path"] = path
+        observed["max_bytes"] = max_bytes
+        return ReadFileResult(data=b"\x00\xffAB", stat=stat)
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.cli.read_file",
+        fake_read,
+    )
+
+    stdout = io.BytesIO()
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=io.BytesIO(
+            fs_read_payload("/srv/app/data.bin", max_bytes=512)
+        ),
+        stdout=stdout,
+        stderr=io.StringIO(),
+        execution_stderr=io.BytesIO(),
+        policy=filesystem_policy(
+            executable,
+            read_roots=("/srv/app",),
+            max_read_bytes=1024,
+        ),
+    )
+
+    assert status == 0
+    assert stdout.getvalue() == b"\x00\xffAB"
+    assert observed == {
+        "path": "/srv/app/data.bin",
+        "max_bytes": 512,
+    }
+
+
+def test_fs_policy_denial_is_generic_and_stops_before_primitive(
+    tmp_path: Path,
+    monkeypatch,
+):
+    executable = make_executable(tmp_path)
+
+    def forbidden_read(*_args, **_kwargs):
+        raise AssertionError("filesystem primitive must not run after denial")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.cli.read_file",
+        forbidden_read,
+    )
+
+    stderr = io.StringIO()
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=io.BytesIO(
+            fs_read_payload("/srv/private/secret", max_bytes=1)
+        ),
+        stdout=io.BytesIO(),
+        stderr=stderr,
+        execution_stderr=io.BytesIO(),
+        policy=filesystem_policy(
+            executable,
+            read_roots=("/srv/app",),
+            max_read_bytes=1024,
+        ),
+    )
+
+    assert status == EX_NOPERM
+    assert stderr.getvalue() == (
+        "ssh-over-mcp-host-agent: filesystem denied\n"
+    )
+    assert "/srv/app" not in stderr.getvalue()
+    assert "/srv/private" not in stderr.getvalue()
+
+
+def test_fs_trailing_stdin_is_rejected_before_primitive(
+    tmp_path: Path,
+    monkeypatch,
+):
+    executable = make_executable(tmp_path)
+
+    def forbidden_read(*_args, **_kwargs):
+        raise AssertionError("filesystem primitive must not run with stdin")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.cli.read_file",
+        forbidden_read,
+    )
+
+    framed = fs_read_payload("/srv/app/data", max_bytes=8) + b"x"
+    stderr = io.StringIO()
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=io.BytesIO(framed),
+        stdout=io.BytesIO(),
+        stderr=stderr,
+        execution_stderr=io.BytesIO(),
+        policy=filesystem_policy(
+            executable,
+            read_roots=("/srv/app",),
+            max_read_bytes=8,
+        ),
+    )
+
+    assert status == EX_PROTOCOL
+    assert "stdin exceeds configured maximum" in stderr.getvalue()
+
+
+def test_fs_read_policy_ceiling_stops_before_primitive(
+    tmp_path: Path,
+    monkeypatch,
+):
+    executable = make_executable(tmp_path)
+
+    def forbidden_read(*_args, **_kwargs):
+        raise AssertionError("filesystem primitive must not exceed policy")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.cli.read_file",
+        forbidden_read,
+    )
+
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=io.BytesIO(
+            fs_read_payload("/srv/app/data", max_bytes=1025)
+        ),
+        stdout=io.BytesIO(),
+        stderr=io.StringIO(),
+        execution_stderr=io.BytesIO(),
+        policy=filesystem_policy(
+            executable,
+            read_roots=("/srv/app",),
+            max_read_bytes=1024,
+        ),
+    )
+
+    assert status == EX_NOPERM
+
+
+def test_fs_primitive_failure_is_generic(
+    tmp_path: Path,
+    monkeypatch,
+):
+    executable = make_executable(tmp_path)
+
+    def fail_stat(_path: str):
+        raise FilesystemAccessError("sensitive inode/path detail")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.cli.stat_path",
+        fail_stat,
+    )
+
+    stderr = io.StringIO()
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=io.BytesIO(fs_stat_payload("/srv/app/missing")),
+        stdout=io.BytesIO(),
+        stderr=stderr,
+        execution_stderr=io.BytesIO(),
+        policy=filesystem_policy(
+            executable,
+            stat_roots=("/srv/app",),
+        ),
+    )
+
+    assert status == EX_UNAVAILABLE
+    assert stderr.getvalue() == (
+        "ssh-over-mcp-host-agent: filesystem operation failed\n"
+    )
+    assert "sensitive" not in stderr.getvalue()

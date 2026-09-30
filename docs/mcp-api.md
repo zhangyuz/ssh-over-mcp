@@ -92,8 +92,16 @@ pinned primitive still performs the actual object access and independently
 rejects symlinks/special objects. A sibling prefix such as `/srv/app2` is not
 inside `/srv/app`.
 
-These primitives and policy are not yet exposed as an SMCP operation or MCP
-tool.
+The host agent now exposes typed SMCP v1 `fs_stat` and `fs_read`
+operations using the same bounded metadata frame as `exec`. Filesystem
+requests are metadata-only: any trailing application stdin is a protocol error
+and object access does not begin. `fs_stat` returns compact JSON metadata on
+stdout; `fs_read` returns raw file bytes. Host-policy denial and filesystem
+access failure return generic SSH-visible errors without policy-root or inode
+details.
+
+These are host-agent wire operations only. The MCP `fs_stat` and `fs_read`
+tools listed above are still future Phase 4 surface work.
 
 ### Processes
 

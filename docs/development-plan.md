@@ -430,8 +430,9 @@ not infer timeout/truncation from ambiguous child exit statuses.
 
 ### Phase 3e — typed filesystem operations
 
-Tasks 1–2 implemented: read-only descriptor-pinned primitives plus
-filesystem-specific host-local authorization.
+Tasks 1–3 implemented: read-only descriptor-pinned primitives,
+filesystem-specific host-local authorization, and typed SMCP v1 read-only wire
+operations.
 
 - internal host-agent `stat_path()` and `read_file()` primitives only; no SMCP
   wire operation or MCP tool is enabled yet;
@@ -455,13 +456,20 @@ filesystem-specific host-local authorization.
   access boundary;
 - OS DAC/ACL/MAC permissions remain authoritative.
 
-The primitives and policy deliberately remain disconnected from the remote
-request parser until typed read-only wire operations are separately reviewed.
+The SMCP v1 metadata frame now uses a strict operation-discriminated request
+union for `exec`, `fs_stat`, and `fs_read`. Filesystem requests are
+metadata-only and any trailing application stdin is rejected before object
+access. `fs_stat` returns compact canonical JSON metadata on stdout;
+`fs_read` returns raw file bytes. Policy denial and object-access failure are
+SSH-visible only as generic bounded diagnostics. The existing bounded
+nonblocking result-delivery path is reused.
+
+These wire operations are host-agent protocol operations only; no MCP filesystem
+tool is enabled yet.
 
 ### Remaining Phase 3 work
 
-- Phase 3e follow-up: typed `fs_stat`/`fs_read` wire operations, followed by
-  separately reviewed mutation operations;
+- Phase 3e follow-up: separately reviewed mutation operations;
 - optional privileged helper protocol.
 
 Adversarial tests include malformed envelopes, command injection, env injection, PTY/forwarding attempts, and bypass through alternate executables.
