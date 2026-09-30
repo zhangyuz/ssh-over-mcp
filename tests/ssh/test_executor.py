@@ -228,6 +228,43 @@ async def test_output_is_bounded_and_process_closed():
 
 
 @pytest.mark.asyncio
+async def test_remote_exit_before_local_deadline_is_not_local_timeout():
+    process = Process(delay=0)
+    process.exit_status = 143
+    executor = SSHExecutor(
+        policy=Policy(ALLOW),
+        connections=Manager(Connection(process)),
+    )
+
+    result = await executor.execute(
+        request(),
+        timeout_seconds=1.0,
+    )
+
+    assert result.exit_status == 143
+    assert result.timed_out is False
+
+
+@pytest.mark.asyncio
+async def test_exact_remote_output_budget_is_not_local_truncation():
+    process = Process(stdout=(b"12345",), delay=0)
+    process.exit_status = 137
+    executor = SSHExecutor(
+        policy=Policy(ALLOW),
+        connections=Manager(Connection(process)),
+    )
+
+    result = await executor.execute(
+        request(),
+        max_output_bytes=5,
+    )
+
+    assert result.stdout == b"12345"
+    assert result.exit_status == 137
+    assert result.truncated is False
+
+
+@pytest.mark.asyncio
 async def test_timeout_closes_remote_channel():
     process = Process(delay=0.2)
     executor = SSHExecutor(
