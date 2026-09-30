@@ -408,6 +408,13 @@ Assert app routes contain `/mcp`, `/healthz`, `/readyz`.
 
 Assert MCP `tools/list` remains exactly the three Task 3 tools; health/readiness are not tools.
 
+Add `test_streamable_http_round_trip_at_mcp_path`: pre-bind a localhost TCP
+socket on an ephemeral port, run `uvicorn.Server.serve(sockets=[socket])` as a
+background async task, then use the official SDK
+`Client(f"http://127.0.0.1:{port}/mcp")` to list tools and call
+`hosts_list`. Assert the same three tools and safe structured result, then set
+`server.should_exit = True` and await clean shutdown.
+
 Build with an unknown static profile and assert construction raises `PrincipalConfigurationError`; there is no ready app.
 
 Use a fake `MCPService` whose methods raise if called and verify `/healthz` and `/readyz` still return 200, proving lifecycle endpoints perform no domain/SSH operation.
@@ -501,7 +508,7 @@ git commit -m "feat: add local Streamable HTTP MCP server"
 
 Document that the implemented Phase 4 slice now provides:
 
-- Streamable HTTP MCP at `/mcp`;
+- Streamable HTTP MCP at `/mcp`, including a real SDK-client HTTP round-trip;
 - `/healthz` and `/readyz`;
 - static server-owned principal profile;
 - `hosts_list`;
