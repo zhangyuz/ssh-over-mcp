@@ -87,9 +87,11 @@ def encode_request(
 
     if len(metadata) > MAX_METADATA_BYTES:
         raise ProtocolError("request metadata exceeds maximum frame size")
-    if isinstance(envelope, ExecEnvelope):
-        if len(stdin) > envelope.limits.max_stdin_bytes:
-            raise ProtocolError("stdin exceeds configured maximum")
+    if (
+        isinstance(envelope, ExecEnvelope)
+        and len(stdin) > envelope.limits.max_stdin_bytes
+    ):
+        raise ProtocolError("stdin exceeds configured maximum")
 
     return MAGIC + struct.pack(">I", len(metadata)) + metadata + stdin
 
