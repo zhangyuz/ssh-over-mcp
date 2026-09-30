@@ -73,6 +73,12 @@ The current pinned bootstrap runner is `2.337.0`. When changing the pinned
 version, update the matching official SHA-256 values in
 `scripts/deploy-runner.sh`.
 
+Ubuntu 26.04 uses uutils multi-call coreutils for paths such as `/usr/bin/cat`.
+Anonymous fd-based exec does not preserve the applet dispatch name for that
+binary. The runner image therefore also installs the coexisting
+`gnu-coreutils` package; fd-exec integration fixtures prefer its `gnu*`
+binaries while leaving the system's essential uutils installation untouched.
+
 ## Security properties of the container
 
 The deployment script starts the container with:

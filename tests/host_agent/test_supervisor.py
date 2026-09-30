@@ -69,6 +69,11 @@ def _child_limits() -> HostChildLimits:
 
 def _copy_native(tmp_path: Path, source: str) -> Path:
     path = Path(source)
+    if path.name in {"cat", "yes", "dd"}:
+        gnu_path = Path("/usr/bin") / f"gnu{path.name}"
+        if gnu_path.exists():
+            path = gnu_path
+
     if not path.exists():
         pytest.skip(f"{source} is required for supervisor tests")
 
