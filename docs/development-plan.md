@@ -467,9 +467,29 @@ nonblocking result-delivery path is reused.
 These wire operations are host-agent protocol operations only; no MCP filesystem
 tool is enabled yet.
 
+### Phase 3e mutation boundary
+
+The accepted mutation design is documented in
+`docs/superpowers/specs/2026-09-30-typed-filesystem-mutations-design.md`.
+
+The first mutation capability is create-only:
+
+- one-level `fs_mkdir` for an absent destination;
+- create-only `fs_write` for an absent regular-file destination.
+
+Overwrite/replace, append, in-place truncate, move/rename, delete/unlink/rmdir,
+recursive mutation, and caller-selected chmod/chown remain disabled. Descriptor
+pinning alone does not make destructive pathname operations identity-atomic in
+a concurrently writable POSIX directory.
+
+Implementation follows
+`docs/superpowers/plans/2026-09-30-typed-filesystem-mutations.md`.
+
 ### Remaining Phase 3 work
 
-- Phase 3e follow-up: separately reviewed mutation operations;
+- Phase 3e create-only mutation implementation and review;
+- a separate future namespace-authority design before destructive filesystem
+  mutation;
 - optional privileged helper protocol.
 
 Adversarial tests include malformed envelopes, command injection, env injection, PTY/forwarding attempts, and bypass through alternate executables.
