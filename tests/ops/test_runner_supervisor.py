@@ -20,6 +20,7 @@ def _fake_host_env(tmp_path: Path) -> tuple[dict[str, str], Path, Path]:
     fake_bin.mkdir()
     state = tmp_path / "runner.state"
     deploy_log = tmp_path / "deploy.log"
+    deploy_count = tmp_path / "deploy.count"
     launchctl_log = tmp_path / "launchctl.log"
 
     _write_executable(
@@ -87,7 +88,19 @@ def _fake_host_env(tmp_path: Path) -> tuple[dict[str, str], Path, Path]:
         #!/usr/bin/env bash
         [[ -z "${RUNNER_TOKEN:-}" ]] || exit 23
         printf '%s\n' "$*" >> "${FAKE_DEPLOY_LOG}"
+
+        count=0
+        if [[ -f "${FAKE_DEPLOY_COUNT}" ]]; then
+          count="$(cat "${FAKE_DEPLOY_COUNT}")"
+        fi
+        count=$((count + 1))
+        printf '%s\n' "${count}" > "${FAKE_DEPLOY_COUNT}"
         touch "${FAKE_DOCKER_STATE}"
+
+        if [[ "${FAKE_STOP_AFTER_DEPLOYS:-0}" -gt 0 ]] \
+          && [[ "${count}" -ge "${FAKE_STOP_AFTER_DEPLOYS}" ]]; then
+          kill -TERM "$PPID"
+        fi
         """,
     )
 
@@ -101,6 +114,7 @@ def _fake_host_env(tmp_path: Path) -> tuple[dict[str, str], Path, Path]:
             "RUNNER_SUPERVISOR_REPLACEMENT_DELAY_SECONDS": "0",
             "FAKE_DOCKER_STATE": str(state),
             "FAKE_DEPLOY_LOG": str(deploy_log),
+            "FAKE_DEPLOY_COUNT": str(deploy_count),
             "FAKE_LAUNCHCTL_LOG": str(launchctl_log),
         }
     )
@@ -123,6 +137,27 @@ def test_once_mode_replaces_one_ephemeral_runner_without_reusing_a_token(
 
     assert result.returncode == 0, result.stderr
     assert deploy_log.read_text(encoding="utf-8").strip() == "up --no-build"
+
+
+def test_run_mode_replaces_retired_runner_automatically(tmp_path: Path) -> None:
+    env, deploy_log, _ = _fake_host_env(tmp_path)
+    env["FAKE_STOP_AFTER_DEPLOYS"] = "2"
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "run"],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert deploy_log.read_text(encoding="utf-8").splitlines() == [
+        "up --no-build",
+        "up --no-build",
+    ]
 
 
 def test_supervisor_rejects_a_preseeded_registration_token(tmp_path: Path) -> None:
