@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import errno
+import io
 import json
 import os
 import select
@@ -16,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from ssh_over_mcp.host_agent.cgroup_v2 import CgroupV2Backend
+from ssh_over_mcp.host_agent.cli import run as run_forcecommand
 from ssh_over_mcp.host_agent.containment import (
     REQUIRED_CGROUP_V2_CONTROLLERS,
     ContainmentLimits,
@@ -36,11 +38,20 @@ from ssh_over_mcp.host_agent.containment_manager_unix import (
     connect_authenticated_containment_manager,
 )
 from ssh_over_mcp.host_agent.file_identity import sha256_fd
-from ssh_over_mcp.host_agent.policy import HostChildLimits, HostObjectIdentity
+from ssh_over_mcp.host_agent.policy import (
+    HostArgvRule,
+    HostChildLimits,
+    HostCommandRule,
+    HostContainmentLimits,
+    HostContainmentPolicy,
+    HostExecutionPolicy,
+    HostLinuxIdentity,
+    HostObjectIdentity,
+)
 from ssh_over_mcp.host_agent.prepare import PreparedCommand
 from ssh_over_mcp.host_agent.run import run_prepared_native
 from ssh_over_mcp.host_agent.supervisor import spawn_prepared_native_contained
-from ssh_over_mcp.ssh.protocol import ExecutionLimits
+from ssh_over_mcp.ssh.protocol import ExecEnvelope, ExecutionLimits, encode_request
 
 _RUN_LIVE = os.environ.get("SSH_OVER_MCP_RUN_LIVE_CGROUP") == "1"
 pytestmark = pytest.mark.skipif(
@@ -2552,6 +2563,340 @@ def test_recursive_cgroup_kill_removes_descendants_and_preserves_sibling() -> No
             os.close(host_start_write)
         if host_result_read >= 0:
             os.close(host_result_read)
+
+        if host_pid is not None:
+            try:
+                os.kill(host_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            _waitpid_bounded(host_pid, timeout_seconds=1.0)
+
+        if manager_pid > 0:
+            try:
+                os.kill(manager_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            _waitpid_bounded(manager_pid, timeout_seconds=1.0)
+
+        if endpoint.exists():
+            endpoint.unlink()
+        if runtime_dir.exists():
+            runtime_dir.rmdir()
+
+
+def _read_fd_to_eof_bounded(fd: int, *, max_bytes: int = 64 * 1024) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = os.read(fd, 4096)
+        if not chunk:
+            return b"".join(chunks)
+        total += len(chunk)
+        assert total <= max_bytes, "ForceCommand output exceeded live-test bound"
+        chunks.append(chunk)
+
+
+def _host_agent_forcecommand_process(
+    fixture: _LiveFixture,
+    endpoint: Path,
+    probe: Path,
+    start_fd: int,
+    result_fd: int,
+    stdout_fd: int,
+    execution_stderr_fd: int,
+) -> None:
+    stdout = None
+    execution_stderr = None
+    try:
+        token = os.read(start_fd, 1)
+        assert token == b"R", "host-agent bootstrap barrier was not released"
+
+        _drop_to_host_agent_identity(fixture.identities)
+        mount = _cgroup2_mount_for(fixture.root)
+        assert _current_cgroup_path(mount) == fixture.host_source
+
+        request_id = f"req_live_forcecommand_{os.getpid()}"
+        identities = fixture.identities
+        containment = HostContainmentPolicy(
+            manager_endpoint=str(endpoint),
+            manager=HostLinuxIdentity(
+                uid=identities.manager.uid,
+                gid=identities.manager.gid,
+            ),
+            host_agent=HostLinuxIdentity(
+                uid=identities.host_agent.uid,
+                gid=identities.host_agent.gid,
+            ),
+            workload=HostLinuxIdentity(
+                uid=identities.workload.uid,
+                gid=identities.workload.gid,
+            ),
+            manager_client_gid=identities.manager_client_gid,
+            limits=HostContainmentLimits(
+                memory_max_bytes=128 * 1024 * 1024,
+                pids_max=16,
+                cpu_quota_us=50_000,
+                cpu_period_us=100_000,
+            ),
+        )
+        execution_policy = HostExecutionPolicy(
+            version=4,
+            allowed_profiles=frozenset({"developer"}),
+            child_limits=_live_child_limits(),
+            containment=containment,
+            commands={
+                str(probe): HostCommandRule(
+                    resolved_path=str(probe),
+                    argv=(HostArgvRule(mode="exact", args=("state",)),),
+                    cwd_roots=("/tmp",),
+                    require_root_owned=True,
+                ),
+            },
+            max_timeout_seconds=5.0,
+            max_output_bytes=64 * 1024,
+            max_stdin_bytes=0,
+        )
+        envelope = ExecEnvelope(
+            request_id=request_id,
+            profile="developer",
+            executable=str(probe),
+            argv=("state",),
+            cwd="/tmp",
+            env={},
+            limits=ExecutionLimits(
+                timeout_seconds=5.0,
+                max_output_bytes=64 * 1024,
+                max_stdin_bytes=0,
+            ),
+        )
+
+        stdout = os.fdopen(stdout_fd, "wb", buffering=0)
+        execution_stderr = os.fdopen(
+            execution_stderr_fd,
+            "wb",
+            buffering=0,
+        )
+        control_stderr = io.StringIO()
+        status = run_forcecommand(
+            env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+            stdin=io.BytesIO(encode_request(envelope, b"")),
+            stdout=stdout,
+            stderr=control_stderr,
+            execution_stderr=execution_stderr,
+            policy=execution_policy,
+        )
+
+        assert status == 0
+        assert control_stderr.getvalue() == ""
+        assert _current_cgroup_path(mount) == fixture.host_source
+        _write_pipe_json(
+            result_fd,
+            {
+                "ok": True,
+                "request_id": request_id,
+            },
+        )
+        os._exit(0)
+    except BaseException:  # noqa: BLE001
+        try:
+            _write_pipe_json(
+                result_fd,
+                {
+                    "ok": False,
+                    "error": traceback.format_exc()[-12000:],
+                },
+            )
+        except BaseException as report_exc:  # noqa: BLE001
+            print(
+                f"cannot report ForceCommand host-agent failure: {report_exc!r}",
+                file=sys.stderr,
+            )
+        traceback.print_exc()
+        os._exit(125)
+    finally:
+        if stdout is not None:
+            stdout.close()
+        else:
+            try:
+                os.close(stdout_fd)
+            except OSError:
+                pass
+        if execution_stderr is not None:
+            execution_stderr.close()
+        else:
+            try:
+                os.close(execution_stderr_fd)
+            except OSError:
+                pass
+
+
+def test_forcecommand_cli_real_manager_end_to_end() -> None:
+    assert os.geteuid() == 0, (
+        "Phase 3d2c ForceCommand proof requires dedicated root bootstrap"
+    )
+    fixture = _fixture()
+    root = fixture.root.resolve(strict=True)
+    source = fixture.host_source.resolve(strict=True)
+    assert root == fixture.root
+    assert source == fixture.host_source
+    assert source.parent == root
+    assert (source / "cgroup.procs").read_text(encoding="ascii").strip() == ""
+
+    raw_probe = os.environ.get(_PROBE_ELF_ENV)
+    assert raw_probe, f"{_PROBE_ELF_ENV} is required"
+    probe = Path(raw_probe).resolve(strict=True)
+    assert probe == Path(raw_probe)
+    assert probe.is_file()
+    assert probe.stat().st_uid == 0
+    assert os.execve in os.supports_fd
+
+    mount = _cgroup2_mount_for(root)
+    assert not _current_cgroup_path(mount).is_relative_to(root)
+
+    runtime_dir = Path(
+        f"/tmp/ssh-over-mcp-live-manager-forcecommand-{os.getpid()}"
+    )
+    assert not runtime_dir.exists()
+    runtime_dir.mkdir(mode=0o700)
+    os.chown(
+        runtime_dir,
+        fixture.identities.manager.uid,
+        fixture.identities.manager_client_gid,
+    )
+    os.chmod(runtime_dir, 0o710)
+    endpoint = runtime_dir / "manager.sock"
+
+    manager_read, manager_write = os.pipe()
+    manager_pid = os.fork()
+    if manager_pid == 0:
+        os.close(manager_read)
+        _manager_process(fixture, endpoint, manager_write)
+        os._exit(126)
+
+    os.close(manager_write)
+    host_pid: int | None = None
+    host_start_write = -1
+    host_result_read = -1
+    stdout_read = -1
+    execution_stderr_read = -1
+
+    try:
+        manager_ready = _read_pipe_json(
+            manager_read,
+            timeout_seconds=5.0,
+        )
+        assert manager_ready.get("ok") is True, manager_ready.get("error")
+
+        host_start_read, host_start_write = os.pipe()
+        host_result_read, host_result_write = os.pipe()
+        stdout_read, stdout_write = os.pipe()
+        execution_stderr_read, execution_stderr_write = os.pipe()
+
+        host_pid = os.fork()
+        if host_pid == 0:
+            os.close(host_start_write)
+            os.close(host_result_read)
+            os.close(stdout_read)
+            os.close(execution_stderr_read)
+            _host_agent_forcecommand_process(
+                fixture,
+                endpoint,
+                probe,
+                host_start_read,
+                host_result_write,
+                stdout_write,
+                execution_stderr_write,
+            )
+            os._exit(126)
+
+        os.close(host_start_read)
+        os.close(host_result_write)
+        os.close(stdout_write)
+        os.close(execution_stderr_write)
+
+        _write_control(source / "cgroup.procs", f"{host_pid}\n")
+        assert _pid_cgroup_path(host_pid, mount) == source
+        os.write(host_start_write, b"R")
+        os.close(host_start_write)
+        host_start_write = -1
+
+        host_result = _read_pipe_json(
+            host_result_read,
+            timeout_seconds=8.0,
+        )
+        assert host_result.get("ok") is True, host_result.get("error")
+        request_id = str(host_result["request_id"])
+        request_scope = root / f"ssh-over-mcp-{request_id}"
+
+        host_status = _waitpid_bounded(host_pid, timeout_seconds=2.0)
+        assert host_status is not None
+        assert os.WIFEXITED(host_status)
+        assert os.WEXITSTATUS(host_status) == 0
+        host_pid = None
+
+        stdout_data = _read_fd_to_eof_bounded(stdout_read)
+        os.close(stdout_read)
+        stdout_read = -1
+        execution_stderr_data = _read_fd_to_eof_bounded(
+            execution_stderr_read
+        )
+        os.close(execution_stderr_read)
+        execution_stderr_read = -1
+
+        assert execution_stderr_data == b""
+        records = [
+            json.loads(line)
+            for line in stdout_data.decode("utf-8").splitlines()
+            if line
+        ]
+        assert len(records) == 1
+        state = records[0]
+        assert state["event"] == "state"
+        assert state["argc"] == 2
+        assert state["env_count"] == 0
+        assert state["cgroup"] == _unified_membership_for(
+            request_scope,
+            mount,
+        )
+
+        workload = fixture.identities.workload
+        assert (state["ruid"], state["euid"], state["suid"]) == (
+            workload.uid,
+            workload.uid,
+            workload.uid,
+        )
+        assert (state["rgid"], state["egid"], state["sgid"]) == (
+            workload.gid,
+            workload.gid,
+            workload.gid,
+        )
+        assert state["groups"] == []
+        for name in ("cap_inh", "cap_prm", "cap_eff", "cap_amb"):
+            assert int(state[name], 16) == 0
+        assert state["no_new_privs"] == "1"
+        assert state["socket_inodes"] == []
+        assert request_scope.exists() is False
+
+        manager_status = _waitpid_bounded(manager_pid, timeout_seconds=3.0)
+        assert manager_status is not None
+        assert os.WIFEXITED(manager_status)
+        assert os.WEXITSTATUS(manager_status) == 0
+        manager_pid = -1
+
+        assert endpoint.exists() is False
+        assert (source / "cgroup.procs").read_text(
+            encoding="ascii"
+        ).strip() == ""
+    finally:
+        os.close(manager_read)
+        if host_start_write >= 0:
+            os.close(host_start_write)
+        if host_result_read >= 0:
+            os.close(host_result_read)
+        if stdout_read >= 0:
+            os.close(stdout_read)
+        if execution_stderr_read >= 0:
+            os.close(execution_stderr_read)
 
         if host_pid is not None:
             try:

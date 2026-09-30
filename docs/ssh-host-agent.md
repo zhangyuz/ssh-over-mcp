@@ -737,6 +737,18 @@ workload identity, or cgroup resource limits. The manager protocol, cgroup
 filesystem authority, attach-before-exec ordering, and workload transition are
 unchanged by this wiring.
 
+The dedicated Ubuntu 26.04 x86_64 real-kernel gate now exercises this wiring
+end to end. At exact commit
+`2857925800649f2ea89d9b123a7b2b19298a8dd6`, a real policy-v4
+`mcp-v1` frame enters `cli.run()` under the host-agent identity, connects
+to the real authenticated containment manager, executes the pinned native probe
+under the workload identity, returns stdout through the real nonblocking output
+path, and removes the request scope. The workload state proves request-cgroup
+membership, empty supplementary groups, zero capabilities, `no_new_privs=1`,
+and no inherited manager socket. The live gate reports `2 passed` for the
+non-root manager phase and `5 passed` for the production/root-bootstrap
+phase, with the delegated root absent after cleanup.
+
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 
 The central policy may be more expressive, but the host-local policy should preserve critical invariants if the central layer is bypassed.
