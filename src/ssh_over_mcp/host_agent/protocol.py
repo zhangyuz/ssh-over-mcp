@@ -10,6 +10,7 @@ from ssh_over_mcp.ssh.protocol import (
     MAX_METADATA_BYTES,
     REMOTE_PROTOCOL_COMMAND,
     ExecEnvelope,
+    FsWriteEnvelope,
     RequestEnvelope,
     decode_envelope_metadata,
 )
@@ -86,6 +87,15 @@ def read_application_stdin(stream: BinaryIO, max_stdin_bytes: int) -> bytes:
     return stdin
 
 
+def read_exact_application_body(stream: BinaryIO, expected_length: int) -> bytes:
+    """Read one exact-length application body and require EOF afterward."""
+
+    body = _read_bounded_to_eof(stream, expected_length + 1)
+    if len(body) != expected_length:
+        raise HostAgentProtocolError("request body length mismatch")
+    return body
+
+
 def read_request(
     stream: BinaryIO,
     *,
@@ -103,9 +113,11 @@ def read_request(
         bound = envelope.limits.max_stdin_bytes
         if max_stdin_bytes is not None:
             bound = min(bound, max_stdin_bytes)
+        stdin = read_application_stdin(stream, bound)
+    elif isinstance(envelope, FsWriteEnvelope):
+        stdin = read_exact_application_body(stream, envelope.content_length)
     else:
-        bound = 0
-    stdin = read_application_stdin(stream, bound)
+        stdin = read_application_stdin(stream, 0)
     return envelope, stdin
 
 
