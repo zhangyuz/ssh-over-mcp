@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 from ssh_over_mcp.host_agent.filesystem import (
-    MAX_FS_READ_BYTES,
     FilesystemAccessError,
+    MAX_FS_READ_BYTES,
     read_file,
     stat_path,
 )
