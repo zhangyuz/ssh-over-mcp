@@ -30,10 +30,10 @@ The Docker runner is intended to validate:
 
 It does **not** claim to validate writable cgroup containment.
 
-The concrete cgroup backend will need a separate Linux-only integration runner
-with a deliberately delegated writable cgroup subtree. We do not grant the
-general Docker runner `--privileged`, `CAP_SYS_ADMIN`, host cgroup write
-access, or the Docker daemon socket merely to make those tests pass.
+Writable-cgroup evidence is provided by a separate dedicated Linux live
+runner with a deliberately delegated subtree. The general Docker runner is
+still not granted `--privileged`, `CAP_SYS_ADMIN`, host cgroup write access,
+or the Docker daemon socket.
 
 ## Host requirements
 
@@ -227,9 +227,9 @@ cgroup-v2 discovery.
 
 The container intentionally has no privilege to mutate the host's cgroup tree.
 
-When the concrete cgroup backend is implemented, live writable-cgroup tests
-will use a different Linux-only runner configuration with a narrowly delegated
-subtree.
+Live writable-cgroup tests use the separate dedicated Linux runner described
+below with a narrowly delegated subtree; they are not run in this generic
+Docker container.
 
 ## macOS host behavior
 
@@ -239,10 +239,10 @@ This validates the Linux userspace/kernel behaviors exposed by that VM, which
 is sufficient for the current test suite.
 
 It does not prove how a production Linux host delegates writable cgroups and
-therefore is not accepted as evidence for the future live cgroup backend.
+is therefore not accepted as live containment evidence.
 
-No `--privileged` workaround should be added merely to make that future test
-run on macOS.
+No `--privileged` workaround should be added to make the dedicated live gate
+run inside Docker Desktop.
 
 ## Run validation
 
@@ -366,3 +366,19 @@ The live workflow is manual-only from trusted `main`, requires a full exact
 commit SHA, receives no repository secrets, and records only the exact commit,
 kernel/machine, delegated paths, configured numeric identities, source PID, and
 available controller names needed to audit the proof.
+
+### Accepted live evidence
+
+The current accepted merged-main live proof is:
+
+```text
+commit: 22e298fec42d92a963f093a6a073de622589dfc0
+guest: Ubuntu 26.04 x86_64
+kernel: 7.0.0-28-generic
+manager phase: 2 passed
+production/resource/recursive-kill phase: 4 passed
+```
+
+Post-run verification confirms `/sys/fs/cgroup/ssh-over-mcp-live` is absent and
+the `gha-live` sudo policy contains exactly one command:
+`/usr/local/libexec/ssh-over-mcp-live-cgroup-gate`.

@@ -8,7 +8,7 @@ ssh-over-mcp-host-agent
 
 Normative behavior is defined in [`../../docs/ssh-host-agent.md`](../../docs/ssh-host-agent.md).
 
-## Current Phase 3d2b2b2c2c behavior
+## Current Phase 3d2b2b2c3 behavior
 
 The ForceCommand request path remains **non-executing**.
 
@@ -52,6 +52,20 @@ with a production authenticated `ContainmentManagerClient`:
   timeout, and is closed by child fd sanitation before native exec;
 - the supervisor/runner containment ordering and manager protocol are unchanged.
 
-ForceCommand execution remains disabled. The next increment is Phase
-`3d2b2b2c3`: live delegated-cgroup descendant-kill, resource-limit, and
-self-migration validation.
+Phase `3d2b2b2c3` adds accepted real-kernel validation of the complete
+containment composition on a dedicated Ubuntu 26.04 x86_64 fixture:
+
+- attach-before-exec through the authenticated manager and start barrier;
+- denied root/sibling self-migration;
+- real PID/CPU/memory cgroup enforcement and OOM accounting;
+- recursive manager-backed `cgroup.kill` with sibling survival;
+- bounded cleanup with no delegated-root `cgroup.kill`.
+
+The accepted merged-main evidence is
+`22e298fec42d92a963f093a6a073de622589dfc0` on kernel
+`7.0.0-28-generic` (`2 passed` manager phase, `4 passed`
+production/resource/recursive-kill phase).
+
+ForceCommand execution remains disabled. The next increment is Phase `3d2c`,
+which may wire the already-contained supervised native execution path into the
+ForceCommand CLI.

@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Through Phase 3d2b2b2c2c implemented; ForceCommand execution remains disabled**
+Status: **Through Phase 3d2b2b2c3 implemented; ForceCommand execution remains disabled**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -379,10 +379,27 @@ Implemented:
 - client transport lifecycle is explicit and idempotent; calls after close fail unavailable;
 - no manager protocol operation, supervisor ordering, cgroup filesystem authority, or ForceCommand execution surface was added.
 
+### Phase 3d2b2b2c3 — live delegated-cgroup validation
+
+Implemented:
+
+- dedicated self-hosted Linux live gate separated from the generic Docker runner;
+- operator-owned, root-owned zero-argument live helper with exact helper digest and exclusive sudo policy;
+- exact-commit clean-checkout validation before privileged repository code runs;
+- real unified cgroup-v2 delegated subtree with distinct manager, host-agent, and workload identities;
+- attach-before-exec production composition through the authenticated manager client and start barrier;
+- workload self-migration attempts to the delegated root and a sibling scope fail;
+- finite `pids.max`, `cpu.max`, and `memory.max` enforcement with real kernel accounting;
+- request-scope OOM attribution through `memory.events`;
+- recursive descendant termination through manager-backed `cgroup.kill` with stable PID/start-time identity checks;
+- sibling request survival during recursive kill;
+- bounded success/failure cleanup which removes request/source scopes without calling `cgroup.kill` on the delegated root;
+- exact merged-main evidence at `22e298fec42d92a963f093a6a073de622589dfc0` on Ubuntu 26.04 x86_64, kernel `7.0.0-28-generic`: manager phase `2 passed`, production/resource/recursive-kill phase `4 passed`;
+- ForceCommand execution remains disabled.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2b2b2c3: live delegated-cgroup descendant-kill/resource-limit/self-migration tests;
-- Phase 3d2c: wire supervised native execution into the ForceCommand CLI only after containment is enforced;
+- Phase 3d2c: wire supervised native execution into the ForceCommand CLI now that containment has real-kernel validation;
 - typed filesystem operations;
 - execution-time resource enforcement;
 - optional privileged helper protocol.
