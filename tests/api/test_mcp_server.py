@@ -216,6 +216,28 @@ async def test_extra_profile_is_rejected_before_service_execution() -> None:
     assert service.calls == []
 
 
+
+@pytest.mark.asyncio
+async def test_oversized_policy_explain_is_rejected_before_service_execution() -> None:
+    service = RecordingService()
+    server = build_mcp_server(
+        service=service,
+        principal_provider=StaticTestPrincipalProvider(),
+    )
+
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "policy_explain",
+            {
+                "host": "host-a",
+                "tool": "ssh_exec",
+                "args": ["x" * 4097],
+            },
+        )
+
+    assert result.is_error is True
+    assert service.calls == []
+
 @pytest.mark.asyncio
 async def test_malformed_tool_input_is_rejected_before_service_execution() -> None:
     service = RecordingService()
