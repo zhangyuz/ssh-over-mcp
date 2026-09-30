@@ -128,10 +128,14 @@ def test_fs_mkdir_rejects_application_stdin():
 
 def test_fs_mkdir_rejects_mode_or_recursive_metadata():
     for extra in (
-        b'{"operation":"fs_mkdir","path":"/srv/app/new","profile":"developer",'
-        b'"request_id":"req_fs_mkdir_1234","version":1,"mode":493}',
-        b'{"operation":"fs_mkdir","path":"/srv/app/new","profile":"developer",'
-        b'"request_id":"req_fs_mkdir_1234","version":1,"recursive":true}',
+        (
+            b'{"operation":"fs_mkdir","path":"/srv/app/new","profile":"developer",'
+            b'"request_id":"req_fs_mkdir_1234","version":1,"mode":493}'
+        ),
+        (
+            b'{"operation":"fs_mkdir","path":"/srv/app/new","profile":"developer",'
+            b'"request_id":"req_fs_mkdir_1234","version":1,"recursive":true}'
+        ),
     ):
         with pytest.raises(ProtocolError):
             decode_envelope_metadata(extra)
