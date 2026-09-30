@@ -12,6 +12,8 @@ from .runtime import MCPRuntimeSettings
 from .server import build_mcp_server
 from .service import MCPService
 
+MAX_MCP_HTTP_REQUEST_BYTES = 128 * 1024
+
 
 def build_application(
     settings: MCPRuntimeSettings,
@@ -45,5 +47,6 @@ def build_application(
     return mcp.streamable_http_app(
         stateless_http=True,
         json_response=True,
+        max_request_body_size=MAX_MCP_HTTP_REQUEST_BYTES,
         host="127.0.0.1",
     )
