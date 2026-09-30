@@ -75,7 +75,16 @@ jobs:
           test "$(stat -c '%u' "$config")" = "0"
           test "$(stat -c '%a' "$config")" = "600"
 
-          sudo -n -l "$helper" >/dev/null
+          mapfile -t sudo_specs < <(
+            LC_ALL=C sudo -n -l |
+              awk '/^[[:space:]]+\(/ { sub(/^[[:space:]]+/, ""); print }'
+          )
+          if [ "${#sudo_specs[@]}" -ne 1 ] ||
+             [ "${sudo_specs[0]}" != "(root) NOPASSWD: $helper" ]; then
+            echo "::error::live runner sudo policy must allow only the fixed no-argument helper"
+            printf 'observed sudo spec: %s\n' "${sudo_specs[@]:-<none>}"
+            exit 1
+          fi
 
       - name: Validate exact commit input
         id: commit
