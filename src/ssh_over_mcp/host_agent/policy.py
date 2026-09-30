@@ -19,6 +19,11 @@ from pydantic import (
 from ssh_over_mcp.policy.commands import normalize_executable
 from ssh_over_mcp.ssh.protocol import ExecEnvelope
 
+from .containment import ContainmentLimits
+from .containment_manager_identity import (
+    ContainmentServiceIdentityPlan,
+    LinuxProcessIdentity,
+)
 from .file_identity import sha256_fd
 
 MAX_POLICY_BYTES = 256 * 1024
@@ -108,17 +113,91 @@ class HostChildLimits(BaseModel):
     open_files: int = Field(ge=16, le=65536)
 
 
+class HostLinuxIdentity(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    uid: int = Field(ge=1, le=(1 << 32) - 2)
+    gid: int = Field(ge=1, le=(1 << 32) - 2)
+
+    def to_runtime(self) -> LinuxProcessIdentity:
+        return LinuxProcessIdentity(uid=self.uid, gid=self.gid)
+
+
+class HostContainmentLimits(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    memory_max_bytes: int = Field(
+        ge=1,
+        le=1024 * 1024 * 1024 * 1024,
+    )
+    pids_max: int = Field(ge=1, le=1_000_000)
+    cpu_quota_us: int = Field(ge=1, le=1_000_000_000)
+    cpu_period_us: int = Field(ge=1_000, le=1_000_000)
+
+    def to_runtime(self) -> ContainmentLimits:
+        return ContainmentLimits(
+            memory_max_bytes=self.memory_max_bytes,
+            pids_max=self.pids_max,
+            cpu_quota_us=self.cpu_quota_us,
+            cpu_period_us=self.cpu_period_us,
+        )
+
+
+class HostContainmentPolicy(BaseModel):
+    """Server-owned containment settings required by execution-capable policy v4."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    manager_endpoint: str = Field(min_length=1)
+    manager: HostLinuxIdentity
+    host_agent: HostLinuxIdentity
+    workload: HostLinuxIdentity
+    manager_client_gid: int = Field(ge=1, le=(1 << 32) - 2)
+    limits: HostContainmentLimits
+
+    @field_validator("manager_endpoint")
+    @classmethod
+    def validate_manager_endpoint(cls, value: str) -> str:
+        return _validate_lexical_absolute_path(value, "manager endpoint")
+
+    @model_validator(mode="after")
+    def validate_runtime_contract(self) -> HostContainmentPolicy:
+        self.to_identity_plan()
+        self.limits.to_runtime()
+        return self
+
+    def to_identity_plan(self) -> ContainmentServiceIdentityPlan:
+        return ContainmentServiceIdentityPlan(
+            manager=self.manager.to_runtime(),
+            host_agent=self.host_agent.to_runtime(),
+            workload=self.workload.to_runtime(),
+            manager_client_gid=self.manager_client_gid,
+        )
+
+    def to_containment_limits(self) -> ContainmentLimits:
+        return self.limits.to_runtime()
+
+
 class HostExecutionPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    version: Literal[3] = 3
+    version: Literal[3, 4] = 3
     allowed_profiles: frozenset[str] = Field(min_length=1)
     child_limits: HostChildLimits
+    containment: HostContainmentPolicy | None = None
     commands: dict[str, HostCommandRule] = Field(min_length=1)
     env_allow: frozenset[str] = frozenset()
     max_timeout_seconds: float = Field(gt=0, le=3600)
     max_output_bytes: int = Field(gt=0, le=64 * 1024 * 1024)
     max_stdin_bytes: int = Field(ge=0, le=64 * 1024 * 1024)
+
+    @model_validator(mode="after")
+    def validate_policy_version(self) -> HostExecutionPolicy:
+        if self.version == 3 and self.containment is not None:
+            raise ValueError("policy version 3 must not define containment")
+        if self.version == 4 and self.containment is None:
+            raise ValueError("policy version 4 requires containment")
+        return self
 
     @field_validator("allowed_profiles")
     @classmethod
