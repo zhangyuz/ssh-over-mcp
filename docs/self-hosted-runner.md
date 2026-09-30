@@ -324,18 +324,24 @@ The workflow calls exactly one host-installed helper:
 /usr/local/libexec/ssh-over-mcp-live-cgroup-gate
 ```
 
-It must be root-owned, mode `0555` or `0755`, installed outside the runner
-checkout, and be the only command allowed by the runner's passwordless sudo
-policy. It exposes only two operations:
+Its reviewed source of truth is `ops/live-cgroup/ssh-over-mcp-live-cgroup-gate`.
+The operator installs an exact copy outside the checkout at the path above. The
+workflow pins and verifies that installed file's SHA-256 before privileged
+execution.
+
+The installed helper must be root-owned, mode `0555` or `0755`, and be the only
+passwordless sudo command available to the live runner. It accepts **no
+arguments**. The root-owned mode-`0600` file
+`/etc/ssh-over-mcp/live-cgroup-gate.conf` contains exactly one setting:
 
 ```text
-ssh-over-mcp-live-cgroup-gate check
-ssh-over-mcp-live-cgroup-gate run <workspace> <40-hex-commit>
+EXPECTED_COMMIT=<operator-approved 40-hex commit>
 ```
 
-`check` performs no fixture mutation. `run` must reject non-canonical
-workspaces, commits which do not exactly match checked-out `HEAD`, and paths
-outside the runner's configured work root.
+Workspace, cgroup paths, UID/GID values, and the root-owned Python environment
+are fixed inside the reviewed helper rather than supplied by the GitHub job.
+The helper rejects a dirty checkout or any HEAD which differs from the
+operator-approved commit.
 
 The helper owns all fixture configuration. Before repository test code starts,
 it prepares the disposable users/groups, delegated cgroup-v2 root, direct-child

@@ -28,6 +28,8 @@ jobs:
         run: |
           set -euo pipefail
           helper=/usr/local/libexec/ssh-over-mcp-live-cgroup-gate
+          config=/etc/ssh-over-mcp/live-cgroup-gate.conf
+          helper_sha256=ff971adb31508ec338c3dc257d7b3741552634d05b13909f77ef527c5b6a6fe7
 
           if [ "$(id -u)" -eq 0 ]; then
             echo "::error::GitHub runner process must be non-root"
@@ -51,6 +53,14 @@ jobs:
             grep -qw "$controller" <<<"$controllers"
           done
 
+          for directory in /usr/local/libexec /etc/ssh-over-mcp /opt/ssh-over-mcp-live; do
+            test "$(stat -c '%u' "$directory")" = "0"
+            if [ -w "$directory" ]; then
+              echo "::error::live runner must not be able to modify $directory"
+              exit 1
+            fi
+          done
+
           test -x "$helper"
           helper_uid="$(stat -c '%u' "$helper")"
           helper_mode="$(stat -c '%a' "$helper")"
@@ -59,8 +69,13 @@ jobs:
             555|755) ;;
             *) echo "::error::operator helper must be root-owned 0555/0755"; exit 1 ;;
           esac
+          echo "$helper_sha256  $helper" | sha256sum -c -
 
-          sudo -n "$helper" check
+          test -f "$config"
+          test "$(stat -c '%u' "$config")" = "0"
+          test "$(stat -c '%a' "$config")" = "600"
+
+          sudo -n -l "$helper" >/dev/null
 
       - name: Validate exact commit input
         id: commit
@@ -95,9 +110,7 @@ jobs:
 
       - name: Run operator-owned live cgroup gate
         shell: bash
-        env:
-          EXPECTED_COMMIT: ${{ steps.commit.outputs.sha }}
         run: |
           set -euo pipefail
-          sudo -n /usr/local/libexec/ssh-over-mcp-live-cgroup-gate \
-            run "$GITHUB_WORKSPACE" "$EXPECTED_COMMIT"
+          sudo -n /usr/local/libexec/ssh-over-mcp-live-cgroup-gate
+          test ! -e /sys/fs/cgroup/ssh-over-mcp-live

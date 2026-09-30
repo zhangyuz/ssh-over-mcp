@@ -1,0 +1,233 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import os
+import re
+import signal
+import stat
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+_INSTALL_PATH = Path('/usr/local/libexec/ssh-over-mcp-live-cgroup-gate')
+_CONFIG_DIR = Path('/etc/ssh-over-mcp')
+_CONFIG = _CONFIG_DIR / 'live-cgroup-gate.conf'
+_RUNTIME_DIR = Path('/opt/ssh-over-mcp-live')
+_WORKSPACE = Path('/home/gha-live/actions-runner/_work/ssh-over-mcp/ssh-over-mcp')
+_PYTHON = _RUNTIME_DIR / 'venv/bin/python'
+_CGROUP_ROOT = Path('/sys/fs/cgroup/ssh-over-mcp-live')
+_HOST_SOURCE = _CGROUP_ROOT / 'host-agent-source'
+_MANAGER_UID, _MANAGER_GID = 2101, 3101
+_HOST_UID, _HOST_GID = 2102, 3102
+_WORKLOAD_UID, _WORKLOAD_GID = 2103, 3103
+_MANAGER_CLIENT_GID = 3199
+_REQUIRED_CONTROLLERS = {'cpu', 'memory', 'pids'}
+_TIMEOUT_SECONDS = 300
+
+
+def _require_root_directory(path: Path) -> None:
+    info = path.lstat()
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise RuntimeError(f'{path} must be a non-symlink directory')
+    if info.st_uid != 0 or stat.S_IMODE(info.st_mode) & 0o022:
+        raise RuntimeError(f'{path} must be root-owned and not group/other writable')
+
+
+def _require_root_owned(path: Path, *, mode: int) -> None:
+    info = path.lstat()
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise RuntimeError(f'{path} must be a regular non-symlink file')
+    if info.st_uid != 0 or stat.S_IMODE(info.st_mode) != mode:
+        raise RuntimeError(f'{path} must be root-owned mode {mode:04o}')
+
+
+def _expected_commit() -> str:
+    _require_root_directory(_CONFIG_DIR)
+    _require_root_directory(_RUNTIME_DIR)
+    _require_root_owned(_CONFIG, mode=0o600)
+    lines = [line.strip() for line in _CONFIG.read_text(encoding='ascii').splitlines() if line.strip()]
+    if len(lines) != 1 or not lines[0].startswith('EXPECTED_COMMIT='):
+        raise RuntimeError('operator config must contain exactly EXPECTED_COMMIT=<sha>')
+    value = lines[0].split('=', 1)[1].lower()
+    if re.fullmatch(r'[0-9a-f]{40}', value) is None:
+        raise RuntimeError('operator EXPECTED_COMMIT must be full 40-hex')
+    return value
+
+
+def _git(*args: str) -> str:
+    return subprocess.check_output(
+        ['git', *args], cwd=_WORKSPACE, text=True, timeout=10
+    ).strip()
+
+
+def _verify_workspace(expected: str) -> None:
+    if _WORKSPACE.resolve(strict=True) != _WORKSPACE:
+        raise RuntimeError('live workspace must be canonical and must not traverse symlinks')
+    actual = _git('rev-parse', '--verify', 'HEAD^{commit}').lower()
+    if actual != expected:
+        raise RuntimeError(f'operator commit mismatch: expected {expected}, observed {actual}')
+    if _git('status', '--porcelain=v1', '--untracked-files=all'):
+        raise RuntimeError('live workspace must be clean before privileged gate')
+
+
+def _write(path: Path, value: str) -> None:
+    with path.open('w', encoding='ascii') as handle:
+        handle.write(value)
+
+
+def _prepare_root() -> None:
+    if _CGROUP_ROOT.exists():
+        raise RuntimeError('dedicated cgroup root already exists; operator cleanup required')
+    controllers = set(Path('/sys/fs/cgroup/cgroup.controllers').read_text(encoding='ascii').split())
+    subtree = set(Path('/sys/fs/cgroup/cgroup.subtree_control').read_text(encoding='ascii').split())
+    if not _REQUIRED_CONTROLLERS <= controllers or not _REQUIRED_CONTROLLERS <= subtree:
+        raise RuntimeError('top-level cgroup does not delegate cpu/memory/pids')
+    _CGROUP_ROOT.mkdir()
+    _HOST_SOURCE.mkdir()
+    for path in (
+        _CGROUP_ROOT,
+        _CGROUP_ROOT / 'cgroup.procs',
+        _CGROUP_ROOT / 'cgroup.subtree_control',
+        _HOST_SOURCE,
+        _HOST_SOURCE / 'cgroup.procs',
+    ):
+        os.chown(path, _MANAGER_UID, _MANAGER_GID)
+        if path.stat().st_mode & 0o022:
+            raise RuntimeError(f'delegated write surface is group/other writable: {path}')
+
+
+def _spawn_source() -> int:
+    pid = os.fork()
+    if pid == 0:
+        try:
+            os.setgroups([_MANAGER_CLIENT_GID])
+            os.setresgid(_HOST_GID, _HOST_GID, _HOST_GID)
+            os.setresuid(_HOST_UID, _HOST_UID, _HOST_UID)
+            os.kill(os.getpid(), signal.SIGSTOP)
+            while True:
+                signal.pause()
+        finally:
+            os._exit(126)
+    waited, status = os.waitpid(pid, os.WUNTRACED)
+    if waited != pid or not os.WIFSTOPPED(status):
+        raise RuntimeError('operator source process did not enter stopped state')
+    _write(_HOST_SOURCE / 'cgroup.procs', f'{pid}\n')
+    return pid
+
+
+def _reap_source(pid: int) -> None:
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        os.waitpid(pid, 0)
+    except ChildProcessError:
+        pass
+
+
+def _wait_empty(scope: Path) -> None:
+    deadline = time.monotonic() + 3.0
+    while (scope / 'cgroup.procs').read_text(encoding='ascii').strip():
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f'cgroup did not become empty: {scope}')
+        time.sleep(0.01)
+
+
+def _cleanup_root() -> None:
+    if not _CGROUP_ROOT.exists():
+        return
+    for child in list(_CGROUP_ROOT.iterdir()):
+        if not child.is_dir() or child == _HOST_SOURCE:
+            continue
+        if not child.name.startswith('ssh-over-mcp-'):
+            raise RuntimeError(f'refusing to clean unexpected cgroup child: {child.name}')
+        events = (child / 'cgroup.events').read_text(encoding='ascii')
+        if 'populated 1' in events:
+            _write(child / 'cgroup.kill', '1\n')
+        _wait_empty(child)
+        child.rmdir()
+    if _HOST_SOURCE.exists():
+        source_events = (_HOST_SOURCE / 'cgroup.events').read_text(encoding='ascii')
+        if 'populated 1' in source_events:
+            _write(_HOST_SOURCE / 'cgroup.kill', '1\n')
+        _wait_empty(_HOST_SOURCE)
+        _HOST_SOURCE.rmdir()
+    if (_CGROUP_ROOT / 'cgroup.procs').read_text(encoding='ascii').strip():
+        raise RuntimeError('refusing to remove populated delegated root')
+    enabled = (_CGROUP_ROOT / 'cgroup.subtree_control').read_text(encoding='ascii').split()
+    if enabled:
+        _write(_CGROUP_ROOT / 'cgroup.subtree_control', ' '.join(f'-{name}' for name in enabled) + '\n')
+    _CGROUP_ROOT.rmdir()
+
+
+def _run_live(expected: str, source_pid: int) -> None:
+    python = _PYTHON.resolve(strict=True)
+    if python.stat().st_uid != 0 or python.stat().st_mode & 0o022:
+        raise RuntimeError('operator Python must be root-owned and not group/other writable')
+    launcher = _WORKSPACE / 'scripts/run-live-delegated-cgroup-probe.py'
+    env = {
+        'PATH': '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+        'HOME': '/root',
+        'LC_ALL': 'C.UTF-8',
+        'PYTHONPATH': str(_WORKSPACE / 'src'),
+        'SSH_OVER_MCP_LIVE_EXPECTED_COMMIT': expected,
+        'SSH_OVER_MCP_LIVE_CGROUP_ROOT': str(_CGROUP_ROOT),
+        'SSH_OVER_MCP_LIVE_CGROUP_HOST_SOURCE': str(_HOST_SOURCE),
+        'SSH_OVER_MCP_LIVE_CGROUP_SOURCE_PID': str(source_pid),
+        'SSH_OVER_MCP_LIVE_CGROUP_MANAGER_UID': str(_MANAGER_UID),
+        'SSH_OVER_MCP_LIVE_CGROUP_MANAGER_GID': str(_MANAGER_GID),
+        'SSH_OVER_MCP_LIVE_CGROUP_HOST_UID': str(_HOST_UID),
+        'SSH_OVER_MCP_LIVE_CGROUP_HOST_GID': str(_HOST_GID),
+        'SSH_OVER_MCP_LIVE_CGROUP_WORKLOAD_UID': str(_WORKLOAD_UID),
+        'SSH_OVER_MCP_LIVE_CGROUP_WORKLOAD_GID': str(_WORKLOAD_GID),
+        'SSH_OVER_MCP_LIVE_CGROUP_MANAGER_CLIENT_GID': str(_MANAGER_CLIENT_GID),
+    }
+    subprocess.run(
+        [str(python), str(launcher)],
+        cwd=_WORKSPACE,
+        env=env,
+        check=True,
+        timeout=_TIMEOUT_SECONDS,
+    )
+
+
+def main() -> int:
+    if len(sys.argv) != 1:
+        print('operator live gate accepts no arguments', file=sys.stderr)
+        return 2
+    if Path(sys.argv[0]).resolve(strict=True) != _INSTALL_PATH:
+        print('operator live gate must run from its fixed install path', file=sys.stderr)
+        return 2
+    _require_root_directory(_INSTALL_PATH.parent)
+    if os.geteuid() != 0:
+        print('operator live gate must run as root', file=sys.stderr)
+        return 2
+    expected = _expected_commit()
+    _verify_workspace(expected)
+    source_pid: int | None = None
+    failure: BaseException | None = None
+    try:
+        _prepare_root()
+        source_pid = _spawn_source()
+        _run_live(expected, source_pid)
+    except BaseException as exc:
+        failure = exc
+    finally:
+        if source_pid is not None:
+            _reap_source(source_pid)
+        try:
+            _cleanup_root()
+        except BaseException as cleanup_exc:
+            if failure is None:
+                failure = cleanup_exc
+            else:
+                print(f'live-gate cleanup error: {cleanup_exc!r}', file=sys.stderr)
+    if failure is not None:
+        raise failure
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

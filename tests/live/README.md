@@ -194,14 +194,17 @@ operator helper installed outside the checkout is the only passwordless sudo
 command.
 
 The workflow input is a full 40-hex trusted commit. The checkout must exactly
-match that commit before the operator helper may run.
-
-The operator supplies the existing live fixture variables plus:
+match that commit before the operator helper may run. Independently, the
+root-owned operator config pins the same commit as:
 
 ```text
-SSH_OVER_MCP_LIVE_EXPECTED_COMMIT=<exact 40-hex commit>
-SSH_OVER_MCP_LIVE_CGROUP_SOURCE_PID=<stopped operator-owned source pid>
+EXPECTED_COMMIT=<operator-approved 40-hex commit>
 ```
+
+The helper accepts no arguments and fixes the workspace, delegated paths, and
+numeric identities in its reviewed source. It creates the disposable delegated
+root, direct-child source cgroup, and stopped host-agent source process outside
+checked-out code, then passes only those operator-owned values to the launcher.
 
 `scripts/run-live-delegated-cgroup-probe.py` validates the exact clean checkout
 and emits one bounded JSON metadata record. It then runs two fixed phases:
