@@ -771,9 +771,13 @@ every parent component with
 to that pinned parent and is never resolved through a symlink.
 
 The initial stat primitive accepts only regular files and directories. The
-initial read primitive accepts only regular files, opens them nonblocking to
-avoid FIFO hangs, enforces a caller bound plus a 64 MiB hard ceiling, and
-revalidates device/inode/change metadata and size before returning bytes.
+initial read primitive first pins the final object with `O_PATH|O_NOFOLLOW` and
+rejects every non-regular inode before any data-capable open. A verified regular
+inode is then reopened through `/proc/self/fd/<pinned-fd>` with a nonblocking
+read descriptor and its identity is checked again. This avoids device/FIFO open
+side effects and final-path replacement races. Reads enforce a caller bound plus
+a 64 MiB hard ceiling and revalidate device/inode/change metadata and size
+before returning bytes.
 
 This does not create a new authorization principal. A later Phase 3e slice must
 define filesystem-specific host-local allow/deny rules and the typed remote
