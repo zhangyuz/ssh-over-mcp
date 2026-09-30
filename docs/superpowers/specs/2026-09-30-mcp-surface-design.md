@@ -241,12 +241,10 @@ class so callers cannot distinguish “does not exist” from “exists but is h
 
 ### 9.1 `hosts_list`
 
-The first implementation returns only safe server-owned metadata:
-
-- logical host alias;
-- safe labels;
-- an optional descriptive list of MCP capabilities which the server is willing
-  to advertise.
+The first implementation returns only the logical host alias. Existing
+inventory labels are operator metadata but are not classified as public, so the
+first slice returns an empty label list rather than assuming they are safe. It
+also returns an empty capability list.
 
 Discovery MUST NOT expose:
 
@@ -257,17 +255,18 @@ Discovery MUST NOT expose:
 - role allowlists;
 - policy rule identifiers.
 
-Capability advertisement is informational only and is never an authorization
-decision. In the first Phase 4 slice the capability list is empty. A later slice
-may populate it only from separately reviewed server-owned capability metadata;
-it MUST NOT guess capability from partial policy-rule inspection.
+Label and capability advertisement are informational only and are never
+authorization decisions. A later slice may populate either only from separately
+reviewed server-owned public metadata; it MUST NOT expose raw inventory labels
+or guess capability from partial policy-rule inspection.
 
 ### 9.2 `host_info`
 
 The initial `host_info` implementation is static and non-networking.
 
-It returns the same safe identity/label information for one visible alias plus
-other explicitly safe server metadata introduced by later reviewed slices.
+It returns the same alias-only public identity for one visible host. Labels or
+other metadata may be added only after they have an explicit public-data
+contract.
 
 It does not open SSH merely to provide “runtime information.” A future runtime
 probe requires its own bounded design and policy decision.
