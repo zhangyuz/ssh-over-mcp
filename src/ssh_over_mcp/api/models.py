@@ -25,14 +25,14 @@ class HostSummary(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     alias: str = Field(min_length=1)
-    labels: tuple[str, ...] = ()
-    capabilities: tuple[str, ...] = ()
+    labels: tuple[str, ...] = Field(default_factory=tuple)
+    capabilities: tuple[str, ...] = Field(default_factory=tuple)
 
 
 class HostsListResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    hosts: tuple[HostSummary, ...] = ()
+    hosts: tuple[HostSummary, ...] = Field(default_factory=tuple)
 
 
 class PolicyExplainRequest(BaseModel):
@@ -41,7 +41,7 @@ class PolicyExplainRequest(BaseModel):
     host: str = Field(min_length=1)
     tool: ExplainableTool
     executable: str | None = None
-    args: tuple[str, ...] = ()
+    args: tuple[str, ...] = Field(default_factory=tuple)
     cwd: str | None = None
     path: str | None = None
     env: dict[str, str] = Field(default_factory=dict)
