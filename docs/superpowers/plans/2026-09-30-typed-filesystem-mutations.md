@@ -98,7 +98,8 @@ Requirements:
 - bounded exact body length;
 - fsync before publish;
 - create-if-absent publish through an fd-bound Linux mechanism;
-- fsync parent before success;
+- fsync parent after publication;
+- post-publication parent-fsync failure reported as a distinct committed/durability-uncertain outcome with no blind cleanup;
 - existing destination never replaced;
 - no named-temp fallback;
 - unsupported kernel/filesystem/proc-fd publication fails closed.
@@ -162,7 +163,8 @@ Prove:
 - symlink/path escapes fail;
 - destination collision never replaces an entry;
 - unsupported `O_TMPFILE` publication fails closed;
-- failed write does not publish a final pathname;
+- every pre-publication failure leaves no final pathname;
+- post-publication parent-fsync failure remains visibly committed and is never blind-cleaned;
 - published data is exact and fsynced before visibility;
 - policy denial touches no object;
 - request body mismatch touches no final object.

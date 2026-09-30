@@ -496,7 +496,19 @@ Create-only mutation progress:
   mode/owner/recursive metadata, invokes only the create-only directory primitive,
   and returns status 0 with empty stdout on success;
 - policy denial and primitive failure remain generic on the SSH-visible channel;
-- `fs_mkdir` is still below the MCP tool layer.
+- `fs_mkdir` is still below the MCP tool layer;
+- Task 4 implemented internally: create-only regular-file publication through
+  a pinned parent and unnamed `O_TMPFILE` inode, with fixed maximum mode
+  `0600`, strict 64 MiB hard bound/exact length, file fsync before publication,
+  create-if-absent publication, and parent-directory fsync afterward;
+- every pre-publication failure leaves no final pathname, existing destinations
+  are never replaced, and there is no named-temp fallback;
+- publication is the namespace commit point. A later parent-directory fsync
+  failure is reported as a distinct committed/durability-uncertain outcome and
+  never triggers blind pathname cleanup;
+- this regular-file primitive remains disconnected from host policy and SMCP
+  until write-create authorization and wire semantics explicitly handle that
+  committed outcome.
 
 ### Remaining Phase 3 work
 

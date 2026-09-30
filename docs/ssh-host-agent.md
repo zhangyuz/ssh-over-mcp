@@ -824,6 +824,21 @@ rejects any trailing body before mutation, then invokes only
 denial and primitive failure are normalized to the existing generic filesystem
 diagnostics. This is still below the MCP tool layer.
 
+Create-only regular-file mutation now has an internal primitive but no host
+policy or SMCP operation yet. The primitive pins the destination parent, creates
+an unnamed inode with `O_TMPFILE`, writes an exact bounded byte body, fsyncs and
+verifies the unnamed regular inode, then publishes it only if the final name is
+absent. Existing destinations are never replaced and there is no named-temp
+fallback.
+
+The publish link is the namespace commit point. Any failure before that point
+leaves no final pathname. If the parent-directory fsync fails after publication,
+the primitive reports a distinct committed-but-durability-uncertain error and
+does not unlink the final pathname: blind cleanup could otherwise delete a
+replacement installed by another authorized namespace writer. A future
+`fs_write` wire slice must explicitly represent or otherwise safely handle
+that committed outcome before remote enablement.
+
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 
 The central policy may be more expressive, but the host-local policy should preserve critical invariants if the central layer is bypassed.
