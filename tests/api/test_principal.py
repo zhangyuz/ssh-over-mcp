@@ -89,3 +89,64 @@ def test_phase4_api_models_reject_extra_fields(
 ) -> None:
     with pytest.raises(ValidationError):
         model_type.model_validate(kwargs)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "host": "host-a",
+            "tool": "ssh_exec",
+            "executable": "/" + ("x" * 4096),
+        },
+        {
+            "host": "host-a",
+            "tool": "ssh_exec",
+            "args": tuple("x" for _ in range(257)),
+        },
+        {
+            "host": "host-a",
+            "tool": "ssh_exec",
+            "args": ("x" * 4097,),
+        },
+        {
+            "host": "host-a",
+            "tool": "fs_stat",
+            "path": "/" + ("x" * 4096),
+        },
+        {
+            "host": "host-a",
+            "tool": "ssh_exec",
+            "env": {f"K{index}": "v" for index in range(129)},
+        },
+        {
+            "host": "host-a",
+            "tool": "ssh_exec",
+            "env": {"K" * 129: "v"},
+        },
+        {
+            "host": "host-a",
+            "tool": "ssh_exec",
+            "env": {"SAFE": "v" * 8193},
+        },
+        {
+            "host": "host-a",
+            "tool": "ssh_exec",
+            "privilege": "p" * 65,
+        },
+    ],
+)
+def test_policy_explain_request_rejects_oversized_fields(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        PolicyExplainRequest.model_validate(payload)
+
+
+def test_policy_explain_request_rejects_aggregate_metadata_over_64_kib() -> None:
+    with pytest.raises(ValidationError, match="metadata exceeds maximum"):
+        PolicyExplainRequest(
+            host="host-a",
+            tool="ssh_exec",
+            args=tuple("x" * 4000 for _ in range(17)),
+        )
