@@ -191,8 +191,10 @@ operation-level concern, not a process-readiness requirement.
 Health/readiness endpoints are ordinary HTTP endpoints and MUST NOT appear in
 the MCP tool registry.
 
-The server should use stateless MCP request handling where supported by the
-chosen stable SDK path. Session state MUST NOT become an authorization source.
+The server MUST use the SDK's stateless Streamable HTTP mode when that mode is
+available in the selected stable SDK version. If the SDK requires protocol
+session state, that state is transport-only and MUST NOT become an
+authorization source.
 
 ## 7. Configuration and secrets
 
@@ -256,8 +258,9 @@ Discovery MUST NOT expose:
 - policy rule identifiers.
 
 Capability advertisement is informational only and is never an authorization
-decision. If a capability cannot be derived without exposing policy structure or
-overstating access, it is omitted rather than guessed.
+decision. In the first Phase 4 slice the capability list is empty. A later slice
+may populate it only from separately reviewed server-owned capability metadata;
+it MUST NOT guess capability from partial policy-rule inspection.
 
 ### 9.2 `host_info`
 
@@ -285,6 +288,14 @@ Inputs may describe the proposed operation:
 - requested privilege where supported.
 
 The profile is always injected from `PrincipalContext`.
+
+Before policy evaluation, the service applies the same host-visibility check as
+`host_info`. Unknown and role-hidden hosts return the same not-visible error,
+so `policy_explain` cannot be used as a hidden-inventory oracle.
+
+The requested tool name is validated against the server's recognized MCP/domain
+tool identifiers. Arbitrary tool strings are rejected as invalid input rather
+than passed through to policy matching.
 
 The tool returns a sanitized explanation containing only values safe for the
 caller, such as:
@@ -440,7 +451,8 @@ Before the first slice may merge, tests must prove:
 
 - tool schemas do not contain a profile override;
 - static principal is injected server-side;
-- unknown static profile fails startup/readiness closed;
+- unknown static profile makes server construction fail closed and can never
+  produce a ready server;
 - changing request metadata cannot change the principal.
 
 ### Discovery
