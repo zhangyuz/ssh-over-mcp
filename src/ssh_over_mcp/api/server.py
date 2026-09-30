@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
@@ -21,12 +23,47 @@ _READ_ONLY_ANNOTATIONS = ToolAnnotations(
 )
 
 
+class StrictMCPServer(MCPServer):
+    """MCPServer which fails closed on undeclared top-level tool arguments."""
+
+    async def list_tools(self):
+        tools = await super().list_tools()
+        for tool in tools:
+            tool.input_schema = {
+                **tool.input_schema,
+                "additionalProperties": False,
+            }
+        return tools
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        context=None,
+    ):
+        tool = next(
+            (
+                candidate
+                for candidate in await self.list_tools()
+                if candidate.name == name
+            ),
+            None,
+        )
+        if tool is not None:
+            allowed = set(
+                tool.input_schema.get("properties", {})
+            )
+            if set(arguments).difference(allowed):
+                raise ToolError("unexpected tool argument")
+        return await super().call_tool(name, arguments, context)
+
+
 def build_mcp_server(
     *,
     service: MCPService,
     principal_provider: PrincipalProvider,
 ) -> MCPServer:
-    mcp = MCPServer("ssh-over-mcp")
+    mcp = StrictMCPServer("ssh-over-mcp")
 
     @mcp.tool(
         annotations=_READ_ONLY_ANNOTATIONS,
