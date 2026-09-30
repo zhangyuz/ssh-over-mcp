@@ -230,14 +230,14 @@ def main() -> int:
         _prepare_root()
         source_pid = _spawn_source()
         _run_live(expected, source_pid)
-    except BaseException as exc:
+    except BaseException as exc:  # noqa: BLE001 - cleanup must run on any exit
         failure = exc
     finally:
         if source_pid is not None:
             _reap_source(source_pid)
         try:
             _cleanup_root()
-        except BaseException as cleanup_exc:
+        except BaseException as cleanup_exc:  # noqa: BLE001 - preserve original failure
             if failure is None:
                 failure = cleanup_exc
             else:

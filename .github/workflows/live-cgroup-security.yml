@@ -29,7 +29,7 @@ jobs:
           set -euo pipefail
           helper=/usr/local/libexec/ssh-over-mcp-live-cgroup-gate
           config=/etc/ssh-over-mcp/live-cgroup-gate.conf
-          helper_sha256=4e7a590fe633d65e8e056275d55c2235bdf6fd1cb4facd57c62f485e38d77deb
+          helper_sha256=c0a964f5d2cd31b2b65fb087915c09f7e11267a1c8e1f935a9548d0101188e74
 
           if [ "$(id -u)" -eq 0 ]; then
             echo "::error::GitHub runner process must be non-root"
