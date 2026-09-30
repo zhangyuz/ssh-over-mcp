@@ -189,6 +189,7 @@ def _run_live(expected: str, source_pid: int) -> None:
         'PATH': '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
         'HOME': '/root',
         'LC_ALL': 'C.UTF-8',
+        'PYTHONDONTWRITEBYTECODE': '1',
         'PYTHONPATH': str(_WORKSPACE / 'src'),
         'SSH_OVER_MCP_LIVE_EXPECTED_COMMIT': expected,
         'SSH_OVER_MCP_LIVE_CGROUP_ROOT': str(_CGROUP_ROOT),
