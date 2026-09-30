@@ -26,6 +26,7 @@ from .containment_manager_identity import (
 )
 from .file_identity import sha256_fd
 from .filesystem import MAX_FS_PATH_BYTES, MAX_FS_READ_BYTES
+from .filesystem_mutation import MAX_FS_WRITE_BYTES
 
 MAX_POLICY_BYTES = 256 * 1024
 DEFAULT_POLICY_PATH = Path("/etc/ssh-over-mcp/host-policy.yaml")
@@ -187,6 +188,7 @@ class HostFilesystemProfilePolicy(BaseModel):
     stat_roots: tuple[str, ...] = ()
     read_roots: tuple[str, ...] = ()
     mkdir_roots: tuple[str, ...] = ()
+    write_create_roots: tuple[str, ...] = ()
     max_read_bytes: int | None = Field(
         default=None,
         strict=True,
@@ -194,7 +196,19 @@ class HostFilesystemProfilePolicy(BaseModel):
         le=MAX_FS_READ_BYTES,
     )
 
-    @field_validator("stat_roots", "read_roots", "mkdir_roots")
+    max_write_bytes: int | None = Field(
+        default=None,
+        strict=True,
+        ge=0,
+        le=MAX_FS_WRITE_BYTES,
+    )
+
+    @field_validator(
+        "stat_roots",
+        "read_roots",
+        "mkdir_roots",
+        "write_create_roots",
+    )
     @classmethod
     def validate_roots(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         validated = tuple(
@@ -207,12 +221,25 @@ class HostFilesystemProfilePolicy(BaseModel):
 
     @model_validator(mode="after")
     def validate_read_contract(self) -> HostFilesystemProfilePolicy:
-        if not self.stat_roots and not self.read_roots and not self.mkdir_roots:
+        if (
+            not self.stat_roots
+            and not self.read_roots
+            and not self.mkdir_roots
+            and not self.write_create_roots
+        ):
             raise ValueError("filesystem policy must allow an operation")
         if self.read_roots and self.max_read_bytes is None:
             raise ValueError("filesystem read roots require max_read_bytes")
         if not self.read_roots and self.max_read_bytes is not None:
             raise ValueError("max_read_bytes requires filesystem read roots")
+        if self.write_create_roots and self.max_write_bytes is None:
+            raise ValueError(
+                "filesystem write-create roots require max_write_bytes"
+            )
+        if not self.write_create_roots and self.max_write_bytes is not None:
+            raise ValueError(
+                "max_write_bytes requires filesystem write-create roots"
+            )
         return self
 
 
@@ -306,6 +333,7 @@ class HostFilesystemAuthorizationResult(BaseModel):
     allowed: bool
     reason: str
     effective_max_read_bytes: int | None = None
+    effective_max_write_bytes: int | None = None
 
 
 class _UniqueKeyLoader(yaml.SafeLoader):
@@ -420,6 +448,51 @@ def authorize_filesystem_mkdir(
     return HostFilesystemAuthorizationResult(
         allowed=True,
         reason="host policy allowed filesystem mkdir",
+    )
+
+
+def authorize_filesystem_write_create(
+    policy: HostExecutionPolicy,
+    *,
+    profile: str,
+    path: str,
+    content_length: int,
+) -> HostFilesystemAuthorizationResult:
+    """Authorize a lexical create-only file write without filesystem I/O."""
+
+    if profile not in policy.allowed_profiles:
+        return _filesystem_deny("profile is not allowed by host policy")
+    rules = policy.filesystem.get(profile)
+    if (
+        rules is None
+        or not rules.write_create_roots
+        or rules.max_write_bytes is None
+    ):
+        return _filesystem_deny(
+            "profile has no filesystem write-create permission in host policy"
+        )
+    if (
+        isinstance(content_length, bool)
+        or not isinstance(content_length, int)
+        or content_length < 0
+    ):
+        return _filesystem_deny("filesystem write length is invalid")
+    if content_length > rules.max_write_bytes:
+        return _filesystem_deny(
+            "filesystem write length exceeds host-policy ceiling"
+        )
+    try:
+        canonical = _validate_filesystem_path(path, "filesystem path")
+    except (TypeError, ValueError):
+        return _filesystem_deny("filesystem path is not canonical")
+    if not _filesystem_path_allowed(canonical, rules.write_create_roots):
+        return _filesystem_deny(
+            "filesystem write-create path is outside allowed roots"
+        )
+    return HostFilesystemAuthorizationResult(
+        allowed=True,
+        reason="host policy allowed filesystem write-create",
+        effective_max_write_bytes=content_length,
     )
 
 

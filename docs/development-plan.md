@@ -506,9 +506,15 @@ Create-only mutation progress:
 - publication is the namespace commit point. A later parent-directory fsync
   failure is reported as a distinct committed/durability-uncertain outcome and
   never triggers blind pathname cleanup;
-- this regular-file primitive remains disconnected from host policy and SMCP
-  until write-create authorization and wire semantics explicitly handle that
-  committed outcome.
+- this regular-file primitive remains disconnected from SMCP until wire
+  semantics explicitly handle the committed outcome;
+- Task 5 implemented: filesystem host policy now has profile-scoped
+  `write_create_roots` plus strict server-owned `max_write_bytes` bounded by
+  the primitive 64 MiB hard ceiling;
+- write-create authorization is lexical-only, accepts exact non-negative
+  content lengths including zero, rejects sibling-prefix/root escapes, and
+  performs no filesystem I/O or object creation;
+- no `fs_write` SMCP operation or MCP tool is enabled by Task 5.
 
 ### Remaining Phase 3 work
 

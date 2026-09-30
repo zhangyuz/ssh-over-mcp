@@ -839,6 +839,15 @@ replacement installed by another authorized namespace writer. A future
 `fs_write` wire slice must explicitly represent or otherwise safely handle
 that committed outcome before remote enablement.
 
+Host-local write-create authorization is now defined but remains disconnected
+from SMCP. Each already-allowed profile may receive independent canonical
+`write_create_roots` and a strict server-owned `max_write_bytes` ceiling no
+larger than the primitive 64 MiB hard bound. Authorization accepts exact
+non-negative declared lengths, including zero, and performs lexical root and
+limit checks only; it does not resolve, open, create, or remove caller-selected
+filesystem objects. The create-only primitive remains the object/publication
+boundary after authorization.
+
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 
 The central policy may be more expressive, but the host-local policy should preserve critical invariants if the central layer is bypassed.
