@@ -3,9 +3,11 @@ import pytest
 from ssh_over_mcp.ssh.protocol import (
     ExecEnvelope,
     ExecutionLimits,
+    FsMkdirEnvelope,
     FsReadEnvelope,
     FsStatEnvelope,
     ProtocolError,
+    decode_envelope_metadata,
     decode_request,
     encode_request,
 )
@@ -98,3 +100,42 @@ def test_fs_read_bound_rejects_boolean():
             path="/srv/app/data.bin",
             max_bytes=True,
         )
+
+
+def test_fs_mkdir_frame_roundtrip_is_metadata_only():
+    expected = FsMkdirEnvelope(
+        request_id="req_fs_mkdir_1234",
+        profile="developer",
+        path="/srv/app/new-directory",
+    )
+
+    actual, stdin = decode_request(encode_request(expected))
+
+    assert actual == expected
+    assert stdin == b""
+
+
+def test_fs_mkdir_rejects_application_stdin():
+    envelope = FsMkdirEnvelope(
+        request_id="req_fs_mkdir_1234",
+        profile="developer",
+        path="/srv/app/new-directory",
+    )
+
+    with pytest.raises(ProtocolError, match="do not accept stdin"):
+        encode_request(envelope, b"x")
+
+
+def test_fs_mkdir_rejects_mode_or_recursive_metadata():
+    for extra in (
+        (
+            b'{"operation":"fs_mkdir","path":"/srv/app/new","profile":"developer",'
+            b'"request_id":"req_fs_mkdir_1234","version":1,"mode":493}'
+        ),
+        (
+            b'{"operation":"fs_mkdir","path":"/srv/app/new","profile":"developer",'
+            b'"request_id":"req_fs_mkdir_1234","version":1,"recursive":true}'
+        ),
+    ):
+        with pytest.raises(ProtocolError):
+            decode_envelope_metadata(extra)

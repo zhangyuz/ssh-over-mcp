@@ -54,8 +54,13 @@ class FsReadEnvelope(_RequestEnvelopeBase):
     )
 
 
+class FsMkdirEnvelope(_RequestEnvelopeBase):
+    operation: Literal["fs_mkdir"] = "fs_mkdir"
+    path: str = Field(min_length=1)
+
+
 RequestEnvelope = Annotated[
-    ExecEnvelope | FsStatEnvelope | FsReadEnvelope,
+    ExecEnvelope | FsStatEnvelope | FsReadEnvelope | FsMkdirEnvelope,
     Field(discriminator="operation"),
 ]
 _REQUEST_ADAPTER = TypeAdapter(RequestEnvelope)
