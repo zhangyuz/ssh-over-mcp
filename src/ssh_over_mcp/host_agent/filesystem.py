@@ -5,7 +5,7 @@ import stat
 from dataclasses import dataclass
 from typing import Literal
 
-
+MAX_FS_PATH_BYTES = 4096
 MAX_FS_READ_BYTES = 64 * 1024 * 1024
 _READ_CHUNK_BYTES = 64 * 1024
 
@@ -48,6 +48,8 @@ def _canonical_absolute_path(path: str) -> tuple[str, ...]:
         raise FilesystemAccessError("filesystem path must be a non-empty string")
     if "\x00" in path:
         raise FilesystemAccessError("filesystem path contains NUL")
+    if len(os.fsencode(path)) >= MAX_FS_PATH_BYTES:
+        raise FilesystemAccessError("filesystem path exceeds Linux pathname limit")
     if not path.startswith("/") or path.startswith("//"):
         raise FilesystemAccessError("filesystem path must be absolute and canonical")
 
