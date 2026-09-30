@@ -10,6 +10,8 @@ from ssh_over_mcp.ssh.protocol import (
     MAX_METADATA_BYTES,
     REMOTE_PROTOCOL_COMMAND,
     ExecEnvelope,
+    RequestEnvelope,
+    decode_envelope_metadata,
 )
 
 
@@ -56,7 +58,7 @@ def _read_bounded_to_eof(stream: BinaryIO, limit: int) -> bytes:
     return b"".join(chunks)
 
 
-def read_envelope(stream: BinaryIO) -> ExecEnvelope:
+def read_envelope(stream: BinaryIO) -> RequestEnvelope:
     """Read only the fixed header and bounded JSON metadata."""
 
     magic = _read_exact(stream, len(MAGIC))
@@ -70,7 +72,7 @@ def read_envelope(stream: BinaryIO) -> ExecEnvelope:
 
     metadata = _read_exact(stream, metadata_length)
     try:
-        return ExecEnvelope.model_validate_json(metadata)
+        return decode_envelope_metadata(metadata)
     except Exception as exc:
         raise HostAgentProtocolError("invalid request metadata") from exc
 
@@ -88,7 +90,7 @@ def read_request(
     stream: BinaryIO,
     *,
     max_stdin_bytes: int | None = None,
-) -> tuple[ExecEnvelope, bytes]:
+) -> tuple[RequestEnvelope, bytes]:
     """Convenience wrapper for a full request.
 
     The production host-agent CLI uses the two-stage API so host-local policy
@@ -97,14 +99,17 @@ def read_request(
     """
 
     envelope = read_envelope(stream)
-    bound = envelope.limits.max_stdin_bytes
-    if max_stdin_bytes is not None:
-        bound = min(bound, max_stdin_bytes)
+    if isinstance(envelope, ExecEnvelope):
+        bound = envelope.limits.max_stdin_bytes
+        if max_stdin_bytes is not None:
+            bound = min(bound, max_stdin_bytes)
+    else:
+        bound = 0
     stdin = read_application_stdin(stream, bound)
     return envelope, stdin
 
 
-def parse_request_bytes(payload: bytes) -> tuple[ExecEnvelope, bytes]:
+def parse_request_bytes(payload: bytes) -> tuple[RequestEnvelope, bytes]:
     """Test/helper wrapper around the streaming parser."""
 
     return read_request(io.BytesIO(payload))
