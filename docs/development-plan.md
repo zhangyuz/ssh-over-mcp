@@ -414,10 +414,16 @@ Implemented first wiring slice:
   deadline so a peer which stops reading cannot indefinitely block the host
   agent.
 
+Accepted real-kernel evidence at
+`2857925800649f2ea89d9b123a7b2b19298a8dd6` on Ubuntu 26.04 x86_64,
+kernel `7.0.0-28-generic`: manager phase `2 passed`; production/root phase
+`5 passed`, including the real ForceCommand → authenticated manager →
+contained workload path. The delegated root is absent after completion.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2c follow-up: real end-to-end ForceCommand/live-manager proof and
-  final execution-response semantics review;
+- Phase 3d2c follow-up: final execution-response semantics review and phase
+  closure;
 - typed filesystem operations;
 - execution-time resource enforcement;
 - optional privileged helper protocol.
