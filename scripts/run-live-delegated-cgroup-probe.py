@@ -33,7 +33,7 @@ _REQUIRED_ENV = (
 
 def _git_output(repository: Path, *args: str) -> str:
     return subprocess.check_output(
-        ["git", *args],
+        ["git", "-c", f"safe.directory={repository}", *args],
         cwd=repository,
         text=True,
         timeout=10,
