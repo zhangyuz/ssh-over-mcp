@@ -732,6 +732,15 @@ closed at the bounded deadline instead of blocking the host-agent indefinitely.
 A signal-terminated workload maps to conventional SSH exit status
 `128 + signal`; ordinary child exit statuses are forwarded directly.
 
+SMCP v1 does not define a response-metadata frame. The control-plane
+`SSHExecutionResult.timed_out` and `truncated` fields therefore report only
+control-plane SSH collection guards. If the host-agent supervisor enforces its
+own timeout or output ceiling first, the control plane receives only the
+already-bounded stdout/stderr plus the resulting SSH exit semantics. It MUST
+not infer a remote timeout or truncation flag from a status such as 137 or 143,
+because a workload may legitimately produce the same status. A future response
+protocol revision may add authenticated structured outcome metadata.
+
 Request envelopes still cannot choose the manager endpoint, service identities,
 workload identity, or cgroup resource limits. The manager protocol, cgroup
 filesystem authority, attach-before-exec ordering, and workload transition are
