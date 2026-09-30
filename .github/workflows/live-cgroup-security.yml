@@ -1,0 +1,125 @@
+name: Live delegated cgroup security
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Full 40-hex trusted commit to validate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ssh-over-mcp-live-cgroup-security
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Live delegated cgroup v2 proof
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, x64, ssh-over-mcp-cgroup-live]
+    timeout-minutes: 15
+
+    steps:
+      - name: Verify isolated live runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          helper=/usr/local/libexec/ssh-over-mcp-live-cgroup-gate
+          config=/etc/ssh-over-mcp/live-cgroup-gate.conf
+          helper_sha256=c0a964f5d2cd31b2b65fb087915c09f7e11267a1c8e1f935a9548d0101188e74
+
+          if [ "$(id -u)" -eq 0 ]; then
+            echo "::error::GitHub runner process must be non-root"
+            exit 1
+          fi
+
+          cap_eff="$(awk '/^CapEff:/ { print $2 }' /proc/self/status)"
+          if [ "$cap_eff" != "0000000000000000" ]; then
+            echo "::error::GitHub runner process must have zero effective capabilities"
+            exit 1
+          fi
+
+          if [ -S /var/run/docker.sock ]; then
+            echo "::error::Docker socket must not be exposed to the live job"
+            exit 1
+          fi
+
+          test -r /sys/fs/cgroup/cgroup.controllers
+          controllers="$(cat /sys/fs/cgroup/cgroup.controllers)"
+          for controller in cpu memory pids; do
+            grep -qw "$controller" <<<"$controllers"
+          done
+
+          for directory in /usr/local/libexec /etc/ssh-over-mcp /opt/ssh-over-mcp-live; do
+            test "$(stat -c '%u' "$directory")" = "0"
+            if [ -w "$directory" ]; then
+              echo "::error::live runner must not be able to modify $directory"
+              exit 1
+            fi
+          done
+
+          test -x "$helper"
+          helper_uid="$(stat -c '%u' "$helper")"
+          helper_mode="$(stat -c '%a' "$helper")"
+          test "$helper_uid" = "0"
+          case "$helper_mode" in
+            555|755) ;;
+            *) echo "::error::operator helper must be root-owned 0555/0755"; exit 1 ;;
+          esac
+          echo "$helper_sha256  $helper" | sha256sum -c -
+
+          test -f "$config"
+          test "$(stat -c '%u' "$config")" = "0"
+          test "$(stat -c '%a' "$config")" = "600"
+
+          mapfile -t sudo_specs < <(
+            LC_ALL=C sudo -n -l |
+              awk '/^[[:space:]]+\(/ { sub(/^[[:space:]]+/, ""); print }'
+          )
+          if [ "${#sudo_specs[@]}" -ne 1 ] ||
+             [ "${sudo_specs[0]}" != "(root) NOPASSWD: $helper" ]; then
+            echo "::error::live runner sudo policy must allow only the fixed no-argument helper"
+            printf 'observed sudo spec: %s\n' "${sudo_specs[@]:-<none>}"
+            exit 1
+          fi
+
+      - name: Validate exact commit input
+        id: commit
+        shell: bash
+        env:
+          REQUESTED_COMMIT: ${{ inputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$REQUESTED_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::commit_sha must be a full 40-hex commit"
+            exit 2
+          fi
+          normalized="$(tr 'A-F' 'a-f' <<<"$REQUESTED_COMMIT")"
+          echo "sha=$normalized" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout exact trusted commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ steps.commit.outputs.sha }}
+          persist-credentials: false
+          clean: true
+          fetch-depth: 0
+
+      - name: Verify exact checkout
+        shell: bash
+        env:
+          EXPECTED_COMMIT: ${{ steps.commit.outputs.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse --verify 'HEAD^{commit}')" = "$EXPECTED_COMMIT"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Run operator-owned live cgroup gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -n /usr/local/libexec/ssh-over-mcp-live-cgroup-gate
+          test ! -e /sys/fs/cgroup/ssh-over-mcp-live

@@ -176,3 +176,48 @@ The test requires the operator-supplied source PID described above. It proves:
 The manager remains non-root with zero inheritable/permitted/effective/ambient
 capabilities. The proof does not require `CAP_KILL` and does not signal the
 operator-owned source PID.
+
+
+## Dedicated workflow gate
+
+Task 8 promotes the live cgroup fixture to a manual dedicated self-hosted gate.
+The accepted runner label is:
+
+```text
+[self-hosted, linux, x64, ssh-over-mcp-cgroup-live]
+```
+
+The GitHub runner process is non-root with zero effective capabilities and no
+Docker socket. It does not own the delegated subtree and does not receive
+fixture paths or numeric identities from workflow inputs. One root-owned
+operator helper installed outside the checkout is the only passwordless sudo
+command.
+
+The workflow input is a full 40-hex trusted commit. The checkout must exactly
+match that commit before the operator helper may run. Independently, the
+root-owned operator config pins the same commit as:
+
+```text
+EXPECTED_COMMIT=<operator-approved 40-hex commit>
+```
+
+The helper accepts no arguments and fixes the workspace, delegated paths, and
+numeric identities in its reviewed source. It creates the disposable delegated
+root, direct-child source cgroup, and stopped host-agent source process outside
+checked-out code, then passes only those operator-owned values to the launcher.
+
+`scripts/run-live-delegated-cgroup-probe.py` validates the exact clean checkout
+and emits one bounded JSON metadata record. It then runs two fixed phases:
+
+1. manager phase: preflight plus the real backend create/attach/limits/cleanup
+   proof under the configured non-root manager UID/GID, exact supplementary
+   manager-client GID, zero capability bounding/inheritable/effective/ambient
+   sets, and `NoNewPrivs=1`;
+2. bootstrap phase: after the stopped Task-3 source process is retired, the
+   existing Task 4-7 production-composition, PID/CPU, memory, and recursive
+   `cgroup.kill` proofs run from the root bootstrap harness.
+
+The launcher does not create users, groups, the delegated root, or initial
+source membership. Those remain operator responsibilities outside checked-out
+test code. Request-scope cleanup remains bounded and the operator helper owns
+final fixture teardown on success or failure.
