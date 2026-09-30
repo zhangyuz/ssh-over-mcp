@@ -3,7 +3,7 @@ from __future__ import annotations
 import errno
 import os
 import stat
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
 import yaml
@@ -25,6 +25,7 @@ from .containment_manager_identity import (
     LinuxProcessIdentity,
 )
 from .file_identity import sha256_fd
+from .filesystem import MAX_FS_PATH_BYTES, MAX_FS_READ_BYTES
 
 MAX_POLICY_BYTES = 256 * 1024
 DEFAULT_POLICY_PATH = Path("/etc/ssh-over-mcp/host-policy.yaml")
@@ -178,6 +179,42 @@ class HostContainmentPolicy(BaseModel):
         return self.limits.to_runtime()
 
 
+class HostFilesystemProfilePolicy(BaseModel):
+    """Server-owned read-only filesystem policy for one SSH profile."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    stat_roots: tuple[str, ...] = ()
+    read_roots: tuple[str, ...] = ()
+    max_read_bytes: int | None = Field(
+        default=None,
+        strict=True,
+        ge=1,
+        le=MAX_FS_READ_BYTES,
+    )
+
+    @field_validator("stat_roots", "read_roots")
+    @classmethod
+    def validate_roots(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        validated = tuple(
+            _validate_filesystem_path(value, "filesystem root")
+            for value in values
+        )
+        if len(set(validated)) != len(validated):
+            raise ValueError("filesystem roots must not contain duplicates")
+        return validated
+
+    @model_validator(mode="after")
+    def validate_read_contract(self) -> HostFilesystemProfilePolicy:
+        if not self.stat_roots and not self.read_roots:
+            raise ValueError("filesystem policy must allow stat or read")
+        if self.read_roots and self.max_read_bytes is None:
+            raise ValueError("filesystem read roots require max_read_bytes")
+        if not self.read_roots and self.max_read_bytes is not None:
+            raise ValueError("max_read_bytes requires filesystem read roots")
+        return self
+
+
 class HostExecutionPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -185,6 +222,9 @@ class HostExecutionPolicy(BaseModel):
     allowed_profiles: frozenset[str] = Field(min_length=1)
     child_limits: HostChildLimits
     containment: HostContainmentPolicy | None = None
+    filesystem: dict[str, HostFilesystemProfilePolicy] = Field(
+        default_factory=dict
+    )
     commands: dict[str, HostCommandRule] = Field(min_length=1)
     env_allow: frozenset[str] = frozenset()
     max_timeout_seconds: float = Field(gt=0, le=3600)
@@ -197,6 +237,11 @@ class HostExecutionPolicy(BaseModel):
             raise ValueError("policy version 3 must not define containment")
         if self.version == 4 and self.containment is None:
             raise ValueError("policy version 4 requires containment")
+        unknown_profiles = set(self.filesystem).difference(self.allowed_profiles)
+        if unknown_profiles:
+            raise ValueError(
+                "filesystem policy profiles must be globally allowed"
+            )
         return self
 
     @field_validator("allowed_profiles")
@@ -254,6 +299,14 @@ class HostAuthorizationResult(BaseModel):
     cwd_identity: HostObjectIdentity | None = None
 
 
+class HostFilesystemAuthorizationResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    allowed: bool
+    reason: str
+    effective_max_read_bytes: int | None = None
+
+
 class _UniqueKeyLoader(yaml.SafeLoader):
     pass
 
@@ -290,6 +343,91 @@ def _validate_lexical_absolute_path(value: str, label: str) -> str:
     if normalized != value:
         raise ValueError(f"{label} must be a canonical lexical path")
     return value
+
+
+def _validate_filesystem_path(value: str, label: str) -> str:
+    value = _validate_lexical_absolute_path(value, label)
+    if len(os.fsencode(value)) >= MAX_FS_PATH_BYTES:
+        raise ValueError(f"{label} exceeds Linux pathname limit")
+    return value
+
+
+def _filesystem_path_allowed(
+    path: str,
+    roots: tuple[str, ...],
+) -> bool:
+    candidate = PurePosixPath(path)
+    for root_text in roots:
+        root = PurePosixPath(root_text)
+        if root == PurePosixPath("/") or candidate == root or root in candidate.parents:
+            return True
+    return False
+
+
+def _filesystem_deny(reason: str) -> HostFilesystemAuthorizationResult:
+    return HostFilesystemAuthorizationResult(allowed=False, reason=reason)
+
+
+def authorize_filesystem_stat(
+    policy: HostExecutionPolicy,
+    *,
+    profile: str,
+    path: str,
+) -> HostFilesystemAuthorizationResult:
+    """Authorize a lexical fs_stat request without touching the filesystem."""
+
+    if profile not in policy.allowed_profiles:
+        return _filesystem_deny("profile is not allowed by host policy")
+    rules = policy.filesystem.get(profile)
+    if rules is None:
+        return _filesystem_deny(
+            "profile has no filesystem permissions in host policy"
+        )
+    try:
+        canonical = _validate_filesystem_path(path, "filesystem path")
+    except (TypeError, ValueError):
+        return _filesystem_deny("filesystem path is not canonical")
+    if not _filesystem_path_allowed(canonical, rules.stat_roots):
+        return _filesystem_deny("filesystem stat path is outside allowed roots")
+    return HostFilesystemAuthorizationResult(
+        allowed=True,
+        reason="host policy allowed filesystem stat",
+    )
+
+
+def authorize_filesystem_read(
+    policy: HostExecutionPolicy,
+    *,
+    profile: str,
+    path: str,
+    max_bytes: int,
+) -> HostFilesystemAuthorizationResult:
+    """Authorize a lexical fs_read request without touching the filesystem."""
+
+    if profile not in policy.allowed_profiles:
+        return _filesystem_deny("profile is not allowed by host policy")
+    rules = policy.filesystem.get(profile)
+    if rules is None or not rules.read_roots or rules.max_read_bytes is None:
+        return _filesystem_deny(
+            "profile has no filesystem read permission in host policy"
+        )
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes <= 0:
+        return _filesystem_deny("filesystem read bound is invalid")
+    if max_bytes > rules.max_read_bytes:
+        return _filesystem_deny(
+            "filesystem read bound exceeds host-policy ceiling"
+        )
+    try:
+        canonical = _validate_filesystem_path(path, "filesystem path")
+    except (TypeError, ValueError):
+        return _filesystem_deny("filesystem path is not canonical")
+    if not _filesystem_path_allowed(canonical, rules.read_roots):
+        return _filesystem_deny("filesystem read path is outside allowed roots")
+    return HostFilesystemAuthorizationResult(
+        allowed=True,
+        reason="host policy allowed filesystem read",
+        effective_max_read_bytes=max_bytes,
+    )
 
 
 def load_host_policy(

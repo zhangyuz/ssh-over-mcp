@@ -82,8 +82,18 @@ pinned and classified with an `O_PATH` descriptor; a read-capable descriptor is
 opened only after the pinned inode is proven regular. Symlinks and special
 objects (FIFO, socket, block/character device) therefore fail closed before a
 data-capable open. File reads have a hard
-64 MiB ceiling in addition to the caller/server policy bound. This primitive is
-not yet exposed as an SMCP operation or MCP tool.
+64 MiB ceiling in addition to the caller/server policy bound.
+
+Host-local read-only filesystem policy is profile-scoped. Each profile may have
+separate canonical `stat_roots` and `read_roots`; read-enabled profiles also
+require a strict server-owned `max_read_bytes` ceiling. Authorization is
+lexical-only and does not resolve or open the requested path. The descriptor-
+pinned primitive still performs the actual object access and independently
+rejects symlinks/special objects. A sibling prefix such as `/srv/app2` is not
+inside `/srv/app`.
+
+These primitives and policy are not yet exposed as an SMCP operation or MCP
+tool.
 
 ### Processes
 

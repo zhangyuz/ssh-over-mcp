@@ -430,10 +430,11 @@ not infer timeout/truncation from ambiguous child exit statuses.
 
 ### Phase 3e — typed filesystem operations
 
-Task 1 implemented: read-only descriptor-pinned primitives.
+Tasks 1–2 implemented: read-only descriptor-pinned primitives plus
+filesystem-specific host-local authorization.
 
 - internal host-agent `stat_path()` and `read_file()` primitives only; no SMCP
-  wire operation or MCP tool is enabled by this slice;
+  wire operation or MCP tool is enabled yet;
 - absolute lexically canonical paths only, with a 4096-byte Linux pathname hard bound;
 - every parent component is opened relative to a pinned directory fd with
   `O_NOFOLLOW`; intermediate symlinks fail closed;
@@ -444,16 +445,23 @@ Task 1 implemented: read-only descriptor-pinned primitives.
 - FIFO/socket/device/symlink objects are rejected;
 - pinned reads verify stable device/inode/change metadata and size before
   returning;
+- host-local filesystem policy is scoped per profile rather than shared across
+  every globally allowed profile;
+- `stat_roots` and `read_roots` are separate absolute canonical lexical roots;
+- each read-enabled profile requires a strict server-owned `max_read_bytes`
+  ceiling no larger than the primitive hard limit;
+- filesystem authorization performs lexical root/ceiling checks only and does
+  not resolve, stat, or open caller paths; descriptor pinning remains the object
+  access boundary;
 - OS DAC/ACL/MAC permissions remain authoritative.
 
-The primitive deliberately remains disconnected from the remote request parser
-until a filesystem-specific host-local authorization schema and typed wire
-operation are reviewed.
+The primitives and policy deliberately remain disconnected from the remote
+request parser until typed read-only wire operations are separately reviewed.
 
 ### Remaining Phase 3 work
 
-- Phase 3e follow-up: filesystem-specific host-local policy and typed read-only
-  wire operations, followed by separately reviewed mutation operations;
+- Phase 3e follow-up: typed `fs_stat`/`fs_read` wire operations, followed by
+  separately reviewed mutation operations;
 - optional privileged helper protocol.
 
 Adversarial tests include malformed envelopes, command injection, env injection, PTY/forwarding attempts, and bypass through alternate executables.

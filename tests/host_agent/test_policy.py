@@ -9,8 +9,11 @@ from ssh_over_mcp.host_agent.policy import (
     HostContainmentLimits,
     HostContainmentPolicy,
     HostExecutionPolicy,
+    HostFilesystemProfilePolicy,
     HostLinuxIdentity,
     HostPolicyError,
+    authorize_filesystem_read,
+    authorize_filesystem_stat,
     authorize_request,
     load_host_policy,
 )
@@ -678,3 +681,212 @@ def test_containment_policy_rejects_invalid_cgroup_limit():
 
     with pytest.raises(ValueError):
         HostContainmentLimits(**values)
+
+
+def _with_filesystem_policy(
+    base: HostExecutionPolicy,
+    *,
+    allowed_profiles: frozenset[str] | None = None,
+    filesystem: dict[str, HostFilesystemProfilePolicy],
+) -> HostExecutionPolicy:
+    values = base.model_dump()
+    if allowed_profiles is not None:
+        values["allowed_profiles"] = allowed_profiles
+    values["filesystem"] = {
+        profile: rules.model_dump()
+        for profile, rules in filesystem.items()
+    }
+    return HostExecutionPolicy.model_validate(values)
+
+
+def test_filesystem_stat_policy_is_profile_scoped_and_root_bounded(
+    tmp_path: Path,
+) -> None:
+    executable = make_executable(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    base = make_policy(executable, cwd)
+    policy = _with_filesystem_policy(
+        base,
+        allowed_profiles=frozenset({"developer", "observer"}),
+        filesystem={
+            "developer": HostFilesystemProfilePolicy(
+                stat_roots=("/srv/projects/app",),
+            )
+        },
+    )
+
+    allowed = authorize_filesystem_stat(
+        policy,
+        profile="developer",
+        path="/srv/projects/app/config/settings.yaml",
+    )
+    sibling = authorize_filesystem_stat(
+        policy,
+        profile="developer",
+        path="/srv/projects/application/secret",
+    )
+    observer = authorize_filesystem_stat(
+        policy,
+        profile="observer",
+        path="/srv/projects/app/config/settings.yaml",
+    )
+
+    assert allowed.allowed is True
+    assert sibling.allowed is False
+    assert observer.allowed is False
+
+
+def test_filesystem_read_policy_enforces_server_owned_byte_ceiling(
+    tmp_path: Path,
+) -> None:
+    executable = make_executable(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    policy = _with_filesystem_policy(
+        make_policy(executable, cwd),
+        filesystem={
+            "developer": HostFilesystemProfilePolicy(
+                read_roots=("/srv/projects/app",),
+                max_read_bytes=4096,
+            )
+        },
+    )
+
+    allowed = authorize_filesystem_read(
+        policy,
+        profile="developer",
+        path="/srv/projects/app/README.md",
+        max_bytes=1024,
+    )
+    denied = authorize_filesystem_read(
+        policy,
+        profile="developer",
+        path="/srv/projects/app/README.md",
+        max_bytes=4097,
+    )
+
+    assert allowed.allowed is True
+    assert allowed.effective_max_read_bytes == 1024
+    assert denied.allowed is False
+    assert "ceiling" in denied.reason
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "relative/path",
+        "//srv/projects/app",
+        "/srv/projects/../app",
+        "/srv/projects/app/",
+    ],
+)
+def test_filesystem_request_policy_rejects_noncanonical_paths(
+    tmp_path: Path,
+    path: str,
+) -> None:
+    executable = make_executable(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    policy = _with_filesystem_policy(
+        make_policy(executable, cwd),
+        filesystem={
+            "developer": HostFilesystemProfilePolicy(
+                stat_roots=("/srv/projects",),
+                read_roots=("/srv/projects",),
+                max_read_bytes=4096,
+            )
+        },
+    )
+
+    assert authorize_filesystem_stat(
+        policy,
+        profile="developer",
+        path=path,
+    ).allowed is False
+    assert authorize_filesystem_read(
+        policy,
+        profile="developer",
+        path=path,
+        max_bytes=1,
+    ).allowed is False
+
+
+def test_filesystem_policy_rejects_noncanonical_or_duplicate_roots() -> None:
+    with pytest.raises(ValueError):
+        HostFilesystemProfilePolicy(stat_roots=("/srv/app/../app",))
+
+    with pytest.raises(ValueError, match="duplicates"):
+        HostFilesystemProfilePolicy(
+            stat_roots=("/srv/app", "/srv/app"),
+        )
+
+
+def test_filesystem_read_roots_require_explicit_server_limit() -> None:
+    with pytest.raises(ValueError, match="require max_read_bytes"):
+        HostFilesystemProfilePolicy(read_roots=("/srv/app",))
+
+    with pytest.raises(ValueError, match="requires filesystem read roots"):
+        HostFilesystemProfilePolicy(
+            stat_roots=("/srv/app",),
+            max_read_bytes=1024,
+        )
+
+    with pytest.raises(ValueError):
+        HostFilesystemProfilePolicy(
+            read_roots=("/srv/app",),
+            max_read_bytes=True,
+        )
+
+
+def test_filesystem_policy_profile_must_be_globally_allowed(
+    tmp_path: Path,
+) -> None:
+    executable = make_executable(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    values = make_policy(executable, cwd).model_dump()
+    values["filesystem"] = {
+        "observer": HostFilesystemProfilePolicy(
+            stat_roots=("/srv/app",),
+        ).model_dump()
+    }
+
+    with pytest.raises(ValueError, match="globally allowed"):
+        HostExecutionPolicy.model_validate(values)
+
+
+def test_filesystem_authorization_does_not_touch_filesystem(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = make_executable(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    policy = _with_filesystem_policy(
+        make_policy(executable, cwd),
+        filesystem={
+            "developer": HostFilesystemProfilePolicy(
+                stat_roots=("/srv/app",),
+                read_roots=("/srv/app",),
+                max_read_bytes=1024,
+            )
+        },
+    )
+
+    def forbidden_open(*_args, **_kwargs):
+        raise AssertionError("authorization must not open filesystem objects")
+
+    monkeypatch.setattr("os.open", forbidden_open)
+
+    assert authorize_filesystem_stat(
+        policy,
+        profile="developer",
+        path="/srv/app/config",
+    ).allowed is True
+    assert authorize_filesystem_read(
+        policy,
+        profile="developer",
+        path="/srv/app/config",
+        max_bytes=512,
+    ).allowed is True

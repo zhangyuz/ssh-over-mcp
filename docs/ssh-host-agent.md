@@ -779,10 +779,22 @@ side effects and final-path replacement races. Reads enforce a caller bound plus
 a 64 MiB hard ceiling and revalidate device/inode/change metadata and size
 before returning bytes.
 
-This does not create a new authorization principal. A later Phase 3e slice must
-define filesystem-specific host-local allow/deny rules and the typed remote
-operation before these primitives become remotely reachable. OS filesystem
-permissions remain the final access boundary.
+The next host-local layer is now defined without making the primitives remotely
+reachable. Filesystem permissions are scoped per already-allowed SSH profile,
+with independent absolute canonical `stat_roots` and `read_roots`. A
+read-enabled profile also carries a strict server-owned `max_read_bytes` ceiling
+bounded by the primitive's 64 MiB hard maximum.
+
+Filesystem authorization is intentionally lexical-only: it validates canonical
+paths, profile membership, root containment, and the requested read bound but
+does not call `resolve()`, `stat()`, or `open()` on caller paths. This keeps the
+policy decision free of pathname races and side effects. After authorization,
+the descriptor-pinned primitive remains responsible for traversing and
+revalidating the actual object without following symlinks.
+
+This still does not create a remotely reachable filesystem operation. A later
+Phase 3e slice must define the typed SMCP `fs_stat`/`fs_read` wire operations.
+OS filesystem permissions remain the final access boundary.
 
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 
