@@ -852,6 +852,15 @@ larger than the primitive 64 MiB hard bound. Authorization is lexical-only and
 does not resolve, open, create, or remove caller-selected filesystem objects.
 This remains below the MCP tool layer.
 
+Real Ubuntu 26.04 x86 validation additionally proves that concurrent
+create-only writers racing the same destination yield exactly one published
+complete body, the unnamed file is fsynced before the publish link becomes
+visible, and the parent is fsynced afterward. Integrated host-agent tests also
+prove that lexical policy approval cannot use an intermediate symlink to escape
+the allowed root, existing destinations remain unchanged, policy denial and
+body-length mismatch leave no object, and the real post-publish fsync-failure
+path preserves the committed file while returning status 74.
+
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 
 The central policy may be more expressive, but the host-local policy should preserve critical invariants if the central layer is bypassed.
