@@ -1077,3 +1077,159 @@ def test_fs_write_committed_outcome_is_distinct_and_not_retryable(
         "durability uncertain; do not retry blindly\n"
     )
     assert "sensitive" not in stderr.getvalue()
+
+
+def test_fs_write_real_policy_denial_leaves_no_object(
+    tmp_path: Path,
+) -> None:
+    executable = make_executable(tmp_path)
+    allowed = tmp_path / "allowed"
+    denied = tmp_path / "denied"
+    allowed.mkdir()
+    denied.mkdir()
+    target = denied / "new.bin"
+    framed = fs_write_payload(str(target), b"secret")
+    stream = io.BytesIO(framed)
+
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=stream,
+        stdout=io.BytesIO(),
+        stderr=io.StringIO(),
+        execution_stderr=io.BytesIO(),
+        policy=filesystem_policy(
+            executable,
+            write_create_roots=(str(allowed),),
+            max_write_bytes=1024,
+        ),
+    )
+
+    assert status == EX_NOPERM
+    assert stream.tell() < len(framed)
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("delta", [-1, 1])
+def test_fs_write_real_body_mismatch_leaves_no_object(
+    tmp_path: Path,
+    delta: int,
+) -> None:
+    executable = make_executable(tmp_path)
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    target = allowed / "new.bin"
+    valid = fs_write_payload(str(target), b"ABCD")
+    framed = valid[:-1] if delta < 0 else valid + b"x"
+
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=io.BytesIO(framed),
+        stdout=io.BytesIO(),
+        stderr=io.StringIO(),
+        execution_stderr=io.BytesIO(),
+        policy=filesystem_policy(
+            executable,
+            write_create_roots=(str(allowed),),
+            max_write_bytes=1024,
+        ),
+    )
+
+    assert status == EX_PROTOCOL
+    assert not target.exists()
+
+
+def test_fs_write_real_intermediate_symlink_cannot_escape_allowed_root(
+    tmp_path: Path,
+) -> None:
+    executable = make_executable(tmp_path)
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside"
+    allowed.mkdir()
+    outside.mkdir()
+    (allowed / "link").symlink_to(outside, target_is_directory=True)
+    target = allowed / "link" / "new.bin"
+
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=io.BytesIO(fs_write_payload(str(target), b"ABCD")),
+        stdout=io.BytesIO(),
+        stderr=io.StringIO(),
+        execution_stderr=io.BytesIO(),
+        policy=filesystem_policy(
+            executable,
+            write_create_roots=(str(allowed),),
+            max_write_bytes=1024,
+        ),
+    )
+
+    assert status == EX_UNAVAILABLE
+    assert not (outside / "new.bin").exists()
+
+
+def test_fs_write_real_collision_never_replaces_existing_destination(
+    tmp_path: Path,
+) -> None:
+    executable = make_executable(tmp_path)
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    target = allowed / "existing.bin"
+    target.write_bytes(b"keep")
+
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=io.BytesIO(fs_write_payload(str(target), b"new")),
+        stdout=io.BytesIO(),
+        stderr=io.StringIO(),
+        execution_stderr=io.BytesIO(),
+        policy=filesystem_policy(
+            executable,
+            write_create_roots=(str(allowed),),
+            max_write_bytes=1024,
+        ),
+    )
+
+    assert status == EX_UNAVAILABLE
+    assert target.read_bytes() == b"keep"
+
+
+def test_fs_write_real_committed_status_keeps_published_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = make_executable(tmp_path)
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    target = allowed / "committed.bin"
+    real_fsync = os.fsync
+    calls = 0
+
+    def fail_post_publish_parent_fsync(fd: int) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            raise OSError("synthetic post-publish fsync failure")
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", fail_post_publish_parent_fsync)
+
+    stderr = io.StringIO()
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=io.BytesIO(fs_write_payload(str(target), b"committed")),
+        stdout=io.BytesIO(),
+        stderr=stderr,
+        execution_stderr=io.BytesIO(),
+        policy=filesystem_policy(
+            executable,
+            write_create_roots=(str(allowed),),
+            max_write_bytes=1024,
+        ),
+    )
+
+    assert calls == 3
+    assert status == EX_FS_COMMITTED
+    assert target.read_bytes() == b"committed"
+    assert stderr.getvalue() == (
+        "ssh-over-mcp-host-agent: filesystem write committed; "
+        "durability uncertain; do not retry blindly\n"
+    )
