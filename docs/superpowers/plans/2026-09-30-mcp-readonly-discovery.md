@@ -54,7 +54,7 @@
   - `PrincipalProvider.get_principal() -> PrincipalContext`
   - `StaticPrincipalProvider(*, profile: str, policy: PolicyDocument)`
   - `ExplainableTool = Literal["ssh_exec", "fs_stat", "fs_read", "fs_mkdir", "fs_write"]`
-  - `HostSummary(alias: str, labels: tuple[str, ...], capabilities: tuple[str, ...] = ())`
+  - `HostSummary(alias: str, labels: tuple[str, ...] = (), capabilities: tuple[str, ...] = ())`
   - `HostsListResult(hosts: tuple[HostSummary, ...])`
   - `PolicyExplainRequest(host: str, tool: ExplainableTool, executable: str | None = None, args: tuple[str, ...] = (), cwd: str | None = None, path: str | None = None, env: dict[str, str] = Field(default_factory=dict), privilege: str = "user")`
   - `PolicyExplainResult(decision: Decision, reason: str, risk: RiskLevel, normalized_executable: str | None, normalized_cwd: str | None, normalized_path: str | None, approval_required: bool, policy_version: str)`
@@ -162,6 +162,7 @@ Add:
 def test_list_hosts_returns_only_visible_safe_metadata(service, developer):
     result = service.list_hosts(developer)
     assert [host.alias for host in result.hosts] == ["open-host", "developer-host"]
+    assert all(host.labels == () for host in result.hosts)
     assert all(host.capabilities == () for host in result.hosts)
     serialized = result.model_dump(mode="json")
     assert "credential_ref" not in repr(serialized)
@@ -208,7 +209,9 @@ def _is_visible(host: Host, profile: str) -> bool:
     return not host.allowed_roles or profile in host.allowed_roles
 ```
 
-`list_hosts` returns visible hosts sorted by alias; labels are sorted tuples; capabilities are always `()` in this slice.
+`list_hosts` returns visible hosts sorted by alias; both labels and capabilities
+are always `()` in this slice because existing inventory labels are not yet
+classified as public metadata.
 
 `get_host` checks existence and visibility in one branch and raises exactly:
 
@@ -507,7 +510,7 @@ Document that the implemented Phase 4 slice now provides:
 
 Explicitly state:
 - no SSH connection occurs in these three tools;
-- capability lists are empty in this slice;
+- label and capability lists are empty in this slice;
 - tool arguments cannot set profile or raw SSH connection fields;
 - the packaged static-principal server binds to localhost only;
 - OAuth remains deferred.
