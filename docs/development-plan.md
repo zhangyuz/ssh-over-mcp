@@ -428,9 +428,32 @@ Phase `3d2c` is closed at this contract boundary. A future response-protocol
 revision may add authenticated structured remote outcome metadata, but v1 does
 not infer timeout/truncation from ambiguous child exit statuses.
 
+### Phase 3e — typed filesystem operations
+
+Task 1 implemented: read-only descriptor-pinned primitives.
+
+- internal host-agent `stat_path()` and `read_file()` primitives only; no SMCP
+  wire operation or MCP tool is enabled by this slice;
+- absolute lexically canonical paths only, with a 4096-byte Linux pathname hard bound;
+- every parent component is opened relative to a pinned directory fd with
+  `O_NOFOLLOW`; intermediate symlinks fail closed;
+- the final object is first pinned/classified with `O_PATH|O_NOFOLLOW`; read-capable open occurs only for a verified regular inode via `/proc/self/fd/<pinned-fd>`;
+- `fs_stat` primitive scope is limited to regular files and directories;
+- `fs_read` primitive scope is limited to regular files and uses both a
+  caller-supplied limit and a 64 MiB hard ceiling;
+- FIFO/socket/device/symlink objects are rejected;
+- pinned reads verify stable device/inode/change metadata and size before
+  returning;
+- OS DAC/ACL/MAC permissions remain authoritative.
+
+The primitive deliberately remains disconnected from the remote request parser
+until a filesystem-specific host-local authorization schema and typed wire
+operation are reviewed.
+
 ### Remaining Phase 3 work
 
-- typed filesystem operations;
+- Phase 3e follow-up: filesystem-specific host-local policy and typed read-only
+  wire operations, followed by separately reviewed mutation operations;
 - optional privileged helper protocol.
 
 Adversarial tests include malformed envelopes, command injection, env injection, PTY/forwarding attempts, and bypass through alternate executables.
