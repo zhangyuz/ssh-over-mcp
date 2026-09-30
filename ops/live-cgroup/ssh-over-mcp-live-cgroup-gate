@@ -57,7 +57,10 @@ def _expected_commit() -> str:
 
 def _git(*args: str) -> str:
     return subprocess.check_output(
-        ['git', *args], cwd=_WORKSPACE, text=True, timeout=10
+        ['git', '-c', f'safe.directory={_WORKSPACE}', *args],
+        cwd=_WORKSPACE,
+        text=True,
+        timeout=10,
     ).strip()
 
 
