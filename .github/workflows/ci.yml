@@ -3,7 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
-  pull_request:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -11,7 +12,7 @@ permissions:
 jobs:
   validate:
     name: Ubuntu 26.04 x86 validation
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name != 'pull_request_target' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux, x64, ssh-over-mcp-mac-x86]
     timeout-minutes: 20
 
@@ -67,9 +68,10 @@ jobs:
             fi
           done
 
-      - name: Checkout
+      - name: Checkout selected revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           clean: true
           fetch-depth: 0
