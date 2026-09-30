@@ -69,6 +69,18 @@ A structured-command denial MUST NOT fall back to this tool.
 
 Typed filesystem tools provide better audit semantics and path policy than equivalent shell commands. Their presence does not replace OS permissions.
 
+Remote filesystem enforcement MUST NOT rely on a normalized path string alone.
+After policy allows a path, the host boundary must independently pin path
+components without following symlinks before touching the object. Read-only
+operations are bounded and structured; they do not invoke shell commands or
+PATH lookup.
+
+The first host-agent filesystem slice supports only regular files and
+directories for stat, and regular files for read. Symlinks and special objects
+(FIFO, socket, block/character device) fail closed. File reads have a hard
+64 MiB ceiling in addition to the caller/server policy bound. This primitive is
+not yet exposed as an SMCP operation or MCP tool.
+
 ### Processes
 
 - `process_list`
