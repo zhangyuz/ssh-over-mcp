@@ -395,6 +395,19 @@ max_stdin_bytes: 16
 """
 
 
+def test_example_policy_is_valid_v4():
+    path = Path(__file__).resolve().parents[2] / "config/host-policy.example.yaml"
+
+    loaded = load_host_policy(path, require_root_owner=False)
+
+    assert loaded.version == 4
+    assert loaded.containment is not None
+    assert (
+        loaded.containment.manager_endpoint
+        == "/run/ssh-over-mcp/containment-manager.sock"
+    )
+
+
 def test_policy_loader_accepts_secure_regular_file(tmp_path: Path):
     path = tmp_path / "policy.yaml"
     path.write_text(_valid_policy_text(), encoding="utf-8")
