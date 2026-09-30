@@ -9,9 +9,16 @@ import time
 from collections.abc import Sequence
 from typing import BinaryIO, TextIO
 
+from ssh_over_mcp.ssh.protocol import FsReadEnvelope, FsStatEnvelope
+
 from .containment import ContainmentRequest
 from .containment_manager_unix import connect_authenticated_containment_manager
-from .filesystem import FilesystemAccessError, ReadOnlyFileStat, read_file, stat_path
+from .filesystem import (
+    FilesystemAccessError,
+    ReadOnlyFileStat,
+    read_file,
+    stat_path,
+)
 from .policy import (
     DEFAULT_POLICY_PATH,
     HostExecutionPolicy,
@@ -29,7 +36,6 @@ from .protocol import (
     validate_ssh_context,
 )
 from .run import run_prepared_native
-from ssh_over_mcp.ssh.protocol import FsReadEnvelope, FsStatEnvelope
 
 EX_PROTOCOL = 65
 EX_UNAVAILABLE = 69
@@ -52,7 +58,7 @@ def run(
     execution_stderr: BinaryIO | None = None,
     policy: HostExecutionPolicy | None = None,
 ) -> int:
-    """Parse, authorize, prepare, and execute policy-v4 requests fail closed."""
+    """Parse and dispatch one authorized SMCP v1 request fail closed."""
 
     try:
         validate_ssh_context(env)
