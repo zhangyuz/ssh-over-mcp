@@ -60,7 +60,7 @@ Implemented:
 
 ## Phase 3 — remote host agent
 
-Status: **Through Phase 3d2b2b2c3 implemented; ForceCommand execution remains disabled**
+Status: **Through Phase 3d2c implemented; contained ForceCommand execution enabled for policy v4**
 
 ### Phase 3a — ForceCommand protocol entry
 
@@ -399,7 +399,7 @@ Implemented:
 
 ### Phase 3d2c — contained ForceCommand execution wiring
 
-Implemented first wiring slice:
+Implemented:
 
 - policy v3 remains non-executing;
 - policy v4 requires server-owned containment configuration;
@@ -412,7 +412,11 @@ Implemented first wiring slice:
 - signal exits map to `128 + signal`;
 - captured stdout/stderr delivery is nonblocking with a fixed five-second
   deadline so a peer which stops reading cannot indefinitely block the host
-  agent.
+  agent;
+- `SSHExecutionResult.timed_out` and `.truncated` describe control-plane SSH
+  collection guards only; SMCP v1 has no response-metadata frame, so a
+  host-agent supervisor timeout/output overflow remains represented by bounded
+  output plus the SSH process exit semantics rather than inferred flags.
 
 Accepted real-kernel evidence at
 `2857925800649f2ea89d9b123a7b2b19298a8dd6` on Ubuntu 26.04 x86_64,
@@ -420,12 +424,13 @@ kernel `7.0.0-28-generic`: manager phase `2 passed`; production/root phase
 `5 passed`, including the real ForceCommand → authenticated manager →
 contained workload path. The delegated root is absent after completion.
 
+Phase `3d2c` is closed at this contract boundary. A future response-protocol
+revision may add authenticated structured remote outcome metadata, but v1 does
+not infer timeout/truncation from ambiguous child exit statuses.
+
 ### Remaining Phase 3 work
 
-- Phase 3d2c follow-up: final execution-response semantics review and phase
-  closure;
 - typed filesystem operations;
-- execution-time resource enforcement;
 - optional privileged helper protocol.
 
 Adversarial tests include malformed envelopes, command injection, env injection, PTY/forwarding attempts, and bypass through alternate executables.
