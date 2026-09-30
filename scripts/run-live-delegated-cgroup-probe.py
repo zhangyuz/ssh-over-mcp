@@ -108,7 +108,10 @@ def _audit_metadata(commit: str) -> None:
             "SSH_OVER_MCP_LIVE_CGROUP_MANAGER_CLIENT_GID"
         ),
     }
-    print("live-cgroup-metadata=" + json.dumps(metadata, sort_keys=True))
+    print(
+        "live-cgroup-metadata=" + json.dumps(metadata, sort_keys=True),
+        flush=True,
+    )
 
 
 def _manager_setpriv_prefix() -> list[str]:
@@ -153,6 +156,8 @@ def _run_pytest(
         "-m",
         "pytest",
         "-q",
+        "-p",
+        "no:cacheprovider",
         "tests/live/test_delegated_cgroup.py",
         "-k",
         expression,
