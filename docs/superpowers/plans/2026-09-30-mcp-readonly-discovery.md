@@ -56,7 +56,7 @@
   - `ExplainableTool = Literal["ssh_exec", "fs_stat", "fs_read", "fs_mkdir", "fs_write"]`
   - `HostSummary(alias: str, labels: tuple[str, ...], capabilities: tuple[str, ...] = ())`
   - `HostsListResult(hosts: tuple[HostSummary, ...])`
-  - `PolicyExplainRequest(host: str, tool: ExplainableTool, executable: str | None = None, args: tuple[str, ...] = (), cwd: str | None = None, path: str | None = None, env: dict[str, str] = {}, privilege: str = "user")`
+  - `PolicyExplainRequest(host: str, tool: ExplainableTool, executable: str | None = None, args: tuple[str, ...] = (), cwd: str | None = None, path: str | None = None, env: dict[str, str] = Field(default_factory=dict), privilege: str = "user")`
   - `PolicyExplainResult(decision: Decision, reason: str, risk: RiskLevel, normalized_executable: str | None, normalized_cwd: str | None, normalized_path: str | None, approval_required: bool, policy_version: str)`
   - `ApiError`, `PrincipalConfigurationError`, `HostNotVisibleError`, `InvalidExplainToolError`.
 
@@ -93,9 +93,10 @@ Expected: FAIL because `ssh_over_mcp.api.principal` / models do not exist.
 
 - [ ] **Step 3: Add dependencies and implement the minimal models/provider**
 
-In `pyproject.toml`, add runtime dependencies:
+In `pyproject.toml`, raise the existing Pydantic floor and add runtime dependencies:
 
 ```toml
+"pydantic>=2.12,<3",
 "mcp>=2,<3",
 "starlette>=0.49.1,<1",
 "uvicorn>=0.31.1,<1",
