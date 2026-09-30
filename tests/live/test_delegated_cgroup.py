@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import ctypes
-import io
 import errno
+import io
 import json
 import os
 import select
