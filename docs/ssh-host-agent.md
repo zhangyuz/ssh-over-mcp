@@ -764,8 +764,9 @@ The first typed-filesystem host primitive is intentionally disconnected from
 the ForceCommand request parser. It establishes the object-access boundary
 before any wire operation is enabled.
 
-For each approved absolute canonical path, the host agent starts from a pinned
-`/` directory descriptor and opens every parent component with
+For each approved absolute canonical path, bounded to fewer than 4096 encoded
+bytes, the host agent starts from a pinned `/` directory descriptor and opens
+every parent component with
 `O_PATH|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC`. The final object is opened relative
 to that pinned parent and is never resolved through a symlink.
 
