@@ -1,13 +1,19 @@
 # GitHub Actions runner image
 
-This directory contains the Ubuntu 24.04 image used by the repository's
+This directory contains the Ubuntu 26.04 image used by the repository's
 self-hosted validation runner.
 
-Build and deploy through:
+For normal operation on the dedicated Intel Mac, install the host-side
+supervisor:
 
 ```bash
-bash scripts/deploy-runner.sh up
+bash scripts/supervise-mac-x86-runner.sh install
 ```
+
+It keeps the host controller alive while every GitHub Actions runner remains a
+one-job ephemeral container. The lower-level one-shot deployment entrypoint is
+still available through `scripts/deploy-mac-x86-runner.sh` and
+`scripts/deploy-runner.sh`.
 
 The image supports Linux x64 and ARM64 runner packages. The deployment script
 selects the architecture from the Linux or macOS Docker host and passes the
