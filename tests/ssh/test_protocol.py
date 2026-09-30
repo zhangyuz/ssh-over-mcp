@@ -3,6 +3,8 @@ import pytest
 from ssh_over_mcp.ssh.protocol import (
     ExecEnvelope,
     ExecutionLimits,
+    FsReadEnvelope,
+    FsStatEnvelope,
     ProtocolError,
     decode_request,
     encode_request,
@@ -43,3 +45,56 @@ def test_stdin_limit_enforced():
 def test_bad_magic_rejected():
     with pytest.raises(ProtocolError):
         decode_request(b"bad")
+
+
+
+def test_fs_stat_frame_roundtrip_has_no_application_stdin():
+    expected = FsStatEnvelope(
+        request_id="req_fs_stat_1234",
+        profile="developer",
+        path="/srv/app/README.md",
+    )
+
+    actual, stdin = decode_request(encode_request(expected))
+
+    assert actual == expected
+    assert stdin == b""
+
+
+def test_fs_read_frame_roundtrip_has_strict_bound():
+    expected = FsReadEnvelope(
+        request_id="req_fs_read_1234",
+        profile="developer",
+        path="/srv/app/data.bin",
+        max_bytes=4096,
+    )
+
+    actual, stdin = decode_request(encode_request(expected))
+
+    assert actual == expected
+    assert stdin == b""
+
+
+def test_filesystem_request_rejects_application_stdin():
+    request = FsReadEnvelope(
+        request_id="req_fs_read_1234",
+        profile="developer",
+        path="/srv/app/data.bin",
+        max_bytes=4096,
+    )
+
+    with pytest.raises(ProtocolError, match="do not accept stdin"):
+        encode_request(request, b"x")
+
+    with pytest.raises(ProtocolError, match="do not accept stdin"):
+        decode_request(encode_request(request) + b"x")
+
+
+def test_fs_read_bound_rejects_boolean():
+    with pytest.raises(ValueError):
+        FsReadEnvelope(
+            request_id="req_fs_read_1234",
+            profile="developer",
+            path="/srv/app/data.bin",
+            max_bytes=True,
+        )
