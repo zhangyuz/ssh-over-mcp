@@ -758,6 +758,27 @@ and no inherited manager socket. The live gate reports `2 passed` for the
 non-root manager phase and `5 passed` for the production/root-bootstrap
 phase, with the delegated root absent after cleanup.
 
+### Phase 3e read-only filesystem primitives
+
+The first typed-filesystem host primitive is intentionally disconnected from
+the ForceCommand request parser. It establishes the object-access boundary
+before any wire operation is enabled.
+
+For each approved absolute canonical path, the host agent starts from a pinned
+`/` directory descriptor and opens every parent component with
+`O_PATH|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC`. The final object is opened relative
+to that pinned parent and is never resolved through a symlink.
+
+The initial stat primitive accepts only regular files and directories. The
+initial read primitive accepts only regular files, opens them nonblocking to
+avoid FIFO hangs, enforces a caller bound plus a 64 MiB hard ceiling, and
+revalidates device/inode/change metadata and size before returning bytes.
+
+This does not create a new authorization principal. A later Phase 3e slice must
+define filesystem-specific host-local allow/deny rules and the typed remote
+operation before these primitives become remotely reachable. OS filesystem
+permissions remain the final access boundary.
+
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 
 The central policy may be more expressive, but the host-local policy should preserve critical invariants if the central layer is bypassed.
