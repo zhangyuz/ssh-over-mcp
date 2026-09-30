@@ -92,6 +92,23 @@ def test_health_and_readiness_do_not_execute_domain_operations(
         assert client.get("/readyz").status_code == 200
 
 
+def test_mcp_http_rejects_request_body_over_128_kib(tmp_path: Path) -> None:
+    app = build_application(settings(tmp_path))
+    oversized_body = b"x" * ((128 * 1024) + 1)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp",
+            content=oversized_body,
+            headers={
+                "content-type": "application/json",
+                "host": "127.0.0.1:8000",
+            },
+        )
+
+    assert response.status_code == 413
+
+
 @pytest.mark.asyncio
 async def test_streamable_http_round_trip_at_mcp_path(
     tmp_path: Path,
