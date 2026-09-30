@@ -2,7 +2,7 @@
 
 Date: 2026-09-30
 
-Status: proposed for implementation planning
+Status: implemented for the create-only v1 boundary; destructive namespace mutation deferred
 
 ## 1. Purpose
 

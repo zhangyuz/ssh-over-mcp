@@ -861,6 +861,13 @@ the allowed root, existing destinations remain unchanged, policy denial and
 body-length mismatch leave no object, and the real post-publish fsync-failure
 path preserves the committed file while returning status 74.
 
+The Phase 3e mutation boundary is closed at create-only semantics. The host
+agent has no SMCP envelope or primitive for overwrite, append, truncate,
+move/rename, delete/unlink/rmdir, recursive mutation, caller-selected chmod/
+chown, or a generic privileged filesystem helper. Any future destructive
+namespace mutation requires a separate authority design rather than widening
+`fs_write` or `fs_mkdir`.
+
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 
 The central policy may be more expressive, but the host-local policy should preserve critical invariants if the central layer is bypassed.

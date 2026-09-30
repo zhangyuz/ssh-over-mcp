@@ -467,7 +467,7 @@ nonblocking result-delivery path is reused.
 These wire operations are host-agent protocol operations only; no MCP filesystem
 tool is enabled yet.
 
-### Phase 3e mutation boundary
+### Phase 3e mutation boundary — create-only v1 closed
 
 The accepted mutation design is documented in
 `docs/superpowers/specs/2026-09-30-typed-filesystem-mutations-design.md`.
@@ -526,11 +526,14 @@ Create-only mutation progress:
   composition: concurrent create-if-absent races publish exactly one complete
   body, file fsync occurs before publish visibility, symlink escape/collision
   attempts fail closed, policy denial/body mismatch leave no object, and the
-  real committed path preserves the published file while returning status 74.
+  real committed path preserves the published file while returning status 74;
+- Task 8 review complete: the remote filesystem surface remains limited to
+  read-only stat/read plus create-only mkdir/write. Overwrite, append, in-place
+  truncate, move/rename, delete/unlink/rmdir, recursive mutation, arbitrary
+  chmod/chown, and generic privileged filesystem helpers remain unavailable.
 
 ### Remaining Phase 3 work
 
-- Phase 3e create-only mutation implementation and review;
 - a separate future namespace-authority design before destructive filesystem
   mutation;
 - optional privileged helper protocol.

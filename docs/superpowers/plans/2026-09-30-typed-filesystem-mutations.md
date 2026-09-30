@@ -182,11 +182,19 @@ create-if-absent publish link and parent fsync after publication.
 
 GitHub-hosted runners are not accepted as evidence.
 
-## Task 8 — mutation boundary review
+## Task 8 — mutation boundary review — implemented
 
-Review Phase 3e create-only mutations as a whole.
+Final review confirms the remote filesystem surface is limited to:
 
-Explicitly confirm that none of the following is remotely available:
+- read-only `fs_stat` and `fs_read`;
+- one-level create-if-absent `fs_mkdir`;
+- create-if-absent regular-file `fs_write`.
+
+The shared SMCP discriminated union contains no destructive filesystem
+operation. The mutation primitive module contains only create-directory and
+create-regular-file paths.
+
+The following remain unavailable remotely:
 
 - overwrite;
 - append;
@@ -197,5 +205,5 @@ Explicitly confirm that none of the following is remotely available:
 - arbitrary chmod/chown;
 - generic privileged filesystem helper.
 
-Only after this review may a separate design investigate destructive namespace
-mutation.
+No destructive namespace mutation may be added by extending this phase. It
+requires a separate namespace-authority design and review.
