@@ -792,9 +792,23 @@ policy decision free of pathname races and side effects. After authorization,
 the descriptor-pinned primitive remains responsible for traversing and
 revalidating the actual object without following symlinks.
 
-This still does not create a remotely reachable filesystem operation. A later
-Phase 3e slice must define the typed SMCP `fs_stat`/`fs_read` wire operations.
-OS filesystem permissions remain the final access boundary.
+The read-only primitives are now reachable through typed SMCP v1 operations.
+The request metadata is a strict discriminated union: `fs_stat` carries only
+request/profile/path fields and `fs_read` adds one strict positive
+`max_bytes` field. Neither operation accepts application stdin; one trailing
+byte is enough to reject the request before the pinned primitive runs.
+
+The host agent authorizes filesystem metadata before object access and never
+enters command preparation, containment-manager setup, or native execution for
+these operations. `fs_stat` emits compact deterministic JSON containing path,
+kind, size, mode, uid, gid, and mtime_ns. `fs_read` emits raw file bytes.
+Policy denial and primitive failure are normalized to generic SSH-visible
+diagnostics, and successful output reuses the existing bounded nonblocking
+delivery path.
+
+This is still below the MCP tool layer; Phase 4 must expose and parse the typed
+MCP `fs_stat`/`fs_read` tools separately. OS filesystem permissions remain
+the final access boundary.
 
 Linux/POSIX fd execution has a close-on-exec caveat for shebang scripts. Script execution remains disabled and requires a separate explicit design.
 
