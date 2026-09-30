@@ -302,3 +302,130 @@ def test_create_regular_file_never_opens_named_temp_or_final_path(
 
     assert target.read_bytes() == b"data"
     assert target.name not in opened_names
+
+
+def test_create_regular_file_supports_empty_file(tmp_path: Path) -> None:
+    target = tmp_path / "empty.bin"
+
+    create_regular_file(str(target), b"", expected_length=0)
+
+    assert target.read_bytes() == b""
+    assert target.stat().st_size == 0
+
+
+@pytest.mark.parametrize("kind", ["directory", "symlink"])
+def test_create_regular_file_never_replaces_non_file_destination(
+    tmp_path: Path,
+    kind: str,
+) -> None:
+    target = tmp_path / "target"
+    if kind == "directory":
+        target.mkdir()
+    else:
+        destination = tmp_path / "destination"
+        destination.write_bytes(b"keep")
+        target.symlink_to(destination)
+
+    with pytest.raises(FilesystemMutationError, match="already exists"):
+        create_regular_file(str(target), b"new", expected_length=3)
+
+    if kind == "directory":
+        assert target.is_dir()
+    else:
+        assert target.is_symlink()
+        assert target.resolve().read_bytes() == b"keep"
+
+
+@pytest.mark.parametrize(
+    ("data", "expected_length"),
+    [
+        (b"", -1),
+        (b"", 1),
+        (b"x", 0),
+    ],
+)
+def test_create_regular_file_invalid_body_rejected_before_filesystem_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    data: bytes,
+    expected_length: int,
+) -> None:
+    target = tmp_path / "created.bin"
+    real_open = os.open
+    root_opened = False
+
+    def tracking_open(path, flags, *args, **kwargs):
+        nonlocal root_opened
+        if path == "/":
+            root_opened = True
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", tracking_open)
+
+    with pytest.raises(FilesystemMutationError):
+        create_regular_file(
+            str(target),
+            data,
+            expected_length=expected_length,
+        )
+
+    assert root_opened is False
+    assert not target.exists()
+
+
+def test_create_regular_file_rejects_missing_parent(tmp_path: Path) -> None:
+    target = tmp_path / "missing" / "created.bin"
+
+    with pytest.raises(FilesystemMutationError, match="unsafe"):
+        create_regular_file(str(target), b"data", expected_length=4)
+
+    assert not target.exists()
+
+
+def test_create_regular_file_rejects_filesystem_root() -> None:
+    with pytest.raises(FilesystemMutationError, match="filesystem root"):
+        create_regular_file("/", b"", expected_length=0)
+
+
+def test_create_regular_file_write_failure_never_publishes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "created.bin"
+
+    def fail_write(_fd: int, _data) -> int:
+        raise OSError(errno.EIO, "synthetic write failure")
+
+    monkeypatch.setattr(os, "write", fail_write)
+
+    with pytest.raises(FilesystemMutationError, match="write failed"):
+        create_regular_file(str(target), b"data", expected_length=4)
+
+    assert not target.exists()
+
+
+def test_create_regular_file_file_fsync_failure_never_publishes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "created.bin"
+    real_fsync = os.fsync
+    calls = 0
+
+    def fail_file_fsync(fd: int) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError(errno.EIO, "synthetic file fsync failure")
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", fail_file_fsync)
+
+    with pytest.raises(
+        FilesystemMutationError,
+        match="data cannot be synchronized",
+    ):
+        create_regular_file(str(target), b"data", expected_length=4)
+
+    assert calls == 2
+    assert not target.exists()
