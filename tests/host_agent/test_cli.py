@@ -1,8 +1,8 @@
 import io
 import os
+from pathlib import Path
 
 import pytest
-from pathlib import Path
 
 from ssh_over_mcp.host_agent.cli import (
     EX_NOPERM,
