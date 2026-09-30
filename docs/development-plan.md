@@ -434,7 +434,7 @@ Task 1 implemented: read-only descriptor-pinned primitives.
 
 - internal host-agent `stat_path()` and `read_file()` primitives only; no SMCP
   wire operation or MCP tool is enabled by this slice;
-- absolute lexically canonical paths only;
+- absolute lexically canonical paths only, with a 4096-byte Linux pathname hard bound;
 - every parent component is opened relative to a pinned directory fd with
   `O_NOFOLLOW`; intermediate symlinks fail closed;
 - the final object is opened with `O_NOFOLLOW` and pinned by fd;
