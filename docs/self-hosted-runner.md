@@ -298,13 +298,65 @@ does not silently become unusable as GitHub advances the minimum accepted
 runner version. Rebuild the image regularly and update the pinned version and
 hashes in source control.
 
-## Future cgroup-live runner
+## Dedicated live cgroup runner
 
-The future concrete `CgroupV2Backend` needs tests which can create a request
-cgroup, write `memory.max`, `pids.max`, and `cpu.max`, attach a stopped
-child to `cgroup.procs`, invoke `cgroup.kill`, and remove the empty scope.
+Writable-cgroup evidence uses a separate disposable Linux fixture with the
+custom label:
 
-Those tests MUST NOT be enabled by making this generic runner privileged.
+```yaml
+runs-on: [self-hosted, linux, x64, ssh-over-mcp-cgroup-live]
+```
 
-They will use a separate Linux-only runner with a dedicated delegated cgroup
-subtree and a separate custom label.
+The generic Docker runner remains unprivileged and is never upgraded for this
+purpose. macOS Docker Desktop is not accepted as live cgroup evidence.
+
+The live runner process itself is non-root and has zero effective Linux
+capabilities. It has no Docker socket, production secrets, or host credentials.
+Unlike the generic hardened Docker runner, it cannot set `NoNewPrivs=1`
+because the job must invoke one narrowly authorized setuid-`sudo` handoff.
+No other sudo command is permitted.
+
+### Operator handoff contract
+
+The workflow calls exactly one host-installed helper:
+
+```text
+/usr/local/libexec/ssh-over-mcp-live-cgroup-gate
+```
+
+It must be root-owned, mode `0555` or `0755`, installed outside the runner
+checkout, and be the only command allowed by the runner's passwordless sudo
+policy. It exposes only two operations:
+
+```text
+ssh-over-mcp-live-cgroup-gate check
+ssh-over-mcp-live-cgroup-gate run <workspace> <40-hex-commit>
+```
+
+`check` performs no fixture mutation. `run` must reject non-canonical
+workspaces, commits which do not exactly match checked-out `HEAD`, and paths
+outside the runner's configured work root.
+
+The helper owns all fixture configuration. Before repository test code starts,
+it prepares the disposable users/groups, delegated cgroup-v2 root, direct-child
+`host-agent-source`, and one stopped source process already running under the
+configured host-agent identity in that source cgroup. The delegated root itself
+must stay empty and the manager must remain outside it.
+
+The helper then invokes the checked-out
+`scripts/run-live-delegated-cgroup-probe.py` with only operator-controlled
+fixture paths/IDs plus `SSH_OVER_MCP_LIVE_EXPECTED_COMMIT`. The launcher
+first runs preflight and the real-backend primitive under the configured
+non-root manager identity with zero capabilities, then retires the stopped
+source fixture and runs the production-composition/resource/recursive-kill
+proofs through the existing root bootstrap harness.
+
+On every exit path the operator helper must kill/reap its disposable fixture
+processes, remove only request scopes below its dedicated root, restore the
+original controller state, and remove the disposable delegated subtree. It
+must never call `cgroup.kill` on the delegated root itself.
+
+The live workflow is manual-only from trusted `main`, requires a full exact
+commit SHA, receives no repository secrets, and records only the exact commit,
+kernel/machine, delegated paths, configured numeric identities, source PID, and
+available controller names needed to audit the proof.
