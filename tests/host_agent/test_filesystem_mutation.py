@@ -3,6 +3,8 @@ from __future__ import annotations
 import errno
 import os
 import stat
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -429,3 +431,73 @@ def test_create_regular_file_file_fsync_failure_never_publishes(
 
     assert calls == 2
     assert not target.exists()
+
+
+def test_create_regular_file_real_collision_race_publishes_one_complete_body(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "raced.bin"
+    payloads = tuple(
+        f"writer-{index:02d}-payload".encode("ascii")
+        for index in range(8)
+    )
+    barrier = threading.Barrier(len(payloads))
+
+    def attempt(data: bytes) -> tuple[str, bytes]:
+        barrier.wait(timeout=5)
+        try:
+            create_regular_file(
+                str(target),
+                data,
+                expected_length=len(data),
+            )
+        except FilesystemMutationError:
+            return ("denied", data)
+        return ("created", data)
+
+    with ThreadPoolExecutor(max_workers=len(payloads)) as pool:
+        outcomes = tuple(pool.map(attempt, payloads))
+
+    winners = [data for state, data in outcomes if state == "created"]
+    losers = [data for state, data in outcomes if state == "denied"]
+
+    assert len(winners) == 1
+    assert len(losers) == len(payloads) - 1
+    assert target.read_bytes() == winners[0]
+    assert target.read_bytes() in payloads
+
+
+def test_create_regular_file_fsyncs_data_before_publish_visibility(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "ordered.bin"
+    real_fsync = os.fsync
+    real_link = os.link
+    events: list[str] = []
+
+    def tracking_fsync(fd: int) -> None:
+        mode = os.fstat(fd).st_mode
+        events.append("fsync-dir" if stat.S_ISDIR(mode) else "fsync-file")
+        real_fsync(fd)
+
+    def tracking_link(*args, **kwargs):
+        events.append("publish")
+        return real_link(*args, **kwargs)
+
+    monkeypatch.setattr(os, "fsync", tracking_fsync)
+    monkeypatch.setattr(os, "link", tracking_link)
+
+    create_regular_file(
+        str(target),
+        b"ordered-data",
+        expected_length=len(b"ordered-data"),
+    )
+
+    assert target.read_bytes() == b"ordered-data"
+    assert events == [
+        "fsync-dir",
+        "fsync-file",
+        "publish",
+        "fsync-dir",
+    ]

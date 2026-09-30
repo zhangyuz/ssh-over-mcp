@@ -161,11 +161,11 @@ Committed/durability-uncertain outcome:
 
 No overwrite semantics.
 
-## Task 7 — adversarial Linux validation
+## Task 7 — adversarial Linux validation — implemented
 
-Use the Ubuntu 26.04 x86 self-hosted runner.
+Validated on the Ubuntu 26.04 x86 self-hosted runner.
 
-Prove:
+Proven:
 
 - symlink/path escapes fail;
 - destination collision never replaces an entry;
@@ -176,7 +176,11 @@ Prove:
 - policy denial touches no object;
 - request body mismatch touches no final object.
 
-Do not use GitHub-hosted runners as evidence.
+Additional real-kernel proofs cover concurrent writers racing the same absent
+destination and call-order instrumentation showing file fsync before the
+create-if-absent publish link and parent fsync after publication.
+
+GitHub-hosted runners are not accepted as evidence.
 
 ## Task 8 — mutation boundary review
 
