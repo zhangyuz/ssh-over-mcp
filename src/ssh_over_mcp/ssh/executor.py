@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from ssh_over_mcp.policy.models import Decision, EvaluationRequest
 
@@ -26,6 +26,15 @@ class PolicyEvaluator(Protocol):
 
 
 class SSHExecutionResult(BaseModel):
+    """Control-plane view of one SSH execution.
+
+    ``timed_out`` and ``truncated`` describe limits enforced while collecting
+    the SSH channel on the control plane. SMCP v1 has no response-metadata
+    frame, so a host-agent supervisor timeout or output overflow is represented
+    by the bounded stdout/stderr bytes plus the SSH process exit semantics,
+    rather than being inferred into these two local collection flags.
+    """
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     request_id: str
@@ -35,8 +44,17 @@ class SSHExecutionResult(BaseModel):
     stdout: bytes = b""
     stderr: bytes = b""
     duration_ms: int
-    timed_out: bool = False
-    truncated: bool = False
+    timed_out: bool = Field(
+        default=False,
+        description="The control-plane SSH channel exceeded its collection timeout.",
+    )
+    truncated: bool = Field(
+        default=False,
+        description=(
+            "The control-plane SSH reader discarded bytes beyond its shared "
+            "stdout/stderr budget."
+        ),
+    )
 
 
 @dataclass(slots=True)
