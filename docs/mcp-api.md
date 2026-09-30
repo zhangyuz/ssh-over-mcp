@@ -30,7 +30,9 @@ server, hidden hosts fail before policy evaluation, and the result exposes only
 the sanitized decision/reason/risk, caller-originated normalized
 executable/cwd/path, approval requirement, and policy version. Matched rule IDs,
 effective roles, capabilities, credentials, host keys, configured roots, and
-environment values are not returned.
+environment values are not returned. Policy-explain request metadata is capped at
+64 KiB, with explicit bounds on path-like fields, argv, environment entries,
+and privilege text.
 
 ### Command execution
 
@@ -185,7 +187,9 @@ Local liveness/readiness are ordinary HTTP endpoints:
 They are not MCP tools and they do not probe inventory hosts or establish SSH
 sessions. Runtime configuration uses `SSH_OVER_MCP_CONFIG`,
 `SSH_OVER_MCP_PROFILE`, and optional `SSH_OVER_MCP_PORT` (default 8000).
-OAuth/claim-to-profile mapping remains a later Cloudflare-phase concern.
+The Streamable HTTP endpoint rejects request bodies larger than 128 KiB before
+MCP parsing. OAuth/claim-to-profile mapping remains a later Cloudflare-phase
+concern.
 
 ## Annotations
 
