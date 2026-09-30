@@ -6,7 +6,10 @@ from ssh_over_mcp.host_agent.policy import (
     HostArgvRule,
     HostChildLimits,
     HostCommandRule,
+    HostContainmentLimits,
+    HostContainmentPolicy,
     HostExecutionPolicy,
+    HostLinuxIdentity,
     HostPolicyError,
     authorize_request,
     load_host_policy,
@@ -21,6 +24,22 @@ def _child_limits() -> HostChildLimits:
         max_processes=64,
         file_size_bytes=64 * 1024 * 1024,
         open_files=128,
+    )
+
+
+def _containment_policy() -> HostContainmentPolicy:
+    return HostContainmentPolicy(
+        manager_endpoint="/run/ssh-over-mcp/containment-manager.sock",
+        manager=HostLinuxIdentity(uid=2101, gid=3101),
+        host_agent=HostLinuxIdentity(uid=2102, gid=3102),
+        workload=HostLinuxIdentity(uid=2103, gid=3103),
+        manager_client_gid=3199,
+        limits=HostContainmentLimits(
+            memory_max_bytes=512 * 1024 * 1024,
+            pids_max=64,
+            cpu_quota_us=50_000,
+            cpu_period_us=100_000,
+        ),
     )
 
 
@@ -571,3 +590,78 @@ def test_child_limit_invalid_values_are_rejected(field, value):
 
     with pytest.raises(ValueError):
         HostChildLimits(**values)
+
+
+def test_policy_v4_requires_containment(tmp_path: Path):
+    executable = make_executable(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    values = make_policy(executable, cwd).model_dump()
+    values["version"] = 4
+
+    with pytest.raises(ValueError, match="version 4 requires containment"):
+        HostExecutionPolicy(**values)
+
+
+def test_policy_v3_rejects_containment(tmp_path: Path):
+    executable = make_executable(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    values = make_policy(executable, cwd).model_dump()
+    values["containment"] = _containment_policy().model_dump()
+
+    with pytest.raises(ValueError, match="version 3 must not define containment"):
+        HostExecutionPolicy(**values)
+
+
+def test_policy_v4_builds_runtime_containment_contract(tmp_path: Path):
+    executable = make_executable(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    values = make_policy(executable, cwd).model_dump()
+    values["version"] = 4
+    values["containment"] = _containment_policy().model_dump()
+
+    policy = HostExecutionPolicy(**values)
+    assert policy.containment is not None
+
+    plan = policy.containment.to_identity_plan()
+    limits = policy.containment.to_containment_limits()
+
+    assert plan.manager.uid == 2101
+    assert plan.host_agent.uid == 2102
+    assert plan.workload.uid == 2103
+    assert plan.manager_client_gid == 3199
+    assert limits.memory_max_bytes == 512 * 1024 * 1024
+    assert limits.pids_max == 64
+    assert limits.cpu_quota_us == 50_000
+    assert limits.cpu_period_us == 100_000
+
+
+def test_containment_policy_rejects_relative_manager_endpoint():
+    values = _containment_policy().model_dump()
+    values["manager_endpoint"] = "containment-manager.sock"
+
+    with pytest.raises(ValueError, match="manager endpoint"):
+        HostContainmentPolicy(**values)
+
+
+def test_containment_policy_rejects_root_identity():
+    with pytest.raises(ValueError):
+        HostLinuxIdentity(uid=0, gid=3101)
+
+
+def test_containment_policy_rejects_duplicate_service_uids():
+    values = _containment_policy().model_dump()
+    values["workload"]["uid"] = values["host_agent"]["uid"]
+
+    with pytest.raises(ValueError, match="UIDs must be distinct"):
+        HostContainmentPolicy(**values)
+
+
+def test_containment_policy_rejects_invalid_cgroup_limit():
+    values = _containment_policy().limits.model_dump()
+    values["cpu_period_us"] = 999
+
+    with pytest.raises(ValueError):
+        HostContainmentLimits(**values)
