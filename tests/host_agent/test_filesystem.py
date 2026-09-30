@@ -6,12 +6,12 @@ from pathlib import Path
 import pytest
 
 from ssh_over_mcp.host_agent.filesystem import (
-    FilesystemAccessError,
+    MAX_FS_PATH_BYTES,
     MAX_FS_READ_BYTES,
+    FilesystemAccessError,
     read_file,
     stat_path,
 )
-
 
 pytestmark = pytest.mark.skipif(
     not hasattr(os, "O_PATH"),
@@ -52,6 +52,13 @@ def test_stat_directory_is_supported(tmp_path: Path) -> None:
 )
 def test_noncanonical_paths_fail_closed(path: str) -> None:
     with pytest.raises(FilesystemAccessError, match="canonical"):
+        stat_path(path)
+
+
+def test_path_byte_length_is_hard_bounded() -> None:
+    path = "/" + ("a" * MAX_FS_PATH_BYTES)
+
+    with pytest.raises(FilesystemAccessError, match="pathname limit"):
         stat_path(path)
 
 
