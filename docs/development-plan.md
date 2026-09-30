@@ -437,7 +437,7 @@ Task 1 implemented: read-only descriptor-pinned primitives.
 - absolute lexically canonical paths only, with a 4096-byte Linux pathname hard bound;
 - every parent component is opened relative to a pinned directory fd with
   `O_NOFOLLOW`; intermediate symlinks fail closed;
-- the final object is opened with `O_NOFOLLOW` and pinned by fd;
+- the final object is first pinned/classified with `O_PATH|O_NOFOLLOW`; read-capable open occurs only for a verified regular inode via `/proc/self/fd/<pinned-fd>`;
 - `fs_stat` primitive scope is limited to regular files and directories;
 - `fs_read` primitive scope is limited to regular files and uses both a
   caller-supplied limit and a 64 MiB hard ceiling;
