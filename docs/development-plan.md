@@ -521,7 +521,12 @@ Create-only mutation progress:
   generic; post-publication parent-fsync failure returns dedicated `fs_write`
   status 74 plus a fixed host-owned "committed; durability uncertain; do not
   retry blindly" diagnostic;
-- `fs_write` remains below the MCP tool layer.
+- `fs_write` remains below the MCP tool layer;
+- Task 7 implemented on Ubuntu 26.04 x86 with real filesystem adversarial
+  composition: concurrent create-if-absent races publish exactly one complete
+  body, file fsync occurs before publish visibility, symlink escape/collision
+  attempts fail closed, policy denial/body mismatch leave no object, and the
+  real committed path preserves the published file while returning status 74.
 
 ### Remaining Phase 3 work
 
