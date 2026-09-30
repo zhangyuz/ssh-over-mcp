@@ -152,8 +152,9 @@ def test_create_regular_file_does_not_widen_restrictive_umask(
     finally:
         os.umask(previous)
 
-    assert target.read_bytes() == b"x"
-    assert stat.S_IMODE(target.stat().st_mode) == 0
+    info = target.stat()
+    assert info.st_size == 1
+    assert stat.S_IMODE(info.st_mode) == 0
 
 
 def test_create_regular_file_rejects_existing_destination_without_replace(
