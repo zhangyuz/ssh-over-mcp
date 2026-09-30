@@ -9,7 +9,11 @@ import time
 from collections.abc import Sequence
 from typing import BinaryIO, TextIO
 
-from ssh_over_mcp.ssh.protocol import FsReadEnvelope, FsStatEnvelope
+from ssh_over_mcp.ssh.protocol import (
+    FsMkdirEnvelope,
+    FsReadEnvelope,
+    FsStatEnvelope,
+)
 
 from .containment import ContainmentRequest
 from .containment_manager_unix import connect_authenticated_containment_manager
@@ -19,10 +23,15 @@ from .filesystem import (
     read_file,
     stat_path,
 )
+from .filesystem_mutation import (
+    FilesystemMutationError,
+    create_directory,
+)
 from .policy import (
     DEFAULT_POLICY_PATH,
     HostExecutionPolicy,
     HostPolicyError,
+    authorize_filesystem_mkdir,
     authorize_filesystem_read,
     authorize_filesystem_stat,
     authorize_request,
@@ -80,7 +89,7 @@ def run(
         print(f"ssh-over-mcp-host-agent: rejected: {exc}", file=stderr)
         return EX_PROTOCOL
 
-    if isinstance(envelope, (FsStatEnvelope, FsReadEnvelope)):
+    if isinstance(envelope, (FsStatEnvelope, FsReadEnvelope, FsMkdirEnvelope)):
         return _run_filesystem_request(
             envelope=envelope,
             policy=policy,
@@ -196,7 +205,7 @@ def _filesystem_stat_payload(result: ReadOnlyFileStat) -> bytes:
 
 def _run_filesystem_request(
     *,
-    envelope: FsStatEnvelope | FsReadEnvelope,
+    envelope: FsStatEnvelope | FsReadEnvelope | FsMkdirEnvelope,
     policy: HostExecutionPolicy,
     stdin: BinaryIO,
     stdout: BinaryIO | None,
@@ -209,12 +218,18 @@ def _run_filesystem_request(
             profile=envelope.profile,
             path=envelope.path,
         )
-    else:
+    elif isinstance(envelope, FsReadEnvelope):
         decision = authorize_filesystem_read(
             policy,
             profile=envelope.profile,
             path=envelope.path,
             max_bytes=envelope.max_bytes,
+        )
+    else:
+        decision = authorize_filesystem_mkdir(
+            policy,
+            profile=envelope.profile,
+            path=envelope.path,
         )
 
     if not decision.allowed:
@@ -241,7 +256,7 @@ def _run_filesystem_request(
     try:
         if isinstance(envelope, FsStatEnvelope):
             output = _filesystem_stat_payload(stat_path(envelope.path))
-        else:
+        elif isinstance(envelope, FsReadEnvelope):
             max_bytes = decision.effective_max_read_bytes
             if max_bytes is None:
                 raise FilesystemAccessError("missing authorized read bound")
@@ -249,7 +264,10 @@ def _run_filesystem_request(
                 envelope.path,
                 max_bytes=max_bytes,
             ).data
-    except FilesystemAccessError:
+        else:
+            create_directory(envelope.path)
+            output = b""
+    except (FilesystemAccessError, FilesystemMutationError):
         print(
             "ssh-over-mcp-host-agent: filesystem operation failed",
             file=stderr,

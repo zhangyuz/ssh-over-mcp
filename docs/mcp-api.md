@@ -103,6 +103,15 @@ details.
 These are host-agent wire operations only. The MCP `fs_stat` and `fs_read`
 tools listed above are still future Phase 4 surface work.
 
+The host agent also exposes create-only `fs_mkdir` as a typed SMCP v1
+operation. Its request is metadata-only and contains only request ID, profile,
+operation, and path. Mode, owner, recursive, and overwrite fields are not part
+of the schema and extra metadata is rejected. The host agent applies the
+profile-scoped `mkdir_roots` policy and rejects any trailing request body before
+calling the one-level create-only directory primitive. Success returns status 0
+with no stdout body. Policy denial and primitive failure remain generic. This is
+not yet an MCP `fs_mkdir` tool.
+
 ### Processes
 
 - `process_list`

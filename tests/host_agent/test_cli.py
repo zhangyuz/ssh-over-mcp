@@ -19,6 +19,7 @@ from ssh_over_mcp.host_agent.filesystem import (
     ReadFileResult,
     ReadOnlyFileStat,
 )
+from ssh_over_mcp.host_agent.filesystem_mutation import FilesystemMutationError
 from ssh_over_mcp.host_agent.policy import (
     HostArgvRule,
     HostChildLimits,
@@ -33,6 +34,7 @@ from ssh_over_mcp.host_agent.run import SupervisedExecutionResult
 from ssh_over_mcp.ssh.protocol import (
     ExecEnvelope,
     ExecutionLimits,
+    FsMkdirEnvelope,
     FsReadEnvelope,
     FsStatEnvelope,
     encode_request,
@@ -124,6 +126,7 @@ def filesystem_policy(
     *,
     stat_roots: tuple[str, ...] = (),
     read_roots: tuple[str, ...] = (),
+    mkdir_roots: tuple[str, ...] = (),
     max_read_bytes: int | None = None,
 ) -> HostExecutionPolicy:
     values = policy(executable).model_dump()
@@ -131,6 +134,7 @@ def filesystem_policy(
         "developer": HostFilesystemProfilePolicy(
             stat_roots=stat_roots,
             read_roots=read_roots,
+            mkdir_roots=mkdir_roots,
             max_read_bytes=max_read_bytes,
         ).model_dump()
     }
@@ -154,6 +158,16 @@ def fs_read_payload(path: str, *, max_bytes: int) -> bytes:
             profile="developer",
             path=path,
             max_bytes=max_bytes,
+        )
+    )
+
+
+def fs_mkdir_payload(path: str) -> bytes:
+    return encode_request(
+        FsMkdirEnvelope(
+            request_id="req_fs_mkdir_1234",
+            profile="developer",
+            path=path,
         )
     )
 
@@ -685,6 +699,143 @@ def test_fs_primitive_failure_is_generic(
         policy=filesystem_policy(
             executable,
             stat_roots=("/srv/app",),
+        ),
+    )
+
+    assert status == EX_UNAVAILABLE
+    assert stderr.getvalue() == (
+        "ssh-over-mcp-host-agent: filesystem operation failed\n"
+    )
+    assert "sensitive" not in stderr.getvalue()
+
+
+def test_fs_mkdir_runs_policy_then_create_only_primitive(
+    tmp_path: Path,
+    monkeypatch,
+):
+    executable = make_executable(tmp_path)
+    observed: dict[str, object] = {}
+
+    def fake_create(path: str) -> None:
+        observed["path"] = path
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.cli.create_directory",
+        fake_create,
+    )
+
+    stdout = io.BytesIO()
+    execution_stderr = io.BytesIO()
+    control_stderr = io.StringIO()
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=io.BytesIO(fs_mkdir_payload("/srv/app/new-directory")),
+        stdout=stdout,
+        stderr=control_stderr,
+        execution_stderr=execution_stderr,
+        policy=filesystem_policy(
+            executable,
+            mkdir_roots=("/srv/app",),
+        ),
+    )
+
+    assert status == 0
+    assert observed["path"] == "/srv/app/new-directory"
+    assert stdout.getvalue() == b""
+    assert execution_stderr.getvalue() == b""
+    assert control_stderr.getvalue() == ""
+
+
+def test_fs_mkdir_policy_denial_stops_before_mutation(
+    tmp_path: Path,
+    monkeypatch,
+):
+    executable = make_executable(tmp_path)
+
+    def forbidden_create(*_args, **_kwargs):
+        raise AssertionError("mkdir primitive must not run after policy denial")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.cli.create_directory",
+        forbidden_create,
+    )
+
+    stderr = io.StringIO()
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=io.BytesIO(fs_mkdir_payload("/srv/private/new-directory")),
+        stdout=io.BytesIO(),
+        stderr=stderr,
+        execution_stderr=io.BytesIO(),
+        policy=filesystem_policy(
+            executable,
+            mkdir_roots=("/srv/app",),
+        ),
+    )
+
+    assert status == EX_NOPERM
+    assert stderr.getvalue() == (
+        "ssh-over-mcp-host-agent: filesystem denied\n"
+    )
+
+
+def test_fs_mkdir_trailing_stdin_is_rejected_before_mutation(
+    tmp_path: Path,
+    monkeypatch,
+):
+    executable = make_executable(tmp_path)
+
+    def forbidden_create(*_args, **_kwargs):
+        raise AssertionError("mkdir primitive must not run with stdin")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.cli.create_directory",
+        forbidden_create,
+    )
+
+    stderr = io.StringIO()
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=io.BytesIO(
+            fs_mkdir_payload("/srv/app/new-directory") + b"x"
+        ),
+        stdout=io.BytesIO(),
+        stderr=stderr,
+        execution_stderr=io.BytesIO(),
+        policy=filesystem_policy(
+            executable,
+            mkdir_roots=("/srv/app",),
+        ),
+    )
+
+    assert status == EX_PROTOCOL
+    assert "stdin exceeds configured maximum" in stderr.getvalue()
+
+
+def test_fs_mkdir_primitive_failure_is_generic(
+    tmp_path: Path,
+    monkeypatch,
+):
+    executable = make_executable(tmp_path)
+
+    def fail_create(_path: str) -> None:
+        raise FilesystemMutationError("sensitive namespace detail")
+
+    monkeypatch.setattr(
+        "ssh_over_mcp.host_agent.cli.create_directory",
+        fail_create,
+    )
+
+    stderr = io.StringIO()
+    status = run(
+        env={"SSH_ORIGINAL_COMMAND": "mcp-v1"},
+        stdin=io.BytesIO(fs_mkdir_payload("/srv/app/new-directory")),
+        stdout=io.BytesIO(),
+        stderr=stderr,
+        execution_stderr=io.BytesIO(),
+        policy=filesystem_policy(
+            executable,
+            mkdir_roots=("/srv/app",),
         ),
     )
 

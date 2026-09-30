@@ -491,8 +491,12 @@ Create-only mutation progress:
   one pinned-parent `mkdirat`-style mutation, with no post-create pathname
   reopen/chmod/remove;
 - Task 2 implemented: profile-scoped lexical `mkdir_roots` authorization;
-- `fs_mkdir` is still not remotely reachable; typed SMCP wiring is the next
-  separately reviewed slice.
+- Task 3 implemented: typed metadata-only `fs_mkdir` SMCP v1 operation;
+- `fs_mkdir` authorizes before mutation, rejects trailing stdin, accepts no
+  mode/owner/recursive metadata, invokes only the create-only directory primitive,
+  and returns status 0 with empty stdout on success;
+- policy denial and primitive failure remain generic on the SSH-visible channel;
+- `fs_mkdir` is still below the MCP tool layer.
 
 ### Remaining Phase 3 work
 
