@@ -94,6 +94,22 @@ def _open_parent(path: str) -> tuple[int, str | None]:
         raise
 
 
+def _open_pinned_final(parent_fd: int, final_name: str) -> tuple[int, os.stat_result]:
+    flags = os.O_PATH | os.O_CLOEXEC | os.O_NOFOLLOW
+    try:
+        target_fd = os.open(final_name, flags, dir_fd=parent_fd)
+    except OSError as exc:
+        raise FilesystemAccessError("filesystem object is unavailable") from exc
+
+    try:
+        info = os.fstat(target_fd)
+    except OSError as exc:
+        os.close(target_fd)
+        raise FilesystemAccessError("cannot inspect filesystem object") from exc
+
+    return target_fd, info
+
+
 def _kind(info: os.stat_result) -> FilesystemObjectKind:
     if stat.S_ISREG(info.st_mode):
         return "regular"
@@ -124,13 +140,8 @@ def stat_path(path: str) -> ReadOnlyFileStat:
             target_fd = parent_fd
             parent_fd = -1
         else:
-            flags = os.O_PATH | os.O_CLOEXEC | os.O_NOFOLLOW
-            try:
-                target_fd = os.open(final_name, flags, dir_fd=parent_fd)
-            except OSError as exc:
-                raise FilesystemAccessError(
-                    "filesystem object is unavailable"
-                ) from exc
+            target_fd, info = _open_pinned_final(parent_fd, final_name)
+            return _result_stat(path, info)
 
         try:
             info = os.fstat(target_fd)
@@ -166,24 +177,33 @@ def read_file(path: str, *, max_bytes: int) -> ReadFileResult:
         raise FilesystemAccessError("filesystem read bound is outside the supported range")
 
     parent_fd, final_name = _open_parent(path)
+    path_fd: int | None = None
     file_fd: int | None = None
     try:
         if final_name is None:
             raise FilesystemAccessError("filesystem read target is not a regular file")
 
-        flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+        path_fd, pinned = _open_pinned_final(parent_fd, final_name)
+        if not stat.S_ISREG(pinned.st_mode):
+            raise FilesystemAccessError("filesystem read target is not a regular file")
+
+        # Reopen the already-pinned regular inode for reading. Never perform a
+        # data-capable open on the caller-controlled pathname before its object
+        # type is known; device/FIFO/socket nodes therefore fail at O_PATH.
+        procfd_path = f"/proc/self/fd/{path_fd}"
+        flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK
         try:
-            file_fd = os.open(final_name, flags, dir_fd=parent_fd)
+            file_fd = os.open(procfd_path, flags)
         except OSError as exc:
-            raise FilesystemAccessError("filesystem read target is unavailable") from exc
+            raise FilesystemAccessError("cannot reopen pinned filesystem read target") from exc
 
         try:
             before = os.fstat(file_fd)
         except OSError as exc:
             raise FilesystemAccessError("cannot inspect filesystem read target") from exc
 
-        if not stat.S_ISREG(before.st_mode):
-            raise FilesystemAccessError("filesystem read target is not a regular file")
+        if not stat.S_ISREG(before.st_mode) or not _same_read_identity(pinned, before):
+            raise FilesystemAccessError("filesystem object changed before read")
         if before.st_size > max_bytes:
             raise FilesystemAccessError("filesystem read exceeds configured byte limit")
 
@@ -219,4 +239,6 @@ def read_file(path: str, *, max_bytes: int) -> ReadFileResult:
     finally:
         if file_fd is not None:
             os.close(file_fd)
+        if path_fd is not None:
+            os.close(path_fd)
         os.close(parent_fd)
