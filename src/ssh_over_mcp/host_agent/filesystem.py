@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import posixpath
 import stat
 from dataclasses import dataclass
 from typing import Literal
@@ -52,13 +51,13 @@ def _canonical_absolute_path(path: str) -> tuple[str, ...]:
     if not path.startswith("/") or path.startswith("//"):
         raise FilesystemAccessError("filesystem path must be absolute and canonical")
 
-    normalized = posixpath.normpath(path)
-    if normalized != path:
-        raise FilesystemAccessError("filesystem path must be absolute and canonical")
-
     if path == "/":
         return ()
-    return tuple(path[1:].split("/"))
+
+    components = tuple(path[1:].split("/"))
+    if any(component in {"", ".", ".."} for component in components):
+        raise FilesystemAccessError("filesystem path must be absolute and canonical")
+    return components
 
 
 def _open_root() -> int:
