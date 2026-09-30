@@ -1,10 +1,19 @@
-# Self-hosted Ubuntu 24.04 Docker runner
+# Self-hosted Ubuntu 26.04 x86 Docker runner
 
-The project uses a dedicated self-hosted GitHub Actions runner container for
-Linux execution semantics which are difficult to validate when GitHub-hosted
-capacity is unavailable.
+The active generic validation runner is an ephemeral GitHub Actions runner
+container on the dedicated Intel/x86 Mac host. The container is always
+**Ubuntu 26.04 x86_64**. Apple Silicon/M4 is intentionally excluded from
+runner scheduling.
 
-The runner image is always **Ubuntu 24.04**, even when the Docker host is macOS.
+Deploy it from the repository root with one command:
+
+```bash
+bash scripts/deploy-mac-x86-runner.sh up
+```
+
+The entrypoint builds the pinned image, obtains a one-time GitHub runner
+registration token with authenticated `gh` when needed, starts the hardened
+container, and waits until GitHub reports the runner online.
 
 ## What this runner validates
 
@@ -28,10 +37,9 @@ access, or the Docker daemon socket merely to make those tests pass.
 
 ## Host requirements
 
-Supported deployment hosts:
+The active runner host is:
 
-- Linux with Docker Engine;
-- macOS with Docker Desktop.
+- Intel/x86_64 macOS with Docker Desktop.
 
 Recommended capacity:
 
@@ -40,8 +48,9 @@ Recommended capacity:
 - outbound HTTPS access to GitHub;
 - no inbound network service required.
 
-On macOS, the runner still executes inside Docker Desktop's Linux VM. Apple
-Silicon uses the Linux ARM64 runner package; Intel Macs use Linux x64.
+The dedicated `deploy-mac-x86-runner.sh` entrypoint rejects arm64/Apple Silicon
+hosts. The lower-level `deploy-runner.sh` remains available for maintenance,
+but project workflow scheduling requires the x86-specific label.
 
 ## Runner image
 
@@ -53,10 +62,10 @@ ops/runner/Dockerfile
 
 Properties:
 
-- base image: `ubuntu:24.04`;
+- active base image: `ubuntu:26.04`;
 - GitHub Actions Runner version pinned at build time;
 - official runner archive SHA-256 verified before extraction;
-- x64 and ARM64 supported;
+- active runner architecture: Linux x64;
 - job process runs as fixed non-root UID/GID 1001;
 - normal GitHub runner self-update remains enabled by default.
 
@@ -106,22 +115,22 @@ The self-hosted workflow itself:
 A selected target ref still contains executable code. Choosing the ref is an
 explicit trust decision.
 
-## Deploy on Linux or macOS
+## Deploy on the Intel Mac
 
-The same script is used on both operating systems:
+Use the dedicated one-click entrypoint:
 
 ```bash
-bash scripts/deploy-runner.sh up
+bash scripts/deploy-mac-x86-runner.sh up
 ```
 
 The script:
 
-1. verifies Docker is installed and running;
-2. detects Linux vs macOS;
-3. detects x86-64 vs ARM64;
-4. builds the matching Ubuntu 24.04 runner image;
-5. obtains or accepts a short-lived GitHub runner registration token;
-6. starts the hardened runner container.
+1. requires macOS on `x86_64` and rejects Apple Silicon/M4;
+2. verifies Docker Desktop is installed and running;
+3. builds the pinned Ubuntu 26.04 Linux x64 runner image;
+4. obtains or accepts a short-lived GitHub runner registration token;
+5. starts the hardened ephemeral runner container;
+6. waits until GitHub reports the runner online.
 
 ### Registration token
 
@@ -158,38 +167,31 @@ install the GitHub runner binary directly.
 Start the default ephemeral runner:
 
 ```bash
-RUNNER_TOKEN='...' bash scripts/deploy-runner.sh up
-```
-
-Use an explicit name:
-
-```bash
-RUNNER_TOKEN='...' bash scripts/deploy-runner.sh up \
-  --name ssh-over-mcp-dev-01
+RUNNER_TOKEN='...' bash scripts/deploy-mac-x86-runner.sh up
 ```
 
 Show status:
 
 ```bash
-bash scripts/deploy-runner.sh status
+bash scripts/deploy-mac-x86-runner.sh status
 ```
 
 Follow logs:
 
 ```bash
-bash scripts/deploy-runner.sh logs
+bash scripts/deploy-mac-x86-runner.sh logs
 ```
 
 Remove the runner container:
 
 ```bash
-bash scripts/deploy-runner.sh down
+bash scripts/deploy-mac-x86-runner.sh down
 ```
 
 Build only:
 
 ```bash
-bash scripts/deploy-runner.sh build
+bash scripts/deploy-mac-x86-runner.sh build
 ```
 
 ## Ephemeral vs persistent
@@ -207,16 +209,9 @@ runner is automatically deregistered by GitHub
 
 This is the preferred validation mode.
 
-For local bring-up only, a persistent runner is available:
-
-```bash
-RUNNER_TOKEN='...' bash scripts/deploy-runner.sh up --persistent
-```
-
-Persistent mode uses Docker's `unless-stopped` restart policy and retains the
-runner configuration in the container writable layer.
-
-Do not treat a persistent container as clean between jobs.
+The dedicated macOS x86 entrypoint rejects `--persistent`. Each runner instance
+is one-job ephemeral by policy. The lower-level maintenance script still has a
+persistent mode, but it is not part of the active project runner workflow.
 
 ## Linux host behavior
 
@@ -248,7 +243,7 @@ run on macOS.
 After the runner reports online in GitHub:
 
 1. open **Actions**;
-2. choose **Self-hosted Docker validation**;
+2. choose **Self-hosted Ubuntu 26.04 x86 validation**;
 3. choose **Run workflow** from `main`;
 4. enter the branch, tag, or commit SHA to validate;
 5. run the workflow.
@@ -256,13 +251,14 @@ After the runner reports online in GitHub:
 The job requires:
 
 ```yaml
-runs-on: [self-hosted, linux, ssh-over-mcp-docker]
+runs-on: [self-hosted, linux, x64, ssh-over-mcp-mac-x86]
 ```
 
 The preflight verifies:
 
 - job UID is non-root;
-- OS is Ubuntu 24.04;
+- OS is Ubuntu 26.04;
+- architecture is x86_64;
 - effective Linux capabilities are zero;
 - `NoNewPrivs=1`;
 - Docker socket is not mounted;
