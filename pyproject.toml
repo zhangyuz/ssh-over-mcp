@@ -10,7 +10,10 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
   "asyncssh>=2.24,<3",
-  "pydantic>=2.9,<3",
+  "pydantic>=2.12,<3",
+  "mcp>=2,<3",
+  "starlette>=0.49.1,<1",
+  "uvicorn>=0.31.1,<1",
   "PyYAML>=6.0,<7",
 ]
 
@@ -22,6 +25,7 @@ dev = [
   "pytest>=8.3,<9",
   "pytest-asyncio>=1.4,<2",
   "ruff>=0.8",
+  "httpx>=0.28,<1",
 ]
 
 [tool.pytest.ini_options]
