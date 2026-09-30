@@ -553,6 +553,8 @@ branch:
 - `hosts_list` and `host_info` expose alias-only visible-host identity with
   empty labels/capabilities and indistinguishable missing/hidden errors;
 - sanitized `policy_explain` with no SSH/network side effect;
+- bounded `policy_explain` metadata (64 KiB aggregate plus field/count limits)
+  and a 128 KiB Streamable HTTP request-body cap;
 - `/healthz` and `/readyz` remain ordinary HTTP routes outside the MCP tool
   registry;
 - real MCP SDK client round-trip coverage for Streamable HTTP.
