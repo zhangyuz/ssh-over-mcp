@@ -119,14 +119,33 @@ def test_read_directory_is_rejected(tmp_path: Path) -> None:
         read_file(str(tmp_path), max_bytes=64)
 
 
-def test_special_fifo_is_rejected_without_blocking(tmp_path: Path) -> None:
+def test_special_fifo_is_rejected_before_any_read_capable_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fifo = tmp_path / "pipe"
     os.mkfifo(fifo)
+    real_open = os.open
+    final_open_flags: list[int] = []
+    procfd_opens: list[str] = []
+
+    def tracking_open(path, flags, *args, **kwargs):
+        if path == fifo.name:
+            final_open_flags.append(flags)
+        if isinstance(path, str) and path.startswith("/proc/self/fd/"):
+            procfd_opens.append(path)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", tracking_open)
 
     with pytest.raises(FilesystemAccessError, match="not supported"):
         stat_path(str(fifo))
     with pytest.raises(FilesystemAccessError, match="not a regular file"):
         read_file(str(fifo), max_bytes=64)
+
+    assert final_open_flags
+    assert all(flags & os.O_PATH for flags in final_open_flags)
+    assert procfd_opens == []
 
 
 def test_read_detects_file_change_during_pinned_read(
