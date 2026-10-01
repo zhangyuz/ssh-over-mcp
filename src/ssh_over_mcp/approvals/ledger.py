@@ -529,6 +529,7 @@ class SecurityLedgerStore:
             data = self._row_mapping(row)
             current = ApprovalState(str(data["state"]))
             if current is ApprovalState.EXPIRED:
+                self._commit()
                 raise LedgerExpiredError("approval expired")
             if current is not ApprovalState.PENDING:
                 raise LedgerConflictError("approval transition is not permitted")
@@ -619,6 +620,7 @@ class SecurityLedgerStore:
             data = self._row_mapping(row)
             state = ApprovalState(str(data["state"]))
             if state is ApprovalState.EXPIRED:
+                self._commit()
                 raise LedgerExpiredError("approval expired")
             if state is not ApprovalState.GRANTED:
                 raise LedgerConflictError("approval is not consumable")

@@ -337,3 +337,93 @@ def test_list_active_fills_limit_after_expiring_older_rows(
         assert expired.state is ApprovalState.EXPIRED
     finally:
         database.close()
+
+
+def test_grant_after_expiry_persists_expired_state_and_event_once(
+    tmp_path: Path,
+) -> None:
+    from ssh_over_mcp.approvals.ledger import LedgerExpiredError
+
+    clock = Clock(datetime(2026, 10, 1, 18, 0, tzinfo=UTC))
+    _settings_obj, database, store = _store(
+        tmp_path,
+        clock,
+        default_ttl_seconds=10,
+    )
+    binding = _binding(path="/srv/app/grant-expired")
+    try:
+        pending = store.ensure_approval(
+            binding,
+            _summary(binding),
+            "req_" + "1" * 32,
+        )
+        clock.advance(seconds=11)
+
+        with pytest.raises(LedgerExpiredError):
+            store.grant(
+                pending.approval_id,
+                operator_identity="uid:0:gid:0",
+            )
+        with pytest.raises(LedgerExpiredError):
+            store.grant(
+                pending.approval_id,
+                operator_identity="uid:0:gid:0",
+            )
+
+        row = database.connection.execute(
+            "SELECT state,active_binding_hmac FROM approvals "
+            "WHERE approval_id=?",
+            (pending.approval_id,),
+        ).fetchone()
+        assert row == (ApprovalState.EXPIRED.value, None)
+        assert _events(database).count("approval_expired") == 1
+    finally:
+        database.close()
+
+
+def test_consume_after_expiry_persists_expired_state_and_event_once(
+    tmp_path: Path,
+) -> None:
+    from ssh_over_mcp.approvals.ledger import LedgerExpiredError
+
+    clock = Clock(datetime(2026, 10, 1, 18, 0, tzinfo=UTC))
+    _settings_obj, database, store = _store(
+        tmp_path,
+        clock,
+        default_ttl_seconds=10,
+    )
+    binding = _binding(path="/srv/app/consume-expired")
+    try:
+        pending = store.ensure_approval(
+            binding,
+            _summary(binding),
+            "req_" + "1" * 32,
+        )
+        store.grant(
+            pending.approval_id,
+            operator_identity="uid:0:gid:0",
+        )
+        clock.advance(seconds=11)
+
+        with pytest.raises(LedgerExpiredError):
+            store.consume(
+                pending.approval_id,
+                binding,
+                "req_" + "2" * 32,
+            )
+        with pytest.raises(LedgerExpiredError):
+            store.consume(
+                pending.approval_id,
+                binding,
+                "req_" + "3" * 32,
+            )
+
+        row = database.connection.execute(
+            "SELECT state,active_binding_hmac FROM approvals "
+            "WHERE approval_id=?",
+            (pending.approval_id,),
+        ).fetchone()
+        assert row == (ApprovalState.EXPIRED.value, None)
+        assert _events(database).count("approval_expired") == 1
+    finally:
+        database.close()
