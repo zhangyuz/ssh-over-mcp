@@ -48,3 +48,7 @@ class SSHRemoteOperationError(SSHCoreError):
 
 class SSHRequestOutcomeUncertain(SSHCoreError):
     """The structured request may have reached the remote host."""
+
+
+class SSHFilesystemWriteCommittedUncertain(SSHCoreError):
+    """A file was published but its directory durability is uncertain."""
