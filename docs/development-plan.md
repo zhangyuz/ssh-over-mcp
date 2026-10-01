@@ -457,15 +457,16 @@ operations.
 - OS DAC/ACL/MAC permissions remain authoritative.
 
 The SMCP v1 metadata frame now uses a strict operation-discriminated request
-union for `exec`, `fs_stat`, and `fs_read`. Filesystem requests are
+union for `exec`, `fs_stat`, `fs_read`, `fs_mkdir`, and `fs_write`.
+Filesystem requests are
 metadata-only and any trailing application stdin is rejected before object
 access. `fs_stat` returns compact canonical JSON metadata on stdout;
 `fs_read` returns raw file bytes. Policy denial and object-access failure are
 SSH-visible only as generic bounded diagnostics. The existing bounded
 nonblocking result-delivery path is reused.
 
-These wire operations are host-agent protocol operations only; no MCP filesystem
-tool is enabled yet.
+These host-agent wire operations are consumed by the separately reviewed Phase 4
+MCP filesystem adapters when those adapters are enabled.
 
 ### Phase 3e mutation boundary — create-only v1 closed
 
@@ -496,7 +497,8 @@ Create-only mutation progress:
   mode/owner/recursive metadata, invokes only the create-only directory primitive,
   and returns status 0 with empty stdout on success;
 - policy denial and primitive failure remain generic on the SSH-visible channel;
-- `fs_mkdir` is still below the MCP tool layer;
+- the Phase 4 MCP layer now exposes this operation as strict create-only
+  `fs_mkdir(host, path)` with no caller mode/owner/recursive/overwrite fields;
 - Task 4 implemented internally: create-only regular-file publication through
   a pinned parent and unnamed `O_TMPFILE` inode, with fixed maximum mode
   `0600`, strict 64 MiB hard bound/exact length, file fsync before publication,
@@ -607,9 +609,27 @@ The MCP read-only filesystem slice is implemented:
 - real Streamable HTTP coverage proves default-deny filesystem calls do not
   reach the SSH connection path.
 
+The MCP create-only directory slice is implemented:
+
+- `fs_mkdir` accepts only logical host alias plus bounded path; profile,
+  privilege, request ID, SSH coordinates, credentials, mode, owner, recursive,
+  parents, and overwrite semantics remain server-owned or absent;
+- central policy runs before network access and only its normalized path enters
+  the typed `FsMkdirEnvelope`;
+- the host agent independently applies `mkdir_roots` and the existing
+  pinned-parent, one-level, create-if-absent primitive with maximum mode `0700`;
+- a clean remote status 77 is a definite remote-policy denial, while channel
+  open failure is a definite pre-request transport failure;
+- once a mutation request may have been sent, timeout, collection/output
+  failure, nonzero result other than clean policy denial, malformed success
+  output, or foreign transport failure is surfaced as outcome-uncertain with
+  an explicit do-not-retry-blindly contract;
+- real Streamable HTTP coverage proves default-deny `fs_mkdir` does not reach
+  the SSH connection path.
+
 Still deferred to separately reviewed Phase 4 slices:
 
-- MCP create-only `fs_mkdir` / `fs_write`;
+- MCP create-only `fs_write`;
 - raw shell;
 - OAuth/claim-to-profile mapping;
 - audit/approval persistence;

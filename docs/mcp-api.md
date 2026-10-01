@@ -152,12 +152,26 @@ returning raw remote stderr or internal exception detail.
 
 The host agent also exposes create-only `fs_mkdir` as a typed SMCP v1
 operation. Its request is metadata-only and contains only request ID, profile,
-operation, and path. Mode, owner, recursive, and overwrite fields are not part
-of the schema and extra metadata is rejected. The host agent applies the
-profile-scoped `mkdir_roots` policy and rejects any trailing request body before
-calling the one-level create-only directory primitive. Success returns status 0
-with no stdout body. Policy denial and primitive failure remain generic. This is
-not yet an MCP `fs_mkdir` tool.
+operation, and path. Mode, owner, recursive, parents, and overwrite fields are
+not part of the schema and extra metadata is rejected. The host agent applies
+the profile-scoped `mkdir_roots` policy and rejects any trailing request body
+before calling the one-level create-only directory primitive. The parent must
+already exist, the final entry must be absent, and the server-owned maximum mode
+is `0700`.
+
+The Phase 4 MCP `fs_mkdir` adapter is now implemented. MCP input contains only
+logical host alias and bounded path; the trusted profile and fixed user
+privilege are injected server-side. Host visibility and central policy complete
+before the structured SSH transport can acquire a connection, and only the
+central normalized path enters `FsMkdirEnvelope`.
+
+A clean remote status 77 is a definite host-policy denial. A channel-open
+failure is also a definite pre-request transport failure. Once the request may
+have been sent, however, timeout, collection/output failure, nonzero status other
+than clean policy denial, malformed success output, or other foreign transport
+failure is returned as `filesystem mutation outcome uncertain; do not retry
+blindly`. This conservative classification is required because the directory
+may already have been created even if its success response was lost.
 
 The host agent also exposes create-only `fs_write` as typed SMCP v1. Metadata
 contains request ID, profile, operation, path, and one strict non-negative
@@ -241,7 +255,7 @@ Application shutdown closes the pooled SSH connection manager after the MCP SDK
 lifespan exits.
 
 The registered MCP surface is now `hosts_list`, `host_info`,
-`policy_explain`, `ssh_exec`, `fs_stat`, and `fs_read`.
+`policy_explain`, `ssh_exec`, `fs_stat`, `fs_read`, and `fs_mkdir`.
 Health/readiness remain ordinary HTTP routes and do not appear in the MCP tool
 registry.
 
@@ -266,6 +280,7 @@ Errors should distinguish:
 - remote policy denied;
 - timeout;
 - output truncated;
+- filesystem mutation outcome uncertain / do not retry blindly;
 - execution failure.
 
 Do not return secret values in error details.

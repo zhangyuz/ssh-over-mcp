@@ -10,6 +10,8 @@ from pydantic import ValidationError
 from .errors import ApiError
 from .models import (
     ExplainableTool,
+    FsMkdirRequest,
+    FsMkdirResult,
     FsReadRequest,
     FsReadResult,
     FsStatRequest,
@@ -31,6 +33,12 @@ _READ_ONLY_ANNOTATIONS = ToolAnnotations(
 _EXEC_ANNOTATIONS = ToolAnnotations(
     read_only_hint=False,
     destructive_hint=True,
+    idempotent_hint=False,
+    open_world_hint=False,
+)
+_CREATE_ONLY_ANNOTATIONS = ToolAnnotations(
+    read_only_hint=False,
+    destructive_hint=False,
     idempotent_hint=False,
     open_world_hint=False,
 )
@@ -212,6 +220,26 @@ def build_mcp_server(
                 max_bytes=max_bytes,
             )
             return await service.fs_read(
+                principal_provider.get_principal(),
+                request,
+            )
+        except ValidationError:
+            raise ToolError("invalid tool input") from None
+        except ApiError as exc:
+            raise ToolError(str(exc)) from None
+
+    @mcp.tool(
+        annotations=_CREATE_ONLY_ANNOTATIONS,
+    )
+    async def fs_mkdir(
+        host: str,
+        path: str,
+    ) -> FsMkdirResult:
+        """Create one policy-gated remote directory at an absent path."""
+
+        try:
+            request = FsMkdirRequest(host=host, path=path)
+            return await service.fs_mkdir(
                 principal_provider.get_principal(),
                 request,
             )

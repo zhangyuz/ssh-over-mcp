@@ -14,9 +14,10 @@ from .errors import (
     SSHRemoteOperationError,
     SSHRemotePolicyDenied,
     SSHRemoteResponseError,
+    SSHRequestOutcomeUncertain,
     SSHRequestTimeout,
 )
-from .protocol import FsReadEnvelope, FsStatEnvelope, encode_request
+from .protocol import FsMkdirEnvelope, FsReadEnvelope, FsStatEnvelope, encode_request
 from .transport import SSHExecutionResult, StructuredSSHTransport
 
 DEFAULT_FILESYSTEM_TIMEOUT_SECONDS = 60.0
@@ -74,6 +75,14 @@ class SSHFilesystemReadResult(BaseModel):
     host: str
     path: str
     data: bytes
+
+
+class SSHFilesystemMkdirResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request_id: str
+    host: str
+    path: str
 
 
 class _RemoteStatPayload(BaseModel):
@@ -207,4 +216,68 @@ class SSHFilesystemClient:
             host=request.host,
             path=decision.normalized_path,
             data=result.stdout,
+        )
+
+
+    async def mkdir(
+        self,
+        request: EvaluationRequest,
+        *,
+        request_id: str | None = None,
+    ) -> SSHFilesystemMkdirResult:
+        if request.tool != "fs_mkdir":
+            raise ValueError("filesystem mkdir requires fs_mkdir policy request")
+
+        decision = self.policy.evaluate(request)
+        if decision.decision == Decision.DENY:
+            raise SSHPolicyDenied(decision)
+        if decision.decision == Decision.APPROVAL_REQUIRED:
+            raise SSHApprovalRequired(decision)
+        if not decision.normalized_path:
+            raise SSHPolicyDenied(decision)
+
+        req_id = request_id or f"req_{uuid.uuid4().hex}"
+        envelope = FsMkdirEnvelope(
+            request_id=req_id,
+            profile=request.profile,
+            path=decision.normalized_path,
+        )
+        try:
+            result = await self.transport.run(
+                host=request.host,
+                payload=encode_request(envelope),
+                request_id=req_id,
+                timeout_seconds=self.default_timeout_seconds,
+                max_output_bytes=MIN_FILESYSTEM_TRANSPORT_OUTPUT_BYTES,
+            )
+        except SSHRequestOutcomeUncertain:
+            raise SSHRequestOutcomeUncertain(
+                "remote filesystem mutation outcome is uncertain"
+            ) from None
+
+        if (
+            result.timed_out
+            or result.truncated
+            or result.exit_signal is not None
+        ):
+            raise SSHRequestOutcomeUncertain(
+                "remote filesystem mutation outcome is uncertain"
+            )
+        if result.exit_status == _REMOTE_POLICY_DENIED_EXIT_STATUS:
+            raise SSHRemotePolicyDenied(
+                "remote filesystem policy denied request"
+            )
+        if (
+            result.exit_status != 0
+            or result.stdout
+            or result.stderr
+        ):
+            raise SSHRequestOutcomeUncertain(
+                "remote filesystem mutation outcome is uncertain"
+            )
+
+        return SSHFilesystemMkdirResult(
+            request_id=req_id,
+            host=request.host,
+            path=decision.normalized_path,
         )

@@ -1,7 +1,9 @@
 import asyncio
 
+import asyncssh
 import pytest
 
+import ssh_over_mcp.ssh.errors as ssh_errors
 from ssh_over_mcp.policy.models import (
     Decision,
     EvaluationRequest,
@@ -390,3 +392,102 @@ async def test_executor_delegates_allowed_request_to_injected_transport():
     assert envelope.limits.max_stdin_bytes == 654
     assert stdin == b"hello"
     assert result.stdout == b"delegated"
+
+
+class RaisingConnection:
+    def __init__(self, error):
+        self.error = error
+        self.calls = []
+
+    async def create_process(self, command, **kwargs):
+        self.calls.append((command, kwargs))
+        raise self.error
+
+
+@pytest.mark.asyncio
+async def test_transport_channel_open_failure_is_definite_transport_failure():
+    connection = RaisingConnection(
+        asyncssh.ChannelOpenError(
+            asyncssh.OPEN_CONNECT_FAILED,
+            "SUPERSECRET remote refusal detail",
+        )
+    )
+    transport = StructuredSSHTransport(
+        connections=Manager(connection),
+        cleanup_timeout_seconds=0.1,
+    )
+
+    with pytest.raises(
+        ssh_errors.SSHConnectionError,
+        match="SSH structured channel open failed",
+    ) as exc_info:
+        await transport.run(
+            host="dev01",
+            payload=b"framed",
+            request_id="req_open_1234",
+            timeout_seconds=1.0,
+            max_output_bytes=1024,
+        )
+
+    assert "SUPERSECRET" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_transport_post_open_failure_is_outcome_uncertain():
+    uncertain_error = getattr(
+        ssh_errors,
+        "SSHRequestOutcomeUncertain",
+        None,
+    )
+    assert uncertain_error is not None
+
+    connection = RaisingConnection(
+        RuntimeError("SUPERSECRET write-or-redirect failure")
+    )
+    transport = StructuredSSHTransport(
+        connections=Manager(connection),
+        cleanup_timeout_seconds=0.1,
+    )
+
+    with pytest.raises(
+        uncertain_error,
+        match="structured SSH request outcome is uncertain",
+    ) as exc_info:
+        await transport.run(
+            host="dev01",
+            payload=b"framed",
+            request_id="req_uncertain_1234",
+            timeout_seconds=1.0,
+            max_output_bytes=1024,
+        )
+
+    assert "SUPERSECRET" not in str(exc_info.value)
+
+
+class FailingReader:
+    async def read(self, size):
+        raise RuntimeError("SUPERSECRET collection failure")
+
+
+@pytest.mark.asyncio
+async def test_transport_collection_failure_is_outcome_uncertain():
+    process = Process()
+    process.stdout = FailingReader()
+    transport = StructuredSSHTransport(
+        connections=Manager(Connection(process)),
+        cleanup_timeout_seconds=0.1,
+    )
+
+    with pytest.raises(
+        ssh_errors.SSHRequestOutcomeUncertain,
+        match="structured SSH request outcome is uncertain",
+    ) as exc_info:
+        await transport.run(
+            host="dev01",
+            payload=b"framed",
+            request_id="req_collect_1234",
+            timeout_seconds=1.0,
+            max_output_bytes=1024,
+        )
+
+    assert "SUPERSECRET" not in str(exc_info.value)

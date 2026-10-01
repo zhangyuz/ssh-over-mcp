@@ -19,11 +19,13 @@ from ssh_over_mcp.ssh.errors import (
     SSHRemoteOperationError,
     SSHRemotePolicyDenied,
     SSHRemoteResponseError,
+    SSHRequestOutcomeUncertain,
     SSHRequestTimeout,
 )
 
 from .errors import (
     ApprovalRequiredError,
+    FilesystemMutationOutcomeUncertainError,
     FilesystemOperationError,
     HostNotVisibleError,
     InvalidExecutionLimitError,
@@ -38,6 +40,8 @@ from .errors import (
     SSHTransportError,
 )
 from .models import (
+    FsMkdirRequest,
+    FsMkdirResult,
     FsReadRequest,
     FsReadResult,
     FsStatRequest,
@@ -372,4 +376,64 @@ class MCPService:
             host=result.host,
             path=result.path,
             data_base64=base64.b64encode(result.data).decode("ascii"),
+        )
+
+    async def fs_mkdir(
+        self,
+        principal: PrincipalContext,
+        request: FsMkdirRequest,
+    ) -> FsMkdirResult:
+        self._visible_host(principal, request.host)
+        if self._ssh_filesystem is None:
+            raise FilesystemOperationError(
+                "filesystem operation is unavailable"
+            )
+
+        try:
+            result = await self._ssh_filesystem.mkdir(
+                EvaluationRequest(
+                    profile=principal.profile,
+                    host=request.host,
+                    tool="fs_mkdir",
+                    path=request.path,
+                    privilege="user",
+                )
+            )
+        except SSHPolicyDenied:
+            raise PolicyDeniedError(
+                "request denied by central policy"
+            ) from None
+        except SSHApprovalRequired:
+            raise ApprovalRequiredError(
+                "approval required by central policy"
+            ) from None
+        except SSHCredentialError:
+            raise SSHCredentialUnavailableError(
+                "SSH credential is unavailable"
+            ) from None
+        except SSHHostKeyVerificationError:
+            raise SSHHostKeyError(
+                "SSH host key verification failed"
+            ) from None
+        except SSHConnectionError:
+            raise SSHTransportError("SSH transport failed") from None
+        except SSHRemotePolicyDenied:
+            raise RemotePolicyDeniedError(
+                "remote filesystem policy denied request"
+            ) from None
+        except SSHRequestOutcomeUncertain:
+            raise FilesystemMutationOutcomeUncertainError(
+                "remote filesystem mutation outcome is uncertain; "
+                "do not retry blindly"
+            ) from None
+        except Exception:  # noqa: BLE001
+            raise FilesystemMutationOutcomeUncertainError(
+                "remote filesystem mutation outcome is uncertain; "
+                "do not retry blindly"
+            ) from None
+
+        return FsMkdirResult(
+            request_id=result.request_id,
+            host=result.host,
+            path=result.path,
         )

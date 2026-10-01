@@ -117,11 +117,11 @@ It MUST:
 
 ### Structured SSH transport
 
-Owns the fixed `mcp-v1` SSH channel creation and bounded stdout/stderr collection for already-framed SMCP requests. It allocates no PTY, forwards no environment or X11 state, reuses the per-host connection/session limits, and owns timeout/output-overflow/cancellation channel cleanup. It does not evaluate authorization.
+Owns the fixed `mcp-v1` SSH channel creation and bounded stdout/stderr collection for already-framed SMCP requests. It allocates no PTY, forwards no environment or X11 state, reuses the per-host connection/session limits, and owns timeout/output-overflow/cancellation channel cleanup. It does not evaluate authorization. Channel-open failure is classified as a pre-request transport failure; once channel creation may have written the framed payload, foreign transport/collection failure is classified as request-outcome-uncertain so mutation callers cannot treat lost acknowledgements as proof of no side effect.
 
 ### Structured SSH executor
 
-Obtains an allow decision before invoking the transport, creates the versioned `exec` request frame, and applies server-owned timeout/input/output limits. The read-only typed filesystem client now uses this same structured transport boundary after its own central-policy allow decision, rather than reimplementing SSH process lifecycle logic.
+Obtains an allow decision before invoking the transport, creates the versioned `exec` request frame, and applies server-owned timeout/input/output limits. The typed filesystem client uses this same structured transport boundary after its own central-policy allow decision, rather than reimplementing SSH process lifecycle logic. Read-only stat/read retain bounded response semantics; create-only mkdir additionally treats every ambiguous post-send result as mutation-outcome-uncertain and unsafe for blind retry.
 
 ### Remote host agent
 
