@@ -179,6 +179,7 @@ async def test_streamable_http_round_trip_at_mcp_path(
             "hosts_list",
             "host_info",
             "policy_explain",
+            "ssh_exec",
         }
         assert result.is_error is False
         assert result.structured_content == {
@@ -194,3 +195,22 @@ async def test_streamable_http_round_trip_at_mcp_path(
         server.should_exit = True
         await asyncio.wait_for(task, timeout=5)
         sock.close()
+
+
+def test_application_shutdown_closes_ssh_connection_pool(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    close_calls = 0
+
+    async def record_close(self) -> None:
+        nonlocal close_calls
+        close_calls += 1
+
+    monkeypatch.setattr(SSHConnectionManager, "close", record_close)
+
+    app = build_application(settings(tmp_path))
+    with TestClient(app) as client:
+        assert client.get("/readyz").status_code == 200
+
+    assert close_calls == 1
