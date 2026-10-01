@@ -23,6 +23,7 @@ from ssh_over_mcp.ssh.errors import (
     SSHHostKeyVerificationError,
     SSHPolicyDenied,
 )
+from ssh_over_mcp.ssh.protocol import ProtocolError
 
 
 def _ssh_exec_types():
@@ -287,6 +288,14 @@ async def test_ssh_exec_bounds_stdin_by_encoded_bytes() -> None:
             SSHConnectionError("10.0.0.1 secret transport detail"),
             "SSH transport failed",
         ),
+        (
+            ProtocolError("secret envelope detail"),
+            "execution request is invalid",
+        ),
+        (
+            RuntimeError("secret library exception"),
+            "SSH execution failed",
+        ),
     ],
 )
 async def test_ssh_exec_normalizes_ssh_errors_without_secret_details(
@@ -314,5 +323,7 @@ async def test_ssh_exec_normalizes_ssh_errors_without_secret_details(
         "secret://developer-host",
         "secret-host-key-value",
         "10.0.0.1",
+        "secret envelope detail",
+        "secret library exception",
     ):
         assert secret not in rendered
