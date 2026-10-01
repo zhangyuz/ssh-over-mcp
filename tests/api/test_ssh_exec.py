@@ -110,6 +110,31 @@ def _service(executor: RecordingExecutor) -> MCPService:
     )
 
 
+def test_ssh_exec_request_accepts_any_alias_valid_in_inventory() -> None:
+    SSHExecRequest, _ = _ssh_exec_types()
+    alias = "a" * 300
+    inventory = Inventory(
+        hosts={
+            alias: Host(
+                address="10.0.0.9",
+                port=22,
+                ssh_user="mcp",
+                credential_ref="secret://long-alias",
+                host_key="ssh-ed25519 AAAATEST",
+                allowed_roles=frozenset({"developer"}),
+            )
+        }
+    )
+
+    request = SSHExecRequest(
+        host=alias,
+        executable="/bin/echo",
+    )
+
+    assert alias in inventory.hosts
+    assert request.host == alias
+
+
 def test_ssh_exec_models_expose_only_public_bounded_fields() -> None:
     SSHExecRequest, SSHExecResult = _ssh_exec_types()
 
