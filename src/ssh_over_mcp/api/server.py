@@ -13,12 +13,21 @@ from .models import (
     HostSummary,
     PolicyExplainRequest,
     PolicyExplainResult,
+    SSHExecRequest,
+    SSHExecResult,
 )
 from .principal import PrincipalProvider
 from .service import MCPService
 
 _READ_ONLY_ANNOTATIONS = ToolAnnotations(
     read_only_hint=True,
+    open_world_hint=False,
+)
+
+_SSH_EXEC_ANNOTATIONS = ToolAnnotations(
+    read_only_hint=False,
+    destructive_hint=True,
+    idempotent_hint=False,
     open_world_hint=False,
 )
 
@@ -119,6 +128,36 @@ def build_mcp_server(
                     path=path,
                     env={} if env is None else env,
                     privilege=privilege,
+                ),
+            )
+        except ApiError as exc:
+            raise ToolError(str(exc)) from exc
+
+    @mcp.tool(
+        annotations=_SSH_EXEC_ANNOTATIONS,
+    )
+    async def ssh_exec(
+        host: str,
+        executable: str,
+        args: tuple[str, ...] = (),
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        stdin: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> SSHExecResult:
+        """Execute one policy-gated structured command on a managed host."""
+
+        try:
+            return await service.ssh_exec(
+                principal_provider.get_principal(),
+                SSHExecRequest(
+                    host=host,
+                    executable=executable,
+                    args=args,
+                    cwd=cwd,
+                    env={} if env is None else env,
+                    stdin=stdin,
+                    timeout_seconds=timeout_seconds,
                 ),
             )
         except ApiError as exc:
