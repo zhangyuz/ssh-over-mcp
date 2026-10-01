@@ -2,7 +2,7 @@
 
 Date: 2026-10-01
 
-Status: draft for human review; architecture approved in chat
+Status: self-reviewed revision awaiting human approval before implementation
 
 ## 1. Purpose
 
@@ -285,7 +285,7 @@ The versioned binding contains:
 - fixed privilege;
 - central policy version;
 - policy-normalized executable;
-- exact argv;
+- argv count plus one length-delimited SHA-256 argv fingerprint;
 - policy-normalized cwd;
 - policy-normalized path;
 - sorted environment names plus SHA-256 fingerprints of values;
@@ -301,12 +301,16 @@ values rather than omitted ambiguously.
 
 ### 9.2 Sensitive payloads
 
-Raw environment values, stdin, and `fs_write` bytes are never persisted in
-the ledger.
+Raw argv, environment values, stdin, and `fs_write` bytes are never sent to
+the ledger or persisted there.
 
-The control plane computes bounded SHA-256 payload fingerprints from the actual
-validated bytes/values. The ledger receives those fingerprints as binding
-material and computes a keyed HMAC over the complete canonical binding.
+The control plane computes bounded SHA-256 fingerprints from the actual
+validated values. Argv uses a versioned length-delimited encoding before
+hashing so argument-boundary changes cannot collide through concatenation.
+Environment values, stdin, and `fs_write` content are fingerprinted without
+placing raw values in ledger protocol models. The ledger receives only those
+fingerprints plus non-secret normalized metadata and computes a keyed HMAC over
+the complete canonical binding.
 
 Persisted approval rows contain only:
 
@@ -316,8 +320,11 @@ hmac-sha256:v1:<hex>
 
 plus a bounded safe summary.
 
-The HMAC key is readable only by the ledger service. Key rotation invalidates
-unconsumed approvals by design.
+The HMAC key is readable only by the ledger service. Phase 5 v1 does not
+support online key rotation: the database records a non-secret SHA-256 key ID
+at creation, and startup with a different key fails closed rather than leaving
+persisted approvals in a misleading partially-invalid state. Key rotation and
+migration require a separately reviewed procedure.
 
 ### 9.3 Canonical encoding
 
@@ -413,9 +420,11 @@ Server-owned defaults:
 - default TTL: 10 minutes;
 - hard maximum TTL: 60 minutes.
 
-The MCP client and operator grant command cannot extend TTL. Future risk-specific
-TTL policy may tighten these defaults but cannot widen the hard maximum without
-a separately reviewed configuration change.
+The ledger service owns both TTL values. The execution/admin protocol carries
+no caller-selected TTL field, and the MCP client, control-plane process, and
+operator grant command cannot extend TTL. Future ledger configuration may
+tighten the default by risk but cannot widen the hard maximum without a
+separately reviewed configuration change.
 
 ## 13. Atomic approval consumption
 
@@ -481,6 +490,7 @@ Startup fails closed if:
 - an existing database path is not a regular non-symlink file;
 - schema version is unknown;
 - HMAC key is missing/invalid;
+- the database key ID does not match the configured HMAC key;
 - configured sockets cannot be created safely.
 
 SQLite runtime settings must include:
@@ -540,6 +550,7 @@ The database does not store:
 - host keys;
 - OAuth/service tokens;
 - private keys/certificates;
+- raw argv;
 - environment values;
 - stdin bodies;
 - `fs_write` bodies;
@@ -584,6 +595,17 @@ for MCP request processing.
 - readiness still performs no SSH or remote-host probe;
 - if the ledger becomes unavailable after startup, MCP/domain operations fail
   closed before policy-authorized network side effects;
+- a required pre-network audit append failure keeps the transport call count
+  at zero;
+- if required outcome-audit persistence fails after a side-effecting transport
+  attempt, ordinary success must not be returned: otherwise-successful
+  `ssh_exec`/mutation calls return a stable audit-persistence-outcome-
+  uncertain error with explicit do-not-retry-blindly wording;
+- existing more-specific non-retryable mutation outcomes remain more specific:
+  generic mutation-outcome-uncertain and `fs_write` committed/durability-
+  uncertain are never collapsed into an ordinary audit error;
+- read-only/discovery completion-audit failure returns a stable audit-
+  persistence error and may be retried only after ledger recovery;
 - no operation silently degrades to unaudited execution.
 
 A ledger outage is a local control-plane failure, not a reason to bypass audit
@@ -593,7 +615,9 @@ or approval.
 
 ### 19.1 Approval-required execution
 
-Side-effecting MCP tool schemas gain at most one optional client field:
+Every policy-gated executable/filesystem tool which can receive an
+`APPROVAL_REQUIRED` decision gains at most one optional client field:
+`ssh_exec`, `fs_stat`, `fs_read`, `fs_mkdir`, and `fs_write`.
 
 ```text
 approval_id: str | null
@@ -660,9 +684,9 @@ Because policy version is part of the binding, a granted approval created under
 an older policy version cannot be consumed under a newer approval-required
 decision.
 
-Any change to host, tool, normalized executable/path/cwd, argv, environment
-value fingerprint, payload fingerprint, privilege, policy version, or effective
-execution bounds invalidates the approval.
+Any change to host, tool, normalized executable/path/cwd, argv count or
+fingerprint, environment value fingerprint, payload fingerprint, privilege,
+policy version, or effective execution bounds invalidates the approval.
 
 ## 21. Side-effect and uncertainty semantics
 
@@ -736,8 +760,8 @@ Phase 5 must preserve all of the following:
 13. Approval does not bypass host-agent policy or OS enforcement.
 14. No structured denial falls back to raw shell.
 15. No destructive filesystem tool is introduced.
-16. Audit rows do not contain credentials, secret env values, stdin, file
-    bodies, or unbounded output.
+16. Audit rows do not contain credentials, raw argv, secret env values, stdin,
+    file bodies, or unbounded output.
 17. `fs_write` committed/durability-uncertain remains distinct.
 18. Approval consumption is one attempt, not one successful execution.
 
@@ -864,16 +888,23 @@ Add:
 Exit: RED/GREEN proof for deny precedence, policy change, wrong binding,
 concurrent replay, ledger outage, and network-before-approval ordering.
 
-### 5E — create-only mutation approvals
+### 5E — filesystem approvals
 
-Inject the same authorizer inside `SSHFilesystemClient` for:
+Inject the same authorizer inside `SSHFilesystemClient` for every filesystem
+operation which central policy can mark approval-required:
 
+- `fs_stat`;
+- `fs_read`;
 - `fs_mkdir`;
 - `fs_write`.
 
-Preserve all mutation uncertainty semantics and status-74 committed outcome.
+Read-only operations preserve their existing result/error semantics;
+`fs_read` binds its effective/requested byte limit. Create-only operations
+preserve every mutation uncertainty semantic, including the distinct
+status-74 committed/durability-uncertain outcome.
 
-Exit: approval cannot widen path/body/limit semantics and consumed approvals are
+Exit: approval cannot widen path/read/body/limit semantics, read-only approval
+cannot authorize mutation (or vice versa), and consumed mutation approvals are
 never restored after uncertain outcomes.
 
 ### 5F — final Phase 5 security review
@@ -923,7 +954,8 @@ Explicitly deferred:
 - MCP `audit_query`;
 - raw-shell break-glass enablement;
 - destructive filesystem namespace mutation;
-- privileged helper approval.
+- privileged helper approval;
+- online HMAC-key rotation/migration.
 
 Those capabilities require separate design/review and must not be smuggled into
 the local Phase 5 ledger as convenience features.
