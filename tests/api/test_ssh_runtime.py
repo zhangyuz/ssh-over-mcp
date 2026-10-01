@@ -23,6 +23,15 @@ def _ssh_runtime():
     return importlib.import_module("ssh_over_mcp.api.ssh_runtime")
 
 
+class NoopLedger:
+    def __init__(self) -> None:
+        self.events = []
+
+    async def append_audit(self, event) -> str:
+        self.events.append(event)
+        return "evt_" + ("1" * 32)
+
+
 def _inventory() -> Inventory:
     return Inventory(
         hosts={
@@ -149,6 +158,7 @@ def test_build_ssh_runtime_requires_mapping_for_every_inventory_ref(
             inventory=inventory,
             policy=_policy(inventory),
             credential_map={"secret://other": key_path},
+            ledger=NoopLedger(),
         )
 
 
@@ -175,6 +185,7 @@ def test_build_ssh_runtime_constructs_existing_hardened_components_without_io(
         inventory=inventory,
         policy=_policy(inventory),
         credential_map={"secret://host-a": key_path},
+        ledger=NoopLedger(),
     )
 
     assert isinstance(runtime.credentials, FileCredentialProvider)
@@ -191,6 +202,7 @@ def test_build_ssh_runtime_shares_one_structured_transport(tmp_path: Path) -> No
         inventory=inventory,
         policy=_policy(inventory),
         credential_map={"secret://host-a": key_path},
+        ledger=NoopLedger(),
     )
 
     assert isinstance(runtime.transport, StructuredSSHTransport)
@@ -204,12 +216,18 @@ def test_build_ssh_runtime_shares_transport_with_filesystem_client(
     key_path = _write_key(tmp_path)
     inventory = _inventory()
 
+    policy = _policy(inventory)
+    ledger = NoopLedger()
     runtime = _ssh_runtime().build_ssh_runtime(
         inventory=inventory,
-        policy=_policy(inventory),
+        policy=policy,
         credential_map={"secret://host-a": key_path},
+        ledger=ledger,
     )
 
     assert isinstance(runtime.filesystem, SSHFilesystemClient)
     assert runtime.filesystem.transport is runtime.transport
-    assert runtime.filesystem.policy is runtime.executor.policy
+    assert runtime.filesystem.authorizer is runtime.executor.authorizer
+    assert runtime.executor.authorizer.policy is policy
+    assert runtime.executor.authorizer.ledger is ledger
+    assert ledger.events == []

@@ -1,8 +1,12 @@
+import hashlib
 import json
+from datetime import UTC, datetime
 
 import pytest
 
 import ssh_over_mcp.ssh as ssh_package
+from ssh_over_mcp.api.context import OperationContext
+from ssh_over_mcp.api.models import PrincipalContext
 from ssh_over_mcp.policy.models import (
     Decision,
     EvaluationRequest,
@@ -27,6 +31,26 @@ class Policy:
     def evaluate(self, request):
         self.calls.append(request)
         return self.decision
+
+    async def authorize(self, context, request, facts):
+        decision = self.evaluate(request)
+        if decision.decision is Decision.DENY:
+            raise ssh_package.SSHPolicyDenied(decision)
+        if decision.decision is Decision.APPROVAL_REQUIRED:
+            raise ssh_package.SSHApprovalRequired(decision)
+        return decision
+
+
+def operation_context(label: str = "default") -> OperationContext:
+    request_hex = hashlib.sha256(label.encode("utf-8")).hexdigest()[:32]
+    return OperationContext(
+        request_id=f"req_{request_hex}",
+        principal=PrincipalContext(
+            principal_id="static:developer",
+            profile="developer",
+        ),
+        received_at=datetime(2026, 10, 1, tzinfo=UTC),
+    )
 
 
 class RecordingTransport:
@@ -87,11 +111,11 @@ async def test_fs_stat_policy_normalizes_path_before_typed_transport():
             duration_ms=4,
         )
     )
-    client = client_type(policy=policy, transport=transport)
+    client = client_type(authorizer=policy, transport=transport)
 
     result = await client.stat(
         request("fs_stat", "/srv/app/./config.yaml"),
-        request_id="req_fs_stat_1234",
+        context=operation_context('req_fs_stat_1234'),
     )
 
     assert len(policy.calls) == 1
@@ -99,7 +123,7 @@ async def test_fs_stat_policy_normalizes_path_before_typed_transport():
     assert len(transport.calls) == 1
     call = transport.calls[0]
     assert call["host"] == "dev01"
-    assert call["request_id"] == "req_fs_stat_1234"
+    assert call["request_id"] == operation_context("req_fs_stat_1234").request_id
     assert call["timeout_seconds"] == 60.0
     assert call["max_output_bytes"] == 64 * 1024
 
@@ -109,7 +133,7 @@ async def test_fs_stat_policy_normalizes_path_before_typed_transport():
     assert envelope.path == "/srv/app/config.yaml"
     assert stdin == b""
 
-    assert result.request_id == "req_fs_stat_1234"
+    assert result.request_id == operation_context("req_fs_stat_1234").request_id
     assert result.host == "dev01"
     assert result.path == "/srv/app/config.yaml"
     assert result.kind == "regular"
@@ -135,18 +159,18 @@ async def test_fs_read_policy_normalizes_path_and_returns_raw_bytes():
             duration_ms=5,
         )
     )
-    client = client_type(policy=policy, transport=transport)
+    client = client_type(authorizer=policy, transport=transport)
 
     result = await client.read(
         request("fs_read", "/srv/app/./data.bin"),
         max_bytes=4096,
-        request_id="req_fs_read_1234",
+        context=operation_context('req_fs_read_1234'),
     )
 
     assert len(policy.calls) == 1
     call = transport.calls[0]
     assert call["host"] == "dev01"
-    assert call["request_id"] == "req_fs_read_1234"
+    assert call["request_id"] == operation_context("req_fs_read_1234").request_id
     assert call["timeout_seconds"] == 60.0
     assert call["max_output_bytes"] == 4096
 
@@ -156,7 +180,7 @@ async def test_fs_read_policy_normalizes_path_and_returns_raw_bytes():
     assert envelope.path == "/srv/app/data.bin"
     assert envelope.max_bytes == 4096
     assert stdin == b""
-    assert result.request_id == "req_fs_read_1234"
+    assert result.request_id == operation_context("req_fs_read_1234").request_id
     assert result.host == "dev01"
     assert result.path == "/srv/app/data.bin"
     assert result.data == b"\x00\xffAB"
@@ -198,17 +222,18 @@ async def test_filesystem_policy_failure_happens_before_transport(
         )
     )
     client = ssh_package.SSHFilesystemClient(
-        policy=policy,
+        authorizer=policy,
         transport=transport,
     )
 
     with pytest.raises(error_type):
         if tool == "fs_stat":
-            await client.stat(request(tool, "/srv/app/secret"))
+            await client.stat(request(tool, "/srv/app/secret"), context=operation_context())
         else:
             await client.read(
                 request(tool, "/srv/app/secret"),
                 max_bytes=4096,
+                context=operation_context(),
             )
 
     assert len(policy.calls) == 1
@@ -228,7 +253,7 @@ async def test_fs_read_invalid_bound_fails_before_policy_and_transport(max_bytes
         )
     )
     client = ssh_package.SSHFilesystemClient(
-        policy=policy,
+        authorizer=policy,
         transport=transport,
     )
 
@@ -236,6 +261,7 @@ async def test_fs_read_invalid_bound_fails_before_policy_and_transport(max_bytes
         await client.read(
             request("fs_read", "/srv/app/data.bin"),
             max_bytes=max_bytes,
+            context=operation_context(),
         )
 
     assert policy.calls == []
@@ -255,14 +281,14 @@ async def test_fs_read_reserves_bounded_remote_diagnostic_budget():
         )
     )
     client = ssh_package.SSHFilesystemClient(
-        policy=policy,
+        authorizer=policy,
         transport=transport,
     )
 
     await client.read(
         request("fs_read", "/srv/app/data.bin"),
         max_bytes=1,
-        request_id="req_diag_1234",
+        context=operation_context('req_diag_1234'),
     )
 
     assert transport.calls[0]["max_output_bytes"] == 4096
@@ -284,7 +310,7 @@ async def test_fs_read_never_returns_success_data_over_requested_bound():
         )
     )
     client = ssh_package.SSHFilesystemClient(
-        policy=policy,
+        authorizer=policy,
         transport=transport,
     )
 
@@ -292,7 +318,7 @@ async def test_fs_read_never_returns_success_data_over_requested_bound():
         await client.read(
             request("fs_read", "/srv/app/data.bin"),
             max_bytes=1,
-            request_id="req_overread_1234",
+            context=operation_context('req_overread_1234'),
         )
 
 
@@ -366,7 +392,7 @@ async def test_fs_read_normalizes_remote_failures_without_secret_echo(
     assert error_type is not None
 
     client = ssh_package.SSHFilesystemClient(
-        policy=Policy(allow(normalized_path="/srv/app/data.bin")),
+        authorizer=Policy(allow(normalized_path="/srv/app/data.bin")),
         transport=RecordingTransport(remote_result),
     )
 
@@ -374,6 +400,7 @@ async def test_fs_read_normalizes_remote_failures_without_secret_echo(
         await client.read(
             request("fs_read", "/srv/app/data.bin"),
             max_bytes=4096,
+            context=operation_context(),
         )
 
     assert "SUPERSECRET" not in str(exc_info.value)
@@ -398,7 +425,7 @@ async def test_fs_stat_rejects_mismatched_remote_path():
         separators=(",", ":"),
     ).encode()
     client = ssh_package.SSHFilesystemClient(
-        policy=Policy(allow(normalized_path="/srv/app/config.yaml")),
+        authorizer=Policy(allow(normalized_path="/srv/app/config.yaml")),
         transport=RecordingTransport(
             SSHExecutionResult(
                 request_id="req_path_1234",
@@ -416,6 +443,7 @@ async def test_fs_stat_rejects_mismatched_remote_path():
     ):
         await client.stat(
             request("fs_stat", "/srv/app/config.yaml"),
+            context=operation_context(),
         )
 
 
@@ -425,7 +453,7 @@ async def test_fs_stat_rejects_invalid_remote_json_without_echoing_payload():
     assert response_error is not None
 
     client = ssh_package.SSHFilesystemClient(
-        policy=Policy(allow(normalized_path="/srv/app/config.yaml")),
+        authorizer=Policy(allow(normalized_path="/srv/app/config.yaml")),
         transport=RecordingTransport(
             SSHExecutionResult(
                 request_id="req_json_1234",
@@ -440,6 +468,7 @@ async def test_fs_stat_rejects_invalid_remote_json_without_echoing_payload():
     with pytest.raises(response_error) as exc_info:
         await client.stat(
             request("fs_stat", "/srv/app/config.yaml"),
+            context=operation_context(),
         )
 
     assert str(exc_info.value) == "invalid remote filesystem response"
@@ -460,18 +489,18 @@ async def test_fs_mkdir_policy_normalizes_path_before_typed_transport():
             duration_ms=3,
         )
     )
-    client = client_type(policy=policy, transport=transport)
+    client = client_type(authorizer=policy, transport=transport)
 
     result = await client.mkdir(
         request("fs_mkdir", "/srv/app/./new-directory"),
-        request_id="req_fs_mkdir_1234",
+        context=operation_context('req_fs_mkdir_1234'),
     )
 
     assert len(policy.calls) == 1
     assert policy.calls[0].tool == "fs_mkdir"
     call = transport.calls[0]
     assert call["host"] == "dev01"
-    assert call["request_id"] == "req_fs_mkdir_1234"
+    assert call["request_id"] == operation_context("req_fs_mkdir_1234").request_id
     assert call["timeout_seconds"] == 60.0
     assert call["max_output_bytes"] == 4096
 
@@ -481,7 +510,7 @@ async def test_fs_mkdir_policy_normalizes_path_before_typed_transport():
     assert envelope.path == "/srv/app/new-directory"
     assert stdin == b""
 
-    assert result.request_id == "req_fs_mkdir_1234"
+    assert result.request_id == operation_context("req_fs_mkdir_1234").request_id
     assert result.host == "dev01"
     assert result.path == "/srv/app/new-directory"
 
@@ -508,13 +537,14 @@ async def test_fs_mkdir_policy_failure_happens_before_transport(
         )
     )
     client = ssh_package.SSHFilesystemClient(
-        policy=policy,
+        authorizer=policy,
         transport=transport,
     )
 
     with pytest.raises(error_type):
         await client.mkdir(
             request("fs_mkdir", "/srv/app/new-directory"),
+            context=operation_context(),
         )
 
     assert len(policy.calls) == 1
@@ -524,7 +554,7 @@ async def test_fs_mkdir_policy_failure_happens_before_transport(
 @pytest.mark.asyncio
 async def test_fs_mkdir_remote_policy_denial_is_definite():
     client = ssh_package.SSHFilesystemClient(
-        policy=Policy(allow(normalized_path="/srv/app/new-directory")),
+        authorizer=Policy(allow(normalized_path="/srv/app/new-directory")),
         transport=RecordingTransport(
             SSHExecutionResult(
                 request_id="req_mkdir_deny_1234",
@@ -542,6 +572,7 @@ async def test_fs_mkdir_remote_policy_denial_is_definite():
     ) as exc_info:
         await client.mkdir(
             request("fs_mkdir", "/srv/app/new-directory"),
+            context=operation_context(),
         )
 
     assert "SUPERSECRET" not in str(exc_info.value)
@@ -598,7 +629,7 @@ async def test_fs_mkdir_post_send_abnormal_result_is_outcome_uncertain(
     assert uncertain_error is not None
 
     client = ssh_package.SSHFilesystemClient(
-        policy=Policy(allow(normalized_path="/srv/app/new-directory")),
+        authorizer=Policy(allow(normalized_path="/srv/app/new-directory")),
         transport=RecordingTransport(remote_result),
     )
 
@@ -608,6 +639,7 @@ async def test_fs_mkdir_post_send_abnormal_result_is_outcome_uncertain(
     ) as exc_info:
         await client.mkdir(
             request("fs_mkdir", "/srv/app/new-directory"),
+            context=operation_context(),
         )
 
     assert "SUPERSECRET" not in str(exc_info.value)
@@ -632,7 +664,7 @@ async def test_fs_mkdir_transport_uncertain_failure_stays_uncertain():
     )
     assert uncertain_error is not None
     client = ssh_package.SSHFilesystemClient(
-        policy=Policy(allow(normalized_path="/srv/app/new-directory")),
+        authorizer=Policy(allow(normalized_path="/srv/app/new-directory")),
         transport=RaisingTransport(
             uncertain_error("SUPERSECRET transport uncertainty")
         ),
@@ -644,6 +676,7 @@ async def test_fs_mkdir_transport_uncertain_failure_stays_uncertain():
     ) as exc_info:
         await client.mkdir(
             request("fs_mkdir", "/srv/app/new-directory"),
+            context=operation_context(),
         )
 
     assert "SUPERSECRET" not in str(exc_info.value)
@@ -652,7 +685,7 @@ async def test_fs_mkdir_transport_uncertain_failure_stays_uncertain():
 @pytest.mark.asyncio
 async def test_fs_mkdir_status_77_with_local_timeout_is_still_uncertain():
     client = ssh_package.SSHFilesystemClient(
-        policy=Policy(allow(normalized_path="/srv/app/new-directory")),
+        authorizer=Policy(allow(normalized_path="/srv/app/new-directory")),
         transport=RecordingTransport(
             SSHExecutionResult(
                 request_id="req_mkdir_ambiguous_1234",
@@ -671,6 +704,7 @@ async def test_fs_mkdir_status_77_with_local_timeout_is_still_uncertain():
     ) as exc_info:
         await client.mkdir(
             request("fs_mkdir", "/srv/app/new-directory"),
+            context=operation_context(),
         )
 
     assert "SUPERSECRET" not in str(exc_info.value)
@@ -695,21 +729,21 @@ async def test_fs_write_policy_normalizes_path_and_sends_binary_body():
         )
     )
     client = ssh_package.SSHFilesystemClient(
-        policy=policy,
+        authorizer=policy,
         transport=transport,
     )
 
     result = await client.write(
         request("fs_write", "/srv/app/./new.bin"),
         b"\x00\xffAB",
-        request_id="req_fs_write_1234",
+        context=operation_context('req_fs_write_1234'),
     )
 
     assert len(policy.calls) == 1
     assert policy.calls[0].tool == "fs_write"
     call = transport.calls[0]
     assert call["host"] == "dev01"
-    assert call["request_id"] == "req_fs_write_1234"
+    assert call["request_id"] == operation_context("req_fs_write_1234").request_id
     assert call["timeout_seconds"] == 60.0
     assert call["max_output_bytes"] == 4096
 
@@ -720,7 +754,7 @@ async def test_fs_write_policy_normalizes_path_and_sends_binary_body():
     assert envelope.content_length == 4
     assert body == b"\x00\xffAB"
 
-    assert result.request_id == "req_fs_write_1234"
+    assert result.request_id == operation_context("req_fs_write_1234").request_id
     assert result.host == "dev01"
     assert result.path == "/srv/app/new.bin"
     assert result.content_length == 4
@@ -748,7 +782,7 @@ async def test_fs_write_policy_failure_happens_before_transport(
         )
     )
     client = ssh_package.SSHFilesystemClient(
-        policy=policy,
+        authorizer=policy,
         transport=transport,
     )
 
@@ -756,6 +790,7 @@ async def test_fs_write_policy_failure_happens_before_transport(
         await client.write(
             request("fs_write", "/srv/app/new.bin"),
             b"secret",
+            context=operation_context(),
         )
 
     assert len(policy.calls) == 1
@@ -765,7 +800,7 @@ async def test_fs_write_policy_failure_happens_before_transport(
 @pytest.mark.asyncio
 async def test_fs_write_remote_policy_denial_is_definite():
     client = ssh_package.SSHFilesystemClient(
-        policy=Policy(allow(normalized_path="/srv/app/new.bin")),
+        authorizer=Policy(allow(normalized_path="/srv/app/new.bin")),
         transport=RecordingTransport(
             SSHExecutionResult(
                 request_id="req_write_deny_1234",
@@ -784,6 +819,7 @@ async def test_fs_write_remote_policy_denial_is_definite():
         await client.write(
             request("fs_write", "/srv/app/new.bin"),
             b"data",
+            context=operation_context(),
         )
 
     assert "SUPERSECRET" not in str(exc_info.value)
@@ -799,7 +835,7 @@ async def test_fs_write_status_74_preserves_committed_durability_uncertain():
     assert committed_type is not None
 
     client = ssh_package.SSHFilesystemClient(
-        policy=Policy(allow(normalized_path="/srv/app/new.bin")),
+        authorizer=Policy(allow(normalized_path="/srv/app/new.bin")),
         transport=RecordingTransport(
             SSHExecutionResult(
                 request_id="req_write_commit_1234",
@@ -818,6 +854,7 @@ async def test_fs_write_status_74_preserves_committed_durability_uncertain():
         await client.write(
             request("fs_write", "/srv/app/new.bin"),
             b"data",
+            context=operation_context(),
         )
 
     assert "SUPERSECRET" not in str(exc_info.value)
@@ -867,7 +904,7 @@ async def test_fs_write_post_send_abnormal_result_is_outcome_uncertain(
     remote_result,
 ):
     client = ssh_package.SSHFilesystemClient(
-        policy=Policy(allow(normalized_path="/srv/app/new.bin")),
+        authorizer=Policy(allow(normalized_path="/srv/app/new.bin")),
         transport=RecordingTransport(remote_result),
     )
 
@@ -878,6 +915,7 @@ async def test_fs_write_post_send_abnormal_result_is_outcome_uncertain(
         await client.write(
             request("fs_write", "/srv/app/new.bin"),
             b"data",
+            context=operation_context(),
         )
 
     assert "SUPERSECRET" not in str(exc_info.value)
@@ -893,7 +931,7 @@ async def test_fs_write_status_74_with_local_timeout_is_generic_uncertain():
     assert committed_type is not None
 
     client = ssh_package.SSHFilesystemClient(
-        policy=Policy(allow(normalized_path="/srv/app/new.bin")),
+        authorizer=Policy(allow(normalized_path="/srv/app/new.bin")),
         transport=RecordingTransport(
             SSHExecutionResult(
                 request_id="req_write_ambiguous_1234",
@@ -913,6 +951,7 @@ async def test_fs_write_status_74_with_local_timeout_is_generic_uncertain():
         await client.write(
             request("fs_write", "/srv/app/new.bin"),
             b"data",
+            context=operation_context(),
         )
 
     assert not isinstance(exc_info.value, committed_type)
@@ -922,7 +961,7 @@ async def test_fs_write_status_74_with_local_timeout_is_generic_uncertain():
 @pytest.mark.asyncio
 async def test_fs_write_transport_uncertain_failure_stays_uncertain():
     client = ssh_package.SSHFilesystemClient(
-        policy=Policy(allow(normalized_path="/srv/app/new.bin")),
+        authorizer=Policy(allow(normalized_path="/srv/app/new.bin")),
         transport=RaisingTransport(
             ssh_package.SSHRequestOutcomeUncertain(
                 "SUPERSECRET transport uncertainty"
@@ -937,6 +976,7 @@ async def test_fs_write_transport_uncertain_failure_stays_uncertain():
         await client.write(
             request("fs_write", "/srv/app/new.bin"),
             b"data",
+            context=operation_context(),
         )
 
     assert "SUPERSECRET" not in str(exc_info.value)

@@ -56,8 +56,8 @@ class RecordingFilesystem:
         self.calls = []
         self.error: Exception | None = None
 
-    async def mkdir(self, request):
-        self.calls.append(request)
+    async def mkdir(self, request, *, context):
+        self.calls.append((context, request))
         if self.error is not None:
             raise self.error
         return SSHFilesystemMkdirResult(
@@ -136,7 +136,8 @@ async def test_fs_mkdir_injects_principal_and_returns_created_path() -> None:
     )
 
     assert len(filesystem.calls) == 1
-    evaluation = filesystem.calls[0]
+    seen_context, evaluation = filesystem.calls[0]
+    assert seen_context == _operation_context()
     assert evaluation.profile == "developer"
     assert evaluation.host == "visible"
     assert evaluation.tool == "fs_mkdir"

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-import uuid
-from typing import Literal, Protocol
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from ssh_over_mcp.policy.models import Decision, EvaluationRequest
+from ssh_over_mcp.api.context import OperationContext
+from ssh_over_mcp.approvals.authorization import ExecutionAuthorizationGate
+from ssh_over_mcp.approvals.binding import fingerprint_bytes
+from ssh_over_mcp.approvals.models import ApprovalExecutionFacts
+from ssh_over_mcp.policy.models import EvaluationRequest
 
 from .errors import (
-    SSHApprovalRequired,
     SSHFilesystemWriteCommittedUncertain,
     SSHOutputLimitExceeded,
     SSHPolicyDenied,
@@ -56,10 +58,6 @@ def _require_success(result: SSHExecutionResult) -> None:
         raise SSHRemoteResponseError(
             "invalid remote filesystem response"
         )
-
-
-class PolicyEvaluator(Protocol):
-    def evaluate(self, request: EvaluationRequest): ...
 
 
 class SSHFilesystemStatResult(BaseModel):
@@ -120,11 +118,11 @@ class SSHFilesystemClient:
     def __init__(
         self,
         *,
-        policy: PolicyEvaluator,
+        authorizer: ExecutionAuthorizationGate,
         transport: StructuredSSHTransport,
         default_timeout_seconds: float = DEFAULT_FILESYSTEM_TIMEOUT_SECONDS,
     ) -> None:
-        self.policy = policy
+        self.authorizer = authorizer
         self.transport = transport
         self.default_timeout_seconds = default_timeout_seconds
 
@@ -132,20 +130,23 @@ class SSHFilesystemClient:
         self,
         request: EvaluationRequest,
         *,
-        request_id: str | None = None,
+        context: OperationContext,
     ) -> SSHFilesystemStatResult:
         if request.tool != "fs_stat":
             raise ValueError("filesystem stat requires fs_stat policy request")
 
-        decision = self.policy.evaluate(request)
-        if decision.decision == Decision.DENY:
-            raise SSHPolicyDenied(decision)
-        if decision.decision == Decision.APPROVAL_REQUIRED:
-            raise SSHApprovalRequired(decision)
+        decision = await self.authorizer.authorize(
+            context,
+            request,
+            ApprovalExecutionFacts(
+                effective_timeout_seconds=self.default_timeout_seconds,
+                effective_max_output_bytes=MAX_FILESYSTEM_STAT_RESPONSE_BYTES,
+            ),
+        )
         if not decision.normalized_path:
             raise SSHPolicyDenied(decision)
 
-        req_id = request_id or f"req_{uuid.uuid4().hex}"
+        req_id = context.request_id
         envelope = FsStatEnvelope(
             request_id=req_id,
             profile=request.profile,
@@ -185,8 +186,8 @@ class SSHFilesystemClient:
         self,
         request: EvaluationRequest,
         *,
+        context: OperationContext,
         max_bytes: int,
-        request_id: str | None = None,
     ) -> SSHFilesystemReadResult:
         if request.tool != "fs_read":
             raise ValueError("filesystem read requires fs_read policy request")
@@ -198,15 +199,23 @@ class SSHFilesystemClient:
         ):
             raise ValueError("filesystem read bound is invalid")
 
-        decision = self.policy.evaluate(request)
-        if decision.decision == Decision.DENY:
-            raise SSHPolicyDenied(decision)
-        if decision.decision == Decision.APPROVAL_REQUIRED:
-            raise SSHApprovalRequired(decision)
+        transport_output_limit = max(
+            max_bytes,
+            MIN_FILESYSTEM_TRANSPORT_OUTPUT_BYTES,
+        )
+        decision = await self.authorizer.authorize(
+            context,
+            request,
+            ApprovalExecutionFacts(
+                effective_timeout_seconds=self.default_timeout_seconds,
+                effective_max_output_bytes=transport_output_limit,
+                effective_tool_bytes=max_bytes,
+            ),
+        )
         if not decision.normalized_path:
             raise SSHPolicyDenied(decision)
 
-        req_id = request_id or f"req_{uuid.uuid4().hex}"
+        req_id = context.request_id
         envelope = FsReadEnvelope(
             request_id=req_id,
             profile=request.profile,
@@ -218,10 +227,7 @@ class SSHFilesystemClient:
             payload=encode_request(envelope),
             request_id=req_id,
             timeout_seconds=self.default_timeout_seconds,
-            max_output_bytes=max(
-                max_bytes,
-                MIN_FILESYSTEM_TRANSPORT_OUTPUT_BYTES,
-            ),
+            max_output_bytes=transport_output_limit,
         )
         _require_success(result)
         if len(result.stdout) > max_bytes:
@@ -240,20 +246,23 @@ class SSHFilesystemClient:
         self,
         request: EvaluationRequest,
         *,
-        request_id: str | None = None,
+        context: OperationContext,
     ) -> SSHFilesystemMkdirResult:
         if request.tool != "fs_mkdir":
             raise ValueError("filesystem mkdir requires fs_mkdir policy request")
 
-        decision = self.policy.evaluate(request)
-        if decision.decision == Decision.DENY:
-            raise SSHPolicyDenied(decision)
-        if decision.decision == Decision.APPROVAL_REQUIRED:
-            raise SSHApprovalRequired(decision)
+        decision = await self.authorizer.authorize(
+            context,
+            request,
+            ApprovalExecutionFacts(
+                effective_timeout_seconds=self.default_timeout_seconds,
+                effective_max_output_bytes=MIN_FILESYSTEM_TRANSPORT_OUTPUT_BYTES,
+            ),
+        )
         if not decision.normalized_path:
             raise SSHPolicyDenied(decision)
 
-        req_id = request_id or f"req_{uuid.uuid4().hex}"
+        req_id = context.request_id
         envelope = FsMkdirEnvelope(
             request_id=req_id,
             profile=request.profile,
@@ -305,22 +314,27 @@ class SSHFilesystemClient:
         request: EvaluationRequest,
         data: bytes,
         *,
-        request_id: str | None = None,
+        context: OperationContext,
     ) -> SSHFilesystemWriteResult:
         if request.tool != "fs_write":
             raise ValueError("filesystem write requires fs_write policy request")
         if not isinstance(data, bytes):
             raise TypeError("filesystem write data must be bytes")
 
-        decision = self.policy.evaluate(request)
-        if decision.decision == Decision.DENY:
-            raise SSHPolicyDenied(decision)
-        if decision.decision == Decision.APPROVAL_REQUIRED:
-            raise SSHApprovalRequired(decision)
+        decision = await self.authorizer.authorize(
+            context,
+            request,
+            ApprovalExecutionFacts(
+                effective_timeout_seconds=self.default_timeout_seconds,
+                effective_max_output_bytes=MIN_FILESYSTEM_TRANSPORT_OUTPUT_BYTES,
+                content_length=len(data),
+                content_fingerprint=fingerprint_bytes(data),
+            ),
+        )
         if not decision.normalized_path:
             raise SSHPolicyDenied(decision)
 
-        req_id = request_id or f"req_{uuid.uuid4().hex}"
+        req_id = context.request_id
         envelope = FsWriteEnvelope(
             request_id=req_id,
             profile=request.profile,

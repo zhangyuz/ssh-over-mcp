@@ -9,6 +9,10 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
+from ssh_over_mcp.approvals.authorization import (
+    AuditLedger,
+    AuditOnlyExecutionAuthorizer,
+)
 from ssh_over_mcp.inventory.models import Inventory
 from ssh_over_mcp.policy.engine import PolicyEngine
 from ssh_over_mcp.ssh import (
@@ -125,6 +129,7 @@ def build_ssh_runtime(
     inventory: Inventory,
     policy: PolicyEngine,
     credential_map: Mapping[str, Path],
+    ledger: AuditLedger,
 ) -> SSHRuntime:
     validated = _validate_mapping(credential_map)
     required_refs = {
@@ -142,13 +147,17 @@ def build_ssh_runtime(
         credentials=credentials,
     )
     transport = StructuredSSHTransport(connections=connections)
-    executor = SSHExecutor(
+    authorizer = AuditOnlyExecutionAuthorizer(
         policy=policy,
+        ledger=ledger,
+    )
+    executor = SSHExecutor(
+        authorizer=authorizer,
         connections=connections,
         transport=transport,
     )
     filesystem = SSHFilesystemClient(
-        policy=policy,
+        authorizer=authorizer,
         transport=transport,
     )
     return SSHRuntime(

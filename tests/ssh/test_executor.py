@@ -1,9 +1,12 @@
 import asyncio
+from datetime import UTC, datetime
 
 import asyncssh
 import pytest
 
 import ssh_over_mcp.ssh.errors as ssh_errors
+from ssh_over_mcp.api.context import OperationContext
+from ssh_over_mcp.api.models import PrincipalContext
 from ssh_over_mcp.policy.models import (
     Decision,
     EvaluationRequest,
@@ -25,9 +28,30 @@ from ssh_over_mcp.ssh.transport import SSHExecutionResult, StructuredSSHTranspor
 class Policy:
     def __init__(self, decision):
         self.decision = decision
+        self.calls = []
 
     def evaluate(self, request):
+        self.calls.append(request)
         return self.decision
+
+    async def authorize(self, context, request, facts):
+        decision = self.evaluate(request)
+        if decision.decision is Decision.DENY:
+            raise SSHPolicyDenied(decision)
+        if decision.decision is Decision.APPROVAL_REQUIRED:
+            raise SSHApprovalRequired(decision)
+        return decision
+
+
+def context() -> OperationContext:
+    return OperationContext(
+        request_id="req_" + ("1" * 32),
+        principal=PrincipalContext(
+            principal_id="static:developer",
+            profile="developer",
+        ),
+        received_at=datetime(2026, 10, 1, tzinfo=UTC),
+    )
 
 
 class Reader:
@@ -138,7 +162,7 @@ def request() -> EvaluationRequest:
 async def test_policy_denial_happens_before_ssh():
     manager = Manager(Connection(Process()))
     executor = SSHExecutor(
-        policy=Policy(
+        authorizer=Policy(
             PolicyDecision(
                 decision=Decision.DENY,
                 reason="no",
@@ -150,7 +174,7 @@ async def test_policy_denial_happens_before_ssh():
     )
 
     with pytest.raises(SSHPolicyDenied):
-        await executor.execute(request())
+        await executor.execute(request(), context=context())
 
     assert manager.get_calls == 0
 
@@ -159,7 +183,7 @@ async def test_policy_denial_happens_before_ssh():
 async def test_approval_required_happens_before_ssh():
     manager = Manager(Connection(Process()))
     executor = SSHExecutor(
-        policy=Policy(
+        authorizer=Policy(
             PolicyDecision(
                 decision=Decision.APPROVAL_REQUIRED,
                 reason="approve",
@@ -172,7 +196,7 @@ async def test_approval_required_happens_before_ssh():
     )
 
     with pytest.raises(SSHApprovalRequired):
-        await executor.execute(request())
+        await executor.execute(request(), context=context())
 
     assert manager.get_calls == 0
 
@@ -182,14 +206,14 @@ async def test_fixed_remote_command_and_framed_payload():
     process = Process()
     connection = Connection(process)
     executor = SSHExecutor(
-        policy=Policy(ALLOW),
+        authorizer=Policy(ALLOW),
         connections=Manager(connection),
     )
 
     result = await executor.execute(
         request(),
+        context=context(),
         stdin=b"hello",
-        request_id="req_12345678",
     )
 
     command, kwargs = connection.calls[0]
@@ -216,12 +240,13 @@ async def test_output_is_bounded_and_process_closed():
         delay=0.1,
     )
     executor = SSHExecutor(
-        policy=Policy(ALLOW),
+        authorizer=Policy(ALLOW),
         connections=Manager(Connection(process)),
     )
 
     result = await executor.execute(
         request(),
+        context=context(),
         max_output_bytes=5,
     )
 
@@ -235,12 +260,13 @@ async def test_remote_exit_before_local_deadline_is_not_local_timeout():
     process = Process(delay=0)
     process.exit_status = 143
     executor = SSHExecutor(
-        policy=Policy(ALLOW),
+        authorizer=Policy(ALLOW),
         connections=Manager(Connection(process)),
     )
 
     result = await executor.execute(
         request(),
+        context=context(),
         timeout_seconds=1.0,
     )
 
@@ -253,12 +279,13 @@ async def test_exact_remote_output_budget_is_not_local_truncation():
     process = Process(stdout=(b"12345",), delay=0)
     process.exit_status = 137
     executor = SSHExecutor(
-        policy=Policy(ALLOW),
+        authorizer=Policy(ALLOW),
         connections=Manager(Connection(process)),
     )
 
     result = await executor.execute(
         request(),
+        context=context(),
         max_output_bytes=5,
     )
 
@@ -271,13 +298,14 @@ async def test_exact_remote_output_budget_is_not_local_truncation():
 async def test_timeout_closes_remote_channel():
     process = Process(delay=0.2)
     executor = SSHExecutor(
-        policy=Policy(ALLOW),
+        authorizer=Policy(ALLOW),
         connections=Manager(Connection(process)),
         cleanup_timeout_seconds=0.1,
     )
 
     result = await executor.execute(
         request(),
+        context=context(),
         timeout_seconds=0.01,
     )
 
@@ -289,12 +317,12 @@ async def test_timeout_closes_remote_channel():
 async def test_cancellation_aborts_remote_process():
     process = Process(delay=10)
     executor = SSHExecutor(
-        policy=Policy(ALLOW),
+        authorizer=Policy(ALLOW),
         connections=Manager(Connection(process)),
         cleanup_timeout_seconds=0.05,
     )
 
-    task = asyncio.create_task(executor.execute(request()))
+    task = asyncio.create_task(executor.execute(request(), context=context()))
     await asyncio.sleep(0.01)
     task.cancel()
 
@@ -361,15 +389,15 @@ async def test_executor_delegates_allowed_request_to_injected_transport():
     manager = Manager(Connection(Process()))
     transport = RecordingTransport()
     executor = SSHExecutor(
-        policy=Policy(ALLOW),
+        authorizer=Policy(ALLOW),
         connections=manager,
         transport=transport,
     )
 
     result = await executor.execute(
         request(),
+        context=context(),
         stdin=b"hello",
-        request_id="req_delegate_1234",
         timeout_seconds=7.0,
         max_output_bytes=321,
         max_stdin_bytes=654,
@@ -378,7 +406,7 @@ async def test_executor_delegates_allowed_request_to_injected_transport():
     assert len(transport.calls) == 1
     call = transport.calls[0]
     assert call["host"] == "dev01"
-    assert call["request_id"] == "req_delegate_1234"
+    assert call["request_id"] == context().request_id
     assert call["timeout_seconds"] == 7.0
     assert call["max_output_bytes"] == 321
 

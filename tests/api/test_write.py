@@ -58,8 +58,8 @@ class RecordingFilesystem:
         self.calls = []
         self.error: Exception | None = None
 
-    async def write(self, request, data):
-        self.calls.append((request, data))
+    async def write(self, request, data, *, context):
+        self.calls.append((context, request, data))
         if self.error is not None:
             raise self.error
         return SSHFilesystemWriteResult(
@@ -190,7 +190,8 @@ async def test_fs_write_injects_principal_and_derives_content_length() -> None:
     )
 
     assert len(filesystem.calls) == 1
-    evaluation, data = filesystem.calls[0]
+    seen_context, evaluation, data = filesystem.calls[0]
+    assert seen_context == _operation_context()
     assert evaluation.profile == "developer"
     assert evaluation.host == "visible"
     assert evaluation.tool == "fs_write"

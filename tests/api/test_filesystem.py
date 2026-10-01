@@ -67,8 +67,8 @@ class RecordingFilesystem:
         self.calls = []
         self.error: Exception | None = None
 
-    async def stat(self, request):
-        self.calls.append(("stat", request))
+    async def stat(self, request, *, context):
+        self.calls.append(("stat", context, request))
         if self.error is not None:
             raise self.error
         return SSHFilesystemStatResult(
@@ -83,8 +83,8 @@ class RecordingFilesystem:
             mtime_ns=123456,
         )
 
-    async def read(self, request, *, max_bytes):
-        self.calls.append(("read", request, max_bytes))
+    async def read(self, request, *, context, max_bytes):
+        self.calls.append(("read", context, request, max_bytes))
         if self.error is not None:
             raise self.error
         return SSHFilesystemReadResult(
@@ -130,8 +130,9 @@ async def test_fs_stat_injects_principal_and_returns_metadata() -> None:
         models.FsStatRequest(host="visible", path="/srv/app/file"),
     )
 
-    operation, evaluation = filesystem.calls[0]
+    operation, seen_context, evaluation = filesystem.calls[0]
     assert operation == "stat"
+    assert seen_context == _operation_context()
     assert evaluation.profile == "developer"
     assert evaluation.host == "visible"
     assert evaluation.tool == "fs_stat"
@@ -159,8 +160,9 @@ async def test_fs_read_is_bounded_and_returns_lossless_base64() -> None:
         ),
     )
 
-    operation, evaluation, max_bytes = filesystem.calls[0]
+    operation, seen_context, evaluation, max_bytes = filesystem.calls[0]
     assert operation == "read"
+    assert seen_context == _operation_context()
     assert evaluation.profile == "developer"
     assert evaluation.tool == "fs_read"
     assert evaluation.path == "/srv/app/file"

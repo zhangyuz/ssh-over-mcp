@@ -209,6 +209,7 @@ class MCPService:
                     env=request.env,
                     privilege="user",
                 ),
+                context=context,
                 stdin=stdin,
                 timeout_seconds=request.timeout_seconds,
             )
@@ -267,7 +268,8 @@ class MCPService:
                     tool="fs_stat",
                     path=request.path,
                     privilege="user",
-                )
+                ),
+                context=context,
             )
         except SSHPolicyDenied:
             raise PolicyDeniedError(
@@ -341,6 +343,7 @@ class MCPService:
                     path=request.path,
                     privilege="user",
                 ),
+                context=context,
                 max_bytes=request.max_bytes,
             )
         except SSHPolicyDenied:
@@ -409,7 +412,8 @@ class MCPService:
                     tool="fs_mkdir",
                     path=request.path,
                     privilege="user",
-                )
+                ),
+                context=context,
             )
         except SSHPolicyDenied:
             raise PolicyDeniedError(
@@ -474,6 +478,7 @@ class MCPService:
                     privilege="user",
                 ),
                 data,
+                context=context,
             )
         except SSHPolicyDenied:
             raise PolicyDeniedError(

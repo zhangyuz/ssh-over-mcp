@@ -34,12 +34,13 @@ def build_application(
         policy=bundle.policy,
     )
     credential_map = load_credential_map(settings.credential_map_path)
+    ledger_client = build_ledger_client(settings)
     ssh_runtime = build_ssh_runtime(
         inventory=bundle.inventory,
         policy=policy,
         credential_map=credential_map,
+        ledger=ledger_client,
     )
-    ledger_client = build_ledger_client(settings)
     service = MCPService(
         inventory=bundle.inventory,
         policy=policy,

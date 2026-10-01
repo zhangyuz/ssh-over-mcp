@@ -210,6 +210,7 @@ async def test_ssh_exec_injects_principal_and_returns_lossless_output() -> None:
     assert evaluation.privilege == "user"
 
     assert kwargs == {
+        "context": _operation_context(),
         "stdin": b"hello",
         "timeout_seconds": 30,
     }
