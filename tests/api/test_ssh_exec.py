@@ -135,6 +135,30 @@ def test_ssh_exec_request_accepts_any_alias_valid_in_inventory() -> None:
     assert request.host == alias
 
 
+def test_ssh_exec_request_enforces_declared_field_bounds() -> None:
+    SSHExecRequest, _ = _ssh_exec_types()
+
+    with pytest.raises(ValueError):
+        SSHExecRequest(
+            host="developer-host",
+            executable="/" + ("x" * 4097),
+        )
+
+    with pytest.raises(ValueError):
+        SSHExecRequest(
+            host="developer-host",
+            executable="/bin/echo",
+            env={"": "value"},
+        )
+
+    with pytest.raises(ValueError):
+        SSHExecRequest(
+            host="developer-host",
+            executable="/bin/echo",
+            timeout_seconds=0,
+        )
+
+
 def test_ssh_exec_models_expose_only_public_bounded_fields() -> None:
     SSHExecRequest, SSHExecResult = _ssh_exec_types()
 
