@@ -13,9 +13,6 @@ from .errors import (
     HostNotVisibleError,
     InvalidExplainToolError,
 )
-if TYPE_CHECKING:
-    from ssh_over_mcp.ssh.executor import SSHExecutor
-
 from .models import (
     HostsListResult,
     HostSummary,
@@ -23,6 +20,10 @@ from .models import (
     PolicyExplainResult,
     PrincipalContext,
 )
+
+if TYPE_CHECKING:
+    from ssh_over_mcp.ssh.executor import SSHExecutor
+
 
 _EXPLAINABLE_TOOLS = frozenset(
     {
