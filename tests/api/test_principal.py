@@ -32,7 +32,15 @@ def test_static_principal_provider_returns_server_owned_profile(
         policy=policy,
     )
 
-    assert provider.get_principal() == PrincipalContext(profile="developer")
+    assert provider.get_principal() == PrincipalContext(
+        principal_id="static:developer",
+        profile="developer",
+    )
+
+
+def test_principal_context_requires_server_owned_principal_id() -> None:
+    with pytest.raises(ValidationError):
+        PrincipalContext(profile="developer")
 
 
 def test_static_principal_provider_rejects_unknown_profile(

@@ -168,7 +168,7 @@ async def test_ssh_exec_hides_host_before_executor() -> None:
         match="host is not visible",
     ):
         await service.ssh_exec(
-            models.PrincipalContext(profile="developer"),
+            models.PrincipalContext(principal_id="static:developer", profile="developer"),
             _request("hidden"),
         )
 
@@ -181,7 +181,7 @@ async def test_ssh_exec_injects_principal_and_returns_lossless_output() -> None:
     service = _service(executor)
 
     result = await service.ssh_exec(
-        models.PrincipalContext(profile="developer"),
+        models.PrincipalContext(principal_id="static:developer", profile="developer"),
         _request(),
     )
 
@@ -222,7 +222,7 @@ async def test_ssh_exec_cannot_expand_runtime_limits() -> None:
         match="execution limits are invalid",
     ):
         await service.ssh_exec(
-            models.PrincipalContext(profile="developer"),
+            models.PrincipalContext(principal_id="static:developer", profile="developer"),
             _request(timeout_seconds=30),
         )
 
@@ -231,7 +231,7 @@ async def test_ssh_exec_cannot_expand_runtime_limits() -> None:
         match="execution limits are invalid",
     ):
         await service.ssh_exec(
-            models.PrincipalContext(profile="developer"),
+            models.PrincipalContext(principal_id="static:developer", profile="developer"),
             _request(timeout_seconds=5, stdin="hello"),
         )
 
@@ -319,7 +319,7 @@ async def test_ssh_exec_normalizes_internal_failures(
         match=public_message,
     ) as exc_info:
         await service.ssh_exec(
-            models.PrincipalContext(profile="developer"),
+            models.PrincipalContext(principal_id="static:developer", profile="developer"),
             _request(),
         )
 
@@ -330,7 +330,7 @@ async def test_ssh_exec_normalizes_internal_failures(
 
 class StaticPrincipalProvider:
     def get_principal(self) -> models.PrincipalContext:
-        return models.PrincipalContext(profile="developer")
+        return models.PrincipalContext(principal_id="static:developer", profile="developer")
 
 
 class RecordingToolService:
@@ -435,7 +435,7 @@ async def test_server_ssh_exec_injects_principal_and_returns_result() -> None:
     assert result.structured_content["stdout_base64"] == "b2s="
     assert len(service.calls) == 1
     principal, request = service.calls[0]
-    assert principal == models.PrincipalContext(profile="developer")
+    assert principal == models.PrincipalContext(principal_id="static:developer", profile="developer")
     assert request.host == "visible"
     assert request.executable == "/usr/bin/git"
     assert request.stdin == "hello"
@@ -504,7 +504,7 @@ async def test_ssh_exec_without_executor_fails_closed() -> None:
         match="SSH execution is unavailable",
     ):
         await service.ssh_exec(
-            models.PrincipalContext(profile="developer"),
+            models.PrincipalContext(principal_id="static:developer", profile="developer"),
             _request(),
         )
 

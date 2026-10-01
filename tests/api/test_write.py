@@ -151,7 +151,7 @@ async def test_fs_write_hides_host_before_filesystem_client() -> None:
         match="host is not visible",
     ):
         await service.fs_write(
-            models.PrincipalContext(profile="developer"),
+            models.PrincipalContext(principal_id="static:developer", profile="developer"),
             models.FsWriteRequest(
                 host="hidden",
                 path="/srv/app/new.bin",
@@ -168,7 +168,7 @@ async def test_fs_write_injects_principal_and_derives_content_length() -> None:
     service = _service(filesystem)
 
     result = await service.fs_write(
-        models.PrincipalContext(profile="developer"),
+        models.PrincipalContext(principal_id="static:developer", profile="developer"),
         models.FsWriteRequest(
             host="visible",
             path="/srv/app/./new.bin",
@@ -205,7 +205,7 @@ async def test_fs_write_committed_uncertain_outcome_is_preserved() -> None:
         match="filesystem write committed; durability uncertain; do not retry blindly",
     ) as exc_info:
         await service.fs_write(
-            models.PrincipalContext(profile="developer"),
+            models.PrincipalContext(principal_id="static:developer", profile="developer"),
             models.FsWriteRequest(
                 host="visible",
                 path="/srv/app/new.bin",
@@ -229,7 +229,7 @@ async def test_fs_write_generic_uncertainty_remains_non_retryable() -> None:
         match="do not retry blindly",
     ) as exc_info:
         await service.fs_write(
-            models.PrincipalContext(profile="developer"),
+            models.PrincipalContext(principal_id="static:developer", profile="developer"),
             models.FsWriteRequest(
                 host="visible",
                 path="/srv/app/new.bin",
@@ -253,7 +253,7 @@ async def test_fs_write_pre_request_connection_failure_is_definite() -> None:
         match="SSH transport failed",
     ) as exc_info:
         await service.fs_write(
-            models.PrincipalContext(profile="developer"),
+            models.PrincipalContext(principal_id="static:developer", profile="developer"),
             models.FsWriteRequest(
                 host="visible",
                 path="/srv/app/new.bin",
@@ -266,7 +266,7 @@ async def test_fs_write_pre_request_connection_failure_is_definite() -> None:
 
 class StaticPrincipalProvider:
     def get_principal(self) -> models.PrincipalContext:
-        return models.PrincipalContext(profile="developer")
+        return models.PrincipalContext(principal_id="static:developer", profile="developer")
 
 
 class ToolService:
@@ -370,7 +370,7 @@ async def test_server_fs_write_injects_principal_and_rejects_bad_input() -> None
     assert ok.structured_content["content_length"] == 4
     assert len(service.calls) == 1
     principal, request = service.calls[0]
-    assert principal == models.PrincipalContext(profile="developer")
+    assert principal == models.PrincipalContext(principal_id="static:developer", profile="developer")
     assert request.decoded_data() == b"\x00\xffAB"
 
     assert invalid.is_error is True

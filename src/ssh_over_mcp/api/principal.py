@@ -18,7 +18,10 @@ class StaticPrincipalProvider:
             raise PrincipalConfigurationError(
                 "configured principal profile is invalid"
             )
-        self._principal = PrincipalContext(profile=profile)
+        self._principal = PrincipalContext(
+            principal_id=f"static:{profile}",
+            profile=profile,
+        )
 
     def get_principal(self) -> PrincipalContext:
         return self._principal

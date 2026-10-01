@@ -674,7 +674,26 @@ Explicitly deferred beyond Phase 4:
 
 ## Phase 5 — audit and approvals
 
-Implement request IDs, policy hashes, structured audit sinks, approval store, approval request hashing, expiration, and single-use behavior.
+Phase 5A domain/protocol infrastructure is implemented in this slice with no
+runtime execution behavior change:
+
+- trusted principals now carry server-owned `principal_id + profile`;
+- `OperationContext` provides server-owned request identity for later lifecycle
+  integration;
+- strict audit/approval domain models contain only bounded, secret-safe fields;
+- canonical approval binding fingerprints argv/env/stdin/fs_write payloads
+  without placing raw sensitive values in ledger protocol/storage models;
+- the versioned `SLED\x00\x01` Security Ledger protocol defines strict
+  execution/admin request/response unions with a 64 KiB message cap;
+- `ensure_approval` sends canonical binding + risk, not a duplicated safe
+  summary; the ledger derives the operator-safe summary in Phase 5B;
+- admin list responses use lightweight approval items while show/status may
+  return the full safe `ApprovalStatus`.
+
+Phase 5A does not add sockets, SQLite, approval handles to MCP, readiness
+dependencies, policy changes, or SSH/network behavior. Phase 5B–5F add the
+ledger service, mandatory audit lifecycle, approvals, and final adversarial
+review in separately reviewed slices.
 
 ## Phase 6 — Cloudflare reference deployment
 
