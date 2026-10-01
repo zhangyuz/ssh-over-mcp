@@ -17,6 +17,7 @@ from ssh_over_mcp.ssh.protocol import (
     REMOTE_PROTOCOL_COMMAND,
     decode_request,
 )
+from ssh_over_mcp.ssh.transport import SSHExecutionResult, StructuredSSHTransport
 
 
 class Policy:
@@ -299,3 +300,93 @@ async def test_cancellation_aborts_remote_process():
         await task
 
     assert process.closed is True
+
+
+@pytest.mark.asyncio
+async def test_structured_transport_runs_preframed_payload_with_hardened_channel():
+    process = Process(stdout=(b"data",), stderr=(b"err",))
+    connection = Connection(process)
+    manager = Manager(connection)
+    transport = StructuredSSHTransport(
+        connections=manager,
+        cleanup_timeout_seconds=0.1,
+    )
+
+    result = await transport.run(
+        host="dev01",
+        payload=b"framed",
+        request_id="req_transport_1234",
+        timeout_seconds=1.0,
+        max_output_bytes=1024,
+    )
+
+    assert manager.get_calls == 1
+    command, kwargs = connection.calls[0]
+    assert command == REMOTE_PROTOCOL_COMMAND
+    assert kwargs["input"] == b"framed"
+    assert kwargs["request_pty"] is False
+    assert kwargs["term_type"] is None
+    assert kwargs["env"] == {}
+    assert kwargs["send_env"] == []
+    assert kwargs["x11_forwarding"] is False
+    assert kwargs["encoding"] is None
+    assert result.request_id == "req_transport_1234"
+    assert result.host == "dev01"
+    assert result.stdout == b"data"
+    assert result.stderr == b"err"
+    assert result.exit_status == 0
+    assert result.timed_out is False
+    assert result.truncated is False
+
+
+class RecordingTransport:
+    def __init__(self):
+        self.calls = []
+
+    async def run(self, **kwargs):
+        self.calls.append(kwargs)
+        return SSHExecutionResult(
+            request_id=kwargs["request_id"],
+            host=kwargs["host"],
+            exit_status=0,
+            stdout=b"delegated",
+            duration_ms=1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_executor_delegates_allowed_request_to_injected_transport():
+    manager = Manager(Connection(Process()))
+    transport = RecordingTransport()
+    executor = SSHExecutor(
+        policy=Policy(ALLOW),
+        connections=manager,
+        transport=transport,
+    )
+
+    result = await executor.execute(
+        request(),
+        stdin=b"hello",
+        request_id="req_delegate_1234",
+        timeout_seconds=7.0,
+        max_output_bytes=321,
+        max_stdin_bytes=654,
+    )
+    assert manager.get_calls == 0
+    assert len(transport.calls) == 1
+    call = transport.calls[0]
+    assert call["host"] == "dev01"
+    assert call["request_id"] == "req_delegate_1234"
+    assert call["timeout_seconds"] == 7.0
+    assert call["max_output_bytes"] == 321
+
+    envelope, stdin = decode_request(call["payload"])
+    assert envelope.profile == "developer"
+    assert envelope.executable == "/usr/bin/git"
+    assert envelope.argv == ("status",)
+    assert envelope.cwd == "/srv/app"
+    assert envelope.limits.timeout_seconds == 7.0
+    assert envelope.limits.max_output_bytes == 321
+    assert envelope.limits.max_stdin_bytes == 654
+    assert stdin == b"hello"
+    assert result.stdout == b"delegated"

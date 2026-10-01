@@ -565,8 +565,11 @@ without adding an execution capability at that slice boundary:
   YAML/JSON mapping from inventory credential refs to absolute mounted key files;
 - all inventory credential refs must be covered and all mapped key paths must
   already exist;
-- startup composes the existing `FileCredentialProvider`,
-  `SSHConnectionManager`, and `SSHExecutor`;
+- startup composes the existing `FileCredentialProvider` and
+  `SSHConnectionManager`, one shared `StructuredSSHTransport`, and `SSHExecutor`;
+- the shared transport owns the fixed `mcp-v1` channel plus bounded collection,
+  timeout/output-overflow, cancellation, and cleanup mechanics without owning
+  authorization;
 - composition, `/healthz`, and `/readyz` do not resolve credentials or open
   network connections.
 

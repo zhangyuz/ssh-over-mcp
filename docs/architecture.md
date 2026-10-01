@@ -115,9 +115,13 @@ It MUST:
 - expire pooled connections after a configured maximum age;
 - bound concurrent sessions per host.
 
+### Structured SSH transport
+
+Owns the fixed `mcp-v1` SSH channel creation and bounded stdout/stderr collection for already-framed SMCP requests. It allocates no PTY, forwards no environment or X11 state, reuses the per-host connection/session limits, and owns timeout/output-overflow/cancellation channel cleanup. It does not evaluate authorization.
+
 ### Structured SSH executor
 
-Obtains an allow decision before opening the transport, creates the versioned request frame, invokes only the fixed `mcp-v1` remote command, and applies client-side timeout/input/output limits.
+Obtains an allow decision before invoking the transport, creates the versioned `exec` request frame, and applies server-owned timeout/input/output limits. Typed filesystem clients use this same structured transport boundary when their MCP adapters are enabled, rather than reimplementing SSH process lifecycle logic.
 
 ### Remote host agent
 

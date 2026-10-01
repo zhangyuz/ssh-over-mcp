@@ -221,9 +221,11 @@ credentials:
 Private-key bytes are never stored in this map. Startup fails closed if the
 file shape is invalid, a mapped path is not an existing absolute file, or any
 inventory credential reference lacks a mapping. Startup composes the existing
-`FileCredentialProvider -> SSHConnectionManager -> SSHExecutor` chain but does
-not resolve a credential or open SSH. Application shutdown closes the pooled SSH
-connection manager after the MCP SDK lifespan exits.
+`FileCredentialProvider -> SSHConnectionManager` boundary plus one shared
+`StructuredSSHTransport`; `SSHExecutor` consumes that transport after central
+policy allows execution. Composition does not resolve a credential or open SSH.
+Application shutdown closes the pooled SSH connection manager after the MCP SDK
+lifespan exits.
 
 The registered MCP surface is now `hosts_list`, `host_info`,
 `policy_explain`, and `ssh_exec`. Health/readiness remain ordinary HTTP
