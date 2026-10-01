@@ -79,6 +79,7 @@ def test_runtime_settings_reject_missing_or_blank_required_values(
     ):
         load_runtime_settings(env)
 
+
 @pytest.mark.parametrize("port", ["0", "65536", "-1", "abc", "1.5", ""])
 def test_runtime_settings_reject_invalid_port(port: str) -> None:
     with pytest.raises(
