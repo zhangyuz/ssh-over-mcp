@@ -14,6 +14,8 @@ MAX_MCP_ENV_ITEMS = 128
 MAX_MCP_ENV_NAME_CHARS = 128
 MAX_MCP_ENV_VALUE_CHARS = 8192
 MAX_MCP_PRIVILEGE_CHARS = 64
+MAX_MCP_EXEC_STDIN_BYTES = 64 * 1024
+MAX_MCP_EXEC_TIMEOUT_SECONDS = 60.0
 
 _MCP_PATH = Annotated[str, Field(max_length=MAX_MCP_PATH_CHARS)]
 _MCP_ARG = Annotated[str, Field(max_length=MAX_MCP_ARG_CHARS)]
@@ -95,3 +97,57 @@ class PolicyExplainResult(BaseModel):
     normalized_path: str | None = None
     approval_required: bool
     policy_version: str
+
+
+class SSHExecRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    host: str = Field(min_length=1)
+    executable: str = Field(
+        min_length=1,
+        max_length=MAX_MCP_PATH_CHARS,
+    )
+    args: tuple[_MCP_ARG, ...] = Field(
+        default_factory=tuple,
+        max_length=MAX_MCP_ARG_COUNT,
+    )
+    cwd: _MCP_PATH | None = None
+    env: dict[_MCP_ENV_NAME, _MCP_ENV_VALUE] = Field(
+        default_factory=dict,
+        max_length=MAX_MCP_ENV_ITEMS,
+    )
+    stdin: str = ""
+    timeout_seconds: float | None = Field(
+        default=None,
+        gt=0,
+        le=MAX_MCP_EXEC_TIMEOUT_SECONDS,
+    )
+
+    @model_validator(mode="after")
+    def validate_execution_bounds(self) -> SSHExecRequest:
+        if len(self.stdin.encode("utf-8")) > MAX_MCP_EXEC_STDIN_BYTES:
+            raise ValueError("MCP ssh_exec stdin exceeds maximum size")
+        if (
+            len(
+                self.model_dump_json(
+                    exclude={"stdin"},
+                ).encode("utf-8")
+            )
+            > MAX_MCP_METADATA_BYTES
+        ):
+            raise ValueError("MCP tool metadata exceeds maximum size")
+        return self
+
+
+class SSHExecResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request_id: str = Field(min_length=1)
+    host: str = Field(min_length=1)
+    exit_status: int | None = None
+    exit_signal: str | None = None
+    stdout_base64: str = ""
+    stderr_base64: str = ""
+    duration_ms: int = Field(ge=0)
+    timed_out: bool = False
+    truncated: bool = False
