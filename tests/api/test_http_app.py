@@ -71,6 +71,9 @@ class ReadyLedgerClient:
     async def ping(self) -> None:
         return None
 
+    async def append_audit(self, event) -> str:
+        return f"evt_{event.request_id}"
+
 
 class FailingLedgerClient:
     async def ping(self) -> None:
@@ -197,6 +200,8 @@ async def test_streamable_http_round_trip_at_mcp_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    patch_ready_ledger(monkeypatch)
+
     async def forbidden_connection(*_args, **_kwargs):
         raise AssertionError("policy denial must happen before SSH")
 
