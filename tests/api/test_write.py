@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from datetime import UTC, datetime
 
 import pytest
 from mcp import Client
@@ -8,6 +9,7 @@ from pydantic import ValidationError
 
 from ssh_over_mcp.api import errors as api_errors
 from ssh_over_mcp.api import models
+from ssh_over_mcp.api.context import OperationContext
 from ssh_over_mcp.api.server import build_mcp_server
 from ssh_over_mcp.api.service import MCPService
 from ssh_over_mcp.inventory.models import Host, Inventory
@@ -17,6 +19,17 @@ from ssh_over_mcp.ssh import (
     SSHFilesystemWriteResult,
     SSHRequestOutcomeUncertain,
 )
+
+
+def _operation_context() -> OperationContext:
+    return OperationContext(
+        request_id="req_" + "1" * 32,
+        principal=models.PrincipalContext(
+            principal_id="static:developer",
+            profile="developer",
+        ),
+        received_at=datetime(2026, 10, 1, tzinfo=UTC),
+    )
 
 
 def _inventory() -> Inventory:
@@ -151,7 +164,7 @@ async def test_fs_write_hides_host_before_filesystem_client() -> None:
         match="host is not visible",
     ):
         await service.fs_write(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             models.FsWriteRequest(
                 host="hidden",
                 path="/srv/app/new.bin",
@@ -168,7 +181,7 @@ async def test_fs_write_injects_principal_and_derives_content_length() -> None:
     service = _service(filesystem)
 
     result = await service.fs_write(
-        models.PrincipalContext(principal_id="static:developer", profile="developer"),
+        _operation_context(),
         models.FsWriteRequest(
             host="visible",
             path="/srv/app/./new.bin",
@@ -205,7 +218,7 @@ async def test_fs_write_committed_uncertain_outcome_is_preserved() -> None:
         match="filesystem write committed; durability uncertain; do not retry blindly",
     ) as exc_info:
         await service.fs_write(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             models.FsWriteRequest(
                 host="visible",
                 path="/srv/app/new.bin",
@@ -229,7 +242,7 @@ async def test_fs_write_generic_uncertainty_remains_non_retryable() -> None:
         match="do not retry blindly",
     ) as exc_info:
         await service.fs_write(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             models.FsWriteRequest(
                 host="visible",
                 path="/srv/app/new.bin",
@@ -253,7 +266,7 @@ async def test_fs_write_pre_request_connection_failure_is_definite() -> None:
         match="SSH transport failed",
     ) as exc_info:
         await service.fs_write(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             models.FsWriteRequest(
                 host="visible",
                 path="/srv/app/new.bin",
@@ -369,8 +382,12 @@ async def test_server_fs_write_injects_principal_and_rejects_bad_input() -> None
     assert ok.is_error is False
     assert ok.structured_content["content_length"] == 4
     assert len(service.calls) == 1
-    principal, request = service.calls[0]
-    assert principal == models.PrincipalContext(principal_id="static:developer", profile="developer")
+    context, request = service.calls[0]
+    assert isinstance(context, OperationContext)
+    assert context.principal == models.PrincipalContext(
+        principal_id="static:developer",
+        profile="developer",
+    )
     assert request.decoded_data() == b"\x00\xffAB"
 
     assert invalid.is_error is True

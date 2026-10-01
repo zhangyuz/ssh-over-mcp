@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from mcp import Client
 from pydantic import ValidationError
 
 from ssh_over_mcp.api import errors as api_errors
 from ssh_over_mcp.api import models
+from ssh_over_mcp.api.context import OperationContext
 from ssh_over_mcp.api.server import build_mcp_server
 from ssh_over_mcp.api.service import MCPService
 from ssh_over_mcp.inventory.models import Host, Inventory
@@ -14,6 +17,17 @@ from ssh_over_mcp.ssh import (
     SSHFilesystemMkdirResult,
     SSHRequestOutcomeUncertain,
 )
+
+
+def _operation_context() -> OperationContext:
+    return OperationContext(
+        request_id="req_" + "1" * 32,
+        principal=models.PrincipalContext(
+            principal_id="static:developer",
+            profile="developer",
+        ),
+        received_at=datetime(2026, 10, 1, tzinfo=UTC),
+    )
 
 
 def _inventory() -> Inventory:
@@ -98,7 +112,7 @@ async def test_fs_mkdir_hides_host_before_filesystem_client() -> None:
         match="host is not visible",
     ):
         await service.fs_mkdir(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             models.FsMkdirRequest(
                 host="hidden",
                 path="/srv/app/new-directory",
@@ -114,7 +128,7 @@ async def test_fs_mkdir_injects_principal_and_returns_created_path() -> None:
     service = _service(filesystem)
 
     result = await service.fs_mkdir(
-        models.PrincipalContext(principal_id="static:developer", profile="developer"),
+        _operation_context(),
         models.FsMkdirRequest(
             host="visible",
             path="/srv/app/./new-directory",
@@ -148,7 +162,7 @@ async def test_fs_mkdir_uncertain_outcome_is_sanitized_and_non_retryable() -> No
         match="do not retry blindly",
     ) as exc_info:
         await service.fs_mkdir(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             models.FsMkdirRequest(
                 host="visible",
                 path="/srv/app/new-directory",
@@ -170,7 +184,7 @@ async def test_fs_mkdir_pre_request_connection_failure_is_definite_transport_err
         match="SSH transport failed",
     ) as exc_info:
         await service.fs_mkdir(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             models.FsMkdirRequest(
                 host="visible",
                 path="/srv/app/new-directory",
@@ -269,8 +283,12 @@ async def test_server_fs_mkdir_injects_principal_and_rejects_extra_fields() -> N
     assert ok.is_error is False
     assert ok.structured_content["request_id"] == "req_tool_mkdir_1234"
     assert len(service.calls) == 1
-    principal, request = service.calls[0]
-    assert principal == models.PrincipalContext(principal_id="static:developer", profile="developer")
+    context, request = service.calls[0]
+    assert isinstance(context, OperationContext)
+    assert context.principal == models.PrincipalContext(
+        principal_id="static:developer",
+        profile="developer",
+    )
     assert request.path == "/srv/app/new-directory"
 
     assert rejected.is_error is True
@@ -289,7 +307,7 @@ async def test_fs_mkdir_unexpected_failure_is_conservatively_uncertain() -> None
         match="do not retry blindly",
     ) as exc_info:
         await service.fs_mkdir(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             models.FsMkdirRequest(
                 host="visible",
                 path="/srv/app/new-directory",

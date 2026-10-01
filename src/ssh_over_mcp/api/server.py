@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from mcp.server import MCPServer
@@ -7,6 +8,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import ValidationError
 
+from .context import OperationContext, new_request_id
 from .errors import ApiError
 from .models import (
     ExplainableTool,
@@ -93,6 +95,13 @@ def build_mcp_server(
 ) -> MCPServer:
     mcp = StrictMCPServer("ssh-over-mcp")
 
+    def operation_context() -> OperationContext:
+        return OperationContext(
+            request_id=new_request_id(),
+            principal=principal_provider.get_principal(),
+            received_at=datetime.now(UTC),
+        )
+
     @mcp.tool(
         annotations=_READ_ONLY_ANNOTATIONS,
     )
@@ -100,9 +109,7 @@ def build_mcp_server(
         """List hosts visible to the server-owned principal."""
 
         try:
-            return service.list_hosts(
-                principal_provider.get_principal()
-            )
+            return service.list_hosts(operation_context())
         except ApiError as exc:
             raise ToolError(str(exc)) from exc
 
@@ -114,7 +121,7 @@ def build_mcp_server(
 
         try:
             return service.get_host(
-                principal_provider.get_principal(),
+                operation_context(),
                 alias,
             )
         except ApiError as exc:
@@ -136,18 +143,19 @@ def build_mcp_server(
         """Explain central policy without executing the request."""
 
         try:
+            request = PolicyExplainRequest(
+                host=host,
+                tool=tool,
+                executable=executable,
+                args=args,
+                cwd=cwd,
+                path=path,
+                env={} if env is None else env,
+                privilege=privilege,
+            )
             return service.explain_policy(
-                principal_provider.get_principal(),
-                PolicyExplainRequest(
-                    host=host,
-                    tool=tool,
-                    executable=executable,
-                    args=args,
-                    cwd=cwd,
-                    path=path,
-                    env={} if env is None else env,
-                    privilege=privilege,
-                ),
+                operation_context(),
+                request,
             )
         except ApiError as exc:
             raise ToolError(str(exc)) from exc
@@ -177,7 +185,7 @@ def build_mcp_server(
                 timeout_seconds=timeout_seconds,
             )
             return await service.ssh_exec(
-                principal_provider.get_principal(),
+                operation_context(),
                 request,
             )
         except ValidationError:
@@ -197,7 +205,7 @@ def build_mcp_server(
         try:
             request = FsStatRequest(host=host, path=path)
             return await service.fs_stat(
-                principal_provider.get_principal(),
+                operation_context(),
                 request,
             )
         except ValidationError:
@@ -222,7 +230,7 @@ def build_mcp_server(
                 max_bytes=max_bytes,
             )
             return await service.fs_read(
-                principal_provider.get_principal(),
+                operation_context(),
                 request,
             )
         except ValidationError:
@@ -242,7 +250,7 @@ def build_mcp_server(
         try:
             request = FsMkdirRequest(host=host, path=path)
             return await service.fs_mkdir(
-                principal_provider.get_principal(),
+                operation_context(),
                 request,
             )
         except ValidationError:
@@ -267,7 +275,7 @@ def build_mcp_server(
                 data_base64=data_base64,
             )
             return await service.fs_write(
-                principal_provider.get_principal(),
+                operation_context(),
                 request,
             )
         except ValidationError:

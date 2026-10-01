@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from datetime import UTC, datetime
 
 import pytest
 from mcp import Client
@@ -8,6 +9,7 @@ from pydantic import ValidationError
 
 from ssh_over_mcp.api import errors as api_errors
 from ssh_over_mcp.api import models
+from ssh_over_mcp.api.context import OperationContext
 from ssh_over_mcp.api.server import build_mcp_server
 from ssh_over_mcp.api.service import MCPService
 from ssh_over_mcp.inventory.models import Host, Inventory
@@ -26,6 +28,17 @@ from ssh_over_mcp.ssh import (
     SSHRemoteResponseError,
     SSHRequestTimeout,
 )
+
+
+def _operation_context() -> OperationContext:
+    return OperationContext(
+        request_id="req_" + "1" * 32,
+        principal=models.PrincipalContext(
+            principal_id="static:developer",
+            profile="developer",
+        ),
+        received_at=datetime(2026, 10, 1, tzinfo=UTC),
+    )
 
 
 def _inventory() -> Inventory:
@@ -100,7 +113,7 @@ async def test_fs_stat_hides_host_before_filesystem_client() -> None:
         match="host is not visible",
     ):
         await service.fs_stat(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             models.FsStatRequest(host="hidden", path="/srv/app/file"),
         )
 
@@ -113,7 +126,7 @@ async def test_fs_stat_injects_principal_and_returns_metadata() -> None:
     service = _service(filesystem)
 
     result = await service.fs_stat(
-        models.PrincipalContext(principal_id="static:developer", profile="developer"),
+        _operation_context(),
         models.FsStatRequest(host="visible", path="/srv/app/file"),
     )
 
@@ -138,7 +151,7 @@ async def test_fs_read_is_bounded_and_returns_lossless_base64() -> None:
     service = _service(filesystem)
 
     result = await service.fs_read(
-        models.PrincipalContext(principal_id="static:developer", profile="developer"),
+        _operation_context(),
         models.FsReadRequest(
             host="visible",
             path="/srv/app/file",
@@ -266,7 +279,7 @@ async def test_filesystem_service_sanitizes_remote_failures(
         match=message,
     ) as exc_info:
         await service.fs_stat(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             models.FsStatRequest(host="visible", path="/srv/app/file"),
         )
     assert "SUPERSECRET" not in str(exc_info.value)
@@ -371,8 +384,12 @@ async def test_server_fs_read_injects_principal_and_rejects_extra_fields() -> No
 
     assert ok.is_error is False
     assert ok.structured_content["data_base64"] == "AP9BQg=="
-    _, principal, request = service.calls[0]
-    assert principal == models.PrincipalContext(principal_id="static:developer", profile="developer")
+    _, context, request = service.calls[0]
+    assert isinstance(context, OperationContext)
+    assert context.principal == models.PrincipalContext(
+        principal_id="static:developer",
+        profile="developer",
+    )
     assert request.max_bytes == 4096
     assert rejected.is_error is True
     assert len(service.calls) == 1

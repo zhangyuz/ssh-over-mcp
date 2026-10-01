@@ -24,6 +24,7 @@ from ssh_over_mcp.ssh.errors import (
     SSHRequestTimeout,
 )
 
+from .context import OperationContext
 from .errors import (
     ApprovalRequiredError,
     FilesystemMutationOutcomeUncertainError,
@@ -115,8 +116,9 @@ class MCPService:
 
     def list_hosts(
         self,
-        principal: PrincipalContext,
+        context: OperationContext,
     ) -> HostsListResult:
+        principal = context.principal
         visible = tuple(
             self._summary(alias)
             for alias, host in sorted(self._inventory.hosts.items())
@@ -126,17 +128,19 @@ class MCPService:
 
     def get_host(
         self,
-        principal: PrincipalContext,
+        context: OperationContext,
         alias: str,
     ) -> HostSummary:
+        principal = context.principal
         self._visible_host(principal, alias)
         return self._summary(alias)
 
     def explain_policy(
         self,
-        principal: PrincipalContext,
+        context: OperationContext,
         request: PolicyExplainRequest,
     ) -> PolicyExplainResult:
+        principal = context.principal
         self._visible_host(principal, request.host)
         if request.tool not in _EXPLAINABLE_TOOLS:
             raise InvalidExplainToolError(
@@ -171,9 +175,10 @@ class MCPService:
 
     async def ssh_exec(
         self,
-        principal: PrincipalContext,
+        context: OperationContext,
         request: SSHExecRequest,
     ) -> SSHExecResult:
+        principal = context.principal
         self._visible_host(principal, request.host)
         if self._ssh_executor is None:
             raise SSHExecutionError("SSH execution is unavailable")
@@ -244,9 +249,10 @@ class MCPService:
 
     async def fs_stat(
         self,
-        principal: PrincipalContext,
+        context: OperationContext,
         request: FsStatRequest,
     ) -> FsStatResult:
+        principal = context.principal
         self._visible_host(principal, request.host)
         if self._ssh_filesystem is None:
             raise FilesystemOperationError(
@@ -316,9 +322,10 @@ class MCPService:
 
     async def fs_read(
         self,
-        principal: PrincipalContext,
+        context: OperationContext,
         request: FsReadRequest,
     ) -> FsReadResult:
+        principal = context.principal
         self._visible_host(principal, request.host)
         if self._ssh_filesystem is None:
             raise FilesystemOperationError(
@@ -384,9 +391,10 @@ class MCPService:
 
     async def fs_mkdir(
         self,
-        principal: PrincipalContext,
+        context: OperationContext,
         request: FsMkdirRequest,
     ) -> FsMkdirResult:
+        principal = context.principal
         self._visible_host(principal, request.host)
         if self._ssh_filesystem is None:
             raise FilesystemOperationError(
@@ -445,9 +453,10 @@ class MCPService:
 
     async def fs_write(
         self,
-        principal: PrincipalContext,
+        context: OperationContext,
         request: FsWriteRequest,
     ) -> FsWriteResult:
+        principal = context.principal
         self._visible_host(principal, request.host)
         if self._ssh_filesystem is None:
             raise FilesystemOperationError(
