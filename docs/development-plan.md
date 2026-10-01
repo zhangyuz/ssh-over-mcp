@@ -546,6 +546,8 @@ Adversarial tests include malformed envelopes, command injection, env injection,
 
 ## Phase 4 — MCP surface
 
+Status: **complete; merged to main**
+
 The read-only discovery/explanation slice is merged:
 
 - official MCP Python SDK v2;
@@ -647,15 +649,28 @@ The MCP create-only file-write slice is implemented:
 - real Streamable HTTP coverage exercises the maximum 64 KiB MCP payload and
   proves default-deny `fs_write` does not reach the SSH connection path.
 
-Still deferred to separately reviewed Phase 4 slices:
+The final Phase 4 whole-surface review is complete:
 
-- raw shell;
-- OAuth/claim-to-profile mapping;
+- exact implementation commit
+  `79a3ebd6ed5e06b32ac1f152e3dc5b21e3ee9f5e`;
+- authoritative hardened Ubuntu 26.04 x86 workflow run `36864606963` passed
+  Ruff, cgroup-v2 probe, Python 3.13/3.14 compile, and both full pytest suites;
+- the MCP registry contains only discovery/explain, structured exec, read-only
+  stat/read, and create-only mkdir/write;
+- health/readiness remain ordinary HTTP endpoints;
+- client input cannot select the trusted profile, raw SSH coordinates, or
+  credentials;
+- central policy precedes every side-effecting SSH path and host-agent policy
+  remains independently authoritative;
+- destructive filesystem mutation and raw-shell MCP handlers remain absent;
+- no Critical or Important finding remained.
+
+Explicitly deferred beyond Phase 4:
+
+- raw-shell enablement;
+- OAuth/claim-to-profile mapping and Cloudflare identity integration;
 - audit/approval persistence;
 - destructive filesystem namespace mutation.
-
-Each remaining Phase 4 capability continues to require an exact-head hardened
-Ubuntu 26.04 x86 gate and whole-branch security review before merge.
 
 ## Phase 5 — audit and approvals
 

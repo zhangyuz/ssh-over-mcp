@@ -2,7 +2,7 @@
 
 Date: 2026-09-30
 
-Status: proposed for implementation planning
+Status: implemented; final surface review verified 2026-10-01
 
 ## 1. Purpose
 
@@ -517,6 +517,23 @@ Phase 4 may be marked implemented only after one exact main commit proves:
 - no destructive filesystem or raw-shell bypass is introduced;
 - Python 3.13/3.14 full suites pass on the hardened Ubuntu 26.04 x86
   self-hosted runner.
+
+Final Phase 4 review evidence:
+
+- exact implementation commit:
+  `79a3ebd6ed5e06b32ac1f152e3dc5b21e3ee9f5e`;
+- authoritative self-hosted workflow run `36864606963`: success;
+- registered MCP surface is exactly `hosts_list`, `host_info`,
+  `policy_explain`, `ssh_exec`, `fs_stat`, `fs_read`, `fs_mkdir`, and
+  `fs_write`;
+- health/readiness remain outside the tool registry;
+- no `ssh_shell`, `fs_move`, or `fs_delete` MCP handler is registered;
+- central-policy-before-network and host-agent independent enforcement are
+  covered by the merged side-effecting tool tests;
+- create-only mkdir/write semantics and the distinct fs_write committed/
+  durability-uncertain outcome survive the MCP mapping.
+
+No Critical or Important finding remained in the final whole-surface review.
 
 ## 21. Deferred work
 
