@@ -80,7 +80,7 @@ def _validate_mapping(
         document = _CredentialMapDocument(
             credentials=dict(credential_map),
         )
-    except (TypeError, ValueError, ValidationError) as exc:
+    except (TypeError, ValueError, ValidationError):
         raise RuntimeConfigurationError(
             "runtime configuration is invalid"
         ) from None
@@ -108,7 +108,7 @@ def load_credential_map(path: str | Path) -> dict[str, Path]:
         yaml.YAMLError,
         json.JSONDecodeError,
         ValidationError,
-    ) as exc:
+    ):
         raise RuntimeConfigurationError(
             "runtime configuration is invalid"
         ) from None
