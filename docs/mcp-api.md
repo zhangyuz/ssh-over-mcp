@@ -182,8 +182,31 @@ create-only primitive is not called until the complete authorized body and EOF
 have been observed. Success returns status 0 with empty stdout. Pre-publication
 failures use the generic filesystem failure. If publication committed but the
 parent-directory fsync fails, status 74 plus a fixed host-owned diagnostic means
-durability is uncertain and the caller MUST NOT blindly retry. This is not yet
-an MCP `fs_write` tool.
+durability is uncertain and the caller MUST NOT blindly retry.
+
+The Phase 4 MCP `fs_write` adapter is now implemented. MCP input contains only
+logical host alias, bounded path, and canonical strict `data_base64`. The MCP
+surface caps decoded content at 64 KiB so a maximum-size request remains inside
+the existing 128 KiB Streamable HTTP request-body limit; that outer cap does not
+replace the host-agent profile-specific `write_create_roots` and
+`max_write_bytes` checks. `content_length` is derived server-side from decoded
+bytes and cannot be supplied by the caller.
+
+Only the centrally normalized path and server-derived content length enter
+`FsWriteEnvelope`; the exact decoded bytes are the SMCP body. The existing
+host-agent primitive remains create-if-absent, publishes an unnamed `O_TMPFILE`
+only after full write and file fsync, uses maximum mode `0600`, and fsyncs the
+parent directory after publication. Overwrite, append, caller-selected mode/
+owner, move, and delete remain unavailable.
+
+A clean remote status 74 maps to the distinct public outcome
+`filesystem write committed; durability uncertain; do not retry blindly`.
+A clean status 77 remains a definite host-policy denial. Any local timeout,
+truncation, signal ambiguity, status 69, lost acknowledgement, or other
+post-send transport/collection failure maps to generic mutation-outcome-
+uncertain with the same do-not-retry-blindly rule. Definite credential,
+host-key, connection, and channel-open failures remain pre-request transport
+errors.
 
 ### Processes
 
@@ -255,7 +278,8 @@ Application shutdown closes the pooled SSH connection manager after the MCP SDK
 lifespan exits.
 
 The registered MCP surface is now `hosts_list`, `host_info`,
-`policy_explain`, `ssh_exec`, `fs_stat`, `fs_read`, and `fs_mkdir`.
+`policy_explain`, `ssh_exec`, `fs_stat`, `fs_read`, `fs_mkdir`, and
+`fs_write`.
 Health/readiness remain ordinary HTTP routes and do not appear in the MCP tool
 registry.
 
@@ -281,6 +305,7 @@ Errors should distinguish:
 - timeout;
 - output truncated;
 - filesystem mutation outcome uncertain / do not retry blindly;
+- filesystem write committed / durability uncertain / do not retry blindly;
 - execution failure.
 
 Do not return secret values in error details.

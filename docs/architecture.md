@@ -121,7 +121,7 @@ Owns the fixed `mcp-v1` SSH channel creation and bounded stdout/stderr collectio
 
 ### Structured SSH executor
 
-Obtains an allow decision before invoking the transport, creates the versioned `exec` request frame, and applies server-owned timeout/input/output limits. The typed filesystem client uses this same structured transport boundary after its own central-policy allow decision, rather than reimplementing SSH process lifecycle logic. Read-only stat/read retain bounded response semantics; create-only mkdir additionally treats every ambiguous post-send result as mutation-outcome-uncertain and unsafe for blind retry.
+Obtains an allow decision before invoking the transport, creates the versioned `exec` request frame, and applies server-owned timeout/input/output limits. The typed filesystem client uses this same structured transport boundary after its own central-policy allow decision, rather than reimplementing SSH process lifecycle logic. Read-only stat/read retain bounded response semantics; create-only mkdir treats every ambiguous post-send result as mutation-outcome-uncertain and unsafe for blind retry. Create-only write additionally preserves the host-agent status-74 boundary as a distinct published-but-durability-uncertain outcome while treating all other ambiguous post-send failures conservatively.
 
 ### Remote host agent
 

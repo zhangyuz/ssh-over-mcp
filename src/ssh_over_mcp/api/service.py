@@ -13,6 +13,7 @@ from ssh_over_mcp.ssh.errors import (
     SSHApprovalRequired,
     SSHConnectionError,
     SSHCredentialError,
+    SSHFilesystemWriteCommittedUncertain,
     SSHHostKeyVerificationError,
     SSHOutputLimitExceeded,
     SSHPolicyDenied,
@@ -27,6 +28,7 @@ from .errors import (
     ApprovalRequiredError,
     FilesystemMutationOutcomeUncertainError,
     FilesystemOperationError,
+    FilesystemWriteCommittedUncertainError,
     HostNotVisibleError,
     InvalidExecutionLimitError,
     InvalidExplainToolError,
@@ -46,6 +48,8 @@ from .models import (
     FsReadResult,
     FsStatRequest,
     FsStatResult,
+    FsWriteRequest,
+    FsWriteResult,
     HostsListResult,
     HostSummary,
     PolicyExplainRequest,
@@ -436,4 +440,73 @@ class MCPService:
             request_id=result.request_id,
             host=result.host,
             path=result.path,
+        )
+
+
+    async def fs_write(
+        self,
+        principal: PrincipalContext,
+        request: FsWriteRequest,
+    ) -> FsWriteResult:
+        self._visible_host(principal, request.host)
+        if self._ssh_filesystem is None:
+            raise FilesystemOperationError(
+                "filesystem operation is unavailable"
+            )
+
+        data = request.decoded_data()
+        try:
+            result = await self._ssh_filesystem.write(
+                EvaluationRequest(
+                    profile=principal.profile,
+                    host=request.host,
+                    tool="fs_write",
+                    path=request.path,
+                    privilege="user",
+                ),
+                data,
+            )
+        except SSHPolicyDenied:
+            raise PolicyDeniedError(
+                "request denied by central policy"
+            ) from None
+        except SSHApprovalRequired:
+            raise ApprovalRequiredError(
+                "approval required by central policy"
+            ) from None
+        except SSHCredentialError:
+            raise SSHCredentialUnavailableError(
+                "SSH credential is unavailable"
+            ) from None
+        except SSHHostKeyVerificationError:
+            raise SSHHostKeyError(
+                "SSH host key verification failed"
+            ) from None
+        except SSHConnectionError:
+            raise SSHTransportError("SSH transport failed") from None
+        except SSHRemotePolicyDenied:
+            raise RemotePolicyDeniedError(
+                "remote filesystem policy denied request"
+            ) from None
+        except SSHFilesystemWriteCommittedUncertain:
+            raise FilesystemWriteCommittedUncertainError(
+                "filesystem write committed; durability uncertain; "
+                "do not retry blindly"
+            ) from None
+        except SSHRequestOutcomeUncertain:
+            raise FilesystemMutationOutcomeUncertainError(
+                "remote filesystem mutation outcome is uncertain; "
+                "do not retry blindly"
+            ) from None
+        except Exception:  # noqa: BLE001
+            raise FilesystemMutationOutcomeUncertainError(
+                "remote filesystem mutation outcome is uncertain; "
+                "do not retry blindly"
+            ) from None
+
+        return FsWriteResult(
+            request_id=result.request_id,
+            host=result.host,
+            path=result.path,
+            content_length=result.content_length,
         )

@@ -523,7 +523,9 @@ Create-only mutation progress:
   generic; post-publication parent-fsync failure returns dedicated `fs_write`
   status 74 plus a fixed host-owned "committed; durability uncertain; do not
   retry blindly" diagnostic;
-- `fs_write` remains below the MCP tool layer;
+- the Phase 4 MCP layer now exposes strict create-only `fs_write(host, path,
+  data_base64)`; content length is server-derived and overwrite/append/mode/
+  owner metadata remain absent;
 - Task 7 implemented on Ubuntu 26.04 x86 with real filesystem adversarial
   composition: concurrent create-if-absent races publish exactly one complete
   body, file fsync occurs before publish visibility, symlink escape/collision
@@ -627,9 +629,26 @@ The MCP create-only directory slice is implemented:
 - real Streamable HTTP coverage proves default-deny `fs_mkdir` does not reach
   the SSH connection path.
 
+The MCP create-only file-write slice is implemented:
+
+- `fs_write` accepts logical host alias, bounded path, and canonical strict
+  base64 only; decoded content has a 64 KiB MCP hard cap chosen to stay within
+  the existing 128 KiB Streamable HTTP request-body limit;
+- trusted profile, user privilege, request ID, and `content_length` remain
+  server-owned; content length is derived from the decoded bytes;
+- central policy runs before network access and only its normalized path enters
+  the typed `FsWriteEnvelope`;
+- host-agent `write_create_roots`, `max_write_bytes`, exact-body validation,
+  unnamed-`O_TMPFILE` create-if-absent publication, maximum mode `0600`, and
+  fsync ordering remain independently authoritative;
+- clean status 74 preserves the distinct committed/durability-uncertain public
+  outcome; generic post-send ambiguity remains outcome-uncertain and both
+  categories explicitly prohibit blind retry;
+- real Streamable HTTP coverage exercises the maximum 64 KiB MCP payload and
+  proves default-deny `fs_write` does not reach the SSH connection path.
+
 Still deferred to separately reviewed Phase 4 slices:
 
-- MCP create-only `fs_write`;
 - raw shell;
 - OAuth/claim-to-profile mapping;
 - audit/approval persistence;

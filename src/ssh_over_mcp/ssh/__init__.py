@@ -9,6 +9,7 @@ from .errors import (
     SSHApprovalRequired,
     SSHConnectionError,
     SSHCredentialError,
+    SSHFilesystemWriteCommittedUncertain,
     SSHHostKeyVerificationError,
     SSHOutputLimitExceeded,
     SSHPolicyDenied,
@@ -24,6 +25,7 @@ from .filesystem import (
     SSHFilesystemMkdirResult,
     SSHFilesystemReadResult,
     SSHFilesystemStatResult,
+    SSHFilesystemWriteResult,
 )
 from .protocol import (
     ExecEnvelope,
@@ -50,6 +52,8 @@ __all__ = [
     "SSHFilesystemMkdirResult",
     "SSHFilesystemReadResult",
     "SSHFilesystemStatResult",
+    "SSHFilesystemWriteCommittedUncertain",
+    "SSHFilesystemWriteResult",
     "SSHHostKeyVerificationError",
     "SSHOutputLimitExceeded",
     "SSHPolicyDenied",

@@ -13,6 +13,7 @@ from ssh_over_mcp.ssh.protocol import (
     FsMkdirEnvelope,
     FsReadEnvelope,
     FsStatEnvelope,
+    FsWriteEnvelope,
     decode_request,
 )
 from ssh_over_mcp.ssh.transport import SSHExecutionResult
@@ -670,6 +671,272 @@ async def test_fs_mkdir_status_77_with_local_timeout_is_still_uncertain():
     ) as exc_info:
         await client.mkdir(
             request("fs_mkdir", "/srv/app/new-directory"),
+        )
+
+    assert "SUPERSECRET" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_fs_write_policy_normalizes_path_and_sends_binary_body():
+    committed_type = getattr(
+        ssh_package,
+        "SSHFilesystemWriteCommittedUncertain",
+        None,
+    )
+    assert committed_type is not None
+
+    policy = Policy(allow(normalized_path="/srv/app/new.bin"))
+    transport = RecordingTransport(
+        SSHExecutionResult(
+            request_id="req_fs_write_1234",
+            host="dev01",
+            exit_status=0,
+            duration_ms=3,
+        )
+    )
+    client = ssh_package.SSHFilesystemClient(
+        policy=policy,
+        transport=transport,
+    )
+
+    result = await client.write(
+        request("fs_write", "/srv/app/./new.bin"),
+        b"\x00\xffAB",
+        request_id="req_fs_write_1234",
+    )
+
+    assert len(policy.calls) == 1
+    assert policy.calls[0].tool == "fs_write"
+    call = transport.calls[0]
+    assert call["host"] == "dev01"
+    assert call["request_id"] == "req_fs_write_1234"
+    assert call["timeout_seconds"] == 60.0
+    assert call["max_output_bytes"] == 4096
+
+    envelope, body = decode_request(call["payload"])
+    assert isinstance(envelope, FsWriteEnvelope)
+    assert envelope.profile == "developer"
+    assert envelope.path == "/srv/app/new.bin"
+    assert envelope.content_length == 4
+    assert body == b"\x00\xffAB"
+
+    assert result.request_id == "req_fs_write_1234"
+    assert result.host == "dev01"
+    assert result.path == "/srv/app/new.bin"
+    assert result.content_length == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("decision", "error_type"),
+    [
+        (Decision.DENY, ssh_package.SSHPolicyDenied),
+        (Decision.APPROVAL_REQUIRED, ssh_package.SSHApprovalRequired),
+    ],
+)
+async def test_fs_write_policy_failure_happens_before_transport(
+    decision,
+    error_type,
+):
+    policy = Policy(deny(decision))
+    transport = RecordingTransport(
+        SSHExecutionResult(
+            request_id="unused_request",
+            host="dev01",
+            exit_status=0,
+            duration_ms=0,
+        )
+    )
+    client = ssh_package.SSHFilesystemClient(
+        policy=policy,
+        transport=transport,
+    )
+
+    with pytest.raises(error_type):
+        await client.write(
+            request("fs_write", "/srv/app/new.bin"),
+            b"secret",
+        )
+
+    assert len(policy.calls) == 1
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_fs_write_remote_policy_denial_is_definite():
+    client = ssh_package.SSHFilesystemClient(
+        policy=Policy(allow(normalized_path="/srv/app/new.bin")),
+        transport=RecordingTransport(
+            SSHExecutionResult(
+                request_id="req_write_deny_1234",
+                host="dev01",
+                exit_status=77,
+                stderr=b"SUPERSECRET host policy detail",
+                duration_ms=2,
+            )
+        ),
+    )
+
+    with pytest.raises(
+        ssh_package.SSHRemotePolicyDenied,
+        match="remote filesystem policy denied request",
+    ) as exc_info:
+        await client.write(
+            request("fs_write", "/srv/app/new.bin"),
+            b"data",
+        )
+
+    assert "SUPERSECRET" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_fs_write_status_74_preserves_committed_durability_uncertain():
+    committed_type = getattr(
+        ssh_package,
+        "SSHFilesystemWriteCommittedUncertain",
+        None,
+    )
+    assert committed_type is not None
+
+    client = ssh_package.SSHFilesystemClient(
+        policy=Policy(allow(normalized_path="/srv/app/new.bin")),
+        transport=RecordingTransport(
+            SSHExecutionResult(
+                request_id="req_write_commit_1234",
+                host="dev01",
+                exit_status=74,
+                stderr=b"SUPERSECRET remote committed detail",
+                duration_ms=2,
+            )
+        ),
+    )
+
+    with pytest.raises(
+        committed_type,
+        match="filesystem write committed; durability uncertain; do not retry blindly",
+    ) as exc_info:
+        await client.write(
+            request("fs_write", "/srv/app/new.bin"),
+            b"data",
+        )
+
+    assert "SUPERSECRET" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "remote_result",
+    [
+        SSHExecutionResult(
+            request_id="req_timeout_write_1234",
+            host="dev01",
+            duration_ms=10,
+            timed_out=True,
+        ),
+        SSHExecutionResult(
+            request_id="req_truncated_write_1234",
+            host="dev01",
+            duration_ms=2,
+            truncated=True,
+            stderr=b"SUPERSECRET truncated diagnostic",
+        ),
+        SSHExecutionResult(
+            request_id="req_failure_write_1234",
+            host="dev01",
+            exit_status=69,
+            duration_ms=2,
+            stderr=b"SUPERSECRET remote failure",
+        ),
+        SSHExecutionResult(
+            request_id="req_stdout_write_1234",
+            host="dev01",
+            exit_status=0,
+            duration_ms=2,
+            stdout=b"SUPERSECRET unexpected output",
+        ),
+        SSHExecutionResult(
+            request_id="req_stderr_write_1234",
+            host="dev01",
+            exit_status=0,
+            duration_ms=2,
+            stderr=b"SUPERSECRET unexpected stderr",
+        ),
+    ],
+)
+async def test_fs_write_post_send_abnormal_result_is_outcome_uncertain(
+    remote_result,
+):
+    client = ssh_package.SSHFilesystemClient(
+        policy=Policy(allow(normalized_path="/srv/app/new.bin")),
+        transport=RecordingTransport(remote_result),
+    )
+
+    with pytest.raises(
+        ssh_package.SSHRequestOutcomeUncertain,
+        match="remote filesystem mutation outcome is uncertain",
+    ) as exc_info:
+        await client.write(
+            request("fs_write", "/srv/app/new.bin"),
+            b"data",
+        )
+
+    assert "SUPERSECRET" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_fs_write_status_74_with_local_timeout_is_generic_uncertain():
+    committed_type = getattr(
+        ssh_package,
+        "SSHFilesystemWriteCommittedUncertain",
+        None,
+    )
+    assert committed_type is not None
+
+    client = ssh_package.SSHFilesystemClient(
+        policy=Policy(allow(normalized_path="/srv/app/new.bin")),
+        transport=RecordingTransport(
+            SSHExecutionResult(
+                request_id="req_write_ambiguous_1234",
+                host="dev01",
+                exit_status=74,
+                duration_ms=10,
+                timed_out=True,
+                stderr=b"SUPERSECRET partial committed diagnostic",
+            )
+        ),
+    )
+
+    with pytest.raises(
+        ssh_package.SSHRequestOutcomeUncertain,
+        match="remote filesystem mutation outcome is uncertain",
+    ) as exc_info:
+        await client.write(
+            request("fs_write", "/srv/app/new.bin"),
+            b"data",
+        )
+
+    assert not isinstance(exc_info.value, committed_type)
+    assert "SUPERSECRET" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_fs_write_transport_uncertain_failure_stays_uncertain():
+    client = ssh_package.SSHFilesystemClient(
+        policy=Policy(allow(normalized_path="/srv/app/new.bin")),
+        transport=RaisingTransport(
+            ssh_package.SSHRequestOutcomeUncertain(
+                "SUPERSECRET transport uncertainty"
+            )
+        ),
+    )
+
+    with pytest.raises(
+        ssh_package.SSHRequestOutcomeUncertain,
+        match="remote filesystem mutation outcome is uncertain",
+    ) as exc_info:
+        await client.write(
+            request("fs_write", "/srv/app/new.bin"),
+            b"data",
         )
 
     assert "SUPERSECRET" not in str(exc_info.value)

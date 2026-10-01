@@ -9,6 +9,7 @@ from ssh_over_mcp.policy.models import Decision, EvaluationRequest
 
 from .errors import (
     SSHApprovalRequired,
+    SSHFilesystemWriteCommittedUncertain,
     SSHOutputLimitExceeded,
     SSHPolicyDenied,
     SSHRemoteOperationError,
@@ -17,13 +18,20 @@ from .errors import (
     SSHRequestOutcomeUncertain,
     SSHRequestTimeout,
 )
-from .protocol import FsMkdirEnvelope, FsReadEnvelope, FsStatEnvelope, encode_request
+from .protocol import (
+    FsMkdirEnvelope,
+    FsReadEnvelope,
+    FsStatEnvelope,
+    FsWriteEnvelope,
+    encode_request,
+)
 from .transport import SSHExecutionResult, StructuredSSHTransport
 
 DEFAULT_FILESYSTEM_TIMEOUT_SECONDS = 60.0
 MAX_FILESYSTEM_STAT_RESPONSE_BYTES = 64 * 1024
 MAX_FILESYSTEM_READ_BYTES = 1024 * 1024
 MIN_FILESYSTEM_TRANSPORT_OUTPUT_BYTES = 4096
+_REMOTE_WRITE_COMMITTED_EXIT_STATUS = 74
 _REMOTE_POLICY_DENIED_EXIT_STATUS = 77
 
 
@@ -83,6 +91,15 @@ class SSHFilesystemMkdirResult(BaseModel):
     request_id: str
     host: str
     path: str
+
+
+class SSHFilesystemWriteResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request_id: str
+    host: str
+    path: str
+    content_length: int = Field(ge=0)
 
 
 class _RemoteStatPayload(BaseModel):
@@ -280,4 +297,78 @@ class SSHFilesystemClient:
             request_id=req_id,
             host=request.host,
             path=decision.normalized_path,
+        )
+
+
+    async def write(
+        self,
+        request: EvaluationRequest,
+        data: bytes,
+        *,
+        request_id: str | None = None,
+    ) -> SSHFilesystemWriteResult:
+        if request.tool != "fs_write":
+            raise ValueError("filesystem write requires fs_write policy request")
+        if not isinstance(data, bytes):
+            raise TypeError("filesystem write data must be bytes")
+
+        decision = self.policy.evaluate(request)
+        if decision.decision == Decision.DENY:
+            raise SSHPolicyDenied(decision)
+        if decision.decision == Decision.APPROVAL_REQUIRED:
+            raise SSHApprovalRequired(decision)
+        if not decision.normalized_path:
+            raise SSHPolicyDenied(decision)
+
+        req_id = request_id or f"req_{uuid.uuid4().hex}"
+        envelope = FsWriteEnvelope(
+            request_id=req_id,
+            profile=request.profile,
+            path=decision.normalized_path,
+            content_length=len(data),
+        )
+        try:
+            result = await self.transport.run(
+                host=request.host,
+                payload=encode_request(envelope, data),
+                request_id=req_id,
+                timeout_seconds=self.default_timeout_seconds,
+                max_output_bytes=MIN_FILESYSTEM_TRANSPORT_OUTPUT_BYTES,
+            )
+        except SSHRequestOutcomeUncertain:
+            raise SSHRequestOutcomeUncertain(
+                "remote filesystem mutation outcome is uncertain"
+            ) from None
+
+        if (
+            result.timed_out
+            or result.truncated
+            or result.exit_signal is not None
+        ):
+            raise SSHRequestOutcomeUncertain(
+                "remote filesystem mutation outcome is uncertain"
+            )
+        if result.exit_status == _REMOTE_POLICY_DENIED_EXIT_STATUS:
+            raise SSHRemotePolicyDenied(
+                "remote filesystem policy denied request"
+            )
+        if result.exit_status == _REMOTE_WRITE_COMMITTED_EXIT_STATUS:
+            raise SSHFilesystemWriteCommittedUncertain(
+                "filesystem write committed; durability uncertain; "
+                "do not retry blindly"
+            )
+        if (
+            result.exit_status != 0
+            or result.stdout
+            or result.stderr
+        ):
+            raise SSHRequestOutcomeUncertain(
+                "remote filesystem mutation outcome is uncertain"
+            )
+
+        return SSHFilesystemWriteResult(
+            request_id=req_id,
+            host=request.host,
+            path=decision.normalized_path,
+            content_length=len(data),
         )
