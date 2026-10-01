@@ -560,7 +560,6 @@ The read-only discovery/explanation slice is merged:
 
 The SSH runtime-composition slice adds server-owned credential wiring:
 
-
 - required `SSH_OVER_MCP_CREDENTIAL_MAP` points to strict operator-owned
   YAML/JSON mapping from inventory credential refs to absolute mounted key files;
 - all inventory credential refs must be covered and all mapped key paths must
