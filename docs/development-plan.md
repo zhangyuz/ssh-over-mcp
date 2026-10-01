@@ -542,7 +542,35 @@ Adversarial tests include malformed envelopes, command injection, env injection,
 
 ## Phase 4 — MCP surface
 
-Implement Streamable HTTP MCP server and tools documented in `mcp-api.md`. Include health/readiness endpoints outside the MCP tool surface.
+First read-only discovery/explanation slice implemented on the Phase 4 feature
+branch:
+
+- official MCP Python SDK v2;
+- stateless Streamable HTTP at `/mcp`;
+- localhost-only packaged server while using the static principal provider;
+- server-owned `StaticPrincipalProvider`; client tool arguments cannot select
+  the trusted profile;
+- `hosts_list` and `host_info` expose alias-only visible-host identity with
+  empty labels/capabilities and indistinguishable missing/hidden errors;
+- sanitized `policy_explain` with no SSH/network side effect;
+- bounded `policy_explain` metadata (64 KiB aggregate plus field/count limits)
+  and a 128 KiB Streamable HTTP request-body cap;
+- `/healthz` and `/readyz` remain ordinary HTTP routes outside the MCP tool
+  registry;
+- real MCP SDK client round-trip coverage for Streamable HTTP.
+
+Still deferred to separately reviewed Phase 4 slices:
+
+- MCP `ssh_exec`;
+- MCP `fs_stat` / `fs_read`;
+- MCP create-only `fs_mkdir` / `fs_write`;
+- raw shell;
+- OAuth/claim-to-profile mapping;
+- audit/approval persistence;
+- destructive filesystem namespace mutation.
+
+Final merge of this slice remains gated on exact-head hardened Ubuntu 26.04 x86
+self-hosted verification and whole-branch security review.
 
 ## Phase 5 — audit and approvals
 

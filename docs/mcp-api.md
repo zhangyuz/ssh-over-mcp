@@ -13,13 +13,26 @@
 ### Discovery
 
 #### `hosts_list`
-Returns hosts visible to the current profile, including safe labels and capabilities.
+Implemented in the first Phase 4 slice. Returns only logical aliases visible to
+the server-owned principal. Existing inventory labels are not yet classified as
+public, so labels and capabilities are returned as empty lists.
 
 #### `host_info`
-Returns non-secret inventory and runtime information for one allowed host.
+Implemented in the first Phase 4 slice. Returns the same alias-only public
+identity for one visible host. Unknown and role-hidden aliases produce the same
+public not-visible error. This slice does not open SSH or probe host runtime
+state.
 
 #### `policy_explain`
-Explains an allow/deny/approval decision for a hypothetical normalized operation without executing it.
+Implemented in the first Phase 4 slice. Evaluates a hypothetical central-policy
+request without execution or SSH access. The trusted profile is injected by the
+server, hidden hosts fail before policy evaluation, and the result exposes only
+the sanitized decision/reason/risk, caller-originated normalized
+executable/cwd/path, approval requirement, and policy version. Matched rule IDs,
+effective roles, capabilities, credentials, host keys, configured roots, and
+environment values are not returned. Policy-explain request metadata is capped at
+64 KiB, with explicit bounds on path-like fields, argv, environment entries,
+and privilege text.
 
 ### Command execution
 
@@ -101,7 +114,8 @@ access failure return generic SSH-visible errors without policy-root or inode
 details.
 
 These are host-agent wire operations only. The MCP `fs_stat` and `fs_read`
-tools listed above are still future Phase 4 surface work.
+adapters remain future Phase 4 slices; they are not registered by the initial
+discovery/explanation server.
 
 The host agent also exposes create-only `fs_mkdir` as a typed SMCP v1
 operation. Its request is metadata-only and contains only request ID, profile,
@@ -158,7 +172,24 @@ Read-only and restricted to profiles permitted to inspect audit events.
 
 ## MCP transport
 
-The remote MCP server uses Streamable HTTP at `/mcp`. The implementation SHOULD track the current MCP stable SDK/specification and SHOULD support stateless requests when available. Protocol negotiation/compatibility is handled at the transport layer rather than by business policy.
+The first Phase 4 server uses the official MCP Python SDK v2 and exposes
+Streamable HTTP at `/mcp` with stateless JSON responses. Until verified OAuth
+identity is added, the packaged server binds only to `127.0.0.1` and uses one
+operator-configured static principal profile from `SSH_OVER_MCP_PROFILE`.
+Clients cannot override that profile through tool arguments, query parameters,
+or arbitrary request metadata.
+
+Local liveness/readiness are ordinary HTTP endpoints:
+
+- `GET /healthz` -> `{"status":"ok"}`;
+- `GET /readyz` -> `{"status":"ready"}`.
+
+They are not MCP tools and they do not probe inventory hosts or establish SSH
+sessions. Runtime configuration uses `SSH_OVER_MCP_CONFIG`,
+`SSH_OVER_MCP_PROFILE`, and optional `SSH_OVER_MCP_PORT` (default 8000).
+The Streamable HTTP endpoint rejects request bodies larger than 128 KiB before
+MCP parsing. OAuth/claim-to-profile mapping remains a later Cloudflare-phase
+concern.
 
 ## Annotations
 
