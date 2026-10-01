@@ -16,10 +16,12 @@ from ssh_over_mcp.ssh.errors import (
     SSHHostKeyVerificationError,
     SSHPolicyDenied,
 )
+from ssh_over_mcp.ssh.protocol import ProtocolError
 
 from .errors import (
     ExecutionApprovalRequiredError,
     ExecutionCredentialError,
+    ExecutionFailureError,
     ExecutionHostKeyError,
     ExecutionPolicyDeniedError,
     ExecutionRequestError,
@@ -210,6 +212,14 @@ class MCPService:
         except SSHConnectionError:
             raise ExecutionTransportError(
                 "SSH transport failed"
+            ) from None
+        except ProtocolError:
+            raise ExecutionRequestError(
+                "execution request is invalid"
+            ) from None
+        except Exception:
+            raise ExecutionFailureError(
+                "SSH execution failed"
             ) from None
 
         return SSHExecResult(
