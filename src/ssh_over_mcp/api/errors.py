@@ -40,3 +40,7 @@ class ExecutionHostKeyError(ApiError):
 
 class ExecutionTransportError(ApiError):
     """Raised when the SSH transport cannot execute the request."""
+
+
+class ExecutionFailureError(ApiError):
+    """Raised when execution fails without a more specific public category."""
