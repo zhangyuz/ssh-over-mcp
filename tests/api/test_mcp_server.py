@@ -84,12 +84,17 @@ async def test_server_registers_closed_world_tool_surface() -> None:
         "ssh_exec",
         "fs_stat",
         "fs_read",
+        "fs_mkdir",
     }
     for tool in listed.tools:
         assert tool.annotations is not None
         if tool.name == "ssh_exec":
             assert tool.annotations.read_only_hint is False
             assert tool.annotations.destructive_hint is True
+        elif tool.name == "fs_mkdir":
+            assert tool.annotations.read_only_hint is False
+            assert tool.annotations.destructive_hint is False
+            assert tool.annotations.idempotent_hint is False
         else:
             assert tool.annotations.read_only_hint is True
         assert tool.annotations.open_world_hint is False

@@ -60,3 +60,7 @@ class RemoteOutputLimitError(ApiError):
 
 class FilesystemOperationError(ApiError):
     """Stable public error for remote filesystem failure."""
+
+
+class FilesystemMutationOutcomeUncertainError(ApiError):
+    """The remote mutation may have committed; blind retry is unsafe."""

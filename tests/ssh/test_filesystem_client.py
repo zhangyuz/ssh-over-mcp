@@ -9,7 +9,12 @@ from ssh_over_mcp.policy.models import (
     PolicyDecision,
     RiskLevel,
 )
-from ssh_over_mcp.ssh.protocol import FsReadEnvelope, FsStatEnvelope, decode_request
+from ssh_over_mcp.ssh.protocol import (
+    FsMkdirEnvelope,
+    FsReadEnvelope,
+    FsStatEnvelope,
+    decode_request,
+)
 from ssh_over_mcp.ssh.transport import SSHExecutionResult
 
 
@@ -437,4 +442,234 @@ async def test_fs_stat_rejects_invalid_remote_json_without_echoing_payload():
         )
 
     assert str(exc_info.value) == "invalid remote filesystem response"
+    assert "SUPERSECRET" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_fs_mkdir_policy_normalizes_path_before_typed_transport():
+    client_type = getattr(ssh_package, "SSHFilesystemClient", None)
+    assert client_type is not None
+
+    policy = Policy(allow(normalized_path="/srv/app/new-directory"))
+    transport = RecordingTransport(
+        SSHExecutionResult(
+            request_id="req_fs_mkdir_1234",
+            host="dev01",
+            exit_status=0,
+            duration_ms=3,
+        )
+    )
+    client = client_type(policy=policy, transport=transport)
+
+    result = await client.mkdir(
+        request("fs_mkdir", "/srv/app/./new-directory"),
+        request_id="req_fs_mkdir_1234",
+    )
+
+    assert len(policy.calls) == 1
+    assert policy.calls[0].tool == "fs_mkdir"
+    call = transport.calls[0]
+    assert call["host"] == "dev01"
+    assert call["request_id"] == "req_fs_mkdir_1234"
+    assert call["timeout_seconds"] == 60.0
+    assert call["max_output_bytes"] == 4096
+
+    envelope, stdin = decode_request(call["payload"])
+    assert isinstance(envelope, FsMkdirEnvelope)
+    assert envelope.profile == "developer"
+    assert envelope.path == "/srv/app/new-directory"
+    assert stdin == b""
+
+    assert result.request_id == "req_fs_mkdir_1234"
+    assert result.host == "dev01"
+    assert result.path == "/srv/app/new-directory"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("decision", "error_type"),
+    [
+        (Decision.DENY, ssh_package.SSHPolicyDenied),
+        (Decision.APPROVAL_REQUIRED, ssh_package.SSHApprovalRequired),
+    ],
+)
+async def test_fs_mkdir_policy_failure_happens_before_transport(
+    decision,
+    error_type,
+):
+    policy = Policy(deny(decision))
+    transport = RecordingTransport(
+        SSHExecutionResult(
+            request_id="unused_request",
+            host="dev01",
+            exit_status=0,
+            duration_ms=0,
+        )
+    )
+    client = ssh_package.SSHFilesystemClient(
+        policy=policy,
+        transport=transport,
+    )
+
+    with pytest.raises(error_type):
+        await client.mkdir(
+            request("fs_mkdir", "/srv/app/new-directory"),
+        )
+
+    assert len(policy.calls) == 1
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_fs_mkdir_remote_policy_denial_is_definite():
+    client = ssh_package.SSHFilesystemClient(
+        policy=Policy(allow(normalized_path="/srv/app/new-directory")),
+        transport=RecordingTransport(
+            SSHExecutionResult(
+                request_id="req_mkdir_deny_1234",
+                host="dev01",
+                exit_status=77,
+                stderr=b"SUPERSECRET host policy detail",
+                duration_ms=2,
+            )
+        ),
+    )
+
+    with pytest.raises(
+        ssh_package.SSHRemotePolicyDenied,
+        match="remote filesystem policy denied request",
+    ) as exc_info:
+        await client.mkdir(
+            request("fs_mkdir", "/srv/app/new-directory"),
+        )
+
+    assert "SUPERSECRET" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "remote_result",
+    [
+        SSHExecutionResult(
+            request_id="req_timeout_1234",
+            host="dev01",
+            duration_ms=10,
+            timed_out=True,
+        ),
+        SSHExecutionResult(
+            request_id="req_truncated_1234",
+            host="dev01",
+            duration_ms=2,
+            truncated=True,
+            stderr=b"SUPERSECRET truncated diagnostic",
+        ),
+        SSHExecutionResult(
+            request_id="req_failure_1234",
+            host="dev01",
+            exit_status=69,
+            duration_ms=2,
+            stderr=b"SUPERSECRET remote failure",
+        ),
+        SSHExecutionResult(
+            request_id="req_stdout_1234",
+            host="dev01",
+            exit_status=0,
+            duration_ms=2,
+            stdout=b"SUPERSECRET unexpected output",
+        ),
+        SSHExecutionResult(
+            request_id="req_stderr_1234",
+            host="dev01",
+            exit_status=0,
+            duration_ms=2,
+            stderr=b"SUPERSECRET unexpected stderr",
+        ),
+    ],
+)
+async def test_fs_mkdir_post_send_abnormal_result_is_outcome_uncertain(
+    remote_result,
+):
+    uncertain_error = getattr(
+        ssh_package,
+        "SSHRequestOutcomeUncertain",
+        None,
+    )
+    assert uncertain_error is not None
+
+    client = ssh_package.SSHFilesystemClient(
+        policy=Policy(allow(normalized_path="/srv/app/new-directory")),
+        transport=RecordingTransport(remote_result),
+    )
+
+    with pytest.raises(
+        uncertain_error,
+        match="remote filesystem mutation outcome is uncertain",
+    ) as exc_info:
+        await client.mkdir(
+            request("fs_mkdir", "/srv/app/new-directory"),
+        )
+
+    assert "SUPERSECRET" not in str(exc_info.value)
+
+
+class RaisingTransport:
+    def __init__(self, error):
+        self.error = error
+        self.calls = []
+
+    async def run(self, **kwargs):
+        self.calls.append(kwargs)
+        raise self.error
+
+
+@pytest.mark.asyncio
+async def test_fs_mkdir_transport_uncertain_failure_stays_uncertain():
+    uncertain_error = getattr(
+        ssh_package,
+        "SSHRequestOutcomeUncertain",
+        None,
+    )
+    assert uncertain_error is not None
+    client = ssh_package.SSHFilesystemClient(
+        policy=Policy(allow(normalized_path="/srv/app/new-directory")),
+        transport=RaisingTransport(
+            uncertain_error("SUPERSECRET transport uncertainty")
+        ),
+    )
+
+    with pytest.raises(
+        uncertain_error,
+        match="remote filesystem mutation outcome is uncertain",
+    ) as exc_info:
+        await client.mkdir(
+            request("fs_mkdir", "/srv/app/new-directory"),
+        )
+
+    assert "SUPERSECRET" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_fs_mkdir_status_77_with_local_timeout_is_still_uncertain():
+    client = ssh_package.SSHFilesystemClient(
+        policy=Policy(allow(normalized_path="/srv/app/new-directory")),
+        transport=RecordingTransport(
+            SSHExecutionResult(
+                request_id="req_mkdir_ambiguous_1234",
+                host="dev01",
+                exit_status=77,
+                duration_ms=10,
+                timed_out=True,
+                stderr=b"SUPERSECRET partial denial",
+            )
+        ),
+    )
+
+    with pytest.raises(
+        ssh_package.SSHRequestOutcomeUncertain,
+        match="remote filesystem mutation outcome is uncertain",
+    ) as exc_info:
+        await client.mkdir(
+            request("fs_mkdir", "/srv/app/new-directory"),
+        )
+
     assert "SUPERSECRET" not in str(exc_info.value)

@@ -15,11 +15,13 @@ from .errors import (
     SSHRemoteOperationError,
     SSHRemotePolicyDenied,
     SSHRemoteResponseError,
+    SSHRequestOutcomeUncertain,
     SSHRequestTimeout,
 )
 from .executor import SSHExecutionResult, SSHExecutor
 from .filesystem import (
     SSHFilesystemClient,
+    SSHFilesystemMkdirResult,
     SSHFilesystemReadResult,
     SSHFilesystemStatResult,
 )
@@ -45,6 +47,7 @@ __all__ = [
     "SSHExecutionResult",
     "SSHExecutor",
     "SSHFilesystemClient",
+    "SSHFilesystemMkdirResult",
     "SSHFilesystemReadResult",
     "SSHFilesystemStatResult",
     "SSHHostKeyVerificationError",
@@ -53,6 +56,7 @@ __all__ = [
     "SSHRemoteOperationError",
     "SSHRemotePolicyDenied",
     "SSHRemoteResponseError",
+    "SSHRequestOutcomeUncertain",
     "SSHRequestTimeout",
     "StaticCredentialProvider",
     "decode_request",

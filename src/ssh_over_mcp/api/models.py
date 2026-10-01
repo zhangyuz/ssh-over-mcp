@@ -194,3 +194,18 @@ class FsReadResult(BaseModel):
     host: str = Field(min_length=1)
     path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)
     data_base64: str
+
+
+class FsMkdirRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    host: str = Field(min_length=1)
+    path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)
+
+
+class FsMkdirResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request_id: str = Field(min_length=1)
+    host: str = Field(min_length=1)
+    path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)

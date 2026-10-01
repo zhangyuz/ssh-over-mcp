@@ -206,6 +206,13 @@ async def test_streamable_http_round_trip_at_mcp_path(
                     "max_bytes": 4096,
                 },
             )
+            denied_mkdir = await client.call_tool(
+                "fs_mkdir",
+                {
+                    "host": "host-a",
+                    "path": "/srv/app/new-directory",
+                },
+            )
 
         assert {tool.name for tool in listed.tools} == {
             "hosts_list",
@@ -214,6 +221,7 @@ async def test_streamable_http_round_trip_at_mcp_path(
             "ssh_exec",
             "fs_stat",
             "fs_read",
+            "fs_mkdir",
         }
         assert result.is_error is False
         assert result.structured_content == {
@@ -231,7 +239,11 @@ async def test_streamable_http_round_trip_at_mcp_path(
             for block in denied.content
         )
         assert "request denied by central policy" in denied_text
-        for filesystem_denied in (denied_stat, denied_read):
+        for filesystem_denied in (
+            denied_stat,
+            denied_read,
+            denied_mkdir,
+        ):
             assert filesystem_denied.is_error is True
             filesystem_text = "\n".join(
                 getattr(block, "text", "")
