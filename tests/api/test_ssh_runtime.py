@@ -1,14 +1,11 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
 import pytest
 
 from ssh_over_mcp.api.errors import RuntimeConfigurationError
-from ssh_over_mcp.api.ssh_runtime import (
-    build_ssh_runtime,
-    load_credential_map,
-)
 from ssh_over_mcp.inventory.models import Host, Inventory
 from ssh_over_mcp.policy.engine import PolicyEngine
 from ssh_over_mcp.policy.models import PolicyDocument, RoleSpec
@@ -17,6 +14,10 @@ from ssh_over_mcp.ssh import (
     SSHConnectionManager,
     SSHExecutor,
 )
+
+
+def _ssh_runtime():
+    return importlib.import_module("ssh_over_mcp.api.ssh_runtime")
 
 
 def _inventory() -> Inventory:
@@ -62,7 +63,7 @@ def test_load_credential_map_accepts_absolute_existing_key_files(tmp_path: Path)
         f'  "secret://host-a": "{key_path}"\n',
     )
 
-    mapping = load_credential_map(path)
+    mapping = _ssh_runtime().load_credential_map(path)
 
     assert mapping == {"secret://host-a": key_path}
 
@@ -101,7 +102,7 @@ def test_load_credential_map_rejects_invalid_shape_without_echoing_secrets(
         RuntimeConfigurationError,
         match="runtime configuration is invalid",
     ) as exc_info:
-        load_credential_map(path)
+        _ssh_runtime().load_credential_map(path)
 
     message = str(exc_info.value)
     assert "SUPERSECRET" not in message
@@ -119,7 +120,7 @@ def test_build_ssh_runtime_requires_mapping_for_every_inventory_ref(
         RuntimeConfigurationError,
         match="runtime configuration is invalid",
     ):
-        build_ssh_runtime(
+        _ssh_runtime().build_ssh_runtime(
             inventory=inventory,
             policy=_policy(inventory),
             credential_map={"secret://other": key_path},
@@ -145,7 +146,7 @@ def test_build_ssh_runtime_constructs_existing_hardened_components_without_io(
     monkeypatch.setattr(FileCredentialProvider, "resolve", forbidden_resolve)
     monkeypatch.setattr(SSHConnectionManager, "get_connection", forbidden_connect)
 
-    runtime = build_ssh_runtime(
+    runtime = _ssh_runtime().build_ssh_runtime(
         inventory=inventory,
         policy=_policy(inventory),
         credential_map={"secret://host-a": key_path},
