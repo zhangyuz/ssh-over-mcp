@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import base64
+import binascii
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ssh_over_mcp.policy.models import Decision, RiskLevel
 
@@ -17,6 +19,10 @@ MAX_MCP_PRIVILEGE_CHARS = 64
 MAX_MCP_EXEC_STDIN_BYTES = 64 * 1024
 MAX_MCP_EXEC_TIMEOUT_SECONDS = 60.0
 MAX_MCP_FILESYSTEM_READ_BYTES = 1024 * 1024
+MAX_MCP_FILESYSTEM_WRITE_BYTES = 64 * 1024
+MAX_MCP_FILESYSTEM_WRITE_BASE64_CHARS = (
+    ((MAX_MCP_FILESYSTEM_WRITE_BYTES + 2) // 3) * 4
+)
 
 _MCP_PATH = Annotated[str, Field(max_length=MAX_MCP_PATH_CHARS)]
 _MCP_ARG = Annotated[str, Field(max_length=MAX_MCP_ARG_CHARS)]
@@ -209,3 +215,42 @@ class FsMkdirResult(BaseModel):
     request_id: str = Field(min_length=1)
     host: str = Field(min_length=1)
     path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)
+
+
+class FsWriteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    host: str = Field(min_length=1)
+    path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)
+    data_base64: str = Field(
+        max_length=MAX_MCP_FILESYSTEM_WRITE_BASE64_CHARS,
+    )
+
+    @field_validator("data_base64")
+    @classmethod
+    def validate_data_base64(cls, value: str) -> str:
+        try:
+            encoded = value.encode("ascii")
+            decoded = base64.b64decode(encoded, validate=True)
+        except (UnicodeEncodeError, binascii.Error, ValueError) as exc:
+            raise ValueError("filesystem write data must be strict base64") from exc
+        if len(decoded) > MAX_MCP_FILESYSTEM_WRITE_BYTES:
+            raise ValueError("filesystem write data exceeds maximum size")
+        if base64.b64encode(decoded).decode("ascii") != value:
+            raise ValueError("filesystem write data must be canonical base64")
+        return value
+
+    def decoded_data(self) -> bytes:
+        return base64.b64decode(
+            self.data_base64.encode("ascii"),
+            validate=True,
+        )
+
+
+class FsWriteResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request_id: str = Field(min_length=1)
+    host: str = Field(min_length=1)
+    path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)
+    content_length: int = Field(ge=0, le=MAX_MCP_FILESYSTEM_WRITE_BYTES)

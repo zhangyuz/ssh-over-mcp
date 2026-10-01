@@ -16,6 +16,8 @@ from .models import (
     FsReadResult,
     FsStatRequest,
     FsStatResult,
+    FsWriteRequest,
+    FsWriteResult,
     HostsListResult,
     HostSummary,
     PolicyExplainRequest,
@@ -240,6 +242,31 @@ def build_mcp_server(
         try:
             request = FsMkdirRequest(host=host, path=path)
             return await service.fs_mkdir(
+                principal_provider.get_principal(),
+                request,
+            )
+        except ValidationError:
+            raise ToolError("invalid tool input") from None
+        except ApiError as exc:
+            raise ToolError(str(exc)) from None
+
+    @mcp.tool(
+        annotations=_CREATE_ONLY_ANNOTATIONS,
+    )
+    async def fs_write(
+        host: str,
+        path: str,
+        data_base64: str,
+    ) -> FsWriteResult:
+        """Create one absent remote regular file from bounded base64 bytes."""
+
+        try:
+            request = FsWriteRequest(
+                host=host,
+                path=path,
+                data_base64=data_base64,
+            )
+            return await service.fs_write(
                 principal_provider.get_principal(),
                 request,
             )

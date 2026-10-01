@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import socket
 from pathlib import Path
 
@@ -213,6 +214,16 @@ async def test_streamable_http_round_trip_at_mcp_path(
                     "path": "/srv/app/new-directory",
                 },
             )
+            denied_write = await client.call_tool(
+                "fs_write",
+                {
+                    "host": "host-a",
+                    "path": "/srv/app/new.bin",
+                    "data_base64": base64.b64encode(
+                        b"x" * (64 * 1024)
+                    ).decode("ascii"),
+                },
+            )
 
         assert {tool.name for tool in listed.tools} == {
             "hosts_list",
@@ -222,6 +233,7 @@ async def test_streamable_http_round_trip_at_mcp_path(
             "fs_stat",
             "fs_read",
             "fs_mkdir",
+            "fs_write",
         }
         assert result.is_error is False
         assert result.structured_content == {
@@ -243,6 +255,7 @@ async def test_streamable_http_round_trip_at_mcp_path(
             denied_stat,
             denied_read,
             denied_mkdir,
+            denied_write,
         ):
             assert filesystem_denied.is_error is True
             filesystem_text = "\n".join(

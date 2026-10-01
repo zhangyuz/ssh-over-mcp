@@ -64,3 +64,7 @@ class FilesystemOperationError(ApiError):
 
 class FilesystemMutationOutcomeUncertainError(ApiError):
     """The remote mutation may have committed; blind retry is unsafe."""
+
+
+class FilesystemWriteCommittedUncertainError(ApiError):
+    """A file was published but its directory durability is uncertain."""
