@@ -64,7 +64,12 @@ class StrictMCPServer(MCPServer):
             )
             if set(arguments).difference(allowed):
                 raise ToolError("unexpected tool argument")
-        return await super().call_tool(name, arguments, context)
+        try:
+            return await super().call_tool(name, arguments, context)
+        except ToolError as exc:
+            if isinstance(exc.__cause__, ValidationError):
+                raise ToolError("invalid tool input") from None
+            raise
 
 
 def build_mcp_server(

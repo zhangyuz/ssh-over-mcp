@@ -507,3 +507,28 @@ async def test_ssh_exec_without_executor_fails_closed() -> None:
             models.PrincipalContext(profile="developer"),
             _request(),
         )
+
+
+@pytest.mark.asyncio
+async def test_server_sdk_type_validation_is_sanitized() -> None:
+    service = RecordingToolService()
+    server = build_mcp_server(
+        service=service,
+        principal_provider=StaticPrincipalProvider(),
+    )
+
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "ssh_exec",
+            {
+                "host": "visible",
+                "executable": "/usr/bin/id",
+                "timeout_seconds": "SUPERSECRET",
+            },
+        )
+
+    assert result.is_error is True
+    text = _tool_error_text(result)
+    assert "invalid tool input" in text
+    assert "SUPERSECRET" not in text
+    assert service.calls == []
