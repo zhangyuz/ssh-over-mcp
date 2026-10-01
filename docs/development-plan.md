@@ -558,8 +558,8 @@ The read-only discovery/explanation slice is merged:
   registry;
 - real MCP SDK client round-trip coverage for Streamable HTTP.
 
-The SSH runtime-composition slice adds server-owned credential wiring without
-adding an execution capability:
+The SSH runtime-composition slice adds server-owned credential wiring:
+
 
 - required `SSH_OVER_MCP_CREDENTIAL_MAP` points to strict operator-owned
   YAML/JSON mapping from inventory credential refs to absolute mounted key files;
@@ -569,12 +569,24 @@ adding an execution capability:
   `SSHConnectionManager`, and `SSHExecutor`;
 - composition, `/healthz`, and `/readyz` do not resolve credentials or open
   network connections;
-- the MCP tool registry remains exactly the three read-only discovery/explain
-  tools.
+- application startup and health/readiness remain non-networking.
+
+The `ssh_exec` adapter slice adds the first side-effecting MCP capability:
+
+- strict input contains only host alias, executable/args/cwd/env, UTF-8 stdin,
+  and optional timeout;
+- the server-owned principal becomes the policy profile and cannot be
+  overridden by the client;
+- host visibility is checked before delegation to the existing `SSHExecutor`;
+- central policy remains before network access and no shell fallback exists;
+- client timeout can only tighten the executor default, while output/stdin
+  ceilings remain server-owned;
+- binary stdout/stderr are returned losslessly as base64;
+- SSH/protocol/library failures are normalized to stable public errors;
+- application shutdown closes the SSH connection pool.
 
 Still deferred to separately reviewed Phase 4 slices:
 
-- MCP `ssh_exec`;
 - MCP `fs_stat` / `fs_read`;
 - MCP create-only `fs_mkdir` / `fs_write`;
 - raw shell;
