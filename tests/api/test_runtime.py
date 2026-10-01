@@ -12,12 +12,14 @@ def test_runtime_settings_load_required_values_and_default_port() -> None:
     settings = load_runtime_settings(
         {
             "SSH_OVER_MCP_CONFIG": "/etc/ssh-over-mcp/config.yaml",
+            "SSH_OVER_MCP_CREDENTIAL_MAP": "/etc/ssh-over-mcp/credentials.yaml",
             "SSH_OVER_MCP_PROFILE": "developer",
         }
     )
 
     assert settings == MCPRuntimeSettings(
         config_path=Path("/etc/ssh-over-mcp/config.yaml"),
+        credential_map_path=Path("/etc/ssh-over-mcp/credentials.yaml"),
         profile="developer",
         port=8000,
     )
@@ -27,6 +29,7 @@ def test_runtime_settings_accept_explicit_valid_port() -> None:
     settings = load_runtime_settings(
         {
             "SSH_OVER_MCP_CONFIG": "/etc/ssh-over-mcp/config.yaml",
+            "SSH_OVER_MCP_CREDENTIAL_MAP": "/etc/ssh-over-mcp/credentials.yaml",
             "SSH_OVER_MCP_PROFILE": "developer",
             "SSH_OVER_MCP_PORT": "9123",
         }
@@ -39,17 +42,30 @@ def test_runtime_settings_accept_explicit_valid_port() -> None:
     "env",
     [
         {
+            "SSH_OVER_MCP_CREDENTIAL_MAP": "/etc/ssh-over-mcp/credentials.yaml",
             "SSH_OVER_MCP_PROFILE": "developer",
         },
         {
             "SSH_OVER_MCP_CONFIG": "/etc/ssh-over-mcp/config.yaml",
+            "SSH_OVER_MCP_PROFILE": "developer",
+        },
+        {
+            "SSH_OVER_MCP_CONFIG": "/etc/ssh-over-mcp/config.yaml",
+            "SSH_OVER_MCP_CREDENTIAL_MAP": "/etc/ssh-over-mcp/credentials.yaml",
         },
         {
             "SSH_OVER_MCP_CONFIG": "",
+            "SSH_OVER_MCP_CREDENTIAL_MAP": "/etc/ssh-over-mcp/credentials.yaml",
             "SSH_OVER_MCP_PROFILE": "developer",
         },
         {
             "SSH_OVER_MCP_CONFIG": "/etc/ssh-over-mcp/config.yaml",
+            "SSH_OVER_MCP_CREDENTIAL_MAP": "",
+            "SSH_OVER_MCP_PROFILE": "developer",
+        },
+        {
+            "SSH_OVER_MCP_CONFIG": "/etc/ssh-over-mcp/config.yaml",
+            "SSH_OVER_MCP_CREDENTIAL_MAP": "/etc/ssh-over-mcp/credentials.yaml",
             "SSH_OVER_MCP_PROFILE": " ",
         },
     ],
@@ -73,6 +89,7 @@ def test_runtime_settings_reject_invalid_port(port: str) -> None:
         load_runtime_settings(
             {
                 "SSH_OVER_MCP_CONFIG": "/etc/ssh-over-mcp/config.yaml",
+                "SSH_OVER_MCP_CREDENTIAL_MAP": "/etc/ssh-over-mcp/credentials.yaml",
                 "SSH_OVER_MCP_PROFILE": "developer",
                 "SSH_OVER_MCP_PORT": port,
                 "UNRELATED_SECRET": "must-not-appear",
@@ -85,6 +102,7 @@ def test_runtime_configuration_error_does_not_echo_environment() -> None:
         load_runtime_settings(
             {
                 "SSH_OVER_MCP_CONFIG": "",
+                "SSH_OVER_MCP_CREDENTIAL_MAP": "/etc/ssh-over-mcp/credentials.yaml",
                 "SSH_OVER_MCP_PROFILE": "developer",
                 "UNRELATED_SECRET": "super-secret-value",
             }

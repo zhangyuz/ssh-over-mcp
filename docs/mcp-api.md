@@ -185,8 +185,27 @@ Local liveness/readiness are ordinary HTTP endpoints:
 - `GET /readyz` -> `{"status":"ready"}`.
 
 They are not MCP tools and they do not probe inventory hosts or establish SSH
-sessions. Runtime configuration uses `SSH_OVER_MCP_CONFIG`,
-`SSH_OVER_MCP_PROFILE`, and optional `SSH_OVER_MCP_PORT` (default 8000).
+sessions. Runtime configuration uses required `SSH_OVER_MCP_CONFIG`,
+`SSH_OVER_MCP_CREDENTIAL_MAP`, and `SSH_OVER_MCP_PROFILE`, plus optional
+`SSH_OVER_MCP_PORT` (default 8000).
+
+The credential-map file is operator-owned YAML or JSON. It contains only
+logical inventory credential references mapped to absolute paths of already
+mounted private-key files, for example:
+
+```yaml
+credentials:
+  "secret://ssh/dev01": "/run/secrets/ssh/dev01"
+```
+
+Private-key bytes are never stored in this map. Startup fails closed if the
+file shape is invalid, a mapped path is not an existing absolute file, or any
+inventory credential reference lacks a mapping. Startup composes the existing
+`FileCredentialProvider -> SSHConnectionManager -> SSHExecutor` chain but does
+not resolve a credential or open SSH. The MCP registry in this slice remains
+only `hosts_list`, `host_info`, and `policy_explain`; `ssh_exec` is still
+a later separately reviewed adapter.
+
 The Streamable HTTP endpoint rejects request bodies larger than 128 KiB before
 MCP parsing. OAuth/claim-to-profile mapping remains a later Cloudflare-phase
 concern.

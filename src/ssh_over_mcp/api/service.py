@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ssh_over_mcp.inventory.models import Host, Inventory
 from ssh_over_mcp.policy.engine import PolicyEngine
 from ssh_over_mcp.policy.models import (
@@ -18,6 +20,10 @@ from .models import (
     PolicyExplainResult,
     PrincipalContext,
 )
+
+if TYPE_CHECKING:
+    from ssh_over_mcp.ssh.executor import SSHExecutor
+
 
 _EXPLAINABLE_TOOLS = frozenset(
     {
@@ -42,9 +48,11 @@ class MCPService:
         *,
         inventory: Inventory,
         policy: PolicyEngine,
+        ssh_executor: SSHExecutor | None = None,
     ) -> None:
         self._inventory = inventory
         self._policy = policy
+        self._ssh_executor = ssh_executor
 
     @staticmethod
     def _is_visible(host: Host, profile: str) -> bool:
