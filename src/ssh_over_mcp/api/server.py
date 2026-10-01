@@ -5,6 +5,7 @@ from typing import Any
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
+from pydantic import ValidationError
 
 from .errors import ApiError
 from .models import (
@@ -160,6 +161,8 @@ def build_mcp_server(
                     timeout_seconds=timeout_seconds,
                 ),
             )
+        except ValidationError:
+            raise ToolError("invalid tool input") from None
         except ApiError as exc:
             raise ToolError(str(exc)) from exc
 
