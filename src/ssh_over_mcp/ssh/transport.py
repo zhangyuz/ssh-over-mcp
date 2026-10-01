@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from .connection import SSHConnectionManager
+from .errors import SSHConnectionError, SSHRequestOutcomeUncertain
 from .protocol import REMOTE_PROTOCOL_COMMAND
 
 
@@ -86,27 +87,43 @@ class StructuredSSHTransport:
         started = time.monotonic()
         async with self.connections.session_slot(host):
             connection = await self.connections.get_connection(host)
-            process = await connection.create_process(
-                REMOTE_PROTOCOL_COMMAND,
-                input=payload,
-                request_pty=False,
-                term_type=None,
-                # Application metadata belongs only in the framed SMCP payload.
-                # Never inherit or forward ambient SSH environment state.
-                env={},
-                send_env=[],
-                x11_forwarding=False,
-                encoding=None,
-            )
+            try:
+                process = await connection.create_process(
+                    REMOTE_PROTOCOL_COMMAND,
+                    input=payload,
+                    request_pty=False,
+                    term_type=None,
+                    # Application metadata belongs only in the framed SMCP payload.
+                    # Never inherit or forward ambient SSH environment state.
+                    env={},
+                    send_env=[],
+                    x11_forwarding=False,
+                    encoding=None,
+                )
+            except Exception as exc:  # noqa: BLE001
+                if _is_asyncssh_channel_open_error(exc):
+                    raise SSHConnectionError(
+                        "SSH structured channel open failed"
+                    ) from None
+                raise SSHRequestOutcomeUncertain(
+                    "structured SSH request outcome is uncertain"
+                ) from None
 
-            return await self._collect(
-                process,
-                request_id=request_id,
-                host=host,
-                timeout_seconds=timeout_seconds,
-                max_output_bytes=max_output_bytes,
-                started=started,
-            )
+            try:
+                return await self._collect(
+                    process,
+                    request_id=request_id,
+                    host=host,
+                    timeout_seconds=timeout_seconds,
+                    max_output_bytes=max_output_bytes,
+                    started=started,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                raise SSHRequestOutcomeUncertain(
+                    "structured SSH request outcome is uncertain"
+                ) from None
 
     async def _collect(
         self,
@@ -241,6 +258,15 @@ class StructuredSSHTransport:
                 process.wait_closed(),
                 timeout=self.cleanup_timeout_seconds,
             )
+
+
+def _is_asyncssh_channel_open_error(exc: BaseException) -> bool:
+    try:
+        import asyncssh
+    except ImportError:
+        return exc.__class__.__name__ == "ChannelOpenError"
+
+    return isinstance(exc, asyncssh.ChannelOpenError)
 
 
 def _signal_name(exit_signal: Any) -> str | None:

@@ -44,3 +44,7 @@ class SSHRemotePolicyDenied(SSHCoreError):
 
 class SSHRemoteOperationError(SSHCoreError):
     """The remote structured operation failed without safe public detail."""
+
+
+class SSHRequestOutcomeUncertain(SSHCoreError):
+    """The structured request may have reached the remote host."""
