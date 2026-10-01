@@ -133,9 +133,22 @@ stdout; `fs_read` returns raw file bytes. Host-policy denial and filesystem
 access failure return generic SSH-visible errors without policy-root or inode
 details.
 
-These are host-agent wire operations only. The MCP `fs_stat` and `fs_read`
-adapters remain future Phase 4 slices; they are not registered by the initial
-discovery/explanation server.
+The Phase 4 MCP `fs_stat` and `fs_read` adapters are now implemented.
+Both accept only a logical host alias plus a bounded path; `fs_read` additionally
+requires one strict positive `max_bytes` value capped at 1 MiB by the MCP
+surface. The trusted profile and fixed user privilege are injected server-side.
+Host visibility and central policy are evaluated before the shared structured
+SSH transport can acquire a connection. The central normalized path is the only
+path placed in the typed SMCP envelope, and the host agent independently applies
+its profile-scoped path policy and descriptor-pinned object checks.
+
+`fs_stat` returns server-generated request ID, host alias, normalized path,
+kind, size, mode, uid, gid, and mtime_ns. `fs_read` returns the request ID,
+host alias, normalized path, and lossless `data_base64`. A file larger than
+the requested bound is rejected rather than truncated. Remote policy denial,
+timeout, control-plane output overflow, malformed remote responses, credential,
+host-key, and transport failures are mapped to stable public errors without
+returning raw remote stderr or internal exception detail.
 
 The host agent also exposes create-only `fs_mkdir` as a typed SMCP v1
 operation. Its request is metadata-only and contains only request ID, profile,
@@ -228,8 +241,9 @@ Application shutdown closes the pooled SSH connection manager after the MCP SDK
 lifespan exits.
 
 The registered MCP surface is now `hosts_list`, `host_info`,
-`policy_explain`, and `ssh_exec`. Health/readiness remain ordinary HTTP
-routes and do not appear in the MCP tool registry.
+`policy_explain`, `ssh_exec`, `fs_stat`, and `fs_read`.
+Health/readiness remain ordinary HTTP routes and do not appear in the MCP tool
+registry.
 
 The Streamable HTTP endpoint rejects request bodies larger than 128 KiB before
 MCP parsing. OAuth/claim-to-profile mapping remains a later Cloudflare-phase

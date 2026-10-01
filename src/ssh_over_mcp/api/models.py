@@ -16,6 +16,7 @@ MAX_MCP_ENV_VALUE_CHARS = 8192
 MAX_MCP_PRIVILEGE_CHARS = 64
 MAX_MCP_EXEC_STDIN_BYTES = 64 * 1024
 MAX_MCP_EXEC_TIMEOUT_SECONDS = 60.0
+MAX_MCP_FILESYSTEM_READ_BYTES = 1024 * 1024
 
 _MCP_PATH = Annotated[str, Field(max_length=MAX_MCP_PATH_CHARS)]
 _MCP_ARG = Annotated[str, Field(max_length=MAX_MCP_ARG_CHARS)]
@@ -151,3 +152,45 @@ class SSHExecResult(BaseModel):
     duration_ms: int = Field(ge=0)
     timed_out: bool = False
     truncated: bool = False
+
+
+class FsStatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    host: str = Field(min_length=1)
+    path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)
+
+
+class FsStatResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request_id: str = Field(min_length=1)
+    host: str = Field(min_length=1)
+    path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)
+    kind: Literal["regular", "directory"]
+    size: int = Field(ge=0)
+    mode: int = Field(ge=0)
+    uid: int = Field(ge=0)
+    gid: int = Field(ge=0)
+    mtime_ns: int
+
+
+class FsReadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    host: str = Field(min_length=1)
+    path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)
+    max_bytes: int = Field(
+        strict=True,
+        ge=1,
+        le=MAX_MCP_FILESYSTEM_READ_BYTES,
+    )
+
+
+class FsReadResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request_id: str = Field(min_length=1)
+    host: str = Field(min_length=1)
+    path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)
+    data_base64: str

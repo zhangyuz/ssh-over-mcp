@@ -121,7 +121,7 @@ Owns the fixed `mcp-v1` SSH channel creation and bounded stdout/stderr collectio
 
 ### Structured SSH executor
 
-Obtains an allow decision before invoking the transport, creates the versioned `exec` request frame, and applies server-owned timeout/input/output limits. Typed filesystem clients use this same structured transport boundary when their MCP adapters are enabled, rather than reimplementing SSH process lifecycle logic.
+Obtains an allow decision before invoking the transport, creates the versioned `exec` request frame, and applies server-owned timeout/input/output limits. The read-only typed filesystem client now uses this same structured transport boundary after its own central-policy allow decision, rather than reimplementing SSH process lifecycle logic.
 
 ### Remote host agent
 

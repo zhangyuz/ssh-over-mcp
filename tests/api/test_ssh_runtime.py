@@ -14,6 +14,7 @@ from ssh_over_mcp.ssh import (
     FileCredentialProvider,
     SSHConnectionManager,
     SSHExecutor,
+    SSHFilesystemClient,
 )
 from ssh_over_mcp.ssh.transport import StructuredSSHTransport
 
@@ -195,3 +196,20 @@ def test_build_ssh_runtime_shares_one_structured_transport(tmp_path: Path) -> No
     assert isinstance(runtime.transport, StructuredSSHTransport)
     assert runtime.executor.transport is runtime.transport
     assert runtime.transport.connections is runtime.connections
+
+
+def test_build_ssh_runtime_shares_transport_with_filesystem_client(
+    tmp_path: Path,
+) -> None:
+    key_path = _write_key(tmp_path)
+    inventory = _inventory()
+
+    runtime = _ssh_runtime().build_ssh_runtime(
+        inventory=inventory,
+        policy=_policy(inventory),
+        credential_map={"secret://host-a": key_path},
+    )
+
+    assert isinstance(runtime.filesystem, SSHFilesystemClient)
+    assert runtime.filesystem.transport is runtime.transport
+    assert runtime.filesystem.policy is runtime.executor.policy

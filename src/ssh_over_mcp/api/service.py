@@ -14,21 +14,34 @@ from ssh_over_mcp.ssh.errors import (
     SSHConnectionError,
     SSHCredentialError,
     SSHHostKeyVerificationError,
+    SSHOutputLimitExceeded,
     SSHPolicyDenied,
+    SSHRemoteOperationError,
+    SSHRemotePolicyDenied,
+    SSHRemoteResponseError,
+    SSHRequestTimeout,
 )
 
 from .errors import (
     ApprovalRequiredError,
+    FilesystemOperationError,
     HostNotVisibleError,
     InvalidExecutionLimitError,
     InvalidExplainToolError,
     PolicyDeniedError,
+    RemoteOutputLimitError,
+    RemotePolicyDeniedError,
+    RemoteTimeoutError,
     SSHCredentialUnavailableError,
     SSHExecutionError,
     SSHHostKeyError,
     SSHTransportError,
 )
 from .models import (
+    FsReadRequest,
+    FsReadResult,
+    FsStatRequest,
+    FsStatResult,
     HostsListResult,
     HostSummary,
     PolicyExplainRequest,
@@ -40,6 +53,7 @@ from .models import (
 
 if TYPE_CHECKING:
     from ssh_over_mcp.ssh.executor import SSHExecutor
+    from ssh_over_mcp.ssh.filesystem import SSHFilesystemClient
 
 
 _EXPLAINABLE_TOOLS = frozenset(
@@ -66,10 +80,12 @@ class MCPService:
         inventory: Inventory,
         policy: PolicyEngine,
         ssh_executor: SSHExecutor | None = None,
+        ssh_filesystem: SSHFilesystemClient | None = None,
     ) -> None:
         self._inventory = inventory
         self._policy = policy
         self._ssh_executor = ssh_executor
+        self._ssh_filesystem = ssh_filesystem
 
     @staticmethod
     def _is_visible(host: Host, profile: str) -> bool:
@@ -216,4 +232,144 @@ class MCPService:
             duration_ms=result.duration_ms,
             timed_out=result.timed_out,
             truncated=result.truncated,
+        )
+
+    async def fs_stat(
+        self,
+        principal: PrincipalContext,
+        request: FsStatRequest,
+    ) -> FsStatResult:
+        self._visible_host(principal, request.host)
+        if self._ssh_filesystem is None:
+            raise FilesystemOperationError(
+                "filesystem operation is unavailable"
+            )
+
+        try:
+            result = await self._ssh_filesystem.stat(
+                EvaluationRequest(
+                    profile=principal.profile,
+                    host=request.host,
+                    tool="fs_stat",
+                    path=request.path,
+                    privilege="user",
+                )
+            )
+        except SSHPolicyDenied:
+            raise PolicyDeniedError(
+                "request denied by central policy"
+            ) from None
+        except SSHApprovalRequired:
+            raise ApprovalRequiredError(
+                "approval required by central policy"
+            ) from None
+        except SSHCredentialError:
+            raise SSHCredentialUnavailableError(
+                "SSH credential is unavailable"
+            ) from None
+        except SSHHostKeyVerificationError:
+            raise SSHHostKeyError(
+                "SSH host key verification failed"
+            ) from None
+        except SSHConnectionError:
+            raise SSHTransportError("SSH transport failed") from None
+        except SSHRemotePolicyDenied:
+            raise RemotePolicyDeniedError(
+                "remote filesystem policy denied request"
+            ) from None
+        except SSHRequestTimeout:
+            raise RemoteTimeoutError(
+                "remote filesystem request timed out"
+            ) from None
+        except SSHOutputLimitExceeded:
+            raise RemoteOutputLimitError(
+                "remote filesystem response exceeded output limit"
+            ) from None
+        except (SSHRemoteOperationError, SSHRemoteResponseError):
+            raise FilesystemOperationError(
+                "remote filesystem operation failed"
+            ) from None
+        except Exception:  # noqa: BLE001
+            raise FilesystemOperationError(
+                "remote filesystem operation failed"
+            ) from None
+
+        return FsStatResult(
+            request_id=result.request_id,
+            host=result.host,
+            path=result.path,
+            kind=result.kind,
+            size=result.size,
+            mode=result.mode,
+            uid=result.uid,
+            gid=result.gid,
+            mtime_ns=result.mtime_ns,
+        )
+
+    async def fs_read(
+        self,
+        principal: PrincipalContext,
+        request: FsReadRequest,
+    ) -> FsReadResult:
+        self._visible_host(principal, request.host)
+        if self._ssh_filesystem is None:
+            raise FilesystemOperationError(
+                "filesystem operation is unavailable"
+            )
+
+        try:
+            result = await self._ssh_filesystem.read(
+                EvaluationRequest(
+                    profile=principal.profile,
+                    host=request.host,
+                    tool="fs_read",
+                    path=request.path,
+                    privilege="user",
+                ),
+                max_bytes=request.max_bytes,
+            )
+        except SSHPolicyDenied:
+            raise PolicyDeniedError(
+                "request denied by central policy"
+            ) from None
+        except SSHApprovalRequired:
+            raise ApprovalRequiredError(
+                "approval required by central policy"
+            ) from None
+        except SSHCredentialError:
+            raise SSHCredentialUnavailableError(
+                "SSH credential is unavailable"
+            ) from None
+        except SSHHostKeyVerificationError:
+            raise SSHHostKeyError(
+                "SSH host key verification failed"
+            ) from None
+        except SSHConnectionError:
+            raise SSHTransportError("SSH transport failed") from None
+        except SSHRemotePolicyDenied:
+            raise RemotePolicyDeniedError(
+                "remote filesystem policy denied request"
+            ) from None
+        except SSHRequestTimeout:
+            raise RemoteTimeoutError(
+                "remote filesystem request timed out"
+            ) from None
+        except SSHOutputLimitExceeded:
+            raise RemoteOutputLimitError(
+                "remote filesystem response exceeded output limit"
+            ) from None
+        except (SSHRemoteOperationError, SSHRemoteResponseError):
+            raise FilesystemOperationError(
+                "remote filesystem operation failed"
+            ) from None
+        except Exception:  # noqa: BLE001
+            raise FilesystemOperationError(
+                "remote filesystem operation failed"
+            ) from None
+
+        return FsReadResult(
+            request_id=result.request_id,
+            host=result.host,
+            path=result.path,
+            data_base64=base64.b64encode(result.data).decode("ascii"),
         )

@@ -566,7 +566,8 @@ without adding an execution capability at that slice boundary:
 - all inventory credential refs must be covered and all mapped key paths must
   already exist;
 - startup composes the existing `FileCredentialProvider` and
-  `SSHConnectionManager`, one shared `StructuredSSHTransport`, and `SSHExecutor`;
+  `SSHConnectionManager`, one shared `StructuredSSHTransport`, `SSHExecutor`,
+  and the read-only `SSHFilesystemClient`;
 - the shared transport owns the fixed `mcp-v1` channel plus bounded collection,
   timeout/output-overflow, cancellation, and cleanup mechanics without owning
   authorization;
@@ -589,9 +590,25 @@ The MCP `ssh_exec` slice is implemented:
 - real Streamable HTTP coverage proves default-deny `ssh_exec` does not reach
   the SSH connection path.
 
+The MCP read-only filesystem slice is implemented:
+
+- `fs_stat` and `fs_read` use the same shared `StructuredSSHTransport`
+  rather than introducing a second SSH process lifecycle;
+- host visibility and central policy run before network access;
+- only the centrally normalized path enters typed `FsStatEnvelope` /
+  `FsReadEnvelope` requests;
+- `fs_read` requires a strict positive byte bound with a 1 MiB MCP hard cap,
+  and oversized files fail rather than truncate;
+- `fs_stat` returns bounded structured metadata and `fs_read` returns
+  lossless base64 bytes;
+- host-agent policy denial, timeout, output overflow, malformed response,
+  credential, host-key, and transport failures are normalized to stable public
+  errors;
+- real Streamable HTTP coverage proves default-deny filesystem calls do not
+  reach the SSH connection path.
+
 Still deferred to separately reviewed Phase 4 slices:
 
-- MCP `fs_stat` / `fs_read`;
 - MCP create-only `fs_mkdir` / `fs_write`;
 - raw shell;
 - OAuth/claim-to-profile mapping;

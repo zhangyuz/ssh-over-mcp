@@ -191,12 +191,29 @@ async def test_streamable_http_round_trip_at_mcp_path(
                     "args": ["hello"],
                 },
             )
+            denied_stat = await client.call_tool(
+                "fs_stat",
+                {
+                    "host": "host-a",
+                    "path": "/srv/app/file",
+                },
+            )
+            denied_read = await client.call_tool(
+                "fs_read",
+                {
+                    "host": "host-a",
+                    "path": "/srv/app/file",
+                    "max_bytes": 4096,
+                },
+            )
 
         assert {tool.name for tool in listed.tools} == {
             "hosts_list",
             "host_info",
             "policy_explain",
             "ssh_exec",
+            "fs_stat",
+            "fs_read",
         }
         assert result.is_error is False
         assert result.structured_content == {
@@ -214,6 +231,13 @@ async def test_streamable_http_round_trip_at_mcp_path(
             for block in denied.content
         )
         assert "request denied by central policy" in denied_text
+        for filesystem_denied in (denied_stat, denied_read):
+            assert filesystem_denied.is_error is True
+            filesystem_text = "\n".join(
+                getattr(block, "text", "")
+                for block in filesystem_denied.content
+            )
+            assert "request denied by central policy" in filesystem_text
     finally:
         server.should_exit = True
         await asyncio.wait_for(task, timeout=5)

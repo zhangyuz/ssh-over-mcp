@@ -10,6 +10,10 @@ from pydantic import ValidationError
 from .errors import ApiError
 from .models import (
     ExplainableTool,
+    FsReadRequest,
+    FsReadResult,
+    FsStatRequest,
+    FsStatResult,
     HostsListResult,
     HostSummary,
     PolicyExplainRequest,
@@ -163,6 +167,51 @@ def build_mcp_server(
                 timeout_seconds=timeout_seconds,
             )
             return await service.ssh_exec(
+                principal_provider.get_principal(),
+                request,
+            )
+        except ValidationError:
+            raise ToolError("invalid tool input") from None
+        except ApiError as exc:
+            raise ToolError(str(exc)) from None
+
+    @mcp.tool(
+        annotations=_READ_ONLY_ANNOTATIONS,
+    )
+    async def fs_stat(
+        host: str,
+        path: str,
+    ) -> FsStatResult:
+        """Return policy-gated metadata for one remote filesystem object."""
+
+        try:
+            request = FsStatRequest(host=host, path=path)
+            return await service.fs_stat(
+                principal_provider.get_principal(),
+                request,
+            )
+        except ValidationError:
+            raise ToolError("invalid tool input") from None
+        except ApiError as exc:
+            raise ToolError(str(exc)) from None
+
+    @mcp.tool(
+        annotations=_READ_ONLY_ANNOTATIONS,
+    )
+    async def fs_read(
+        host: str,
+        path: str,
+        max_bytes: int,
+    ) -> FsReadResult:
+        """Read one bounded remote regular file without shell fallback."""
+
+        try:
+            request = FsReadRequest(
+                host=host,
+                path=path,
+                max_bytes=max_bytes,
+            )
+            return await service.fs_read(
                 principal_provider.get_principal(),
                 request,
             )
