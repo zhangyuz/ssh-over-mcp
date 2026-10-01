@@ -83,7 +83,7 @@ def _validate_mapping(
     except (TypeError, ValueError, ValidationError) as exc:
         raise RuntimeConfigurationError(
             "runtime configuration is invalid"
-        ) from exc
+        ) from None
     return dict(document.credentials)
 
 
@@ -111,7 +111,7 @@ def load_credential_map(path: str | Path) -> dict[str, Path]:
     ) as exc:
         raise RuntimeConfigurationError(
             "runtime configuration is invalid"
-        ) from exc
+        ) from None
 
     return dict(document.credentials)
 

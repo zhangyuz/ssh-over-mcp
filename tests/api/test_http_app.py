@@ -13,6 +13,7 @@ from ssh_over_mcp.api.app import build_application
 from ssh_over_mcp.api.errors import PrincipalConfigurationError
 from ssh_over_mcp.api.runtime import MCPRuntimeSettings
 from ssh_over_mcp.api.service import MCPService
+from ssh_over_mcp.ssh import FileCredentialProvider, SSHConnectionManager
 
 _CONFIG = """
 inventory:
@@ -97,6 +98,26 @@ def test_health_and_readiness_do_not_execute_domain_operations(
     monkeypatch.setattr(MCPService, "list_hosts", forbidden)
     monkeypatch.setattr(MCPService, "get_host", forbidden)
     monkeypatch.setattr(MCPService, "explain_policy", forbidden)
+
+    app = build_application(settings(tmp_path))
+
+    with TestClient(app) as client:
+        assert client.get("/healthz").status_code == 200
+        assert client.get("/readyz").status_code == 200
+
+
+def test_application_lifecycle_does_not_resolve_credentials_or_open_ssh(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden_resolve(*_args, **_kwargs):
+        raise AssertionError("application startup must not resolve credentials")
+
+    def forbidden_connect(*_args, **_kwargs):
+        raise AssertionError("application startup must not open SSH")
+
+    monkeypatch.setattr(FileCredentialProvider, "resolve", forbidden_resolve)
+    monkeypatch.setattr(SSHConnectionManager, "get_connection", forbidden_connect)
 
     app = build_application(settings(tmp_path))
 
