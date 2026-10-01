@@ -339,7 +339,9 @@ async def test_ssh_exec_validation_error_does_not_echo_sensitive_input() -> None
             "ssh_exec",
             {
                 "host": "host-a",
-                "executable": "/" + ("SUPERSECRET" * 500),
+                "executable": "/bin/echo",
+                "env": {"SECRET": "SUPERSECRET"},
+                "timeout_seconds": 0,
             },
         )
 
