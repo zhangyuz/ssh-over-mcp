@@ -16,6 +16,7 @@ from ssh_over_mcp.ssh import (
     SSHConnectionManager,
     SSHExecutor,
 )
+from ssh_over_mcp.ssh.transport import StructuredSSHTransport
 
 from .errors import RuntimeConfigurationError
 
@@ -70,6 +71,7 @@ _UniqueKeyLoader.add_constructor(
 class SSHRuntime:
     credentials: FileCredentialProvider
     connections: SSHConnectionManager
+    transport: StructuredSSHTransport
     executor: SSHExecutor
 
 
@@ -137,12 +139,15 @@ def build_ssh_runtime(
         inventory=inventory,
         credentials=credentials,
     )
+    transport = StructuredSSHTransport(connections=connections)
     executor = SSHExecutor(
         policy=policy,
         connections=connections,
+        transport=transport,
     )
     return SSHRuntime(
         credentials=credentials,
         connections=connections,
+        transport=transport,
         executor=executor,
     )

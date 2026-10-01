@@ -15,6 +15,7 @@ from ssh_over_mcp.ssh import (
     SSHConnectionManager,
     SSHExecutor,
 )
+from ssh_over_mcp.ssh.transport import StructuredSSHTransport
 
 
 def _ssh_runtime():
@@ -179,3 +180,18 @@ def test_build_ssh_runtime_constructs_existing_hardened_components_without_io(
     assert isinstance(runtime.connections, SSHConnectionManager)
     assert isinstance(runtime.executor, SSHExecutor)
     assert calls == {"resolve": 0, "connect": 0}
+
+
+def test_build_ssh_runtime_shares_one_structured_transport(tmp_path: Path) -> None:
+    key_path = _write_key(tmp_path)
+    inventory = _inventory()
+
+    runtime = _ssh_runtime().build_ssh_runtime(
+        inventory=inventory,
+        policy=_policy(inventory),
+        credential_map={"secret://host-a": key_path},
+    )
+
+    assert isinstance(runtime.transport, StructuredSSHTransport)
+    assert runtime.executor.transport is runtime.transport
+    assert runtime.transport.connections is runtime.connections
