@@ -100,7 +100,7 @@ async def test_fs_stat_hides_host_before_filesystem_client() -> None:
         match="host is not visible",
     ):
         await service.fs_stat(
-            models.PrincipalContext(profile="developer"),
+            models.PrincipalContext(principal_id="static:developer", profile="developer"),
             models.FsStatRequest(host="hidden", path="/srv/app/file"),
         )
 
@@ -113,7 +113,7 @@ async def test_fs_stat_injects_principal_and_returns_metadata() -> None:
     service = _service(filesystem)
 
     result = await service.fs_stat(
-        models.PrincipalContext(profile="developer"),
+        models.PrincipalContext(principal_id="static:developer", profile="developer"),
         models.FsStatRequest(host="visible", path="/srv/app/file"),
     )
 
@@ -138,7 +138,7 @@ async def test_fs_read_is_bounded_and_returns_lossless_base64() -> None:
     service = _service(filesystem)
 
     result = await service.fs_read(
-        models.PrincipalContext(profile="developer"),
+        models.PrincipalContext(principal_id="static:developer", profile="developer"),
         models.FsReadRequest(
             host="visible",
             path="/srv/app/file",
@@ -266,7 +266,7 @@ async def test_filesystem_service_sanitizes_remote_failures(
         match=message,
     ) as exc_info:
         await service.fs_stat(
-            models.PrincipalContext(profile="developer"),
+            models.PrincipalContext(principal_id="static:developer", profile="developer"),
             models.FsStatRequest(host="visible", path="/srv/app/file"),
         )
     assert "SUPERSECRET" not in str(exc_info.value)
@@ -274,7 +274,7 @@ async def test_filesystem_service_sanitizes_remote_failures(
 
 class StaticPrincipalProvider:
     def get_principal(self) -> models.PrincipalContext:
-        return models.PrincipalContext(profile="developer")
+        return models.PrincipalContext(principal_id="static:developer", profile="developer")
 
 
 class ToolService:
@@ -372,7 +372,7 @@ async def test_server_fs_read_injects_principal_and_rejects_extra_fields() -> No
     assert ok.is_error is False
     assert ok.structured_content["data_base64"] == "AP9BQg=="
     _, principal, request = service.calls[0]
-    assert principal == models.PrincipalContext(profile="developer")
+    assert principal == models.PrincipalContext(principal_id="static:developer", profile="developer")
     assert request.max_bytes == 4096
     assert rejected.is_error is True
     assert len(service.calls) == 1

@@ -47,6 +47,7 @@ ExplainableTool = Literal[
 class PrincipalContext(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    principal_id: str = Field(min_length=1)
     profile: str = Field(min_length=1)
 
 

@@ -54,7 +54,7 @@ def inventory() -> Inventory:
 
 @pytest.fixture
 def developer() -> PrincipalContext:
-    return PrincipalContext(profile="developer")
+    return PrincipalContext(principal_id="static:developer", profile="developer")
 
 
 class RecordingPolicy:

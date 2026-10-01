@@ -18,7 +18,7 @@ from ssh_over_mcp.policy.models import Decision, RiskLevel
 
 class StaticTestPrincipalProvider:
     def get_principal(self) -> PrincipalContext:
-        return PrincipalContext(profile="developer")
+        return PrincipalContext(principal_id="static:developer", profile="developer")
 
 
 class RecordingService:
@@ -162,7 +162,7 @@ async def test_hosts_list_returns_safe_structured_output() -> None:
         ]
     }
     assert service.calls == [
-        ("hosts_list", PrincipalContext(profile="developer"))
+        ("hosts_list", PrincipalContext(principal_id="static:developer", profile="developer"))
     ]
 
 
