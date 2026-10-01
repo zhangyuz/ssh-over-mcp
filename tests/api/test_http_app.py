@@ -40,9 +40,22 @@ def write_config(tmp_path: Path) -> Path:
     return path
 
 
+def write_credential_map(tmp_path: Path) -> Path:
+    key_path = tmp_path / "host-a.key"
+    key_path.write_text("test-key-material", encoding="utf-8")
+    path = tmp_path / "credentials.yaml"
+    path.write_text(
+        "credentials:\n"
+        f'  "secret://host-a": "{key_path}"\n',
+        encoding="utf-8",
+    )
+    return path
+
+
 def settings(tmp_path: Path, *, profile: str = "developer") -> MCPRuntimeSettings:
     return MCPRuntimeSettings(
         config_path=write_config(tmp_path),
+        credential_map_path=write_credential_map(tmp_path),
         profile=profile,
         port=8000,
     )
