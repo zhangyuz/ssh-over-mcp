@@ -76,6 +76,10 @@ Requirements:
   without raw secret-bearing exception detail;
 - nonzero remote exit status, local collection timeout, and output truncation
   remain structured result fields rather than shell-style fallback behavior;
+- SMCP v1 has no authenticated response-metadata frame, so the adapter MUST NOT
+  infer a distinct remote-policy-denied category from ambiguous exit
+  status/stderr; a future response-protocol revision is required for that
+  classification;
 - application shutdown closes the pooled SSH connection manager;
 - remote host agent independently validates the structured request.
 
