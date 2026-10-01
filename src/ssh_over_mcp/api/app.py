@@ -6,9 +6,12 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 
+from ssh_over_mcp.approvals.client import LedgerClientError
+from ssh_over_mcp.approvals.transport import LedgerTransportError
 from ssh_over_mcp.config.loader import load_config
 from ssh_over_mcp.policy.engine import PolicyEngine
 
+from .ledger_runtime import build_ledger_client
 from .principal import StaticPrincipalProvider
 from .runtime import MCPRuntimeSettings
 from .server import build_mcp_server
@@ -36,6 +39,7 @@ def build_application(
         policy=policy,
         credential_map=credential_map,
     )
+    ledger_client = build_ledger_client(settings)
     service = MCPService(
         inventory=bundle.inventory,
         policy=policy,
@@ -53,6 +57,13 @@ def build_application(
 
     @mcp.custom_route("/readyz", methods=["GET"])
     async def readyz(_request: Request) -> JSONResponse:
+        try:
+            await ledger_client.ping()
+        except (LedgerClientError, LedgerTransportError):
+            return JSONResponse(
+                {"status": "not_ready"},
+                status_code=503,
+            )
         return JSONResponse({"status": "ready"})
 
     app = mcp.streamable_http_app(
