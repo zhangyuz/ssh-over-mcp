@@ -67,7 +67,7 @@ def tool_error_text(result) -> str:
 
 
 @pytest.mark.asyncio
-async def test_server_registers_only_three_read_only_closed_world_tools() -> None:
+async def test_server_registers_closed_world_discovery_and_ssh_exec_tools() -> None:
     service = RecordingService()
     server = build_mcp_server(
         service=service,
@@ -81,10 +81,14 @@ async def test_server_registers_only_three_read_only_closed_world_tools() -> Non
         "hosts_list",
         "host_info",
         "policy_explain",
+        "ssh_exec",
     }
     for tool in listed.tools:
         assert tool.annotations is not None
-        assert tool.annotations.read_only_hint is True
+        if tool.name == "ssh_exec":
+            assert tool.annotations.read_only_hint is False
+        else:
+            assert tool.annotations.read_only_hint is True
         assert tool.annotations.open_world_hint is False
         assert tool.input_schema["additionalProperties"] is False
         properties = tool.input_schema.get("properties", {})
@@ -258,6 +262,65 @@ async def test_malformed_tool_input_is_rejected_before_service_execution() -> No
 
     async with Client(server) as client:
         result = await client.call_tool("host_info", {})
+
+    assert result.is_error is True
+    assert service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_ssh_exec_schema_exposes_no_trusted_connection_overrides() -> None:
+    server = build_mcp_server(
+        service=RecordingService(),
+        principal_provider=StaticTestPrincipalProvider(),
+    )
+
+    async with Client(server) as client:
+        listed = await client.list_tools()
+
+    tool = next(item for item in listed.tools if item.name == "ssh_exec")
+    assert set(tool.input_schema.get("properties", {})) == {
+        "host",
+        "executable",
+        "args",
+        "cwd",
+        "env",
+        "stdin",
+        "timeout_seconds",
+    }
+    assert tool.input_schema["additionalProperties"] is False
+    schema_text = repr(tool.input_schema)
+    for forbidden in (
+        "profile",
+        "address",
+        "port",
+        "ssh_user",
+        "credential_ref",
+        "host_key",
+        "request_id",
+        "max_output_bytes",
+        "max_stdin_bytes",
+        "ssh_shell",
+    ):
+        assert forbidden not in schema_text
+
+
+@pytest.mark.asyncio
+async def test_ssh_exec_rejects_client_profile_override_before_service_execution() -> None:
+    service = RecordingService()
+    server = build_mcp_server(
+        service=service,
+        principal_provider=StaticTestPrincipalProvider(),
+    )
+
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "ssh_exec",
+            {
+                "host": "host-a",
+                "executable": "/bin/echo",
+                "profile": "ops",
+            },
+        )
 
     assert result.is_error is True
     assert service.calls == []
