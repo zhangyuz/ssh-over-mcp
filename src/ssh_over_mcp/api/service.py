@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from typing import TYPE_CHECKING
 
 from ssh_over_mcp.inventory.models import Host, Inventory
@@ -8,10 +9,24 @@ from ssh_over_mcp.policy.models import (
     Decision,
     EvaluationRequest,
 )
+from ssh_over_mcp.ssh.errors import (
+    SSHApprovalRequired,
+    SSHConnectionError,
+    SSHCredentialError,
+    SSHHostKeyVerificationError,
+    SSHPolicyDenied,
+)
 
 from .errors import (
+    ApprovalRequiredError,
     HostNotVisibleError,
+    InvalidExecutionLimitError,
     InvalidExplainToolError,
+    PolicyDeniedError,
+    SSHCredentialUnavailableError,
+    SSHExecutionError,
+    SSHHostKeyError,
+    SSHTransportError,
 )
 from .models import (
     HostsListResult,
@@ -19,6 +34,8 @@ from .models import (
     PolicyExplainRequest,
     PolicyExplainResult,
     PrincipalContext,
+    SSHExecRequest,
+    SSHExecResult,
 )
 
 if TYPE_CHECKING:
@@ -125,4 +142,78 @@ class MCPService:
             normalized_path=decision.normalized_path,
             approval_required=decision.approval_required,
             policy_version=decision.policy_version,
+        )
+
+
+    async def ssh_exec(
+        self,
+        principal: PrincipalContext,
+        request: SSHExecRequest,
+    ) -> SSHExecResult:
+        self._visible_host(principal, request.host)
+        if self._ssh_executor is None:
+            raise SSHExecutionError("SSH execution is unavailable")
+
+        stdin = request.stdin.encode("utf-8")
+        if (
+            request.timeout_seconds is not None
+            and request.timeout_seconds
+            > self._ssh_executor.default_timeout_seconds
+        ):
+            raise InvalidExecutionLimitError(
+                "execution limits are invalid"
+            )
+        if len(stdin) > self._ssh_executor.default_max_stdin_bytes:
+            raise InvalidExecutionLimitError(
+                "execution limits are invalid"
+            )
+
+        try:
+            result = await self._ssh_executor.execute(
+                EvaluationRequest(
+                    profile=principal.profile,
+                    host=request.host,
+                    tool="ssh_exec",
+                    executable=request.executable,
+                    args=request.args,
+                    cwd=request.cwd,
+                    env=request.env,
+                    privilege="user",
+                ),
+                stdin=stdin,
+                timeout_seconds=request.timeout_seconds,
+            )
+        except SSHPolicyDenied:
+            raise PolicyDeniedError(
+                "request denied by central policy"
+            ) from None
+        except SSHApprovalRequired:
+            raise ApprovalRequiredError(
+                "approval required by central policy"
+            ) from None
+        except SSHCredentialError:
+            raise SSHCredentialUnavailableError(
+                "SSH credential is unavailable"
+            ) from None
+        except SSHHostKeyVerificationError:
+            raise SSHHostKeyError(
+                "SSH host key verification failed"
+            ) from None
+        except SSHConnectionError:
+            raise SSHTransportError("SSH transport failed") from None
+        except Exception:  # noqa: BLE001
+            # This is the public adapter boundary: foreign SSH/library
+            # exceptions must never cross it with raw detail.
+            raise SSHExecutionError("SSH execution failed") from None
+
+        return SSHExecResult(
+            request_id=result.request_id,
+            host=result.host,
+            exit_status=result.exit_status,
+            exit_signal=result.exit_signal,
+            stdout_base64=base64.b64encode(result.stdout).decode("ascii"),
+            stderr_base64=base64.b64encode(result.stderr).decode("ascii"),
+            duration_ms=result.duration_ms,
+            timed_out=result.timed_out,
+            truncated=result.truncated,
         )

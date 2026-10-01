@@ -67,7 +67,7 @@ def tool_error_text(result) -> str:
 
 
 @pytest.mark.asyncio
-async def test_server_registers_only_three_read_only_closed_world_tools() -> None:
+async def test_server_registers_closed_world_tool_surface() -> None:
     service = RecordingService()
     server = build_mcp_server(
         service=service,
@@ -81,10 +81,15 @@ async def test_server_registers_only_three_read_only_closed_world_tools() -> Non
         "hosts_list",
         "host_info",
         "policy_explain",
+        "ssh_exec",
     }
     for tool in listed.tools:
         assert tool.annotations is not None
-        assert tool.annotations.read_only_hint is True
+        if tool.name == "ssh_exec":
+            assert tool.annotations.read_only_hint is False
+            assert tool.annotations.destructive_hint is True
+        else:
+            assert tool.annotations.read_only_hint is True
         assert tool.annotations.open_world_hint is False
         assert tool.input_schema["additionalProperties"] is False
         properties = tool.input_schema.get("properties", {})

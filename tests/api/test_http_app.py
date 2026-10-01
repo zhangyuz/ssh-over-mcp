@@ -146,7 +146,16 @@ def test_mcp_http_rejects_request_body_over_128_kib(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_streamable_http_round_trip_at_mcp_path(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    async def forbidden_connection(*_args, **_kwargs):
+        raise AssertionError("policy denial must happen before SSH")
+
+    monkeypatch.setattr(
+        SSHConnectionManager,
+        "get_connection",
+        forbidden_connection,
+    )
     app = build_application(settings(tmp_path))
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind(("127.0.0.1", 0))
@@ -174,11 +183,20 @@ async def test_streamable_http_round_trip_at_mcp_path(
         async with Client(f"http://127.0.0.1:{port}/mcp") as client:
             listed = await client.list_tools()
             result = await client.call_tool("hosts_list", {})
+            denied = await client.call_tool(
+                "ssh_exec",
+                {
+                    "host": "host-a",
+                    "executable": "/bin/echo",
+                    "args": ["hello"],
+                },
+            )
 
         assert {tool.name for tool in listed.tools} == {
             "hosts_list",
             "host_info",
             "policy_explain",
+            "ssh_exec",
         }
         assert result.is_error is False
         assert result.structured_content == {
@@ -190,7 +208,36 @@ async def test_streamable_http_round_trip_at_mcp_path(
                 }
             ]
         }
+        assert denied.is_error is True
+        denied_text = "\n".join(
+            getattr(block, "text", "")
+            for block in denied.content
+        )
+        assert "request denied by central policy" in denied_text
     finally:
         server.should_exit = True
         await asyncio.wait_for(task, timeout=5)
         sock.close()
+
+
+def test_application_shutdown_closes_ssh_connection_pool(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed = []
+
+    async def recording_close(self) -> None:
+        closed.append(self)
+
+    monkeypatch.setattr(
+        SSHConnectionManager,
+        "close",
+        recording_close,
+    )
+
+    app = build_application(settings(tmp_path))
+
+    with TestClient(app) as client:
+        assert client.get("/healthz").status_code == 200
+
+    assert len(closed) == 1

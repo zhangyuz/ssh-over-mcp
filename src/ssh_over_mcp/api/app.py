@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
@@ -52,9 +54,21 @@ def build_application(
     async def readyz(_request: Request) -> JSONResponse:
         return JSONResponse({"status": "ready"})
 
-    return mcp.streamable_http_app(
+    app = mcp.streamable_http_app(
         stateless_http=True,
         json_response=True,
         max_request_body_size=MAX_MCP_HTTP_REQUEST_BYTES,
         host="127.0.0.1",
     )
+    mcp_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def lifespan(application):
+        async with mcp_lifespan(application):
+            try:
+                yield
+            finally:
+                await ssh_runtime.connections.close()
+
+    app.router.lifespan_context = lifespan
+    return app
