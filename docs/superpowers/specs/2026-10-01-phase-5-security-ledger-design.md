@@ -475,6 +475,25 @@ Protocol requirements:
 - no shell commands;
 - no caller-supplied database path or HMAC-key path.
 
+Phase 5A fixes the protocol envelope at `SLED\x00\x01` plus one unsigned
+big-endian 32-bit JSON length and a 64 KiB JSON payload maximum. Every message
+carries protocol version 1 and a server-generated/caller-library-generated
+`msg_<128-bit hex>` correlation ID.
+
+Execution requests are exactly `ping`, `append_audit`, `ensure_approval`,
+`approval_status`, and `consume_approval`; admin requests are exactly
+`list_approvals`, `show_approval`, `grant_approval`, and
+`deny_approval`. Request/response unions use different discriminators and
+reject cross-union decoding.
+
+A maximum legal canonical binding is already large enough that transmitting
+both the binding and a duplicated `ApprovalSafeSummary` would exceed the
+64 KiB cap. Therefore `ensure_approval` carries request ID, canonical binding,
+and risk only. The ledger service derives the safe summary from that binding
+plus risk before persistence. Admin list responses use bounded lightweight
+items; show/status responses may return full `ApprovalStatus`. No request
+contains caller-selected TTL, operator identity, or binding HMAC.
+
 The two sockets have distinct filesystem ownership/mode policy. The execution
 client identity cannot connect to the admin authority endpoint.
 
@@ -832,6 +851,9 @@ Phase 5 must preserve all of the following:
 Phase 5 is intentionally decomposed into small independently merged slices.
 
 ### 5A — domain contract and canonical binding
+
+Status: implemented as domain/protocol infrastructure; no runtime execution
+behavior change.
 
 Add:
 
