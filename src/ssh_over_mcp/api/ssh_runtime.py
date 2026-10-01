@@ -15,6 +15,7 @@ from ssh_over_mcp.ssh import (
     FileCredentialProvider,
     SSHConnectionManager,
     SSHExecutor,
+    SSHFilesystemClient,
 )
 from ssh_over_mcp.ssh.transport import StructuredSSHTransport
 
@@ -73,6 +74,7 @@ class SSHRuntime:
     connections: SSHConnectionManager
     transport: StructuredSSHTransport
     executor: SSHExecutor
+    filesystem: SSHFilesystemClient
 
 
 def _validate_mapping(
@@ -145,9 +147,14 @@ def build_ssh_runtime(
         connections=connections,
         transport=transport,
     )
+    filesystem = SSHFilesystemClient(
+        policy=policy,
+        transport=transport,
+    )
     return SSHRuntime(
         credentials=credentials,
         connections=connections,
         transport=transport,
         executor=executor,
+        filesystem=filesystem,
     )

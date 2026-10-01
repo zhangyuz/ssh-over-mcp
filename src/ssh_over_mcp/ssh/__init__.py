@@ -10,9 +10,19 @@ from .errors import (
     SSHConnectionError,
     SSHCredentialError,
     SSHHostKeyVerificationError,
+    SSHOutputLimitExceeded,
     SSHPolicyDenied,
+    SSHRemoteOperationError,
+    SSHRemotePolicyDenied,
+    SSHRemoteResponseError,
+    SSHRequestTimeout,
 )
 from .executor import SSHExecutionResult, SSHExecutor
+from .filesystem import (
+    SSHFilesystemClient,
+    SSHFilesystemReadResult,
+    SSHFilesystemStatResult,
+)
 from .protocol import (
     ExecEnvelope,
     ExecutionLimits,
@@ -34,8 +44,16 @@ __all__ = [
     "SSHCredentialError",
     "SSHExecutionResult",
     "SSHExecutor",
+    "SSHFilesystemClient",
+    "SSHFilesystemReadResult",
+    "SSHFilesystemStatResult",
     "SSHHostKeyVerificationError",
+    "SSHOutputLimitExceeded",
     "SSHPolicyDenied",
+    "SSHRemoteOperationError",
+    "SSHRemotePolicyDenied",
+    "SSHRemoteResponseError",
+    "SSHRequestTimeout",
     "StaticCredentialProvider",
     "decode_request",
     "encode_request",
