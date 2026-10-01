@@ -14,8 +14,14 @@ MAX_MCP_ENV_ITEMS = 128
 MAX_MCP_ENV_NAME_CHARS = 128
 MAX_MCP_ENV_VALUE_CHARS = 8192
 MAX_MCP_PRIVILEGE_CHARS = 64
+MAX_MCP_HOST_ALIAS_CHARS = 256
+MAX_MCP_STDIN_CHARS = 1024 * 1024
 
 _MCP_PATH = Annotated[str, Field(max_length=MAX_MCP_PATH_CHARS)]
+_MCP_REQUIRED_PATH = Annotated[
+    str,
+    Field(min_length=1, max_length=MAX_MCP_PATH_CHARS),
+]
 _MCP_ARG = Annotated[str, Field(max_length=MAX_MCP_ARG_CHARS)]
 _MCP_ENV_NAME = Annotated[
     str,
@@ -95,3 +101,52 @@ class PolicyExplainResult(BaseModel):
     normalized_path: str | None = None
     approval_required: bool
     policy_version: str
+
+
+class SSHExecRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    host: str = Field(
+        min_length=1,
+        max_length=MAX_MCP_HOST_ALIAS_CHARS,
+    )
+    executable: _MCP_REQUIRED_PATH
+    args: tuple[_MCP_ARG, ...] = Field(
+        default_factory=tuple,
+        max_length=MAX_MCP_ARG_COUNT,
+    )
+    cwd: _MCP_PATH | None = None
+    env: dict[_MCP_ENV_NAME, _MCP_ENV_VALUE] = Field(
+        default_factory=dict,
+        max_length=MAX_MCP_ENV_ITEMS,
+    )
+    stdin: str | None = Field(
+        default=None,
+        max_length=MAX_MCP_STDIN_CHARS,
+    )
+    timeout_seconds: float | None = Field(
+        default=None,
+        gt=0,
+        allow_inf_nan=False,
+    )
+
+    @model_validator(mode="after")
+    def validate_metadata_size(self) -> SSHExecRequest:
+        metadata = self.model_dump_json(exclude={"stdin"})
+        if len(metadata.encode("utf-8")) > MAX_MCP_METADATA_BYTES:
+            raise ValueError("MCP tool metadata exceeds maximum size")
+        return self
+
+
+class SSHExecResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request_id: str
+    host: str
+    exit_status: int | None = None
+    exit_signal: str | None = None
+    stdout_base64: str
+    stderr_base64: str
+    duration_ms: int = Field(ge=0)
+    timed_out: bool = False
+    truncated: bool = False
