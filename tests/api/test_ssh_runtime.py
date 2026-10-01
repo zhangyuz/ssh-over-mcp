@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import traceback
 from pathlib import Path
 
 import pytest
@@ -108,6 +109,28 @@ def test_load_credential_map_rejects_invalid_shape_without_echoing_secrets(
     assert "SUPERSECRET" not in message
     assert "secret://host-a" not in message
     assert "/missing/key" not in message
+
+
+def test_credential_map_failure_traceback_does_not_echo_sensitive_input(
+    tmp_path: Path,
+) -> None:
+    path = _write_map(
+        tmp_path,
+        "credentials:\n"
+        '  "secret://host-a": "/tmp/key"\n'
+        "private_key: SUPERSECRET\n",
+    )
+
+    try:
+        _ssh_runtime().load_credential_map(path)
+    except RuntimeConfigurationError as exc:
+        rendered = "".join(traceback.format_exception(exc))
+    else:
+        raise AssertionError("invalid credential map must fail closed")
+
+    assert "SUPERSECRET" not in rendered
+    assert "secret://host-a" not in rendered
+    assert "/tmp/key" not in rendered
 
 
 def test_build_ssh_runtime_requires_mapping_for_every_inventory_ref(
