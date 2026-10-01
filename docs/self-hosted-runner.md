@@ -24,6 +24,7 @@ available for maintenance and bootstrap validation.
 The Docker runner is intended to validate:
 
 - Python 3.13 and 3.14;
+- Python stdlib `sqlite3` against the image-provided `libsqlite3.so.0`;
 - process creation with `fork()`;
 - fd-based `execve()`;
 - stdin/stdout/stderr supervision;
@@ -76,6 +77,12 @@ Properties:
 The current pinned bootstrap runner is `2.337.0`. When changing the pinned
 version, update the matching official SHA-256 values in
 `scripts/deploy-runner.sh`.
+
+The image explicitly installs the SQLite runtime package `libsqlite3-0`.
+The Python toolcache installed by `actions/setup-python` includes the
+`_sqlite3` extension but dynamically links to `libsqlite3.so.0`; keeping that
+runtime library in the base image is therefore part of the authoritative CI
+contract.
 
 Ubuntu 26.04 uses uutils multi-call coreutils for paths such as `/usr/bin/cat`.
 Anonymous fd-based exec does not preserve the applet dispatch name for that

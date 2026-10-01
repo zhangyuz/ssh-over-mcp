@@ -691,9 +691,38 @@ runtime execution behavior change:
   return the full safe `ApprovalStatus`.
 
 Phase 5A does not add sockets, SQLite, approval handles to MCP, readiness
-dependencies, policy changes, or SSH/network behavior. Phase 5B–5F add the
-ledger service, mandatory audit lifecycle, approvals, and final adversarial
-review in separately reviewed slices.
+dependencies, policy changes, or SSH/network behavior.
+
+Phase 5B local Security Ledger infrastructure is implemented:
+
+- a dedicated foreground ledger process owns the SQLite database and 32-byte
+  HMAC key;
+- storage validates canonical service-owned paths, secure file ownership/modes,
+  schema version, WAL + synchronous FULL settings, and a non-secret HMAC-key
+  identity before serving requests;
+- the approval state machine provides ledger-owned TTL, active-binding dedup,
+  terminal grant/deny, expiry, atomic single-use consume, restart persistence,
+  and same-transaction approval audit transitions;
+- execution and admin authorities use separate pathname AF_UNIX/SOCK_STREAM
+  endpoints with exact Linux SO_PEERCRED checks before frame read/dispatch;
+- the execution authority exposes only ping/audit/ensure/status/consume while
+  the admin authority exposes only list/show/grant/deny;
+- operator identity is derived from authenticated admin peer credentials and
+  cannot be supplied by protocol or CLI input;
+- clients authenticate the ledger server before sending a request, use one
+  bounded request/response per connection, and verify response correlation;
+- `ssh-over-mcp-approvalctl` exposes only list/show/grant/deny and never opens
+  the database or key directly;
+- real Linux tests cover concurrent ensure/consume, wrong peer identities,
+  dual-endpoint authority separation, inode-safe cleanup, service restart, and
+  secret-retention boundaries.
+
+Phase 5B intentionally does **not** integrate the ledger into MCP, policy,
+readiness, SSH execution, or filesystem execution. Therefore the main MCP
+service does not yet depend on ledger availability and no existing operation is
+claimed to fail closed on ledger outage. Phase 5C adds mandatory request/audit
+lifecycle integration and the pre-network ledger-failure gate; Phase 5D/5E add
+approval-aware execution.
 
 ## Phase 6 — Cloudflare reference deployment
 

@@ -19,6 +19,7 @@ RUN apt-get update \
         git \
         gnu-coreutils \
         jq \
+        libsqlite3-0 \
         gzip \
         tar \
         xz-utils \

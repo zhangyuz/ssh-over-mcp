@@ -20,6 +20,8 @@ dependencies = [
 [project.scripts]
 ssh-over-mcp-host-agent = "ssh_over_mcp.host_agent.cli:main"
 ssh-over-mcp-server = "ssh_over_mcp.api.main:main"
+ssh-over-mcp-ledger = "ssh_over_mcp.approvals.main:main"
+ssh-over-mcp-approvalctl = "ssh_over_mcp.approvals.cli:main"
 
 [project.optional-dependencies]
 dev = [

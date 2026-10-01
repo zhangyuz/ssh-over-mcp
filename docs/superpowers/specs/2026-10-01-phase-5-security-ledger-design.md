@@ -872,21 +872,34 @@ Exit: pure model/canonicalization tests plus full regression suite.
 
 ### 5B — Security Ledger service
 
-Add:
+Status: implemented as isolated local ledger infrastructure; no MCP/SSH
+execution integration.
+
+Implemented:
 
 - dedicated local ledger daemon;
 - execution/admin Unix sockets with peer credentials;
-- SQLite schema/migrations;
-- HMAC key handling;
-- approval state machine;
-- atomic consume;
-- append audit;
-- local `approvalctl`.
+- SQLite schema v1 with WAL, synchronous FULL, schema/key identity validation;
+- 32-byte HMAC key handling without exposing the key to protocol clients;
+- ledger-owned approval TTL, active-binding dedup, terminal grant/deny and
+  expiry transitions;
+- atomic single-use consume plus same-transaction audit append;
+- append-only-through-protocol audit events;
+- one-shot authenticated execution/admin clients;
+- local `approvalctl` list/show/grant/deny over the admin authority only;
+- restart, concurrency, peer-auth, malformed-frame, inode-cleanup, and
+  secret-retention tests.
 
-No MCP/SSH execution integration yet.
+The two authorities remain disjoint: execution accepts only
+ping/audit/ensure/status/consume and admin accepts only list/show/grant/deny.
+Both client and server authenticate the opposite Unix peer before application
+data is trusted; operator identity is derived only from authenticated admin
+peer credentials.
 
-Exit: storage, restart, concurrency, peer-auth, malformed-frame, and secret
-leakage tests.
+No MCP/API/SSH runtime integration is present in 5B. Ledger availability is
+therefore not yet part of MCP readiness or execution ordering. Phase 5C is the
+slice which makes audit/ledger availability mandatory before network side
+effects.
 
 ### 5C — request/audit lifecycle integration
 
