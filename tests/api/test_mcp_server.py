@@ -3,18 +3,17 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from mcp import Client
 
 from ssh_over_mcp.api.errors import HostNotVisibleError
 from ssh_over_mcp.api.models import (
-    HostSummary,
     HostsListResult,
+    HostSummary,
     PolicyExplainResult,
     PrincipalContext,
 )
 from ssh_over_mcp.api.server import build_mcp_server
 from ssh_over_mcp.policy.models import Decision, RiskLevel
-
-from mcp import Client
 
 
 class StaticTestPrincipalProvider:
