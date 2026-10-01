@@ -44,3 +44,19 @@ class SSHTransportError(ApiError):
 
 class SSHExecutionError(ApiError):
     """Stable public error for unexpected execution-boundary failure."""
+
+
+class RemotePolicyDeniedError(ApiError):
+    """Stable public error for host-agent policy denial."""
+
+
+class RemoteTimeoutError(ApiError):
+    """Stable public error for a bounded remote request timeout."""
+
+
+class RemoteOutputLimitError(ApiError):
+    """Stable public error for a bounded remote response overflow."""
+
+
+class FilesystemOperationError(ApiError):
+    """Stable public error for remote filesystem failure."""

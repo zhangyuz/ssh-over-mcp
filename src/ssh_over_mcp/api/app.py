@@ -40,6 +40,7 @@ def build_application(
         inventory=bundle.inventory,
         policy=policy,
         ssh_executor=ssh_runtime.executor,
+        ssh_filesystem=ssh_runtime.filesystem,
     )
     mcp = build_mcp_server(
         service=service,

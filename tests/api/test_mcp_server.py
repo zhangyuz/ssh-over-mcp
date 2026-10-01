@@ -82,6 +82,8 @@ async def test_server_registers_closed_world_tool_surface() -> None:
         "host_info",
         "policy_explain",
         "ssh_exec",
+        "fs_stat",
+        "fs_read",
     }
     for tool in listed.tools:
         assert tool.annotations is not None
