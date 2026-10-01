@@ -151,6 +151,8 @@ class MCPService:
         request: SSHExecRequest,
     ) -> SSHExecResult:
         self._visible_host(principal, request.host)
+        if self._ssh_executor is None:
+            raise SSHExecutionError("SSH execution is unavailable")
 
         stdin = request.stdin.encode("utf-8")
         if (

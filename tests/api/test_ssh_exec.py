@@ -3,10 +3,12 @@ from __future__ import annotations
 import base64
 
 import pytest
+from mcp import Client
 from pydantic import ValidationError
 
 from ssh_over_mcp.api import errors as api_errors
 from ssh_over_mcp.api import models
+from ssh_over_mcp.api.server import build_mcp_server
 from ssh_over_mcp.api.service import MCPService
 from ssh_over_mcp.inventory.models import Host, Inventory
 from ssh_over_mcp.policy.models import Decision, PolicyDecision, RiskLevel
@@ -324,3 +326,184 @@ async def test_ssh_exec_normalizes_internal_failures(
     rendered = str(exc_info.value)
     assert "SUPERSECRET" not in rendered
     assert "secret://" not in rendered
+
+
+class StaticPrincipalProvider:
+    def get_principal(self) -> models.PrincipalContext:
+        return models.PrincipalContext(profile="developer")
+
+
+class RecordingToolService:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def ssh_exec(
+        self,
+        principal: models.PrincipalContext,
+        request: models.SSHExecRequest,
+    ) -> models.SSHExecResult:
+        self.calls.append((principal, request))
+        return models.SSHExecResult(
+            request_id="req_server_1234",
+            host=request.host,
+            exit_status=0,
+            stdout_base64="b2s=",
+            stderr_base64="",
+            duration_ms=5,
+            timed_out=False,
+            truncated=False,
+        )
+
+
+def _tool_error_text(result) -> str:
+    return "\n".join(
+        getattr(block, "text", "")
+        for block in result.content
+    )
+
+
+@pytest.mark.asyncio
+async def test_server_registers_strict_ssh_exec_tool() -> None:
+    service = RecordingToolService()
+    server = build_mcp_server(
+        service=service,
+        principal_provider=StaticPrincipalProvider(),
+    )
+
+    async with Client(server) as client:
+        listed = await client.list_tools()
+
+    tool = next(
+        item for item in listed.tools
+        if item.name == "ssh_exec"
+    )
+    assert set(tool.input_schema["properties"]) == {
+        "host",
+        "executable",
+        "args",
+        "cwd",
+        "env",
+        "stdin",
+        "timeout_seconds",
+    }
+    assert tool.input_schema["additionalProperties"] is False
+    assert tool.annotations is not None
+    assert tool.annotations.read_only_hint is False
+    assert tool.annotations.destructive_hint is True
+    assert tool.annotations.idempotent_hint is False
+    assert tool.annotations.open_world_hint is False
+
+    schema_text = repr(tool.input_schema)
+    for forbidden in (
+        "profile",
+        "address",
+        "ssh_user",
+        "credential_ref",
+        "host_key",
+        "request_id",
+        "max_output_bytes",
+        "max_stdin_bytes",
+        "privilege",
+    ):
+        assert forbidden not in schema_text
+
+
+@pytest.mark.asyncio
+async def test_server_ssh_exec_injects_principal_and_returns_result() -> None:
+    service = RecordingToolService()
+    server = build_mcp_server(
+        service=service,
+        principal_provider=StaticPrincipalProvider(),
+    )
+
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "ssh_exec",
+            {
+                "host": "visible",
+                "executable": "/usr/bin/git",
+                "args": ["status"],
+                "cwd": "/srv/app",
+                "env": {"LANG": "C"},
+                "stdin": "hello",
+                "timeout_seconds": 30,
+            },
+        )
+
+    assert result.is_error is False
+    assert result.structured_content["request_id"] == "req_server_1234"
+    assert result.structured_content["stdout_base64"] == "b2s="
+    assert len(service.calls) == 1
+    principal, request = service.calls[0]
+    assert principal == models.PrincipalContext(profile="developer")
+    assert request.host == "visible"
+    assert request.executable == "/usr/bin/git"
+    assert request.stdin == "hello"
+
+
+@pytest.mark.asyncio
+async def test_server_rejects_client_owned_execution_identity_fields() -> None:
+    service = RecordingToolService()
+    server = build_mcp_server(
+        service=service,
+        principal_provider=StaticPrincipalProvider(),
+    )
+
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "ssh_exec",
+            {
+                "host": "visible",
+                "executable": "/usr/bin/id",
+                "profile": "ops",
+                "credential_ref": "secret://attacker",
+            },
+        )
+
+    assert result.is_error is True
+    assert service.calls == []
+    text = _tool_error_text(result)
+    assert "secret://attacker" not in text
+
+
+@pytest.mark.asyncio
+async def test_server_invalid_ssh_exec_input_is_sanitized() -> None:
+    service = RecordingToolService()
+    server = build_mcp_server(
+        service=service,
+        principal_provider=StaticPrincipalProvider(),
+    )
+    secret_stdin = "SUPERSECRET-" + ("x" * (64 * 1024))
+
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "ssh_exec",
+            {
+                "host": "visible",
+                "executable": "/usr/bin/id",
+                "stdin": secret_stdin,
+            },
+        )
+
+    assert result.is_error is True
+    text = _tool_error_text(result)
+    assert "invalid tool input" in text
+    assert "SUPERSECRET" not in text
+    assert service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_ssh_exec_without_executor_fails_closed() -> None:
+    service = MCPService(
+        inventory=_inventory(),
+        policy=object(),
+    )
+
+    with pytest.raises(
+        api_errors.SSHExecutionError,
+        match="SSH execution is unavailable",
+    ):
+        await service.ssh_exec(
+            models.PrincipalContext(profile="developer"),
+            _request(),
+        )

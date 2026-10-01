@@ -38,9 +38,11 @@ and privilege text.
 
 #### `ssh_exec`
 
-Structured command execution.
+Implemented in Phase 4 as the first side-effecting MCP adapter. It delegates to
+the existing policy-gated `SSHExecutor`; the MCP layer does not implement a
+second execution path.
 
-Conceptual input:
+Input:
 
 ```json
 {
@@ -49,19 +51,37 @@ Conceptual input:
   "args": ["status", "--short"],
   "cwd": "/srv/projects/app",
   "env": {},
-  "stdin": null,
-  "timeout_seconds": 60
+  "stdin": "",
+  "timeout_seconds": 30
 }
 ```
 
-Requirements:
+The server injects the trusted profile and fixed `privilege="user"`. Clients
+cannot provide profile, SSH address/port/user, credential reference, host key,
+request ID, privilege, output limit, or stdin limit.
+
+Requirements and bounds:
 
 - MUST NOT use a shell to interpret `executable` or `args`;
-- executable and arguments are policy-evaluated separately;
-- `cwd` is policy-evaluated;
-- environment is allowlisted;
-- timeout and output bounds are enforced;
-- remote host agent independently validates the structured request.
+- executable, argv, cwd, and environment are evaluated by central policy before
+  any SSH connection is acquired;
+- policy denial and approval-required outcomes do not reach the network path;
+- `stdin` is UTF-8 text with a 64 KiB MCP hard ceiling;
+- `timeout_seconds` is optional, positive, no greater than 60 seconds, and may
+  only tighten the active server-owned executor timeout;
+- the client cannot widen the executor's server-owned stdin/output limits;
+- the host agent independently validates the structured SMCP request;
+- structured denial never falls back to `ssh_shell`.
+
+Successful tool results contain server-generated `request_id`, logical host
+alias, exit status/signal, duration, local collection `timed_out` /
+`truncated` flags, and lossless `stdout_base64` / `stderr_base64` fields.
+Arbitrary binary remote output is never guessed or lossy-decoded as UTF-8.
+
+Policy denial, approval-required, credential, host-key, transport, and
+unexpected execution-boundary failures are mapped to stable public errors.
+Raw policy reasons, credential references, host keys, library exception text,
+and other secret-bearing internal details are not returned.
 
 #### `ssh_shell`
 
@@ -202,9 +222,12 @@ Private-key bytes are never stored in this map. Startup fails closed if the
 file shape is invalid, a mapped path is not an existing absolute file, or any
 inventory credential reference lacks a mapping. Startup composes the existing
 `FileCredentialProvider -> SSHConnectionManager -> SSHExecutor` chain but does
-not resolve a credential or open SSH. The MCP registry in this slice remains
-only `hosts_list`, `host_info`, and `policy_explain`; `ssh_exec` is still
-a later separately reviewed adapter.
+not resolve a credential or open SSH. Application shutdown closes the pooled SSH
+connection manager after the MCP SDK lifespan exits.
+
+The registered MCP surface is now `hosts_list`, `host_info`,
+`policy_explain`, and `ssh_exec`. Health/readiness remain ordinary HTTP
+routes and do not appear in the MCP tool registry.
 
 The Streamable HTTP endpoint rejects request bodies larger than 128 KiB before
 MCP parsing. OAuth/claim-to-profile mapping remains a later Cloudflare-phase
