@@ -217,7 +217,8 @@ class MCPService:
             raise ExecutionRequestError(
                 "execution request is invalid"
             ) from None
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # MCP is the public sanitization boundary for executor/library failures.
             raise ExecutionFailureError(
                 "SSH execution failed"
             ) from None
