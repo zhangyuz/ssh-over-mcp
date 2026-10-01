@@ -2,15 +2,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 
-def test_ci_cancels_stale_runs_with_pr_scoped_concurrency() -> None:
-    workflow = WORKFLOW.read_text(encoding="utf-8")
+def test_ci_cancels_only_stale_pr_runs_and_preserves_main_pushes() -> None:
+    workflow = yaml.load(
+        WORKFLOW.read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
 
-    assert "concurrency:" in workflow
-    assert "cancel-in-progress: true" in workflow
-    assert "github.workflow" in workflow
-    assert "github.event.pull_request.number" in workflow
-    assert "github.ref" in workflow
+    assert workflow["concurrency"] == {
+        "group": (
+            "${{ github.workflow }}-${{ github.event_name == 'pull_request_target' "
+            "&& github.event.pull_request.number || github.run_id }}"
+        ),
+        "cancel-in-progress": (
+            "${{ github.event_name == 'pull_request_target' }}"
+        ),
+    }
