@@ -542,8 +542,7 @@ Adversarial tests include malformed envelopes, command injection, env injection,
 
 ## Phase 4 — MCP surface
 
-First read-only discovery/explanation slice implemented on the Phase 4 feature
-branch:
+The read-only discovery/explanation slice is merged:
 
 - official MCP Python SDK v2;
 - stateless Streamable HTTP at `/mcp`;
@@ -559,6 +558,20 @@ branch:
   registry;
 - real MCP SDK client round-trip coverage for Streamable HTTP.
 
+The SSH runtime-composition slice adds server-owned credential wiring without
+adding an execution capability:
+
+- required `SSH_OVER_MCP_CREDENTIAL_MAP` points to strict operator-owned
+  YAML/JSON mapping from inventory credential refs to absolute mounted key files;
+- all inventory credential refs must be covered and all mapped key paths must
+  already exist;
+- startup composes the existing `FileCredentialProvider`,
+  `SSHConnectionManager`, and `SSHExecutor`;
+- composition, `/healthz`, and `/readyz` do not resolve credentials or open
+  network connections;
+- the MCP tool registry remains exactly the three read-only discovery/explain
+  tools.
+
 Still deferred to separately reviewed Phase 4 slices:
 
 - MCP `ssh_exec`;
@@ -569,8 +582,8 @@ Still deferred to separately reviewed Phase 4 slices:
 - audit/approval persistence;
 - destructive filesystem namespace mutation.
 
-Final merge of this slice remains gated on exact-head hardened Ubuntu 26.04 x86
-self-hosted verification and whole-branch security review.
+Each remaining Phase 4 capability continues to require an exact-head hardened
+Ubuntu 26.04 x86 gate and whole-branch security review before merge.
 
 ## Phase 5 — audit and approvals
 

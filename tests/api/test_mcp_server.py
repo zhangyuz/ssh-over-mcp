@@ -87,7 +87,18 @@ async def test_server_registers_only_three_read_only_closed_world_tools() -> Non
         assert tool.annotations.read_only_hint is True
         assert tool.annotations.open_world_hint is False
         assert tool.input_schema["additionalProperties"] is False
-        assert "profile" not in tool.input_schema.get("properties", {})
+        properties = tool.input_schema.get("properties", {})
+        for forbidden in (
+            "profile",
+            "address",
+            "port",
+            "ssh_user",
+            "credential_ref",
+            "host_key",
+            "credential_map",
+            "key_path",
+        ):
+            assert forbidden not in properties
 
 
 @pytest.mark.asyncio
