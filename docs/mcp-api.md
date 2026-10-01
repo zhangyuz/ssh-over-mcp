@@ -38,9 +38,11 @@ and privilege text.
 
 #### `ssh_exec`
 
-Structured command execution.
+Implemented as the first side-effecting Phase 4 MCP adapter. It delegates to
+the existing policy-gated `SSHExecutor`; the MCP layer does not implement a
+second SSH or execution path.
 
-Conceptual input:
+Input:
 
 ```json
 {
@@ -57,10 +59,24 @@ Conceptual input:
 Requirements:
 
 - MUST NOT use a shell to interpret `executable` or `args`;
-- executable and arguments are policy-evaluated separately;
-- `cwd` is policy-evaluated;
-- environment is allowlisted;
-- timeout and output bounds are enforced;
+- the trusted profile is injected by the server and is never a tool argument;
+- only logical inventory aliases are accepted; SSH address/user/port,
+  credential reference, host key, request ID, and output/stdin ceilings are
+  not client-selectable;
+- host visibility is checked before execution;
+- executable, arguments, cwd, and environment are evaluated by the existing
+  central policy path before network access;
+- client `timeout_seconds` may only tighten the server-owned executor default;
+- stdin is UTF-8 text at the MCP boundary and is checked against the
+  server-owned byte ceiling after encoding;
+- stdout/stderr remain bounded by the executor and are returned losslessly as
+  `stdout_base64` / `stderr_base64`;
+- policy denial, approval-required, credential, host-key, transport, protocol,
+  and unexpected executor/library failures are mapped to stable public errors
+  without raw secret-bearing exception detail;
+- nonzero remote exit status, local collection timeout, and output truncation
+  remain structured result fields rather than shell-style fallback behavior;
+- application shutdown closes the pooled SSH connection manager;
 - remote host agent independently validates the structured request.
 
 #### `ssh_shell`
