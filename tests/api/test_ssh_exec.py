@@ -1,9 +1,23 @@
 from __future__ import annotations
 
+import base64
+
 import pytest
 from pydantic import ValidationError
 
+from ssh_over_mcp.api import errors as api_errors
 from ssh_over_mcp.api import models
+from ssh_over_mcp.api.service import MCPService
+from ssh_over_mcp.inventory.models import Host, Inventory
+from ssh_over_mcp.policy.models import Decision, PolicyDecision, RiskLevel
+from ssh_over_mcp.ssh.errors import (
+    SSHApprovalRequired,
+    SSHConnectionError,
+    SSHCredentialError,
+    SSHHostKeyVerificationError,
+    SSHPolicyDenied,
+)
+from ssh_over_mcp.ssh.executor import SSHExecutionResult
 
 
 def test_ssh_exec_request_is_closed_world_and_bounded() -> None:
@@ -71,3 +85,242 @@ def test_ssh_exec_result_uses_explicit_lossless_base64_fields() -> None:
         "timed_out",
         "truncated",
     }
+
+
+def _inventory() -> Inventory:
+    return Inventory(
+        hosts={
+            "visible": Host(
+                address="10.0.0.1",
+                port=22,
+                ssh_user="secret-user",
+                credential_ref="secret://visible",
+                host_key="secret-host-key",
+                allowed_roles=frozenset({"developer"}),
+            ),
+            "hidden": Host(
+                address="10.0.0.2",
+                port=22,
+                ssh_user="hidden-user",
+                credential_ref="secret://hidden",
+                host_key="hidden-host-key",
+                allowed_roles=frozenset({"ops"}),
+            ),
+        }
+    )
+
+
+class RecordingExecutor:
+    default_timeout_seconds = 60.0
+    default_max_output_bytes = 1024 * 1024
+    default_max_stdin_bytes = 1024 * 1024
+
+    def __init__(self) -> None:
+        self.calls = []
+
+        self.result = SSHExecutionResult(
+            request_id="req_12345678",
+            host="visible",
+            exit_status=0,
+            stdout=b"\xff\x00",
+            stderr=b"\xfe",
+            duration_ms=7,
+            timed_out=False,
+            truncated=False,
+        )
+
+    async def execute(self, request, **kwargs):
+        self.calls.append((request, kwargs))
+        return self.result
+
+
+def _service(executor: RecordingExecutor) -> MCPService:
+    return MCPService(
+        inventory=_inventory(),
+        policy=object(),
+        ssh_executor=executor,
+    )
+
+
+def _request(host: str = "visible", **overrides) -> models.SSHExecRequest:
+    values = {
+        "host": host,
+        "executable": "/usr/bin/git",
+        "args": ("status",),
+        "cwd": "/srv/app",
+        "env": {"LANG": "C"},
+        "stdin": "hello",
+        "timeout_seconds": 30,
+    }
+    values.update(overrides)
+    return models.SSHExecRequest(**values)
+
+
+@pytest.mark.asyncio
+async def test_ssh_exec_hides_host_before_executor() -> None:
+    executor = RecordingExecutor()
+    service = _service(executor)
+
+    with pytest.raises(
+        api_errors.HostNotVisibleError,
+        match="host is not visible",
+    ):
+        await service.ssh_exec(
+            models.PrincipalContext(profile="developer"),
+            _request("hidden"),
+        )
+
+    assert executor.calls == []
+
+
+@pytest.mark.asyncio
+async def test_ssh_exec_injects_principal_and_returns_lossless_output() -> None:
+    executor = RecordingExecutor()
+    service = _service(executor)
+
+    result = await service.ssh_exec(
+        models.PrincipalContext(profile="developer"),
+        _request(),
+    )
+
+    assert len(executor.calls) == 1
+    evaluation, kwargs = executor.calls[0]
+    assert evaluation.profile == "developer"
+    assert evaluation.host == "visible"
+    assert evaluation.tool == "ssh_exec"
+    assert evaluation.executable == "/usr/bin/git"
+    assert evaluation.args == ("status",)
+    assert evaluation.cwd == "/srv/app"
+    assert evaluation.env == {"LANG": "C"}
+    assert evaluation.privilege == "user"
+
+    assert kwargs == {
+        "stdin": b"hello",
+        "timeout_seconds": 30,
+    }
+    assert result.request_id == "req_12345678"
+    assert result.host == "visible"
+    assert result.stdout_base64 == base64.b64encode(b"\xff\x00").decode("ascii")
+    assert result.stderr_base64 == base64.b64encode(b"\xfe").decode("ascii")
+    assert result.exit_status == 0
+    assert result.duration_ms == 7
+    assert result.timed_out is False
+    assert result.truncated is False
+
+
+@pytest.mark.asyncio
+async def test_ssh_exec_cannot_expand_runtime_limits() -> None:
+    executor = RecordingExecutor()
+    executor.default_timeout_seconds = 10.0
+    executor.default_max_stdin_bytes = 4
+    service = _service(executor)
+
+    with pytest.raises(
+        api_errors.InvalidExecutionLimitError,
+        match="execution limits are invalid",
+    ):
+        await service.ssh_exec(
+            models.PrincipalContext(profile="developer"),
+            _request(timeout_seconds=30),
+        )
+
+    with pytest.raises(
+        api_errors.InvalidExecutionLimitError,
+        match="execution limits are invalid",
+    ):
+        await service.ssh_exec(
+            models.PrincipalContext(profile="developer"),
+            _request(timeout_seconds=5, stdin="hello"),
+        )
+
+    assert executor.calls == []
+
+
+def _policy_failure(
+    decision: Decision,
+    *,
+    approval_required: bool = False,
+) -> PolicyDecision:
+    return PolicyDecision(
+        decision=decision,
+        reason="SUPERSECRET internal rule detail",
+        risk=RiskLevel.HIGH,
+        approval_required=approval_required,
+        policy_version="sha256:public",
+    )
+
+
+class RaisingExecutor(RecordingExecutor):
+    def __init__(self, error: Exception) -> None:
+        super().__init__()
+        self.error = error
+
+    async def execute(self, request, **kwargs):
+        self.calls.append((request, kwargs))
+        raise self.error
+
+
+_ERROR_CASES = (
+    (
+        SSHPolicyDenied(_policy_failure(Decision.DENY)),
+        "PolicyDeniedError",
+        "request denied by central policy",
+    ),
+    (
+        SSHApprovalRequired(
+            _policy_failure(
+                Decision.APPROVAL_REQUIRED,
+                approval_required=True,
+            )
+        ),
+        "ApprovalRequiredError",
+        "approval required by central policy",
+    ),
+    (
+        SSHCredentialError("SUPERSECRET credential ref"),
+        "SSHCredentialUnavailableError",
+        "SSH credential is unavailable",
+    ),
+    (
+        SSHHostKeyVerificationError("SUPERSECRET host key"),
+        "SSHHostKeyError",
+        "SSH host key verification failed",
+    ),
+    (
+        SSHConnectionError("SUPERSECRET transport detail"),
+        "SSHTransportError",
+        "SSH transport failed",
+    ),
+    (
+        RuntimeError("SUPERSECRET raw library exception"),
+        "SSHExecutionError",
+        "SSH execution failed",
+    ),
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "public_error_name", "public_message"),
+    _ERROR_CASES,
+)
+async def test_ssh_exec_normalizes_internal_failures(
+    error: Exception,
+    public_error_name: str,
+    public_message: str,
+) -> None:
+    executor = RaisingExecutor(error)
+    service = _service(executor)
+
+    with pytest.raises(
+        getattr(api_errors, public_error_name),
+        match=public_message,
+    ) as exc_info:
+        await service.ssh_exec(
+            models.PrincipalContext(profile="developer"),
+            _request(),
+        )
+
+    rendered = str(exc_info.value)
+    assert "SUPERSECRET" not in rendered
+    assert "secret://" not in rendered
