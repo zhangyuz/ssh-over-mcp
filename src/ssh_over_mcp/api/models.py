@@ -14,7 +14,6 @@ MAX_MCP_ENV_ITEMS = 128
 MAX_MCP_ENV_NAME_CHARS = 128
 MAX_MCP_ENV_VALUE_CHARS = 8192
 MAX_MCP_PRIVILEGE_CHARS = 64
-MAX_MCP_HOST_ALIAS_CHARS = 256
 MAX_MCP_STDIN_CHARS = 1024 * 1024
 
 _MCP_PATH = Annotated[str, Field(max_length=MAX_MCP_PATH_CHARS)]
@@ -106,10 +105,7 @@ class PolicyExplainResult(BaseModel):
 class SSHExecRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    host: str = Field(
-        min_length=1,
-        max_length=MAX_MCP_HOST_ALIAS_CHARS,
-    )
+    host: str = Field(min_length=1)
     executable: _MCP_REQUIRED_PATH
     args: tuple[_MCP_ARG, ...] = Field(
         default_factory=tuple,
