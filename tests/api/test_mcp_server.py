@@ -324,3 +324,28 @@ async def test_ssh_exec_rejects_client_profile_override_before_service_execution
 
     assert result.is_error is True
     assert service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_ssh_exec_validation_error_does_not_echo_sensitive_input() -> None:
+    service = RecordingService()
+    server = build_mcp_server(
+        service=service,
+        principal_provider=StaticTestPrincipalProvider(),
+    )
+
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "ssh_exec",
+            {
+                "host": "host-a",
+                "executable": "/bin/echo",
+                "env": {"": "SUPERSECRET"},
+            },
+        )
+
+    assert result.is_error is True
+    error_text = tool_error_text(result)
+    assert "SUPERSECRET" not in error_text
+    assert "invalid tool input" in error_text
+    assert service.calls == []
