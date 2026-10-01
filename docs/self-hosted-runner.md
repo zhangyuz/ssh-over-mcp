@@ -5,15 +5,19 @@ container on the dedicated Intel/x86 Mac host. The container is always
 **Ubuntu 26.04 x86_64**. Apple Silicon/M4 is intentionally excluded from
 runner scheduling.
 
-Deploy it from the repository root with one command:
+For continuous availability on the dedicated Intel Mac, install the per-user
+supervisor from the repository root:
 
 ```bash
-bash scripts/deploy-mac-x86-runner.sh up
+bash scripts/supervise-mac-x86-runner.sh install
 ```
 
-The entrypoint builds the pinned image, obtains a one-time GitHub runner
-registration token with authenticated `gh` when needed, starts the hardened
-container, and waits until GitHub reports the runner online.
+The launchd-managed supervisor keeps at most one hardened ephemeral runner
+container available. Every runner still accepts exactly one GitHub Actions job,
+then deregisters and is removed. After retirement, the supervisor obtains a new
+short-lived registration token through authenticated `gh` and starts a fresh
+container. The one-shot `deploy-mac-x86-runner.sh up` entrypoint remains
+available for maintenance and bootstrap validation.
 
 ## What this runner validates
 
@@ -48,9 +52,9 @@ Recommended capacity:
 - outbound HTTPS access to GitHub;
 - no inbound network service required.
 
-The dedicated `deploy-mac-x86-runner.sh` entrypoint rejects arm64/Apple Silicon
-hosts. The lower-level `deploy-runner.sh` remains available for maintenance,
-but project workflow scheduling requires the x86-specific label.
+Both the dedicated deploy entrypoint and the supervisor reject arm64/Apple
+Silicon hosts. The lower-level `deploy-runner.sh` remains available for
+maintenance, but project workflow scheduling requires the x86-specific label.
 
 ## Runner image
 
@@ -108,95 +112,102 @@ The deployment also does not mount:
 The runner's job workspace lives only in the container filesystem. In
 ephemeral mode the container is removed after its one assigned job.
 
-The self-hosted workflow itself:
+The self-hosted CI workflow itself:
 
-- is manual-only via `workflow_dispatch`;
-- must be launched from trusted `main`;
+- is defined by trusted base-branch workflow code;
+- runs on `main` pushes and same-repository `pull_request_target` events;
+- rejects fork pull requests before assigning the self-hosted runner;
 - uses `permissions: contents: read`;
 - receives no repository secrets;
-- checks out the explicitly selected target ref only after runner hardening
-  preflight;
+- checks out the selected revision only after runner hardening preflight;
 - pins third-party GitHub Actions to full commit SHAs.
 
-A selected target ref still contains executable code. Choosing the ref is an
-explicit trust decision.
+A selected target revision still contains executable code. The current
+same-repository PR gate treats that revision as trusted project code.
 
 ## Deploy on the Intel Mac
 
-Use the dedicated one-click entrypoint:
+For normal operation, authenticate `gh` for the repository and install the
+supervisor:
+
+```bash
+gh auth status
+bash scripts/supervise-mac-x86-runner.sh install
+```
+
+The supervisor:
+
+1. requires macOS on `x86_64` and rejects Apple Silicon/M4;
+2. verifies Docker Desktop and authenticated `gh` access;
+3. builds the pinned Ubuntu 26.04 Linux x64 image only when it is missing
+   (or when `RUNNER_SUPERVISOR_REBUILD=true`);
+4. starts or adopts at most one runner container;
+5. waits for that ephemeral runner to finish its single job and retire;
+6. starts a replacement with a newly minted registration token;
+7. is restarted by a per-user launchd service after login or process failure.
+
+The supervisor deliberately rejects `RUNNER_TOKEN`. A repository runner
+registration token is short-lived and one-time bootstrap material, so reusing
+one across replacement containers would be incorrect. Authenticated `gh`
+mints a fresh token on every call to the existing deploy entrypoint.
+
+The launchd plist stores repository paths and a command search path only. It
+does not store GitHub tokens or repository secrets.
+
+For a one-shot runner without launchd supervision:
 
 ```bash
 bash scripts/deploy-mac-x86-runner.sh up
 ```
 
-The script:
-
-1. requires macOS on `x86_64` and rejects Apple Silicon/M4;
-2. verifies Docker Desktop is installed and running;
-3. builds the pinned Ubuntu 26.04 Linux x64 runner image;
-4. obtains or accepts a short-lived GitHub runner registration token;
-5. starts the hardened ephemeral runner container;
-6. waits until GitHub reports the runner online.
-
-### Registration token
-
-Preferred options, in order:
-
-1. export a one-time registration token:
-
-   ```bash
-   RUNNER_TOKEN='<token>' bash scripts/deploy-runner.sh up
-   ```
-
-2. if GitHub CLI is installed and authenticated with repository admin
-   permission, omit `RUNNER_TOKEN`; the script requests a repository runner
-   registration token through `gh api`.
-
-A registration token is not a long-lived runner credential and must not be
-committed.
-
-To copy a token manually, use:
-
-```text
-Repository
-→ Settings
-→ Actions
-→ Runners
-→ New self-hosted runner
-```
-
-The script only needs the registration token; the host does not need to
-install the GitHub runner binary directly.
+That maintenance entrypoint may still accept an explicitly supplied one-time
+`RUNNER_TOKEN`, or it can mint one with authenticated `gh`.
 
 ## Common commands
 
-Start the default ephemeral runner:
+Install/start continuous launchd supervision:
 
 ```bash
-RUNNER_TOKEN='...' bash scripts/deploy-mac-x86-runner.sh up
+bash scripts/supervise-mac-x86-runner.sh install
 ```
 
-Show status:
+Show supervisor and current container status:
 
 ```bash
+bash scripts/supervise-mac-x86-runner.sh status
+```
+
+Follow supervisor logs:
+
+```bash
+bash scripts/supervise-mac-x86-runner.sh logs
+```
+
+Stop launchd supervision and remove its plist:
+
+```bash
+bash scripts/supervise-mac-x86-runner.sh uninstall
+```
+
+Run the supervisor in the foreground:
+
+```bash
+bash scripts/supervise-mac-x86-runner.sh run
+```
+
+Run exactly one supervised lifecycle, useful for maintenance:
+
+```bash
+bash scripts/supervise-mac-x86-runner.sh once
+```
+
+The original one-shot deployment commands remain available:
+
+```bash
+bash scripts/deploy-mac-x86-runner.sh up
 bash scripts/deploy-mac-x86-runner.sh status
-```
-
-Follow logs:
-
-```bash
 bash scripts/deploy-mac-x86-runner.sh logs
-```
-
-Remove the runner container:
-
-```bash
 bash scripts/deploy-mac-x86-runner.sh down
-```
-
-Build only:
-
-```bash
 bash scripts/deploy-mac-x86-runner.sh build
 ```
 
@@ -216,8 +227,10 @@ runner is automatically deregistered by GitHub
 This is the preferred validation mode.
 
 The dedicated macOS x86 entrypoint rejects `--persistent`. Each runner instance
-is one-job ephemeral by policy. The lower-level maintenance script still has a
-persistent mode, but it is not part of the active project runner workflow.
+is one-job ephemeral by policy. The host-side supervisor is persistent, but the
+GitHub Actions runners it creates are not: one container equals one registration
+equals one job. The lower-level maintenance script still has a persistent mode,
+but it is not part of the active project runner workflow.
 
 ## Linux host behavior
 
@@ -246,13 +259,14 @@ run inside Docker Desktop.
 
 ## Run validation
 
-After the runner reports online in GitHub:
+The normal CI workflow automatically queues on `main` pushes and trusted
+same-repository pull-request updates. The supervisor keeps a disposable runner
+available to accept the next queued job, so no operator action is required
+between successful runner lifecycles.
 
-1. open **Actions**;
-2. choose **Self-hosted Ubuntu 26.04 x86 validation**;
-3. choose **Run workflow** from `main`;
-4. enter the branch, tag, or commit SHA to validate;
-5. run the workflow.
+For manual diagnostics, the repository's dedicated self-hosted validation
+workflow can still be dispatched from trusted `main` against an explicitly
+selected branch, tag, or commit SHA.
 
 The job requires:
 
