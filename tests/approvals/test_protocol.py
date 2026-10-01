@@ -132,6 +132,7 @@ def test_execution_and_admin_requests_round_trip_strictly() -> None:
         ),
         ConsumeApprovalRequest(
             message_id=MSG_ID,
+            request_id=REQ_ID,
             approval_id=APR_ID,
             binding=_binding(),
         ),
@@ -215,6 +216,7 @@ def test_responses_round_trip_strictly() -> None:
             "version": 1,
             "message_id": MSG_ID,
             "op": "consume_approval",
+            "request_id": REQ_ID,
             "approval_id": APR_ID,
             "binding": _binding().model_dump(mode="json"),
             "binding_hmac": "SUPERSECRET",
@@ -361,4 +363,17 @@ def test_encoding_rejects_payload_over_message_limit() -> None:
     ):
         encode_ledger_message(
             Oversized(data="x" * (MAX_LEDGER_MESSAGE_BYTES + 1))
+        )
+
+
+def test_consume_approval_requires_current_request_id() -> None:
+    from pydantic import ValidationError
+
+    from ssh_over_mcp.approvals.protocol import ConsumeApprovalRequest
+
+    with pytest.raises(ValidationError):
+        ConsumeApprovalRequest(
+            message_id=MSG_ID,
+            approval_id=APR_ID,
+            binding=_binding(),
         )

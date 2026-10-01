@@ -439,7 +439,8 @@ The ledger performs consumption inside one SQLite write transaction:
 5. require principal ID/profile, binding HMAC, host/tool, and policy version to
    match;
 6. update `granted -> consumed` with a conditional state predicate;
-7. append `approval_consumed` audit event in the same transaction;
+7. append `approval_consumed` audit event in the same transaction using the
+   current retry request ID supplied by the execution client;
 8. commit.
 
 Exactly one concurrent caller may observe successful consumption.
@@ -490,9 +491,12 @@ A maximum legal canonical binding is already large enough that transmitting
 both the binding and a duplicated `ApprovalSafeSummary` would exceed the
 64 KiB cap. Therefore `ensure_approval` carries request ID, canonical binding,
 and risk only. The ledger service derives the safe summary from that binding
-plus risk before persistence. Admin list responses use bounded lightweight
-items; show/status responses may return full `ApprovalStatus`. No request
-contains caller-selected TTL, operator identity, or binding HMAC.
+plus risk before persistence. `consume_approval` carries the current retry
+request ID, approval ID, and canonical binding so the atomic consume transaction
+can correlate its `approval_consumed` event to the execution attempt. Admin
+list responses use bounded lightweight items; show/status responses may return
+full `ApprovalStatus`. No request contains caller-selected TTL, operator
+identity, or binding HMAC.
 
 The two sockets have distinct filesystem ownership/mode policy. The execution
 client identity cannot connect to the admin authority endpoint.

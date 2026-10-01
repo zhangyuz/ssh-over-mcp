@@ -177,3 +177,99 @@ def test_approval_status_requires_utc_expiry_and_strict_ids() -> None:
             safe_summary=summary,
             binding_fingerprint=_HMAC_SHORT,
         )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"stdin_length": 1},
+        {"stdin_fingerprint": _SHA_A},
+        {"content_length": 1},
+        {"content_fingerprint": _SHA_A},
+    ],
+)
+def test_approval_execution_facts_require_length_fingerprint_pairs(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        ApprovalExecutionFacts.model_validate(payload)
+
+
+def test_approval_binding_requires_argv_fingerprint_and_payload_pairs() -> None:
+    base = {
+        "principal_id": "static:developer",
+        "profile": "developer",
+        "host": "host-a",
+        "tool": "ssh_exec",
+        "privilege": "user",
+        "policy_version": "1",
+    }
+
+    with pytest.raises(ValidationError):
+        ApprovalBindingInput(**base)
+
+    for extra in (
+        {"argv_fingerprint": _SHA_A, "stdin_length": 1},
+        {"argv_fingerprint": _SHA_A, "stdin_fingerprint": _SHA_A},
+        {"argv_fingerprint": _SHA_A, "content_length": 1},
+        {"argv_fingerprint": _SHA_A, "content_fingerprint": _SHA_A},
+    ):
+        with pytest.raises(ValidationError):
+            ApprovalBindingInput(**base, **extra)
+
+
+def test_safe_summary_requires_canonical_fingerprint_metadata() -> None:
+    base = {
+        "principal_id": "static:developer",
+        "profile": "developer",
+        "host": "host-a",
+        "tool": "ssh_exec",
+        "privilege": "user",
+        "policy_version": "1",
+        "risk": RiskLevel.HIGH,
+    }
+
+    with pytest.raises(ValidationError):
+        ApprovalSafeSummary(**base)
+
+    with pytest.raises(ValidationError):
+        ApprovalSafeSummary(
+            **base,
+            argv_fingerprint=_SHA_A,
+            env_names=("B", "A"),
+        )
+
+    with pytest.raises(ValidationError):
+        ApprovalSafeSummary(
+            **base,
+            argv_fingerprint=_SHA_A,
+            env_names=("A", "A"),
+        )
+
+
+def test_approval_status_must_match_safe_summary_identity() -> None:
+    summary = ApprovalSafeSummary(
+        principal_id="static:developer",
+        profile="developer",
+        host="host-a",
+        tool="ssh_exec",
+        privilege="user",
+        policy_version="1",
+        risk=RiskLevel.HIGH,
+        argv_fingerprint=_SHA_A,
+    )
+
+    for mismatch in (
+        {"host": "host-b", "tool": "ssh_exec", "risk": RiskLevel.HIGH},
+        {"host": "host-a", "tool": "fs_read", "risk": RiskLevel.HIGH},
+        {"host": "host-a", "tool": "ssh_exec", "risk": RiskLevel.LOW},
+    ):
+        with pytest.raises(ValidationError):
+            ApprovalStatus(
+                approval_id="apr_" + ("a" * 32),
+                state=ApprovalState.PENDING,
+                expires_at=datetime(2026, 10, 1, 12, 0, tzinfo=UTC),
+                safe_summary=summary,
+                binding_fingerprint=_HMAC_SHORT,
+                **mismatch,
+            )

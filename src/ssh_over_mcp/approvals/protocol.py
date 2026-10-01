@@ -66,6 +66,7 @@ class ApprovalStatusRequest(_Message):
 
 class ConsumeApprovalRequest(_Message):
     op: Literal["consume_approval"] = "consume_approval"
+    request_id: str = Field(pattern=_REQUEST_ID)
     approval_id: str = Field(pattern=_APPROVAL_ID)
     binding: ApprovalBindingInput
 

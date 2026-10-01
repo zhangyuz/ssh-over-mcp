@@ -4,7 +4,13 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from ssh_over_mcp.policy.models import RiskLevel
 
@@ -24,6 +30,15 @@ _SHORT_HMAC = Annotated[
     str,
     Field(pattern=r"^hmac-sha256:v1:[0-9a-f]{16}$"),
 ]
+
+
+def _require_pair(
+    length: int | None,
+    fingerprint: str | None,
+    label: str,
+) -> None:
+    if (length is None) != (fingerprint is None):
+        raise ValueError(f"{label} length and fingerprint must be paired")
 
 
 class ApprovalState(StrEnum):
@@ -77,6 +92,20 @@ class ApprovalExecutionFacts(BaseModel):
     )
     content_fingerprint: _SHA256 | None = None
 
+    @model_validator(mode="after")
+    def validate_payload_fingerprint_pairs(self) -> ApprovalExecutionFacts:
+        _require_pair(
+            self.stdin_length,
+            self.stdin_fingerprint,
+            "stdin",
+        )
+        _require_pair(
+            self.content_length,
+            self.content_fingerprint,
+            "content",
+        )
+        return self
+
 
 class ApprovalSafeSummary(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -104,7 +133,7 @@ class ApprovalSafeSummary(BaseModel):
         max_length=_MAX_PATH_CHARS,
     )
     argv_count: int = Field(default=0, strict=True, ge=0, le=256)
-    argv_fingerprint: _SHA256 | None = None
+    argv_fingerprint: _SHA256
     env_names: tuple[
         Annotated[str, Field(min_length=1, max_length=_MAX_ENV_NAME_CHARS)],
         ...,
@@ -142,6 +171,15 @@ class ApprovalSafeSummary(BaseModel):
         ge=0,
     )
 
+    @field_validator("env_names")
+    @classmethod
+    def validate_env_names(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        if value != tuple(sorted(value)) or len(value) != len(set(value)):
+            raise ValueError("environment names must be unique and sorted")
+        return value
 
 class ApprovalBindingInput(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -169,7 +207,7 @@ class ApprovalBindingInput(BaseModel):
         max_length=_MAX_PATH_CHARS,
     )
     argv_count: int = Field(default=0, strict=True, ge=0, le=256)
-    argv_fingerprint: _SHA256 | None = None
+    argv_fingerprint: _SHA256
     env_fingerprints: tuple[ApprovalEnvFingerprint, ...] = Field(
         default_factory=tuple,
         max_length=_MAX_ENV_ITEMS,
@@ -220,6 +258,20 @@ class ApprovalBindingInput(BaseModel):
             )
         return value
 
+    @model_validator(mode="after")
+    def validate_binding_payload_pairs(self) -> ApprovalBindingInput:
+        _require_pair(
+            self.stdin_length,
+            self.stdin_fingerprint,
+            "stdin",
+        )
+        _require_pair(
+            self.content_length,
+            self.content_fingerprint,
+            "content",
+        )
+        return self
+
 
 class ApprovalStatus(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -239,3 +291,13 @@ class ApprovalStatus(BaseModel):
         if value.tzinfo is None or value.utcoffset() != timedelta(0):
             raise ValueError("expires_at must be timezone-aware UTC")
         return value
+
+    @model_validator(mode="after")
+    def validate_safe_summary_identity(self) -> ApprovalStatus:
+        if self.host != self.safe_summary.host:
+            raise ValueError("approval host does not match safe summary")
+        if self.tool != self.safe_summary.tool:
+            raise ValueError("approval tool does not match safe summary")
+        if self.risk != self.safe_summary.risk:
+            raise ValueError("approval risk does not match safe summary")
+        return self

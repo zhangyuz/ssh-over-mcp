@@ -71,7 +71,7 @@
   - `get_approval(approval_id: str, *, principal_id: str | None = None, profile: str | None = None) -> ApprovalStatus | None`;
   - `grant(approval_id: str, *, operator_identity: str) -> ApprovalStatus`;
   - `deny(approval_id: str, *, operator_identity: str) -> ApprovalStatus`;
-  - `consume(approval_id: str, binding: ApprovalBindingInput) -> ApprovalStatus`;
+  - `consume(approval_id: str, binding: ApprovalBindingInput, request_id: str) -> ApprovalStatus`;
   - `list_active(limit: int = 100) -> tuple[ApprovalStatus, ...]`.
 - Binding authorization uses `HMAC-SHA256(key, canonical_binding_bytes(binding))` and constant-time comparison.
 
@@ -79,7 +79,7 @@
 - [ ] **Step 2: Verify RED**
 - [ ] **Step 3: Implement ensure/get/grant/deny/expiry in explicit transactions; ensure/reuse appends one approval_required event for the current request, grant/deny append their decision event, and expiry transition appends exactly one approval_expired event**
 - [ ] **Step 4: Add failing concurrent-consume/restart tests**
-- [ ] **Step 5: Implement `BEGIN IMMEDIATE` consume transaction and same-transaction `approval_consumed` event**
+- [ ] **Step 5: Implement `BEGIN IMMEDIATE` consume transaction and same-transaction `approval_consumed` event correlated to the supplied current request ID**
 - [ ] **Step 6: Verify exactly one concurrent consume succeeds and restart preserves consumed state**
 - [ ] **Step 7: Verify raw test secrets are absent from database text dumps and exception tracebacks**
 - [ ] **Step 8: Commit `Feat: add atomic approval ledger`**
@@ -96,7 +96,7 @@
 
 **Interfaces:**
 - Produces synchronous one-shot `LedgerTransport.round_trip(frame: bytes) -> bytes` and `UnixLedgerTransport(socket_path: Path, expected_server: LinuxPeerCredentialPolicy, timeout_seconds=2.0)`; each round trip opens/connects one AF_UNIX/SOCK_STREAM socket, authenticates the server with SO_PEERCRED, exchanges one frame, and closes.
-- Produces `ExecutionLedgerDispatcher(store).dispatch(request, *, peer: LinuxPeerCredentials)` accepting only ping/audit/ensure/status/consume.
+- Produces `ExecutionLedgerDispatcher(store).dispatch(request, *, peer: LinuxPeerCredentials)` accepting only ping/audit/ensure/status/consume. For `ensure_approval`, the dispatcher derives `ApprovalSafeSummary` from the request binding plus risk before calling the store; for `consume_approval`, it forwards the current retry request ID into the atomic consume transaction.
 - Produces `AdminLedgerDispatcher(store).dispatch(request, *, peer: LinuxPeerCredentials)` accepting only list/show/grant/deny; grant/deny derive operator identity exactly as `uid:<uid>:gid:<gid>` from `peer`, never from request data.
 - Produces async `SecurityLedgerClient` and `SecurityLedgerAdminClient`; each public call uses `asyncio.to_thread` around one fresh `UnixLedgerTransport.round_trip`. Clients retain socket path + expected ledger peer policy, not a live socket, so daemon restart can recover without restarting MCP.
 
