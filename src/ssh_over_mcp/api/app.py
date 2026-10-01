@@ -11,6 +11,7 @@ from .principal import StaticPrincipalProvider
 from .runtime import MCPRuntimeSettings
 from .server import build_mcp_server
 from .service import MCPService
+from .ssh_runtime import build_ssh_runtime, load_credential_map
 
 MAX_MCP_HTTP_REQUEST_BYTES = 128 * 1024
 
@@ -27,9 +28,16 @@ def build_application(
         profile=settings.profile,
         policy=bundle.policy,
     )
+    credential_map = load_credential_map(settings.credential_map_path)
+    ssh_runtime = build_ssh_runtime(
+        inventory=bundle.inventory,
+        policy=policy,
+        credential_map=credential_map,
+    )
     service = MCPService(
         inventory=bundle.inventory,
         policy=policy,
+        ssh_executor=ssh_runtime.executor,
     )
     mcp = build_mcp_server(
         service=service,
