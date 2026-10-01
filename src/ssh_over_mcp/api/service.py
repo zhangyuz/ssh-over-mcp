@@ -12,8 +12,8 @@ from .errors import (
     InvalidExplainToolError,
 )
 from .models import (
-    HostSummary,
     HostsListResult,
+    HostSummary,
     PolicyExplainRequest,
     PolicyExplainResult,
     PrincipalContext,
