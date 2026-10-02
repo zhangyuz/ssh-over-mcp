@@ -142,15 +142,21 @@ Full E2E MUST prefer real kernel/service evidence over mocks when feasible.
 
 The ordinary PR runner MUST NOT be made privileged merely to run E2E. In particular, do not add a Docker socket, broad sudo, host PID namespace, writable cgroup root, or equivalent escape surface to the normal runner.
 
-High-privilege fixture setup belongs to operator-owned infrastructure outside the checkout:
-- root-owned helper;
-- root-owned configuration;
-- narrowly scoped sudo entry;
-- exact helper hash/integrity checks;
-- exact trusted commit input;
-- disposable fixture resources.
+Capability-bearing checked-out code MUST NOT execute on a persistent CI/orchestrator host. `CAP_SETUID`/`CAP_SETGID` are intentionally trusted host-agent authority under ADR 0005 and can be used by compromised host-agent code to impersonate other identities, including UID 0 in the same user namespace.
 
-Checked-out repository code may request the fixed fixture operation but MUST NOT gain generic root authority.
+Level-3 E2E therefore uses a fresh disposable Linux virtual machine for every run:
+- the persistent orchestrator account is non-admin/non-root and receives no generic sudo;
+- the orchestrator executes only trusted-main workflow/orchestration code;
+- the target commit is fetched into a bare Git repository and transferred as a bundle; its worktree is never checked out or executed on the persistent host;
+- the guest exposes no host filesystem mount to the target code;
+- GitHub tokens, production credentials, and host secrets are not passed into the guest;
+- the target commit may exercise root/capability paths only inside the guest;
+- in-guest cleanup is still tested;
+- the entire guest is destroyed after every run and its absence is verified.
+
+Unknown pre-existing guest state MUST fail closed rather than being silently reused or deleted.
+
+The reference Phase 7A provider is a dedicated native macOS x86 orchestrator using a pinned Lima/Ubuntu 26.04 guest. Equivalent future providers must preserve the same or stronger isolation contract.
 
 ## 8. Review discipline
 

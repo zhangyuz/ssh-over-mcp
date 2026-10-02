@@ -296,17 +296,39 @@ Examples:
 
 ## 10. Fixture lifecycle
 
-Each E2E run must:
-1. validate exact trusted commit and fixture helper integrity;
-2. reject unknown stale privileged state;
-3. create disposable test identities/keys/cgroups/data;
-4. start sshd, manager, Ledger, and origin;
-5. execute the E2E matrix;
-6. collect security evidence;
-7. teardown all disposable state;
-8. verify teardown.
+Each Level-3 E2E run has an outer persistent-host lifecycle and an inner disposable-guest lifecycle.
 
-Cleanup verification includes:
+### 10.1 Persistent orchestrator lifecycle
+
+The trusted orchestrator must:
+1. run only trusted-main workflow/orchestration code under a dedicated non-admin account;
+2. validate the requested target as an exact 40-hex commit;
+3. fail closed if the fixed Lima instance name already exists;
+4. fetch the target into a temporary bare Git repository without checking out its worktree on the host;
+5. create a Git bundle containing the exact target commit;
+6. start a fresh pinned Ubuntu 26.04 x86_64 Lima guest with no host filesystem mounts;
+7. copy only the source bundle and trusted orchestration metadata into the guest;
+8. never pass GitHub tokens, production credentials, or unrelated host secrets into the guest;
+9. collect bounded E2E evidence;
+10. stop/delete the guest it created in a `finally` path and verify the instance is absent;
+11. remove the temporary bare repository/bundle.
+
+Unknown pre-existing guest state causes fail-closed startup rather than silent reuse or deletion.
+
+### 10.2 Disposable guest lifecycle
+
+Inside the fresh guest, the E2E must:
+1. clone/checkout the transferred bundle and verify HEAD equals the requested target commit;
+2. create disposable test identities/keys/cgroups/data;
+3. install the exact target launcher at the fixed root-owned guest path;
+4. start sshd and the containment manager;
+5. start test-local Ledger/origin components as the non-root probe identity where applicable;
+6. execute the E2E matrix;
+7. collect security evidence;
+8. teardown all disposable in-guest state;
+9. verify teardown before guest destruction.
+
+In-guest cleanup verification includes:
 - no fixture sshd process;
 - no manager process;
 - no workload process;
@@ -315,12 +337,10 @@ Cleanup verification includes:
 - no temporary SSH private key;
 - no temporary origin credential;
 - no temporary Ledger DB/HMAC material;
-- no test filesystem state that the fixture contract marks disposable;
-- no temporary fixture identities when fixture design uses per-run identities.
+- no disposable test filesystem state;
+- no unexpected fixture process/identity residue.
 
-Business assertions passing with cleanup failure is an E2E failure.
-
-Unknown stale privileged state causes fail-closed startup rather than silent repair.
+Business assertions passing with in-guest cleanup failure is an E2E failure. Guest destruction is an additional outer containment requirement, not a substitute for these assertions.
 
 ## 11. CI and E2E gate model
 
@@ -365,45 +385,65 @@ Phase closure and release-candidate work always requires full E2E.
 
 Docs-only changes that do not change these boundaries do not require the expensive E2E gate.
 
-## 12. High-privilege workflow trust model
+## 12. Disposable-guest workflow trust model
 
-The existing `ssh-over-mcp-cgroup-live` pattern is extended rather than weakening ordinary CI.
+The existing ordinary CI and historical `ssh-over-mcp-cgroup-live` contract remain unchanged. Full product E2E adds a separate orchestration boundary rather than upgrading either runner with more privilege.
 
-Operator-owned infrastructure outside the checkout owns:
-- root E2E fixture helper;
-- root-owned helper config;
-- fixed root-owned host-agent capability launcher;
-- narrowly scoped sudo rules for the reviewed fixed helpers only;
-- helper/launcher hash and ownership/mode integrity expectations;
-- delegated-cgroup/sshd/bootstrap authority.
+The reference persistent orchestrator is:
+- a dedicated native macOS x86 account such as `gha-e2e-orchestrator`;
+- non-admin/non-root with no passwordless sudo;
+- a self-hosted runner used only by the trusted-main manual E2E workflow;
+- Lima 2.2.0 with the `vz` driver on Intel macOS with Hypervisor support;
+- no target-commit checkout or execution on the persistent host.
 
-The GitHub runner remains:
-- non-root;
-- zero capabilities;
-- no Docker socket;
-- no generic root shell.
+The trusted guest image is Ubuntu 26.04 x86_64 server cloud image dated 2026-07-20 with SHA-256 `117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477`.
 
-The E2E helper and capability launcher accept only their reviewed fixed operations. Workflow/user input cannot inject arbitrary paths, UIDs, commands, sudo arguments, launcher arguments, or helper flags.
+The guest is started with no host filesystem mounts and no product port forwards. The target commit is transferred as a Git bundle produced from a host-side bare repository. The GitHub token used to fetch the bundle remains on the orchestrator and is never copied into the guest.
 
-The capability launcher must prove that checked-out/application code is not imported while privileged. It transitions first to the exact non-root host-agent identity with only `CAP_SETUID`/`CAP_SETGID`, verifies that state, and only then enters the host-agent application.
+The capability-bearing target checkout may become root inside the disposable guest. That is explicitly accepted by ADR 0006 because the VM is the containment boundary and receives only test-scoped state. It may not gain authority over the persistent orchestrator.
 
-The E2E request is bound to an exact trusted 40-hex commit.
+The real sshd path inside the guest remains:
 
-This architecture makes full E2E required evidence without granting unchecked PR code generic root authority.
+```text
+sshd
+→ ForceCommand exact sudo target
+→ fixed capability launcher
+→ non-root host-agent with CAP_SETUID/CAP_SETGID only
+→ authenticated containment manager
+→ delegated cgroup-v2
+→ zero-capability workload
+```
+
+The capability launcher must still prove that `ssh_over_mcp` application code is not imported while the launcher itself is root; the disposable VM does not weaken the production-representative inner boundary.
+
+The E2E request is bound to an exact target commit through all of:
+- trusted workflow `commit_sha` input;
+- bare-repository fetch result;
+- bundle target ref;
+- guest checkout `git rev-parse HEAD`;
+- guest expected-commit value.
+
+The workflow run's GitHub `headSha` identifies the trusted-main workflow revision and is not the tested-commit identity.
+
+After every run the Lima instance must be destroyed and its absence verified. If a fixed-name guest exists before the run, stop for operator inspection rather than silently deleting unknown state.
+
 ## 13. Implementation slicing
 
 Phase 7A is split into four independently reviewable slices.
 
 ### 7A1 — E2E fixture foundation
 Build only:
+- trusted native-macOS Lima orchestrator and pinned guest definition;
+- exact-commit bare-Git → bundle transfer with no host target checkout;
 - fixture identities/configuration;
 - real sshd + ForceCommand;
 - fixed no-argument capability launcher and exact sudo contract;
 - verified non-root host-agent startup with only `CAP_SETUID`/`CAP_SETGID`;
 - manager socket;
 - delegated cgroup;
-- deterministic bootstrap/teardown;
-- exact-commit/helper integrity checks.
+- deterministic in-guest bootstrap/teardown;
+- whole-guest destruction verification;
+- exact-commit/provider integrity checks.
 
 The completion focus is fixture privilege separation and cleanup.
 
@@ -478,13 +518,14 @@ Phase 7A is complete only when:
 15. Ledger outage fails closed;
 16. containment failure never releases the child to exec;
 17. secrets are absent from model-visible output/audit/log evidence;
-18. cleanup verification passes;
-19. exact-head dedicated E2E evidence exists for required changes;
-20. ordinary CI security posture is not weakened;
-21. development methodology is normative and linked from repository entrypoints;
-22. final review has no remaining Critical/Important finding;
-23. exact PR-head and merge-main CI gates pass;
-24. merged worktrees/branches and disposable fixture state are cleaned.
+18. in-guest cleanup verification passes;
+19. capability-bearing target checkout executes only inside a fresh disposable Linux VM, never on the persistent orchestrator;
+20. the guest receives no host filesystem mount, GitHub token, production credential, or unrelated host secret;
+21. exact-target E2E evidence exists and whole-guest destruction is verified after every run;
+22. ordinary CI security posture is not weakened;
+23. development methodology is normative and linked from repository entrypoints;
+24. final review has no remaining Critical/Important finding and exact PR-head/merge-main ordinary CI gates pass;
+25. merged worktrees/branches, host-side bundle state, guest instance, and disposable in-guest fixture state are cleaned.
 
 ## 17. Later Phase 7 slices
 

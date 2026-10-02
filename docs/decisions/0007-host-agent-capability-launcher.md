@@ -47,7 +47,9 @@ The launcher begins as root only for a bounded credential/capability transition.
 
 Only after that state is verified may the process enter the host-agent application code.
 
-The launcher source is reviewed in the repository, but the launcher used by the trusted managed-host/E2E fixture is an operator-installed copy outside the checkout. The dedicated live workflow verifies the installed artifact's owner, mode, fixed path, and SHA-256 before use.
+The launcher source is reviewed in the repository. For a production managed host, the executable launcher remains an operator-installed trusted artifact outside the writable application checkout and its owner/mode/path/hash are verified before use.
+
+For Phase 7A E2E, ADR 0006 provides a different outer trust boundary: the exact target commit is transferred into a fresh disposable Linux guest and the guest may install that target commit's launcher at the fixed root-owned path. That exception is safe only because capability-bearing target code executes inside the disposable VM; it is not a production installation rule.
 
 The launcher does not accept caller-selected UID/GID, group, executable, module path, policy path, socket path, or capability set.
 
@@ -85,8 +87,8 @@ The SSH account must not be able to:
 - alter the root-owned launcher configuration;
 - influence Python/module search paths used before the privilege drop.
 
-The E2E/managed-host preflight must fail closed if:
-- launcher owner/mode/path/hash is wrong;
+The managed-host preflight, and the in-guest E2E preflight where applicable, must fail closed if:
+- launcher owner/mode/path/hash is wrong for the applicable deployment contract;
 - the sudo policy contains any additional authorized command;
 - the ForceCommand context is not exact;
 - the post-transition host-agent identity differs from the configured UID/GID/groups;

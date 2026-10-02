@@ -1,106 +1,108 @@
-# ADR 0006: Full local E2E uses a dedicated operator-owned privilege fixture
+# ADR 0006: Full local E2E runs capability-bearing code only in a disposable Linux guest
 
 - Status: Accepted
 - Date: 2026-10-02
 
 ## Context
 
-Phase 6 closed the private reference deployment and established strong isolated evidence for the MCP control plane, Security Ledger, approvals/audit, SSH host agent, containment manager, workload identity, container networking, and Cloudflare reference boundary.
+Phase 7A needs complete product-level evidence through real Linux security boundaries: OpenSSH sshd, ForceCommand, the host agent, authenticated containment-manager IPC, delegated cgroup-v2, workload identity/capability transition, filesystem operations, approvals, and audit.
 
-Phase 7 adds stronger host and credential hardening. Before changing those boundaries further, the project needs a complete product-level E2E safety net.
+The ordinary CI runner is intentionally hardened and must remain non-root, without a Docker socket, generic sudo, writable host cgroup authority, or host PID namespace.
 
-A complete E2E must exercise real Linux behavior:
-- OpenSSH sshd;
-- ForceCommand;
-- authenticated containment-manager IPC;
-- delegated cgroup-v2;
-- workload identity/capability transition;
-- real filesystem and native execution.
+ADR 0005 intentionally grants the trusted host-agent process only `CAP_SETUID` and `CAP_SETGID` so its child can transition to the distinct workload identity. ADR 0005 also states that those capabilities are not restricted to the configured workload IDs and that compromise of capability-bearing host-agent code permits impersonation of other identities in the same user namespace.
 
-The ordinary CI runner is intentionally hardened:
-- non-root;
-- no Docker socket;
-- no writable delegated cgroup authority;
-- no generic sudo;
-- no host PID namespace.
+During Phase 7A planning, a disposable Linux probe confirmed the concrete consequence: after dropping to a non-root UID while retaining effective/permitted `CAP_SETUID`/`CAP_SETGID`, the process can successfully call `setresuid(0, 0, 0)`. Therefore a persistent runner/fixture which executes an unmerged target commit as the capability-bearing host agent would effectively give that target commit root-equivalent authority over the persistent fixture host.
 
-Weakening that runner to make E2E convenient would expand the trusted computing base and allow checked-out pull-request code to obtain authority that normal validation does not need.
+That is incompatible with the intended E2E trust model.
 
 Three designs were considered:
 
-1. run full E2E on the ordinary CI runner by adding privilege;
-2. run an all-in-one privileged container that simulates the host boundaries;
-3. retain the ordinary runner security posture and use a dedicated operator-owned fixture helper outside the checkout.
+1. run the full E2E directly on a persistent privileged Linux runner;
+2. run the full E2E in a privileged/shared-kernel container;
+3. keep the persistent orchestrator unprivileged and execute the target commit only inside a fresh disposable Linux virtual machine.
 
 ## Decision
 
-Use a dedicated operator-owned full-E2E fixture.
+Use a fresh disposable Linux virtual machine for every full E2E run.
 
-The ordinary PR-validation runner remains unprivileged.
+The persistent orchestrator:
+- is a dedicated non-admin/non-root self-hosted account;
+- has no generic sudo;
+- does not expose a Docker socket to the workflow;
+- executes only the trusted-main workflow definition and trusted-main orchestration script;
+- never checks out or executes the target commit as a host worktree;
+- fetches the exact target commit into a temporary bare Git repository;
+- creates a Git bundle from that exact commit and copies the bundle into the disposable guest;
+- never passes GitHub tokens, production credentials, or unrelated host secrets into the guest.
 
-High-privilege E2E setup is owned outside the repository checkout:
-- root-owned fixed helper;
-- root-owned helper configuration;
-- narrowly scoped sudo permission for that helper only;
-- helper integrity/hash verification;
-- exact trusted 40-hex commit input;
-- disposable fixture identities, sshd state, cgroups, sockets, keys, and test data.
+The reference provider is:
+- Intel macOS x86_64;
+- Lima 2.2.0;
+- Virtualization.framework driver `vz`;
+- Ubuntu 26.04 x86_64 server cloud image dated 2026-07-20;
+- image digest `sha256:117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477`.
 
-The checked-out repository may invoke the fixed fixture operation but does not receive a generic root shell or arbitrary helper arguments.
+The guest is created with:
+- no host filesystem mounts;
+- no Docker socket;
+- no production secrets;
+- no GitHub token;
+- no host port forwards required by the product test;
+- a fixed E2E instance name serialized by workflow concurrency;
+- exact target commit identity supplied separately by the trusted orchestrator.
 
-The E2E path must use the real product security boundaries:
+Inside the guest:
+1. the exact Git bundle is cloned/checked out;
+2. checked-out HEAD is verified against the requested 40-hex target commit;
+3. root/capability fixture setup may execute because the VM is the containment boundary;
+4. real sshd/ForceCommand/launcher/host-agent/containment/workload paths are exercised;
+5. in-guest cleanup is verified.
 
-```text
-MCP HTTP
-→ central policy / Security Ledger
-→ pinned-host-key SSH
-→ real sshd
-→ ForceCommand
-→ host agent
-→ authenticated containment manager
-→ delegated cgroup-v2
-→ one-way workload identity drop
-→ native executable / typed filesystem operation
-```
+The target commit may obtain root-equivalent authority only inside the disposable guest. That is an accepted property of this E2E because the guest contains no host mounts, production secrets, or orchestration token.
 
-Full E2E becomes required merge evidence for changes touching SSH, authorization, approvals/Ledger, credentials, host-agent, containment, filesystem mutation, audit, workload identity, host sandboxing, egress, SSH CA, secret-manager integration, or the E2E fixture itself.
+After every run, regardless of test result:
+- the orchestrator stops/deletes the guest it created;
+- verifies the guest no longer exists;
+- removes the temporary bare repository/bundle;
+- fails the workflow if guest destruction or host-side cleanup fails.
 
-Phase closure and release-candidate work always require full E2E.
+If the fixed guest name already exists before a run, the workflow fails closed and requires operator inspection. It does not silently reuse or delete unknown pre-existing guest state.
 
-Docs-only or otherwise unrelated changes continue to use the ordinary validation gate unless they alter a security boundary.
-
-Cleanup is part of the E2E result. Unknown stale privileged fixture state causes fail-closed startup. Passing business assertions with failed cleanup is a failed E2E run.
+The trusted workflow is dispatched from `main` with an exact `commit_sha` input. The GitHub workflow run's own `headSha` identifies the trusted workflow revision, not the tested commit. Tested-commit identity is established by the workflow input, bare-repository fetch result, bundle content, guest checkout HEAD, and guest expected-commit value all matching the same SHA.
 
 ## Consequences
 
 Positive:
-- later Phase 7 hardening receives a real integration safety net;
-- ordinary CI does not gain Docker/root/cgroup escape surfaces;
-- real kernel/service behavior is tested rather than simulated;
-- E2E evidence can be required without trusting arbitrary PR code with generic root;
-- fixture lifecycle and cleanup become explicit security contracts.
+- capability-bearing unmerged code cannot root a persistent host;
+- ordinary CI remains unprivileged;
+- the E2E still exercises real Linux kernel/service behavior;
+- full root/capability failure paths can be tested without pretending they are harmless;
+- a whole-VM destruction boundary supplements in-guest cleanup;
+- the reference provider is available on the existing Mac x86 host without weakening its ordinary Docker runner.
 
 Cost:
-- full E2E requires a dedicated Linux x86 fixture/operator helper;
-- the E2E gate is more expensive than ordinary CI;
-- helper/config maintenance becomes security-sensitive infrastructure;
-- trusted-commit/operator workflow is more deliberate than automatic pull-request execution.
+- full E2E is slower and more operationally complex than ordinary CI;
+- a dedicated native macOS orchestrator account/runner is required;
+- Lima/image/provider versions become security-relevant infrastructure;
+- the target commit cannot use the workflow run `headSha` as its identity proof;
+- guest image/network lifecycle requires explicit maintenance.
 
 Deferred:
-- live Cloudflare account E2E remains a separate explicitly approved external-state workflow;
-- additional Phase 7 OS hardening, SSH CA, secret-manager, and fuzz/property testing build on this foundation.
+- Phase 7B may further constrain E2E guest egress;
+- live Cloudflare account E2E remains separately approved external-state work;
+- ADR 0005's deferred smaller identity-switch boundary may be reconsidered independently if reducing long-lived host-agent capability authority becomes worthwhile.
 
 ## Security impact
 
-This decision preserves the least-privilege posture of ordinary CI while allowing authoritative product-level validation of privileged host behavior.
+This ADR changes the outer containment boundary for Level-3 E2E from a persistent host fixture to a disposable VM.
 
-The operator helper and its root-owned configuration are trusted infrastructure and MUST be reviewed accordingly.
+The persistent orchestrator MUST NOT:
+- execute target checkout scripts/binaries;
+- mount host home/workspace paths into the guest;
+- pass repository write tokens, production credentials, SSH credentials, or host secrets into the guest;
+- expose generic sudo/root APIs to the target commit;
+- reuse a stale guest.
 
-Checked-out code MUST NOT be able to:
-- choose arbitrary root helper arguments;
-- choose arbitrary UIDs/GIDs/cgroup roots;
-- install or modify the sudo rule;
-- rewrite the helper or helper config;
-- obtain a Docker socket or generic root shell through the E2E workflow.
+The guest MAY execute the target commit with root/capability authority because it is disposable and contains only test-scoped state.
 
-The E2E fixture MUST verify teardown and reject stale privileged state rather than silently repairing or reusing it.
+In-guest cleanup remains part of the product test. Whole-guest destruction is an additional containment requirement, not a replacement for cleanup assertions.

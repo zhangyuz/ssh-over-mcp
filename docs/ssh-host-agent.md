@@ -32,7 +32,7 @@ The Phase 2 client additionally disables ambient SSH configuration, ssh-agent au
 
 ADR 0005 requires the production host agent to remain non-root while holding only `CAP_SETUID` and `CAP_SETGID` so its contained child can irreversibly transition to the distinct workload identity. Existing live probes establish that identity transition, but a plain sshd ForceCommand starts under the dedicated SSH account and does not itself supply those capabilities.
 
-ADR 0007 defines the Phase 7A deployment bridge. The planned real-sshd E2E uses one fixed, operator-installed, root-owned, no-argument capability launcher as the exact ForceCommand sudo target. The launcher may be root only during the bounded identity/capability transition. Before any `ssh_over_mcp` application module is imported or executed it must:
+ADR 0007 defines the Phase 7A deployment bridge. A production managed host uses one fixed, operator-installed, root-owned, no-argument capability launcher as the exact ForceCommand sudo target. The Phase 7A E2E installs the exact target commit's launcher at that fixed path only inside the fresh disposable Linux guest defined by ADR 0006. In either case, the launcher may be root only during the bounded identity/capability transition. Before any `ssh_over_mcp` application module is imported or executed it must:
 
 1. validate exact `SSH_ORIGINAL_COMMAND=mcp-v1` and reject PTY use;
 2. establish the exact host-agent UID/GID and manager-client supplementary group;
@@ -42,7 +42,7 @@ ADR 0007 defines the Phase 7A deployment bridge. The planned real-sshd E2E uses 
 
 Only after those checks may it enter `ssh_over_mcp.host_agent.cli`.
 
-The launcher accepts no argv and no caller-selected identity, capability, module path, policy path, or manager endpoint. Its installed copy and sudo rule are operator-owned outside the repository checkout and are integrity-checked by the dedicated live fixture. This design is approved for Phase 7A but is not implemented until the corresponding 7A implementation slice lands.
+The launcher accepts no argv and no caller-selected identity, capability, module path, policy path, or manager endpoint. On a production managed host its installed copy and sudo rule are operator-owned outside the writable application checkout. In Phase 7A E2E, target code is allowed to install/run this root-capability path only inside a disposable VM with no host mounts, GitHub token, or production secrets; the whole VM is destroyed after the run. This design is approved for Phase 7A but is not implemented until the corresponding 7A implementation slice lands.
 
 ## Host-key validation
 
