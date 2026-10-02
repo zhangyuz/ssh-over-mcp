@@ -840,7 +840,7 @@ Explicitly deferred beyond Phase 5:
 
 ## Phase 6 — Cloudflare reference deployment
 
-Status: **Phase 6 implementation complete; final closure requires exact-head PR and merge-main CI plus post-merge branch/worktree cleanup.**
+Status: **Phase 6 closed.** Final Phase 6D merged as `a5c7c2d13c504f1e68beb0e7fc55db90539fbcc0`; PR-head CI run `37059153723` and merge-main push CI run `37059622970` passed on the configured self-hosted Ubuntu 26.04 x86 runner, and Phase 6 worktree/branch cleanup completed.
 
 Delivered and verified:
 
@@ -855,7 +855,7 @@ Delivered and verified:
 - separate-instance/static-profile guidance for materially different roles;
 - full Phase 5 security/authority/secret-retention regressions and Phase 6A-6D static/live deployment probes.
 
-The implementation workflow performs no live Cloudflare account mutation; live Cloudflare account provisioning remains an operator action. Final Phase 6 closure is gated on the Phase 6D exact-head PR and merge-main CI plus post-merge cleanup.
+The implementation workflow performed no live Cloudflare account mutation; live Cloudflare account provisioning remains an operator action. All Phase 6 closure gates are satisfied: exact PR-head CI, exact merge-main push CI, final review, and post-merge cleanup.
 
 ## Phase 7 — hardening
 

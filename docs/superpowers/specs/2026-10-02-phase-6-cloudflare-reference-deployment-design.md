@@ -2,7 +2,7 @@
 
 Date: 2026-10-02
 
-Status: implementation complete; final closure requires exact-head CI and post-merge cleanup
+Status: **closed** — Phase 6D merged as `a5c7c2d13c504f1e68beb0e7fc55db90539fbcc0`; exact PR-head and merge-main self-hosted CI passed; Phase 6 worktrees/branches cleaned.
 
 Base commit: `408f8ad1435f0a67eea20342b31c3a30ffe9a4ee`
 
@@ -662,10 +662,7 @@ were implemented through approved Superpowers plans, TDD, adversarial review,
 and self-hosted exact-head CI gates. No live Cloudflare account mutation was
 performed by repository code or by the implementation workflow.
 
-The implementation is complete at this point, but Phase 6 is **not closed**
-until the final Phase 6D PR head and the resulting merge-main commit both pass
-the authoritative self-hosted CI and the merged Phase 6 worktree/branches are
-cleaned. The final merge-main CI is a post-merge gate.
+Phase 6 is **closed**. PR #102 head `2e2486a3b536ad600be5e6439ede36268c08b06f` passed self-hosted CI run `37059153723`; the resulting merge-main commit `a5c7c2d13c504f1e68beb0e7fc55db90539fbcc0` passed push CI run `37059622970`. Both runs used the configured self-hosted Ubuntu 26.04 x86 validation job with Python 3.13 and 3.14. The merged Phase 6D worktree/branch and prior Phase 6 implementation worktrees/branches were cleaned after merge.
 
 ## 26. Phase 6 implementation evidence
 
@@ -689,9 +686,9 @@ cleaned. The final merge-main CI is a post-merge gate.
 | 14 | Existing Phase 5 adversarial tests remain green | `tests/integration/test_phase5_security.py`, `test_phase5_authority_separation.py`, and `test_phase5_secret_retention.py` rerun in the Phase 6D targeted gate | Green |
 | 15 | Deployment-specific negative tests remain green | Phase 6A origin-auth negatives; Phase 6B Compose/live negatives; Phase 6C connector/live negatives; Phase 6D reproducibility/auth-guidance contracts | Green |
 | 16 | Ruff and complete Python test suite pass | Linux/amd64 Phase 6D gate: Ruff + compileall + full pytest; closure-evidence tests intentionally RED until this section was written | Green after closure docs GREEN rerun |
-| 17 | Python 3.13/3.14 exact-head CI passes only on configured self-hosted Ubuntu 26.04 x86 runner | `.github/workflows/ci.yml`; Task 4 requires exact PR-head and merge-main `push` runs | **Pending Task 4** |
-| 18 | Final whole-branch review has no Critical/Important issue | Fresh `408f8ad..HEAD` author security review plus source invariant checklist; no Critical/Important finding before closure docs | Green; final post-PR-head review still required |
-| 19 | Obsolete Phase 6 branches/worktrees removed after merge | Task 4 cleanup contract | **Pending Task 4** |
+| 17 | Python 3.13/3.14 exact-head CI passes only on configured self-hosted Ubuntu 26.04 x86 runner | `.github/workflows/ci.yml`; PR-head `2e2486a3...` → run `37059153723` success; merge-main `a5c7c2d...` → push run `37059622970` success | Green |
+| 18 | Final whole-branch review has no Critical/Important issue | Fresh `408f8ad..2e2486a3` author security review plus source invariant checklist and post-PR-head review; no remaining Critical/Important finding | Green |
+| 19 | Obsolete Phase 6 branches/worktrees removed after merge | Post-merge cleanup left root `main` as the only Phase 6 worktree/branch; refs pruned and `main == origin/main` at `a5c7c2d...` | Green |
 | 20 | Live Cloudflare account changes remain explicit operator action | `docs/cloudflare-deployment.md`; `tests/ops/test_cloudflare_deployment_docs.py`; source/script scan finds no Cloudflare API mutation path | Green |
 
 ### 26.2 Carried Phase 5 security invariants
@@ -717,7 +714,7 @@ cleaned. The final merge-main CI is a post-merge gate.
 | P5-17 | `fs_write` status 74 stays committed/durability-uncertain, distinct from generic uncertainty | `tests/api/test_filesystem_approval_http.py` status-74 assertions; `tests/api/test_write.py::test_fs_write_committed_uncertain_outcome_is_preserved`; Phase 5 security audit-outage case | Green |
 | P5-18 | Consume is one execution attempt, not one successful execution | `tests/integration/test_phase5_security.py::test_consumed_mkdir_approval_is_not_restored_after_transport_abort`; `test_consumed_approval_survives_execution_start_audit_failure`; replay transport remains zero | Green |
 
-### 26.3 Phase 6D review evidence and remaining gates
+### 26.3 Phase 6D final closure evidence
 
 Before this status was written, the Phase 6D adversarial targeted set covering
 Phase 5 security/authority/secret retention and Phase 6A-6D static contracts
@@ -738,8 +735,4 @@ Python dependency shadowing; this is mitigated by the complete Linux/amd64 test
 suite and by the actual workload assertions running inside built Linux
 containers.
 
-Final closure still requires Task 4 exact-head PR CI, exact merge-main push CI,
-and post-merge branch/worktree cleanup. Live Cloudflare account provisioning
-remains an operator action. Phase 7 retains OS sandbox/egress examples, SSH CA,
-secret-manager integration, fuzz/property testing, and the broader hardening
-checklist.
+Final closure gates are satisfied: PR-head CI run `37059153723` and merge-main push CI run `37059622970` both passed on the configured self-hosted Ubuntu 26.04 x86 runner, and post-merge Phase 6 branch/worktree cleanup completed. Live Cloudflare account provisioning remains an operator action. Phase 7 retains OS sandbox/egress examples, SSH CA, secret-manager integration, fuzz/property testing, and the broader hardening checklist.
