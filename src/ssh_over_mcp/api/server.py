@@ -17,6 +17,8 @@ from ssh_over_mcp.audit.recorder import (
 from .context import OperationContext, new_request_id
 from .errors import ApiError
 from .models import (
+    ApprovalStatusRequest,
+    ApprovalStatusResult,
     ExplainableTool,
     FsMkdirRequest,
     FsMkdirResult,
@@ -202,6 +204,41 @@ def build_mcp_server(
             context,
             tool="host_info",
             host=alias,
+        )
+        return result
+
+    @mcp.tool(
+        annotations=_READ_ONLY_ANNOTATIONS,
+    )
+    async def approval_status(
+        approval_id: MCPApprovalID,
+    ) -> ApprovalStatusResult:
+        """Return principal-scoped status for one opaque approval handle."""
+
+        try:
+            request = ApprovalStatusRequest(approval_id=approval_id)
+        except ValidationError:
+            raise ToolError("invalid tool input") from None
+
+        context = operation_context()
+        await record_request_received(
+            context,
+            tool="approval_status",
+        )
+        try:
+            result = await service.approval_status(context, request)
+        except ApiError as exc:
+            await record_discovery_outcome(
+                AuditEventType.EXECUTION_FAILED,
+                context,
+                tool="approval_status",
+            )
+            raise ToolError(str(exc)) from exc
+
+        await record_discovery_outcome(
+            AuditEventType.EXECUTION_COMPLETED,
+            context,
+            tool="approval_status",
         )
         return result
 

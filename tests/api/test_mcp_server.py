@@ -99,6 +99,7 @@ async def test_server_registers_closed_world_tool_surface() -> None:
         "hosts_list",
         "host_info",
         "policy_explain",
+        "approval_status",
         "ssh_exec",
         "fs_stat",
         "fs_read",

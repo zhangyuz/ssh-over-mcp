@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import base64
 import binascii
+from datetime import datetime, timedelta
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from ssh_over_mcp.approvals.models import ApprovalSafeSummary, ApprovalState
 from ssh_over_mcp.inventory.models import MAX_HOST_ALIAS_CHARS
 from ssh_over_mcp.policy.models import Decision, RiskLevel
 
@@ -34,6 +36,10 @@ MCPHostAlias = Annotated[
 MCPApprovalID = Annotated[
     str,
     Field(pattern=r"^apr_[0-9a-f]{32}$"),
+]
+_MCP_BINDING_FINGERPRINT = Annotated[
+    str,
+    Field(pattern=r"^hmac-sha256:v1:[0-9a-f]{16}$"),
 ]
 _MCP_PATH = Annotated[str, Field(max_length=MAX_MCP_PATH_CHARS)]
 _MCP_ARG = Annotated[str, Field(max_length=MAX_MCP_ARG_CHARS)]
@@ -122,6 +128,32 @@ class PolicyExplainResult(BaseModel):
     normalized_path: str | None = None
     approval_required: bool
     policy_version: str
+
+
+class ApprovalStatusRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    approval_id: MCPApprovalID
+
+
+class ApprovalStatusResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    approval_id: MCPApprovalID
+    state: ApprovalState
+    expires_at: datetime
+    host: MCPHostAlias
+    tool: ExplainableTool
+    risk: RiskLevel
+    safe_summary: ApprovalSafeSummary
+    binding_fingerprint: _MCP_BINDING_FINGERPRINT
+
+    @field_validator("expires_at")
+    @classmethod
+    def validate_expires_at(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() != timedelta(0):
+            raise ValueError("expires_at must be timezone-aware UTC")
+        return value
 
 
 class SSHExecRequest(BaseModel):

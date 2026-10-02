@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 from typing import TYPE_CHECKING
 
+from ssh_over_mcp.approvals.client import LedgerClientError, LedgerRemoteError
+from ssh_over_mcp.approvals.transport import LedgerTransportError
 from ssh_over_mcp.inventory.models import Host, Inventory
 from ssh_over_mcp.policy.engine import PolicyEngine
 from ssh_over_mcp.policy.models import (
@@ -28,7 +30,9 @@ from ssh_over_mcp.ssh.errors import (
 
 from .context import OperationContext
 from .errors import (
+    ApprovalNotVisibleError,
     ApprovalRequiredError,
+    ApprovalStatusUnavailableError,
     AuditPersistenceError,
     AuditPersistenceOutcomeUncertainError,
     FilesystemMutationOutcomeUncertainError,
@@ -47,6 +51,8 @@ from .errors import (
     SSHTransportError,
 )
 from .models import (
+    ApprovalStatusRequest,
+    ApprovalStatusResult,
     FsMkdirRequest,
     FsMkdirResult,
     FsReadRequest,
@@ -65,6 +71,7 @@ from .models import (
 )
 
 if TYPE_CHECKING:
+    from ssh_over_mcp.approvals.client import SecurityLedgerClient
     from ssh_over_mcp.ssh.executor import SSHExecutor
     from ssh_over_mcp.ssh.filesystem import SSHFilesystemClient
 
@@ -92,11 +99,13 @@ class MCPService:
         *,
         inventory: Inventory,
         policy: PolicyEngine,
+        approval_client: SecurityLedgerClient | None = None,
         ssh_executor: SSHExecutor | None = None,
         ssh_filesystem: SSHFilesystemClient | None = None,
     ) -> None:
         self._inventory = inventory
         self._policy = policy
+        self._approval_client = approval_client
         self._ssh_executor = ssh_executor
         self._ssh_filesystem = ssh_filesystem
 
@@ -138,6 +147,39 @@ class MCPService:
         principal = context.principal
         self._visible_host(principal, alias)
         return self._summary(alias)
+
+    async def approval_status(
+        self,
+        context: OperationContext,
+        request: ApprovalStatusRequest,
+    ) -> ApprovalStatusResult:
+        if self._approval_client is None:
+            raise ApprovalStatusUnavailableError(
+                "approval status is unavailable"
+            )
+
+        principal = context.principal
+        try:
+            status = await self._approval_client.approval_status(
+                approval_id=request.approval_id,
+                principal_id=principal.principal_id,
+                profile=principal.profile,
+            )
+        except LedgerRemoteError as exc:
+            if exc.code in {"not_found", "not_authorized"}:
+                raise ApprovalNotVisibleError(
+                    "approval is not visible"
+                ) from None
+            raise ApprovalStatusUnavailableError(
+                "approval status is unavailable"
+            ) from None
+        except (LedgerClientError, LedgerTransportError):
+            raise ApprovalStatusUnavailableError(
+                "approval status is unavailable"
+            ) from None
+
+        return ApprovalStatusResult(**status.model_dump())
+
 
     def explain_policy(
         self,

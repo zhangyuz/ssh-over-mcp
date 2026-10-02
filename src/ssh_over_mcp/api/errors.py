@@ -29,6 +29,14 @@ class PolicyDeniedError(ApiError):
     """Stable public error for central-policy denial."""
 
 
+class ApprovalNotVisibleError(ApiError):
+    """Stable public error for hidden or unknown approvals."""
+
+
+class ApprovalStatusUnavailableError(ApiError):
+    """Stable public error when approval status cannot be queried."""
+
+
 class ApprovalRequiredError(ApiError):
     """Stable public error for approval-required execution."""
 
