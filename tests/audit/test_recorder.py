@@ -6,6 +6,7 @@ import pytest
 
 from ssh_over_mcp.api.context import OperationContext
 from ssh_over_mcp.api.models import PrincipalContext
+from ssh_over_mcp.approvals.binding import fingerprint_bytes
 from ssh_over_mcp.approvals.models import ApprovalExecutionFacts
 from ssh_over_mcp.audit.models import AuditEventType
 from ssh_over_mcp.audit.recorder import AuditPersistenceFailure, AuditRecorder
@@ -194,3 +195,56 @@ async def test_filesystem_write_audit_retains_only_content_fingerprint() -> None
     rendered = event.model_dump_json()
     assert "SUPERSECRET_FILE_BYTES" not in rendered
     assert "SUPERSECRET_POLICY_REASON" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_execution_event_retains_only_fingerprints_for_secret_inputs() -> None:
+    ledger = RecordingLedger()
+    recorder = AuditRecorder(ledger)
+    raw_stdin = b"SUPERSECRET_STDIN"
+    raw_content = b"SUPERSECRET_WRITE_CONTENT"
+    request = EvaluationRequest(
+        profile="developer",
+        host="dev01",
+        tool="ssh_exec",
+        executable="/usr/bin/git",
+        args=("SUPERSECRET_ARG",),
+        cwd="/srv/app",
+        env={"TOKEN": "SUPERSECRET_ENV"},
+        privilege="user",
+    )
+    facts = ApprovalExecutionFacts(
+        effective_timeout_seconds=7.0,
+        effective_max_output_bytes=4096,
+        effective_max_stdin_bytes=1024,
+        stdin_length=len(raw_stdin),
+        stdin_fingerprint=fingerprint_bytes(raw_stdin),
+        content_length=len(raw_content),
+        content_fingerprint=fingerprint_bytes(raw_content),
+    )
+
+    await recorder.execution_event(
+        AuditEventType.EXECUTION_STARTED,
+        context=_context(),
+        request=request,
+        decision=_decision(),
+        facts=facts,
+    )
+
+    event = ledger.events[0]
+    assert event.safe_summary is not None
+    assert event.safe_summary.argv_count == 1
+    assert event.safe_summary.env_names == ("TOKEN",)
+    assert event.safe_summary.stdin_length == len(raw_stdin)
+    assert event.safe_summary.stdin_fingerprint == fingerprint_bytes(raw_stdin)
+    assert event.safe_summary.content_length == len(raw_content)
+    assert event.safe_summary.content_fingerprint == fingerprint_bytes(raw_content)
+
+    rendered = event.model_dump_json()
+    for forbidden in (
+        "SUPERSECRET_ARG",
+        "SUPERSECRET_ENV",
+        raw_stdin.decode("ascii"),
+        raw_content.decode("ascii"),
+    ):
+        assert forbidden not in rendered

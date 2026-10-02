@@ -437,3 +437,36 @@ async def test_fs_mkdir_uncertain_outcome_remains_more_specific_when_audit_fails
         )
 
     assert "SUPERSECRET" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_fs_mkdir_success_audit_failure_is_non_retryable_uncertain() -> None:
+    ledger = RecordingAuditLedger(fail_on_call=2)
+    transport = RecordingTransport()
+    client = SSHFilesystemClient(
+        authorizer=RecordingAuthorizer(_allow_path("/srv/app/new-dir")),
+        transport=transport,
+        audit=AuditRecorder(ledger),
+    )
+    request = EvaluationRequest(
+        profile="developer",
+        host="dev01",
+        tool="fs_mkdir",
+        path="/srv/app/new-dir",
+        privilege="user",
+    )
+
+    with pytest.raises(
+        ssh_errors.SSHAuditPersistenceOutcomeUncertain,
+        match="audit persistence outcome is uncertain; do not retry blindly",
+    ) as exc_info:
+        await client.mkdir(
+            request,
+            context=_context(),
+        )
+
+    assert "SUPERSECRET" not in str(exc_info.value)
+    assert len(transport.calls) == 1
+    assert [event.event_type for event in ledger.events] == [
+        AuditEventType.EXECUTION_STARTED,
+    ]
