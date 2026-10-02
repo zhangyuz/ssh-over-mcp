@@ -342,15 +342,20 @@ def build_mcp_server(
     async def fs_stat(
         host: MCPHostAlias,
         path: str,
+        approval_id: MCPApprovalID | None = None,
     ) -> FsStatResult:
         """Return policy-gated metadata for one remote filesystem object."""
 
         try:
-            request = FsStatRequest(host=host, path=path)
+            request = FsStatRequest(
+                host=host,
+                path=path,
+                approval_id=approval_id,
+            )
         except ValidationError:
             raise ToolError("invalid tool input") from None
 
-        context = operation_context()
+        context = operation_context(approval_id=request.approval_id)
         await record_request_received(
             context,
             tool="fs_stat",
@@ -368,6 +373,7 @@ def build_mcp_server(
         host: MCPHostAlias,
         path: str,
         max_bytes: int,
+        approval_id: MCPApprovalID | None = None,
     ) -> FsReadResult:
         """Read one bounded remote regular file without shell fallback."""
 
@@ -376,11 +382,12 @@ def build_mcp_server(
                 host=host,
                 path=path,
                 max_bytes=max_bytes,
+                approval_id=approval_id,
             )
         except ValidationError:
             raise ToolError("invalid tool input") from None
 
-        context = operation_context()
+        context = operation_context(approval_id=request.approval_id)
         await record_request_received(
             context,
             tool="fs_read",
@@ -397,15 +404,20 @@ def build_mcp_server(
     async def fs_mkdir(
         host: MCPHostAlias,
         path: str,
+        approval_id: MCPApprovalID | None = None,
     ) -> FsMkdirResult:
         """Create one policy-gated remote directory at an absent path."""
 
         try:
-            request = FsMkdirRequest(host=host, path=path)
+            request = FsMkdirRequest(
+                host=host,
+                path=path,
+                approval_id=approval_id,
+            )
         except ValidationError:
             raise ToolError("invalid tool input") from None
 
-        context = operation_context()
+        context = operation_context(approval_id=request.approval_id)
         await record_request_received(
             context,
             tool="fs_mkdir",
@@ -423,6 +435,7 @@ def build_mcp_server(
         host: MCPHostAlias,
         path: str,
         data_base64: str,
+        approval_id: MCPApprovalID | None = None,
     ) -> FsWriteResult:
         """Create one absent remote regular file from bounded base64 bytes."""
 
@@ -431,11 +444,12 @@ def build_mcp_server(
                 host=host,
                 path=path,
                 data_base64=data_base64,
+                approval_id=approval_id,
             )
         except ValidationError:
             raise ToolError("invalid tool input") from None
 
-        context = operation_context()
+        context = operation_context(approval_id=request.approval_id)
         await record_request_received(
             context,
             tool="fs_write",

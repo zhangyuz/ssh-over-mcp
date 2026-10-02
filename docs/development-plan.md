@@ -775,8 +775,30 @@ Phase 5D single-use `ssh_exec` approvals are implemented:
   that raw argv/environment values/stdin/credential material do not enter ledger
   frames.
 
-Phase 5E extends the same approval contract to filesystem operations without
-changing the Phase 5D MCP authority boundary.
+Phase 5E filesystem approvals are implemented:
+
+- `fs_stat`, `fs_read`, `fs_mkdir`, and `fs_write` now accept the same optional
+  opaque `approval_id`; MCP still exposes no grant/deny/TTL/binding authority;
+- all four tools use `ExecutionAuthorizer` inside `SSHFilesystemClient`, so
+  current central policy is re-evaluated on every attempt and exact single-use
+  consumption occurs before structured SSH transport;
+- filesystem approval bindings include trusted principal/profile, host, tool,
+  user privilege, current policy version, normalized path, and effective
+  transport bounds; `fs_read` additionally binds its requested/effective byte
+  limit, while `fs_write` binds decoded content length plus SHA-256 content
+  fingerprint;
+- changing only tool, path, `fs_read.max_bytes`, `fs_write` content, principal,
+  or policy version invalidates an existing grant without opening SSH;
+- a consumed grant is never refunded after cancellation, timeout, remote
+  failure, mutation ambiguity, or committed/durability-uncertain status 74;
+- read-only success/error schemas and the Phase 4 1 MiB read cap remain
+  unchanged; create-only mkdir/write invariants, host-agent roots, 0700/0600
+  modes, and no-overwrite semantics remain independently authoritative;
+- real Linux HTTP + Unix-socket ledger coverage proves read replay resistance,
+  mutation post-consume behavior, audit ordering, status-74 event
+  classification, and that raw file bytes/base64 plus credential metadata do
+  not enter ledger protocol frames, persistent audit/approval rows, or public
+  errors.
 
 ## Phase 6 — Cloudflare reference deployment
 
