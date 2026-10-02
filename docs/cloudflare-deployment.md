@@ -74,8 +74,8 @@ authenticates an approved headless client to Cloudflare Access/Portal. Neither
 credential changes the server-owned `SSH_OVER_MCP_PROFILE`.
 
 Private reachability alone is therefore never treated as caller
-authentication. Portal/Tunnel configuration instructions are intentionally
-deferred to Phase 6C.
+authentication. Portal/Tunnel configuration instructions are documented in
+the Phase 6C section below.
 
 ## Gateway
 
@@ -154,5 +154,109 @@ filesystem socket permission check. Rootless Docker or user-namespace remapping
 is not claimed equivalent until a live peer-identity proof validates the
 kernel-visible IDs.
 
-Cloudflare Tunnel, private-hostname routing, MCP Portal registration, and live
-Access/Gateway changes remain Phase 6C work.
+Cloudflare Tunnel, private-hostname routing, MCP Portal registration, and
+Gateway validation are documented below. Those steps remain operator actions.
+
+## Phase 6C private Cloudflare connector and route
+
+Phase 6C adds the Cloudflare connector reference and the operator checklist
+for private routing. Phase 6C does not mutate your Cloudflare account automatically.
+Every Tunnel, private-route, Portal, Access, and Gateway
+change in this section is a manual operator action.
+
+Use Docker Compose 2.33.1 or newer so the connector's
+`cloudflare_egress.gw_priority` contract is preserved. Start from a healthy
+Phase 6B local stack before enabling the connector profile.
+
+### Tunnel connector setup
+
+In Cloudflare, create/select a remotely managed Tunnel manually. Copy only
+that Tunnel's run token into an operator-owned file outside the repository and
+point `SSH_OVER_MCP_CLOUDFLARED_TOKEN_FILE` at that absolute path.
+
+Anyone who obtains the Tunnel token can run that Tunnel, so treat the file as
+a secret. The Tunnel token is not the origin bearer.
+
+The reference connector runs as numeric identity `65532:65532` and reads the
+token through `--token-file`; never move the token into Compose environment
+or argv. On native Linux, the token file must be owned/readable by
+`65532:65532` and use mode `0400` or `0600`. Do not weaken this boundary
+by running `cloudflared` as root.
+
+Set `SSH_OVER_MCP_PRIVATE_HOSTNAME` to the lowercase private DNS hostname
+used for this origin, then start the profile:
+
+```bash
+docker compose --env-file /absolute/path/reference.env \
+  -f deploy/compose/compose.yaml --profile cloudflare up -d cloudflared
+```
+
+The connector mounts only the Tunnel-token file. The origin bearer is not mounted into `cloudflared`; it remains the Portal-to-origin credential.
+
+Credential boundaries are distinct:
+
+- the Tunnel token authorizes a `cloudflared` replica to run the selected Tunnel;
+- the origin bearer authenticates Portal-to-origin MCP requests;
+- an Access service token authenticates an approved headless client to Cloudflare Access/Portal;
+- a Cloudflare API token is an administrative API credential used only for explicit account-management automation. Phase 6C runtime reference does not require a Cloudflare API token.
+
+Do not substitute one credential for another or store an administrative API token in the connector token file.
+
+### Private hostname route
+
+In the Cloudflare dashboard:
+
+1. connect the private network with the selected Tunnel connector;
+2. create a private hostname route for exactly
+   `SSH_OVER_MCP_PRIVATE_HOSTNAME`;
+3. do not create a public-origin DNS record for the MCP origin;
+4. verify the connector and private route are healthy before Portal
+   registration.
+
+The same hostname resolves inside Docker's `origin_internal` network through
+the MCP service alias. It is routing data only. It never selects
+`SSH_OVER_MCP_PROFILE`, principal identity, tool authority, or approval
+authority.
+
+Connector failure must make the Cloudflare path unavailable; it must never
+cause a Docker host-port publication or alternate public listener.
+
+### MCP Portal upstream registration
+
+Register the private server in MCP Portal with exactly:
+
+```text
+HTTP URL: http://<private-hostname>:8000/mcp
+auth_type: bearer
+auth_credentials: <existing origin bearer>
+```
+
+Enter/store the origin bearer in Portal's upstream credentials. The origin
+bearer is not mounted into `cloudflared`, and the Tunnel token is not the
+origin bearer.
+
+Before saving/connecting the private server, enable Route traffic through Cloudflare Gateway. Then save/connect the server and wait for the Portal
+status to become Ready and for capability synchronization to complete.
+
+No command in this repository creates the Tunnel, private route, Portal
+server, Access policy, or Gateway policy for you.
+
+A Cloudflare API token is a separate administrative API credential for account
+management. The Phase 6C runtime reference does not require a Cloudflare API token,
+and no Cloudflare API token is mounted into `mcp` or `cloudflared` or passed in
+Compose environment.
+
+### Gateway validation and scope
+
+After the Portal server is Ready, issue one real-time tool call through the
+Portal and confirm it appears in Gateway HTTP logs. If DLP is enabled, verify
+that an appropriate test policy can inspect or block real-time Portal tool
+traffic without changing application authorization semantics.
+
+Gateway is defense-in-depth. The application policy, approval, and audit remain authoritative for SSH execution decisions. A Gateway/DLP outage or
+misconfiguration must not become an application authorization bypass.
+
+Cloudflare background credential/capability synchronization is not equivalent
+to the real-time Gateway-inspected tool-call path. Do not treat Gateway HTTP
+logs as complete replacement audit coverage for ssh-over-mcp's Security
+Ledger.

@@ -8,7 +8,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _COMPOSE = _REPO_ROOT / "deploy" / "compose" / "compose.yaml"
 _ENV_EXAMPLE = _REPO_ROOT / "deploy" / "compose" / "reference.env.example"
 
-_SERVICES = {"ledger-init", "ledger", "mcp", "approvalctl"}
+_SERVICES = {"ledger-init", "ledger", "mcp", "approvalctl", "cloudflared"}
 _VOLUMES = {"ledger-data", "ledger-exec", "ledger-admin"}
 
 
@@ -26,7 +26,7 @@ def test_compose_has_exact_private_service_network_and_volume_surface() -> None:
 
     assert set(services) == _SERVICES
     assert set(document["volumes"]) == _VOLUMES
-    assert set(document["networks"]) == {"origin_internal", "ssh_egress"}
+    assert set(document["networks"]) == {"origin_internal", "ssh_egress", "cloudflare_egress"}
     assert document["networks"]["origin_internal"]["internal"] is True
 
     for service in services.values():
@@ -46,7 +46,8 @@ def test_compose_has_exact_private_service_network_and_volume_surface() -> None:
     assert services["approvalctl"]["network_mode"] == "none"
     assert set(services["mcp"]["networks"]) == {"origin_internal", "ssh_egress"}
     assert services["mcp"]["networks"]["origin_internal"]["aliases"] == [
-        "ssh-over-mcp-origin"
+        "ssh-over-mcp-origin",
+        "${SSH_OVER_MCP_PRIVATE_HOSTNAME:-mcp.internal.example}",
     ]
 
 
@@ -65,7 +66,7 @@ def test_compose_pins_exact_numeric_identities_and_capabilities() -> None:
         assert service["security_opt"] == ["no-new-privileges:true"]
 
     assert services["ledger-init"]["cap_add"] == ["CHOWN", "DAC_OVERRIDE"]
-    for name in ("ledger", "mcp", "approvalctl"):
+    for name in ("ledger", "mcp", "approvalctl", "cloudflared"):
         assert "cap_add" not in services[name]
 
     assert services["approvalctl"]["profiles"] == ["admin"]
@@ -110,7 +111,8 @@ def test_compose_mount_visibility_preserves_ledger_authority_domains() -> None:
 def test_compose_pins_exact_runtime_environment_and_entrypoints() -> None:
     services = _document()["services"]
     image = "${SSH_OVER_MCP_IMAGE:-ssh-over-mcp:phase6b}"
-    assert {service["image"] for service in services.values()} == {image}
+    app_names = ("ledger-init", "ledger", "mcp", "approvalctl")
+    assert {services[name]["image"] for name in app_names} == {image}
 
     assert services["ledger-init"]["entrypoint"] == ["ssh-over-mcp-ledger-init"]
     assert services["ledger"]["entrypoint"] == ["ssh-over-mcp-ledger"]
@@ -194,6 +196,8 @@ def test_reference_env_example_contains_only_non_secret_inputs() -> None:
         "SSH_OVER_MCP_CREDENTIAL_MAP_FILE",
         "SSH_OVER_MCP_SSH_SECRETS_DIR",
         "SSH_OVER_MCP_ORIGIN_BEARER_FILE",
+        "SSH_OVER_MCP_PRIVATE_HOSTNAME",
+        "SSH_OVER_MCP_CLOUDFLARED_TOKEN_FILE",
     }
     text = _ENV_EXAMPLE.read_text(encoding="utf-8")
     for forbidden in (

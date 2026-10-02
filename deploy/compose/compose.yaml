@@ -80,7 +80,9 @@ services:
       SSH_OVER_MCP_ORIGIN_BEARER_TOKEN_FILE: "/run/secrets/origin-bearer"
     networks:
       origin_internal:
-        aliases: ["ssh-over-mcp-origin"]
+        aliases:
+          - "ssh-over-mcp-origin"
+          - "${SSH_OVER_MCP_PRIVATE_HOSTNAME:-mcp.internal.example}"
       ssh_egress: {}
     healthcheck:
       test:
@@ -114,6 +116,30 @@ services:
         target: /run/ssh-over-mcp-exec
         read_only: true
 
+  cloudflared:
+    profiles: ["cloudflare"]
+    image: "cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c"
+    command:
+      - "tunnel"
+      - "run"
+      - "--token-file"
+      - "/run/secrets/cloudflare-tunnel-token"
+    user: "65532:65532"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    networks:
+      origin_internal: {}
+      cloudflare_egress:
+        gw_priority: 1
+    volumes:
+      - type: bind
+        source: ${SSH_OVER_MCP_CLOUDFLARED_TOKEN_FILE:-/nonexistent/ssh-over-mcp-cloudflare-tunnel-token}
+        target: /run/secrets/cloudflare-tunnel-token
+        read_only: true
+        bind:
+          create_host_path: false
+
   approvalctl:
     profiles: ["admin"]
     image: ${SSH_OVER_MCP_IMAGE:-ssh-over-mcp:phase6b}
@@ -142,3 +168,4 @@ networks:
   origin_internal:
     internal: true
   ssh_egress: {}
+  cloudflare_egress: {}
