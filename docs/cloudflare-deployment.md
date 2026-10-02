@@ -193,6 +193,15 @@ docker compose --env-file /absolute/path/reference.env \
 
 The connector mounts only the Tunnel-token file. The origin bearer is not mounted into `cloudflared`; it remains the Portal-to-origin credential.
 
+Credential boundaries are distinct:
+
+- the Tunnel token authorizes a `cloudflared` replica to run the selected Tunnel;
+- the origin bearer authenticates Portal-to-origin MCP requests;
+- an Access service token authenticates an approved headless client to Cloudflare Access/Portal;
+- a Cloudflare API token is an administrative API credential used only for explicit account-management automation. Phase 6C runtime reference does not require a Cloudflare API token.
+
+Do not substitute one credential for another or store an administrative API token in the connector token file.
+
 ### Private hostname route
 
 In the Cloudflare dashboard:
@@ -231,6 +240,11 @@ status to become Ready and for capability synchronization to complete.
 
 No command in this repository creates the Tunnel, private route, Portal
 server, Access policy, or Gateway policy for you.
+
+A Cloudflare API token is a separate administrative API credential for account
+management. The Phase 6C runtime reference does not require a Cloudflare API token,
+and no Cloudflare API token is mounted into `mcp` or `cloudflared` or passed in
+Compose environment.
 
 ### Gateway validation and scope
 

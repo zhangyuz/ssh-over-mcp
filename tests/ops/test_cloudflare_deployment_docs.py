@@ -39,3 +39,11 @@ def test_phase6c_guide_scopes_gateway_to_defense_in_depth() -> None:
     assert "Gateway HTTP logs" in text
     assert "application policy, approval, and audit remain authoritative" in text
     assert "background credential/capability synchronization" in text
+
+
+def test_phase6c_guide_distinguishes_cloudflare_api_token_from_runtime_secrets() -> None:
+    text = _GUIDE.read_text(encoding="utf-8")
+
+    assert "Cloudflare API token" in text
+    assert "administrative API credential" in text
+    assert "Phase 6C runtime reference does not require a Cloudflare API token" in text
