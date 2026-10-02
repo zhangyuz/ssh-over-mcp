@@ -243,9 +243,8 @@ async def test_granted_exact_approval_is_consumed_before_authorization() -> None
     assert consumed_id == approval_id
     assert binding.policy_version == "sha256:policy"
     assert request_id == _context().request_id
-    assert [event.event_type for event in ledger.events] == [
-        AuditEventType.APPROVAL_REQUIRED
-    ]
+    # The real ledger owns the atomic approval_required + consumed audit pair.
+    assert ledger.events == []
 
 
 @pytest.mark.asyncio
@@ -261,6 +260,11 @@ async def test_unusable_supplied_approval_is_normalized_without_oracle_detail(
     decision = _decision(Decision.APPROVAL_REQUIRED)
     ledger = Ledger()
     ledger.consume_error = RemoteLedgerError(code)
+    ledger.ensure_status = _status(
+        state=ApprovalState.PENDING,
+        approval_id="apr_" + ("8" * 32),
+        decision=decision,
+    )
     authorizer = ExecutionAuthorizer(policy=Policy(decision), ledger=ledger)
 
     with pytest.raises(SSHApprovalRequired) as exc_info:
@@ -270,7 +274,8 @@ async def test_unusable_supplied_approval_is_normalized_without_oracle_detail(
             _facts(),
         )
 
-    assert exc_info.value.approval_status is None
+    assert exc_info.value.approval_status == ledger.ensure_status
+    assert len(ledger.ensure_calls) == 1
     assert code not in str(exc_info.value)
 
 
@@ -297,6 +302,19 @@ class BindingCheckingLedger(Ledger):
         super().__init__()
         self.expected_binding = expected_binding
         self.consume_status = _status(state=ApprovalState.CONSUMED)
+
+    async def ensure_approval(self, *, binding, risk, request_id):
+        self.ensure_calls.append((binding, risk, request_id))
+        return ApprovalStatus(
+            approval_id="apr_" + ("8" * 32),
+            state=ApprovalState.PENDING,
+            expires_at=datetime(2026, 10, 1, 18, 10, tzinfo=UTC),
+            host=binding.host,
+            tool=binding.tool,
+            risk=risk,
+            safe_summary=safe_summary_from_binding(binding, risk),
+            binding_fingerprint="hmac-sha256:v1:" + ("8" * 16),
+        )
 
     async def consume_approval(self, *, approval_id, binding, request_id):
         self.consume_calls.append((approval_id, binding, request_id))
@@ -368,6 +386,7 @@ async def test_binding_change_cannot_consume_existing_grant(
         await authorizer.authorize(context, eval_request, _facts())
 
     assert len(ledger.consume_calls) == 1
+    assert len(ledger.ensure_calls) == 1
 
 
 @pytest.mark.asyncio
@@ -394,6 +413,10 @@ class SingleUseLedger(Ledger):
     def __init__(self, status: ApprovalStatus) -> None:
         super().__init__()
         self.consume_status = status
+        self.ensure_status = _status(
+            state=ApprovalState.PENDING,
+            approval_id="apr_" + ("8" * 32),
+        )
         self._consumed = False
 
     async def consume_approval(self, *, approval_id, binding, request_id):

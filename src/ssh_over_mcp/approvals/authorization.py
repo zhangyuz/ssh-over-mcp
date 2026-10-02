@@ -213,12 +213,6 @@ class ExecutionAuthorizer:
                 approval_status=status,
             )
 
-        await self._append_policy_event(
-            context=context,
-            request=request,
-            decision=decision,
-            binding=binding,
-        )
         try:
             status = await self.ledger.consume_approval(
                 approval_id=approval_id,
@@ -227,11 +221,37 @@ class ExecutionAuthorizer:
             )
         except Exception as exc:  # noqa: BLE001
             if getattr(exc, "code", None) in _UNUSABLE_APPROVAL_CODES:
-                raise SSHApprovalRequired(decision) from None
+                try:
+                    replacement = await self.ledger.ensure_approval(
+                        binding=binding,
+                        risk=decision.risk,
+                        request_id=context.request_id,
+                    )
+                except Exception:  # noqa: BLE001
+                    raise SSHAuditPersistenceError(
+                        "approval persistence failed"
+                    ) from None
+                raise SSHApprovalRequired(
+                    decision,
+                    approval_status=replacement,
+                ) from None
             raise SSHAuditPersistenceError(
                 "approval persistence failed"
             ) from None
 
         if status.state is not ApprovalState.CONSUMED:
-            raise SSHApprovalRequired(decision)
+            try:
+                replacement = await self.ledger.ensure_approval(
+                    binding=binding,
+                    risk=decision.risk,
+                    request_id=context.request_id,
+                )
+            except Exception:  # noqa: BLE001
+                raise SSHAuditPersistenceError(
+                    "approval persistence failed"
+                ) from None
+            raise SSHApprovalRequired(
+                decision,
+                approval_status=replacement,
+            )
         return decision

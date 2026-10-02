@@ -630,6 +630,19 @@ class SecurityLedgerStore:
                     "approval binding does not match"
                 )
 
+            summary = ApprovalSafeSummary.model_validate_json(
+                str(data["safe_summary_json"])
+            )
+            self._append_audit_locked(
+                self._approval_event(
+                    event_type=AuditEventType.APPROVAL_REQUIRED,
+                    request_id=request_id,
+                    approval_id=approval_id,
+                    summary=summary,
+                    decision=Decision.APPROVAL_REQUIRED,
+                )
+            )
+
             try:
                 cursor = self.connection.execute(
                     "UPDATE approvals SET state=?,active_binding_hmac=NULL,"
@@ -648,9 +661,6 @@ class SecurityLedgerStore:
             if cursor.rowcount != 1:
                 raise LedgerConflictError("approval is not consumable")
 
-            summary = ApprovalSafeSummary.model_validate_json(
-                str(data["safe_summary_json"])
-            )
             self._append_audit_locked(
                 self._approval_event(
                     event_type=AuditEventType.APPROVAL_CONSUMED,
