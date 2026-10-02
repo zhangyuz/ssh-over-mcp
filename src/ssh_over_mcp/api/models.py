@@ -260,6 +260,7 @@ class FsMkdirRequest(BaseModel):
 
     host: MCPHostAlias
     path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)
+    approval_id: MCPApprovalID | None = None
 
 
 class FsMkdirResult(BaseModel):

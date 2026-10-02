@@ -1228,3 +1228,178 @@ async def test_filesystem_approval_cannot_cross_authorize_tool_or_path() -> None
     assert mismatched_binding.tool == "fs_read"
     assert mismatched_binding.normalized_path == "/srv/app/file-b"
     assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_fs_mkdir_approval_exact_retry_consumes_before_transport() -> None:
+    from ssh_over_mcp.approvals.authorization import ExecutionAuthorizer
+
+    policy = Policy(_approval_decision("/srv/app/new-directory"))
+    ledger = _ApprovalLedger()
+    transport = RecordingTransport(
+        SSHExecutionResult(
+            request_id="unused",
+            host="dev01",
+            exit_status=0,
+            duration_ms=1,
+        )
+    )
+    client = ssh_package.SSHFilesystemClient(
+        authorizer=ExecutionAuthorizer(policy=policy, ledger=ledger),
+        audit=audit_recorder(),
+        transport=transport,
+    )
+
+    with pytest.raises(ssh_package.SSHApprovalRequired) as exc_info:
+        await client.mkdir(
+            request("fs_mkdir", "/srv/app/./new-directory"),
+            context=_approval_context("mkdir-pending"),
+        )
+
+    assert exc_info.value.approval_status is not None
+    assert transport.calls == []
+    binding, _, _ = ledger.ensure_calls[0]
+    assert binding.tool == "fs_mkdir"
+    assert binding.normalized_path == "/srv/app/new-directory"
+    assert binding.effective_timeout_seconds == 60.0
+    assert binding.effective_max_output_bytes == 4096
+
+    await client.mkdir(
+        request("fs_mkdir", "/srv/app/./new-directory"),
+        context=_approval_context("mkdir-granted", ledger.approval_id),
+    )
+
+    assert len(ledger.consume_calls) == 1
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_fs_mkdir_granted_approval_cannot_override_current_deny() -> None:
+    from ssh_over_mcp.approvals.authorization import ExecutionAuthorizer
+
+    ledger = _ApprovalLedger()
+    policy = Policy(deny(Decision.DENY))
+    transport = RecordingTransport(
+        SSHExecutionResult(
+            request_id="unused",
+            host="dev01",
+            exit_status=0,
+            duration_ms=1,
+        )
+    )
+    client = ssh_package.SSHFilesystemClient(
+        authorizer=ExecutionAuthorizer(policy=policy, ledger=ledger),
+        audit=audit_recorder(),
+        transport=transport,
+    )
+
+    with pytest.raises(ssh_package.SSHPolicyDenied):
+        await client.mkdir(
+            request("fs_mkdir", "/srv/app/new-directory"),
+            context=_approval_context("mkdir-deny", ledger.approval_id),
+        )
+
+    assert ledger.consume_calls == []
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_fs_mkdir_path_change_invalidates_old_approval_pre_network() -> None:
+    from ssh_over_mcp.approvals.authorization import ExecutionAuthorizer
+
+    policy = Policy(_approval_decision("/srv/app/dir-a"))
+    ledger = _ApprovalLedger()
+    transport = RecordingTransport(
+        SSHExecutionResult(
+            request_id="unused",
+            host="dev01",
+            exit_status=0,
+            duration_ms=1,
+        )
+    )
+    client = ssh_package.SSHFilesystemClient(
+        authorizer=ExecutionAuthorizer(policy=policy, ledger=ledger),
+        audit=audit_recorder(),
+        transport=transport,
+    )
+
+    with pytest.raises(ssh_package.SSHApprovalRequired):
+        await client.mkdir(
+            request("fs_mkdir", "/srv/app/dir-a"),
+            context=_approval_context("mkdir-bind-a"),
+        )
+
+    policy.decision = _approval_decision("/srv/app/dir-b")
+    with pytest.raises(ssh_package.SSHApprovalRequired):
+        await client.mkdir(
+            request("fs_mkdir", "/srv/app/dir-b"),
+            context=_approval_context("mkdir-bind-b", ledger.approval_id),
+        )
+
+    assert len(ledger.consume_calls) == 1
+    assert transport.calls == []
+
+
+class _SingleUseApprovalLedger(_ApprovalLedger):
+    def __init__(self) -> None:
+        super().__init__()
+        self.used = False
+
+    async def consume_approval(self, *, approval_id, binding, request_id):
+        if self.used:
+            self.consume_calls.append((approval_id, binding, request_id))
+            raise _ApprovalRemoteError("conflict")
+        status = await super().consume_approval(
+            approval_id=approval_id,
+            binding=binding,
+            request_id=request_id,
+        )
+        self.used = True
+        return status
+
+
+@pytest.mark.asyncio
+async def test_fs_mkdir_concurrent_replay_reaches_transport_once() -> None:
+    import asyncio
+
+    from ssh_over_mcp.approvals.authorization import ExecutionAuthorizer
+
+    policy = Policy(_approval_decision("/srv/app/new-directory"))
+    ledger = _SingleUseApprovalLedger()
+    transport = RecordingTransport(
+        SSHExecutionResult(
+            request_id="unused",
+            host="dev01",
+            exit_status=0,
+            duration_ms=1,
+        )
+    )
+    client = ssh_package.SSHFilesystemClient(
+        authorizer=ExecutionAuthorizer(policy=policy, ledger=ledger),
+        audit=audit_recorder(),
+        transport=transport,
+    )
+
+    with pytest.raises(ssh_package.SSHApprovalRequired):
+        await client.mkdir(
+            request("fs_mkdir", "/srv/app/new-directory"),
+            context=_approval_context("mkdir-concurrent-pending"),
+        )
+
+    async def execute(label: str):
+        return await client.mkdir(
+            request("fs_mkdir", "/srv/app/new-directory"),
+            context=_approval_context(label, ledger.approval_id),
+        )
+
+    results = await asyncio.gather(
+        execute("mkdir-concurrent-a"),
+        execute("mkdir-concurrent-b"),
+        return_exceptions=True,
+    )
+
+    assert sum(not isinstance(item, BaseException) for item in results) == 1
+    failures = [item for item in results if isinstance(item, BaseException)]
+    assert len(failures) == 1
+    assert isinstance(failures[0], ssh_package.SSHApprovalRequired)
+    assert len(transport.calls) == 1

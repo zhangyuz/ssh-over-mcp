@@ -404,15 +404,20 @@ def build_mcp_server(
     async def fs_mkdir(
         host: MCPHostAlias,
         path: str,
+        approval_id: MCPApprovalID | None = None,
     ) -> FsMkdirResult:
         """Create one policy-gated remote directory at an absent path."""
 
         try:
-            request = FsMkdirRequest(host=host, path=path)
+            request = FsMkdirRequest(
+                host=host,
+                path=path,
+                approval_id=approval_id,
+            )
         except ValidationError:
             raise ToolError("invalid tool input") from None
 
-        context = operation_context()
+        context = operation_context(approval_id=request.approval_id)
         await record_request_received(
             context,
             tool="fs_mkdir",

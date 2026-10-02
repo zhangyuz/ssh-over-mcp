@@ -11,8 +11,14 @@ from ssh_over_mcp.api import models
 from ssh_over_mcp.api.context import OperationContext
 from ssh_over_mcp.api.server import build_mcp_server
 from ssh_over_mcp.api.service import MCPService
+from ssh_over_mcp.approvals.models import (
+    ApprovalSafeSummary,
+    ApprovalState,
+    ApprovalStatus,
+)
 from ssh_over_mcp.audit.recorder import AuditRecorder
 from ssh_over_mcp.inventory.models import Host, Inventory
+from ssh_over_mcp.policy.models import Decision, PolicyDecision, RiskLevel
 
 
 class _AuditLedger:
@@ -23,6 +29,7 @@ class _AuditLedger:
 def _audit() -> AuditRecorder:
     return AuditRecorder(_AuditLedger())
 from ssh_over_mcp.ssh import (
+    SSHApprovalRequired,
     SSHAuditPersistenceError,
     SSHAuditPersistenceOutcomeUncertain,
     SSHConnectionError,
@@ -30,8 +37,10 @@ from ssh_over_mcp.ssh import (
     SSHRequestOutcomeUncertain,
 )
 
+APR_ID = "apr_" + ("c" * 32)
 
-def _operation_context() -> OperationContext:
+
+def _operation_context(approval_id: str | None = None) -> OperationContext:
     return OperationContext(
         request_id="req_" + "1" * 32,
         principal=models.PrincipalContext(
@@ -39,6 +48,42 @@ def _operation_context() -> OperationContext:
             profile="developer",
         ),
         received_at=datetime(2026, 10, 1, tzinfo=UTC),
+        approval_id=approval_id,
+    )
+
+
+def _mkdir_approval_status() -> ApprovalStatus:
+    return ApprovalStatus(
+        approval_id=APR_ID,
+        state=ApprovalState.PENDING,
+        expires_at=datetime(2026, 10, 1, 18, 10, tzinfo=UTC),
+        host="visible",
+        tool="fs_mkdir",
+        risk=RiskLevel.HIGH,
+        safe_summary=ApprovalSafeSummary(
+            principal_id="static:developer",
+            profile="developer",
+            host="visible",
+            tool="fs_mkdir",
+            privilege="user",
+            policy_version="sha256:test",
+            risk=RiskLevel.HIGH,
+            normalized_executable=None,
+            normalized_cwd=None,
+            normalized_path="/srv/app/new-directory",
+            argv_count=0,
+            argv_fingerprint="sha256:" + ("1" * 64),
+            env_names=(),
+            stdin_length=None,
+            stdin_fingerprint=None,
+            content_length=None,
+            content_fingerprint=None,
+            effective_timeout_seconds=60.0,
+            effective_max_output_bytes=4096,
+            effective_max_stdin_bytes=None,
+            effective_tool_bytes=None,
+        ),
+        binding_fingerprint="hmac-sha256:v1:" + ("2" * 16),
     )
 
 
@@ -92,9 +137,11 @@ def test_fs_mkdir_request_is_closed_world() -> None:
     request = request_type(
         host="visible",
         path="/srv/app/new-directory",
+        approval_id=APR_ID,
     )
     assert request.host == "visible"
     assert request.path == "/srv/app/new-directory"
+    assert request.approval_id == APR_ID
 
     for extra in (
         {"mode": 0o755},
@@ -105,6 +152,10 @@ def test_fs_mkdir_request_is_closed_world() -> None:
         {"profile": "ops"},
         {"request_id": "attacker"},
         {"credential_ref": "secret://attacker"},
+        {"grant": True},
+        {"deny": True},
+        {"approval_ttl_seconds": 600},
+        {"binding_hmac": "SUPERSECRET"},
     ):
         with pytest.raises(ValidationError):
             request_type(
@@ -112,6 +163,13 @@ def test_fs_mkdir_request_is_closed_world() -> None:
                 path="/srv/app/new-directory",
                 **extra,
             )
+
+    with pytest.raises(ValidationError):
+        request_type(
+            host="visible",
+            path="/srv/app/new-directory",
+            approval_id="apr_SUPERSECRET",
+        )
 
 
 @pytest.mark.asyncio
@@ -160,6 +218,61 @@ async def test_fs_mkdir_injects_principal_and_returns_created_path() -> None:
         host="visible",
         path="/srv/app/new-directory",
     )
+
+
+@pytest.mark.asyncio
+async def test_fs_mkdir_threads_approval_only_through_context() -> None:
+    filesystem = RecordingFilesystem()
+    service = _service(filesystem)
+    context = _operation_context(approval_id=APR_ID)
+
+    await service.fs_mkdir(
+        context,
+        models.FsMkdirRequest(
+            host="visible",
+            path="/srv/app/new-directory",
+            approval_id=APR_ID,
+        ),
+    )
+
+    seen_context, evaluation = filesystem.calls[0]
+    assert seen_context.approval_id == APR_ID
+    assert "approval_id" not in type(evaluation).model_fields
+
+
+@pytest.mark.asyncio
+async def test_fs_mkdir_approval_required_returns_safe_retry_handle() -> None:
+    filesystem = RecordingFilesystem()
+    decision = PolicyDecision(
+        decision=Decision.APPROVAL_REQUIRED,
+        reason="SUPERSECRET policy detail",
+        risk=RiskLevel.HIGH,
+        normalized_path="/srv/app/new-directory",
+        approval_required=True,
+        policy_version="sha256:test",
+    )
+    filesystem.error = SSHApprovalRequired(
+        decision,
+        approval_status=_mkdir_approval_status(),
+    )
+    service = _service(filesystem)
+
+    with pytest.raises(api_errors.ApprovalRequiredError) as exc_info:
+        await service.fs_mkdir(
+            _operation_context(),
+            models.FsMkdirRequest(
+                host="visible",
+                path="/srv/app/new-directory",
+            ),
+        )
+
+    rendered = str(exc_info.value)
+    assert f"approval_id={APR_ID}" in rendered
+    assert "state=pending" in rendered
+    assert "expires_at=2026-10-01T18:10:00+00:00" in rendered
+    assert "retry the exact operation with this approval_id only after approval" in rendered
+    assert "SUPERSECRET" not in rendered
+    assert "/srv/app/new-directory" not in rendered
 
 
 @pytest.mark.asyncio
@@ -245,7 +358,7 @@ async def test_server_registers_strict_create_only_fs_mkdir_tool() -> None:
         listed = await client.list_tools()
 
     tool = next(item for item in listed.tools if item.name == "fs_mkdir")
-    assert set(tool.input_schema["properties"]) == {"host", "path"}
+    assert set(tool.input_schema["properties"]) == {"host", "path", "approval_id"}
     assert tool.input_schema["additionalProperties"] is False
     assert tool.annotations is not None
     assert tool.annotations.read_only_hint is False
@@ -266,6 +379,10 @@ async def test_server_registers_strict_create_only_fs_mkdir_tool() -> None:
         "ssh_user",
         "credential_ref",
         "host_key",
+        "grant",
+        "deny",
+        "approval_ttl_seconds",
+        "binding_hmac",
     ):
         assert forbidden not in schema_text
 
@@ -284,6 +401,7 @@ async def test_server_fs_mkdir_injects_principal_and_rejects_extra_fields() -> N
             {
                 "host": "visible",
                 "path": "/srv/app/new-directory",
+                "approval_id": APR_ID,
             },
         )
         rejected = await client.call_tool(
@@ -305,6 +423,8 @@ async def test_server_fs_mkdir_injects_principal_and_rejects_extra_fields() -> N
         profile="developer",
     )
     assert request.path == "/srv/app/new-directory"
+    assert request.approval_id == APR_ID
+    assert context.approval_id == APR_ID
 
     assert rejected.is_error is True
     assert "SUPERSECRET" not in _tool_error_text(rejected)
