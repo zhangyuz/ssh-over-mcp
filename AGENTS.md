@@ -2,9 +2,11 @@
 
 This repository is security-sensitive infrastructure. Automated coding agents must treat `/docs` as the source of truth.
 
+All automated coding agents MUST read and follow [`docs/development-methodology.md`](docs/development-methodology.md). Its core principle is: **小步快跑，持续迭代，关注质量、安全、一致性。**
+
 ## Required workflow
 
-1. Read `docs/README.md`, `docs/security-model.md`, `docs/policy-spec.md`, and `docs/mcp-api.md` before changing behavior.
+1. Read `docs/development-methodology.md`, `docs/README.md`, `docs/security-model.md`, `docs/policy-spec.md`, and `docs/mcp-api.md` before changing behavior.
 2. Do not weaken a documented security invariant to make a test pass.
 3. Any behavior change affecting authorization, command execution, host identity, credential handling, approvals, audit semantics, or network exposure must update the relevant document in the same change.
 4. Architectural changes require a new ADR under `docs/decisions/`.
