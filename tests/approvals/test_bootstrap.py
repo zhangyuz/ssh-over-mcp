@@ -255,3 +255,68 @@ def test_bootstrap_rejects_overlapping_runtime_directories(
 
     with pytest.raises(LedgerBootstrapError):
         prepare_ledger_runtime(settings)
+
+
+def test_bootstrap_sets_mode_before_transferring_ownership(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_mount_roots(tmp_path)
+    settings = _settings(tmp_path)
+    calls: list[tuple[str, object]] = []
+
+    real_chmod = os.chmod
+    real_chown = os.chown
+    real_fchmod = os.fchmod
+    real_fchown = os.fchown
+
+    def recording_chmod(path, mode, *, dir_fd=None, follow_symlinks=True):
+        calls.append(("chmod", Path(path)))
+        return real_chmod(
+            path,
+            mode,
+            dir_fd=dir_fd,
+            follow_symlinks=follow_symlinks,
+        )
+
+    def recording_chown(path, uid, gid, *, dir_fd=None, follow_symlinks=True):
+        calls.append(("chown", Path(path)))
+        return real_chown(
+            path,
+            uid,
+            gid,
+            dir_fd=dir_fd,
+            follow_symlinks=follow_symlinks,
+        )
+
+    def recording_fchmod(fd: int, mode: int) -> None:
+        calls.append(("fchmod", fd))
+        real_fchmod(fd, mode)
+
+    def recording_fchown(fd: int, uid: int, gid: int) -> None:
+        calls.append(("fchown", fd))
+        real_fchown(fd, uid, gid)
+
+    monkeypatch.setattr(os, "chmod", recording_chmod)
+    monkeypatch.setattr(os, "chown", recording_chown)
+    monkeypatch.setattr(os, "fchmod", recording_fchmod)
+    monkeypatch.setattr(os, "fchown", recording_fchown)
+
+    prepare_ledger_runtime(settings)
+
+    for child in (
+        settings.db_path.parent,
+        settings.execution_socket_path.parent,
+        settings.admin_socket_path.parent,
+    ):
+        chmod_index = calls.index(("chmod", child))
+        chown_index = calls.index(("chown", child))
+        assert chmod_index < chown_index
+
+    fchmod_index = next(
+        index for index, (name, _value) in enumerate(calls) if name == "fchmod"
+    )
+    fchown_index = next(
+        index for index, (name, _value) in enumerate(calls) if name == "fchown"
+    )
+    assert fchmod_index < fchown_index

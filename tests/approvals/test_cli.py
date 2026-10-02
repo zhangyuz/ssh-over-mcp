@@ -148,3 +148,34 @@ def test_cli_client_factory_requires_no_database_or_key_configuration(
         "DB_PATH",
     ):
         assert forbidden not in source
+
+
+def test_cli_run_maps_transport_failure_to_generic_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ssh_over_mcp.approvals import cli
+    from ssh_over_mcp.approvals.transport import LedgerTransportError
+
+    class FailingTransportClient:
+        async def list_approvals(self, *, limit=100):
+            raise LedgerTransportError("SUPERSECRET transport detail")
+
+    monkeypatch.setattr(
+        cli,
+        "create_admin_client_from_env",
+        lambda _env=None: FailingTransportClient(),
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    result = cli.run(
+        ["list"],
+        env={},
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert result == 1
+    assert stdout.getvalue() == ""
+    assert stderr.getvalue() == "Security Ledger approval command failed\n"
+    assert "SUPERSECRET" not in stderr.getvalue()

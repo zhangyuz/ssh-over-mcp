@@ -42,8 +42,8 @@ def _prepare_directory(path: Path, *, uid: int, gid: int, mode: int) -> None:
     except FileNotFoundError:
         try:
             path.mkdir(mode=mode)
-            os.chown(path, uid, gid, follow_symlinks=False)
             os.chmod(path, mode, follow_symlinks=False)
+            os.chown(path, uid, gid, follow_symlinks=False)
         except OSError:
             raise _bootstrap_error() from None
     except OSError:
@@ -73,8 +73,8 @@ def _create_hmac_key(path: Path, *, uid: int, gid: int) -> None:
 
     try:
         _write_all(fd, secrets.token_bytes(32))
-        os.fchown(fd, uid, gid)
         os.fchmod(fd, 0o600)
+        os.fchown(fd, uid, gid)
         os.fsync(fd)
     except OSError:
         raise _bootstrap_error() from None
