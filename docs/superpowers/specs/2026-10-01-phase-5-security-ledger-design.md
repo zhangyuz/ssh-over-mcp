@@ -2,7 +2,7 @@
 
 Date: 2026-10-01
 
-Status: self-reviewed revision awaiting human approval before implementation
+Status: implemented and security-reviewed; closure evidence recorded below
 
 ## 1. Purpose
 
@@ -981,7 +981,41 @@ Phase 5 may be marked complete only after one exact main commit demonstrates:
 - no raw shell/destructive MCP capability appears;
 - hardened self-hosted Python 3.13/3.14 full suites pass.
 
-## 28. Deferred work
+## 28. Closure evidence
+
+Phase 5 implementation and hardening closed against exact implementation
+commit `2fc7acb3611347a42315703db3c6fc98837fb996`.
+
+Authoritative self-hosted CI run `37009047426` validated that exact commit on the
+hardened Ubuntu 26.04 x86 runner and passed:
+
+- non-root / zero-capability / no-new-privileges runner checks;
+- no Docker socket exposure;
+- cgroup-v2 cpu/memory/pids controller availability and project probe;
+- Ruff;
+- Python 3.13 compile + full pytest;
+- Python 3.14 compile + full pytest.
+
+The final review re-checked all 18 security invariants in section 24 against
+both source structure and executable adversarial evidence. The review added
+restart/concurrency/policy-change/binding/outage matrices, authority-separation
+and secret-retention integration tests, post-consume mutation outcome tests,
+and a crash-window test proving that an approval consumed before an
+execution-start audit failure remains consumed without reaching transport or
+inventing a completion event.
+
+One Important defect was found during the review: importing the approval
+authorization module in a clean interpreter could enter a package circular
+import through the SSH package initializer. A focused RED regression reproduced
+the failure, the SSH error imports were deferred to the authorizer call sites,
+and the focused plus full Python 3.13/3.14 suites passed afterward.
+
+No Critical or Important finding remained at closure. No Phase 5 hardening
+change widened MCP authority or introduced raw shell, destructive filesystem
+mutation, OAuth, remote SIEM, reusable approvals, or grant/deny authority in
+MCP.
+
+## 29. Deferred work
 
 Explicitly deferred:
 
