@@ -20,6 +20,7 @@ from ssh_over_mcp.approvals.service import SecurityLedgerService
 from ssh_over_mcp.approvals.storage import LedgerDatabase
 from ssh_over_mcp.approvals.transport import UnixLedgerTransport
 from ssh_over_mcp.ssh.connection import SSHConnectionManager
+from ssh_over_mcp.ssh.errors import SSHRequestOutcomeUncertain
 from ssh_over_mcp.ssh.protocol import decode_request
 from ssh_over_mcp.ssh.transport import (
     SSHExecutionResult,
@@ -306,6 +307,24 @@ async def test_real_http_filesystem_approval_consume_and_outcome_semantics(
                 duration_ms=1,
             )
         if envelope.operation == "fs_mkdir":
+            if envelope.path.endswith("/remote-denied"):
+                return SSHExecutionResult(
+                    request_id=request_id,
+                    host=host,
+                    exit_status=77,
+                    duration_ms=1,
+                )
+            if envelope.path.endswith("/status69"):
+                return SSHExecutionResult(
+                    request_id=request_id,
+                    host=host,
+                    exit_status=69,
+                    duration_ms=1,
+                )
+            if envelope.path.endswith("/transport-uncertain"):
+                raise SSHRequestOutcomeUncertain(
+                    "SUPERSECRET transport uncertainty"
+                )
             return SSHExecutionResult(
                 request_id=request_id,
                 host=host,
@@ -480,6 +499,52 @@ async def test_real_http_filesystem_approval_consume_and_outcome_semantics(
             assert mkdir_status.is_error is False
             assert mkdir_status.structured_content["state"] == "consumed"
 
+            for suffix, expected_text in (
+                ("remote-denied", "remote filesystem policy denied request"),
+                ("status69", "mutation outcome is uncertain"),
+                ("transport-uncertain", "mutation outcome is uncertain"),
+            ):
+                mutation_request: dict[str, object] = {
+                    "host": "host-a",
+                    "path": f"/srv/app/{suffix}",
+                }
+                mutation_id = await _pending_and_grant(
+                    client,
+                    admin,
+                    "fs_mkdir",
+                    mutation_request,
+                )
+                mutation_retry = dict(mutation_request)
+                mutation_retry["approval_id"] = mutation_id
+                before = len(transport_calls)
+                mutation_result = await client.call_tool(
+                    "fs_mkdir",
+                    mutation_retry,
+                )
+                assert mutation_result.is_error is True
+                mutation_text = _tool_text(mutation_result)
+                public_error_texts.append(mutation_text)
+                assert expected_text in mutation_text
+                assert "SUPERSECRET" not in mutation_text
+                assert len(transport_calls) == before + 1
+
+                mutation_status = await client.call_tool(
+                    "approval_status",
+                    {"approval_id": mutation_id},
+                )
+                assert mutation_status.is_error is False
+                assert (
+                    mutation_status.structured_content["state"]
+                    == "consumed"
+                )
+
+                replay = await client.call_tool(
+                    "fs_mkdir",
+                    mutation_retry,
+                )
+                assert replay.is_error is True
+                assert len(transport_calls) == before + 1
+
             write_request: dict[str, object] = {
                 "host": "host-a",
                 "path": "/srv/app/new.bin",
@@ -496,16 +561,14 @@ async def test_real_http_filesystem_approval_consume_and_outcome_semantics(
                 b"WRITE_SECRET_B"
             ).decode("ascii")
             changed_content["approval_id"] = write_id
+            before_changed_content = len(transport_calls)
             rejected_content = await client.call_tool(
                 "fs_write",
                 changed_content,
             )
             assert rejected_content.is_error is True
             public_error_texts.append(_tool_text(rejected_content))
-            assert [call[0] for call in transport_calls] == [
-                "fs_read",
-                "fs_mkdir",
-            ]
+            assert len(transport_calls) == before_changed_content
 
             write_retry = dict(write_request)
             write_retry["approval_id"] = write_id
@@ -528,11 +591,10 @@ async def test_real_http_filesystem_approval_consume_and_outcome_semantics(
             assert write_status.is_error is False
             assert write_status.structured_content["state"] == "consumed"
 
-        assert [call[0] for call in transport_calls] == [
-            "fs_read",
-            "fs_mkdir",
-            "fs_write",
-        ]
+        operations = [call[0] for call in transport_calls]
+        assert operations.count("fs_read") == 1
+        assert operations.count("fs_mkdir") == 4
+        assert operations.count("fs_write") == 1
         write_transport = transport_calls[-1]
         assert write_transport[3] == b"WRITE_SECRET_A"
 

@@ -48,6 +48,7 @@ from ssh_over_mcp.ssh.errors import (
     SSHAuditPersistenceOutcomeUncertain,
     SSHFilesystemWriteCommittedUncertain,
     SSHPolicyDenied,
+    SSHRequestOutcomeUncertain,
 )
 from ssh_over_mcp.ssh.executor import SSHExecutor
 from ssh_over_mcp.ssh.filesystem import SSHFilesystemClient
@@ -852,3 +853,93 @@ async def test_request_audit_outage_is_sanitized() -> None:
             host="dev01",
         )
     assert "SUPERSECRET" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["cancelled", "transport_uncertain"])
+async def test_consumed_mkdir_approval_is_not_restored_after_transport_abort(
+    tmp_path: Path,
+    outcome: str,
+) -> None:
+    clock = Clock(datetime(2026, 10, 2, 10, 0, tzinfo=UTC))
+    database, store = _open_store(tmp_path / outcome, clock)
+    try:
+        request, decision, facts = _approval_case("fs_mkdir")
+        binding = build_approval_binding(
+            _principal(),
+            request,
+            decision,
+            facts,
+        )
+        pending = store.ensure_approval(
+            binding,
+            safe_summary_from_binding(binding, decision.risk),
+            _request_id(f"{outcome}-pending"),
+        )
+        store.grant(
+            pending.approval_id,
+            operator_identity="uid:0:gid:0",
+        )
+        ledger = AsyncStoreLedger(store)
+
+        class AbortTransport:
+            def __init__(self) -> None:
+                self.calls = []
+
+            async def run(self, **kwargs):
+                self.calls.append(kwargs)
+                if outcome == "cancelled":
+                    raise asyncio.CancelledError
+                raise SSHRequestOutcomeUncertain(
+                    "SUPERSECRET transport uncertainty"
+                )
+
+        transport = AbortTransport()
+        client = SSHFilesystemClient(
+            authorizer=ExecutionAuthorizer(
+                policy=MutablePolicy(decision),
+                ledger=ledger,
+            ),
+            audit=AuditRecorder(ledger),
+            transport=transport,
+        )
+        context = _context(
+            f"{outcome}-attempt",
+            approval_id=pending.approval_id,
+        )
+
+        if outcome == "cancelled":
+            with pytest.raises(asyncio.CancelledError):
+                await client.mkdir(request, context=context)
+        else:
+            with pytest.raises(
+                SSHRequestOutcomeUncertain,
+                match="remote filesystem mutation outcome is uncertain",
+            ):
+                await client.mkdir(request, context=context)
+
+        status = store.get_approval(pending.approval_id)
+        assert status is not None
+        assert status.state is ApprovalState.CONSUMED
+        assert len(transport.calls) == 1
+
+        retry_transport = RecordingTransport()
+        retry_client = SSHFilesystemClient(
+            authorizer=ExecutionAuthorizer(
+                policy=MutablePolicy(decision),
+                ledger=ledger,
+            ),
+            audit=AuditRecorder(ledger),
+            transport=retry_transport,
+        )
+        with pytest.raises(SSHApprovalRequired):
+            await retry_client.mkdir(
+                request,
+                context=_context(
+                    f"{outcome}-retry",
+                    approval_id=pending.approval_id,
+                ),
+            )
+        assert retry_transport.calls == []
+    finally:
+        database.close()
