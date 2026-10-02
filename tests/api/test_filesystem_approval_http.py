@@ -17,6 +17,7 @@ from ssh_over_mcp.api.runtime import MCPRuntimeSettings
 from ssh_over_mcp.approvals.client import SecurityLedgerAdminClient
 from ssh_over_mcp.approvals.runtime import SecurityLedgerRuntimeSettings
 from ssh_over_mcp.approvals.service import SecurityLedgerService
+from ssh_over_mcp.approvals.storage import LedgerDatabase
 from ssh_over_mcp.approvals.transport import UnixLedgerTransport
 from ssh_over_mcp.ssh.connection import SSHConnectionManager
 from ssh_over_mcp.ssh.protocol import decode_request
@@ -263,6 +264,22 @@ async def test_real_http_filesystem_approval_consume_and_outcome_semantics(
     ledger_thread = threading.Thread(target=run_ledger)
     ledger_thread.start()
 
+    ledger_frames: list[bytes] = []
+    original_round_trip = UnixLedgerTransport.round_trip
+
+    def capture_round_trip(
+        transport: UnixLedgerTransport,
+        frame: bytes,
+    ) -> bytes:
+        ledger_frames.append(frame)
+        return original_round_trip(transport, frame)
+
+    monkeypatch.setattr(
+        UnixLedgerTransport,
+        "round_trip",
+        capture_round_trip,
+    )
+
     transport_calls: list[tuple[str, str, int | None, bytes]] = []
 
     async def fake_run(
@@ -337,6 +354,11 @@ async def test_real_http_filesystem_approval_consume_and_outcome_semantics(
         )
     )
 
+    read_id = ""
+    mkdir_id = ""
+    write_id = ""
+    public_error_texts: list[str] = []
+
     try:
         for _ in range(500):
             if http_server.started:
@@ -376,6 +398,7 @@ async def test_real_http_filesystem_approval_consume_and_outcome_semantics(
 
             replay = await client.call_tool("fs_read", read_retry)
             assert replay.is_error is True
+            public_error_texts.append(_tool_text(replay))
             assert _approval_id(replay) != read_id
             assert [call[0] for call in transport_calls] == ["fs_read"]
 
@@ -398,6 +421,7 @@ async def test_real_http_filesystem_approval_consume_and_outcome_semantics(
                 changed_limit,
             )
             assert rejected_limit.is_error is True
+            public_error_texts.append(_tool_text(rejected_limit))
             assert [call[0] for call in transport_calls] == ["fs_read"]
 
             wrong_path = dict(bound_read)
@@ -405,6 +429,7 @@ async def test_real_http_filesystem_approval_consume_and_outcome_semantics(
             wrong_path["approval_id"] = bound_read_id
             rejected_path = await client.call_tool("fs_read", wrong_path)
             assert rejected_path.is_error is True
+            public_error_texts.append(_tool_text(rejected_path))
             assert [call[0] for call in transport_calls] == ["fs_read"]
 
             wrong_tool = await client.call_tool(
@@ -416,6 +441,7 @@ async def test_real_http_filesystem_approval_consume_and_outcome_semantics(
                 },
             )
             assert wrong_tool.is_error is True
+            public_error_texts.append(_tool_text(wrong_tool))
             assert [call[0] for call in transport_calls] == ["fs_read"]
 
             original_status = await client.call_tool(
@@ -444,6 +470,7 @@ async def test_real_http_filesystem_approval_consume_and_outcome_semantics(
 
             assert mkdir_result.is_error is True
             mkdir_text = _tool_text(mkdir_result)
+            public_error_texts.append(mkdir_text)
             assert "mutation outcome is uncertain" in mkdir_text
             assert "do not retry blindly" in mkdir_text
             mkdir_status = await client.call_tool(
@@ -474,6 +501,7 @@ async def test_real_http_filesystem_approval_consume_and_outcome_semantics(
                 changed_content,
             )
             assert rejected_content.is_error is True
+            public_error_texts.append(_tool_text(rejected_content))
             assert [call[0] for call in transport_calls] == [
                 "fs_read",
                 "fs_mkdir",
@@ -487,6 +515,7 @@ async def test_real_http_filesystem_approval_consume_and_outcome_semantics(
             )
             assert write_result.is_error is True
             write_text = _tool_text(write_result)
+            public_error_texts.append(write_text)
             assert (
                 "filesystem write committed; durability uncertain; "
                 "do not retry blindly"
@@ -506,6 +535,21 @@ async def test_real_http_filesystem_approval_consume_and_outcome_semantics(
         ]
         write_transport = transport_calls[-1]
         assert write_transport[3] == b"WRITE_SECRET_A"
+
+        captured_ledger = b"".join(ledger_frames)
+        public_errors = "\n".join(public_error_texts)
+        for forbidden in (
+            b"WRITE_SECRET_A",
+            b"WRITE_SECRET_B",
+            base64.b64encode(b"WRITE_SECRET_A"),
+            base64.b64encode(b"WRITE_SECRET_B"),
+            b"test-key-material",
+            b"secret://host-a",
+            b"secret-user",
+            b"secret-host-key",
+        ):
+            assert forbidden not in captured_ledger
+            assert forbidden.decode("ascii") not in public_errors
     finally:
         http_server.should_exit = True
         await asyncio.wait_for(http_task, timeout=5)
@@ -516,3 +560,97 @@ async def test_real_http_filesystem_approval_consume_and_outcome_semantics(
 
     assert not ledger_thread.is_alive()
     assert ledger_errors == []
+
+
+    reopened = LedgerDatabase.open(
+        ledger_settings.storage_settings()
+    )
+    try:
+        events = reopened.connection.execute(
+            "SELECT sequence,event_type,request_id,approval_id,"
+            "safe_summary_json FROM audit_events ORDER BY sequence"
+        ).fetchall()
+        approvals = reopened.connection.execute(
+            "SELECT approval_id,principal_id,profile,host,tool,"
+            "policy_version,risk,state,safe_summary_json,"
+            "binding_fingerprint FROM approvals ORDER BY created_at"
+        ).fetchall()
+    finally:
+        reopened.close()
+
+    persisted = repr((events, approvals))
+    for forbidden in (
+        "WRITE_SECRET_A",
+        "WRITE_SECRET_B",
+        base64.b64encode(b"WRITE_SECRET_A").decode("ascii"),
+        base64.b64encode(b"WRITE_SECRET_B").decode("ascii"),
+        "test-key-material",
+        "secret://host-a",
+        "secret-user",
+        "secret-host-key",
+        "SUPERSECRET_ARG",
+        "SUPERSECRET_ENV",
+        "SUPERSECRET_STDIN",
+    ):
+        assert forbidden not in persisted
+
+    def _retry_event_types(approval_id: str) -> list[str]:
+        consumed = next(
+            row
+            for row in events
+            if row[1] == "approval_consumed" and row[3] == approval_id
+        )
+        request_id = consumed[2]
+        interesting = {
+            "approval_required",
+            "approval_consumed",
+            "execution_started",
+            "execution_completed",
+            "mutation_outcome_uncertain",
+            "filesystem_write_committed_durability_uncertain",
+        }
+        return [
+            row[1]
+            for row in events
+            if row[2] == request_id and row[1] in interesting
+        ]
+
+    def _assert_required_granted_consumed_order(approval_id: str) -> None:
+        required = min(
+            row[0]
+            for row in events
+            if row[1] == "approval_required" and row[3] == approval_id
+        )
+        granted = next(
+            row[0]
+            for row in events
+            if row[1] == "approval_granted" and row[3] == approval_id
+        )
+        consumed = next(
+            row[0]
+            for row in events
+            if row[1] == "approval_consumed" and row[3] == approval_id
+        )
+        assert required < granted < consumed
+
+    for approval_id in (read_id, mkdir_id, write_id):
+        _assert_required_granted_consumed_order(approval_id)
+
+    assert _retry_event_types(read_id) == [
+        "approval_required",
+        "approval_consumed",
+        "execution_started",
+        "execution_completed",
+    ]
+    assert _retry_event_types(mkdir_id) == [
+        "approval_required",
+        "approval_consumed",
+        "execution_started",
+        "mutation_outcome_uncertain",
+    ]
+    assert _retry_event_types(write_id) == [
+        "approval_required",
+        "approval_consumed",
+        "execution_started",
+        "filesystem_write_committed_durability_uncertain",
+    ]

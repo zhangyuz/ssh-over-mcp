@@ -145,3 +145,52 @@ async def test_execution_event_has_safe_summary_and_bounded_result_metadata() ->
     assert "SUPERSECRET_STDOUT" not in rendered
     assert "SUPERSECRET_STDERR" not in rendered
     assert "SUPERSECRET_POLICY_REASON" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_filesystem_write_audit_retains_only_content_fingerprint() -> None:
+    ledger = RecordingLedger()
+    recorder = AuditRecorder(ledger)
+    request = EvaluationRequest(
+        profile="developer",
+        host="dev01",
+        tool="fs_write",
+        path="/srv/app/new.bin",
+        privilege="user",
+    )
+    decision = PolicyDecision(
+        decision=Decision.ALLOW,
+        reason="SUPERSECRET_POLICY_REASON",
+        risk=RiskLevel.MEDIUM,
+        normalized_path="/srv/app/new.bin",
+        policy_version="sha256:test",
+    )
+    raw_content = b"SUPERSECRET_FILE_BYTES"
+    facts = ApprovalExecutionFacts(
+        effective_timeout_seconds=60.0,
+        effective_max_output_bytes=4096,
+        content_length=len(raw_content),
+        content_fingerprint="sha256:" + ("2" * 64),
+    )
+
+    await recorder.execution_event(
+        AuditEventType.EXECUTION_COMPLETED,
+        context=_context(),
+        request=request,
+        decision=decision,
+        facts=facts,
+        result=SSHExecutionResult(
+            request_id=_context().request_id,
+            host="dev01",
+            exit_status=0,
+            duration_ms=1,
+        ),
+    )
+
+    event = ledger.events[0]
+    assert event.safe_summary is not None
+    assert event.safe_summary.content_length == len(raw_content)
+    assert event.safe_summary.content_fingerprint == "sha256:" + ("2" * 64)
+    rendered = event.model_dump_json()
+    assert "SUPERSECRET_FILE_BYTES" not in rendered
+    assert "SUPERSECRET_POLICY_REASON" not in rendered
