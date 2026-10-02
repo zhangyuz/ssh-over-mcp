@@ -11,7 +11,6 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from ssh_over_mcp.approvals.authorization import (
     ApprovalLedger,
-    AuditOnlyExecutionAuthorizer,
     ExecutionAuthorizer,
 )
 from ssh_over_mcp.audit.recorder import AuditRecorder
@@ -154,7 +153,7 @@ def build_ssh_runtime(
         policy=policy,
         ledger=ledger,
     )
-    filesystem_authorizer = AuditOnlyExecutionAuthorizer(
+    filesystem_authorizer = ExecutionAuthorizer(
         policy=policy,
         ledger=ledger,
     )

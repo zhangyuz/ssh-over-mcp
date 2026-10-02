@@ -1064,14 +1064,18 @@ class _ApprovalLedger:
         return self._status(binding, RiskLevel.HIGH, ApprovalState.CONSUMED)
 
 
-def _approval_decision(path: str) -> PolicyDecision:
+def _approval_decision(
+    path: str,
+    *,
+    policy_version: str = "sha256:approval-policy",
+) -> PolicyDecision:
     return PolicyDecision(
         decision=Decision.APPROVAL_REQUIRED,
         reason="operator approval required",
         risk=RiskLevel.HIGH,
         normalized_path=path,
         approval_required=True,
-        policy_version="sha256:approval-policy",
+        policy_version=policy_version,
     )
 
 
@@ -1557,4 +1561,107 @@ async def test_fs_write_granted_approval_cannot_override_current_deny() -> None:
         )
 
     assert ledger.consume_calls == []
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_filesystem_approval_principal_change_fails_pre_network() -> None:
+    from ssh_over_mcp.approvals.authorization import ExecutionAuthorizer
+
+    policy = Policy(_approval_decision("/srv/app/data.bin"))
+    ledger = _ApprovalLedger()
+    transport = RecordingTransport(
+        SSHExecutionResult(
+            request_id="unused",
+            host="dev01",
+            exit_status=0,
+            stdout=b"data",
+            duration_ms=1,
+        )
+    )
+    client = ssh_package.SSHFilesystemClient(
+        authorizer=ExecutionAuthorizer(policy=policy, ledger=ledger),
+        audit=audit_recorder(),
+        transport=transport,
+    )
+
+    with pytest.raises(ssh_package.SSHApprovalRequired):
+        await client.read(
+            request("fs_read", "/srv/app/data.bin"),
+            max_bytes=4096,
+            context=_approval_context("principal-original"),
+        )
+
+    changed_principal = PrincipalContext(
+        principal_id="static:other-developer",
+        profile="developer",
+    )
+    changed_context = _approval_context(
+        "principal-changed",
+        ledger.approval_id,
+    ).model_copy(update={"principal": changed_principal})
+
+    with pytest.raises(ssh_package.SSHApprovalRequired):
+        await client.read(
+            request("fs_read", "/srv/app/data.bin"),
+            max_bytes=4096,
+            context=changed_context,
+        )
+
+    assert len(ledger.consume_calls) == 1
+    _, changed_binding, _ = ledger.consume_calls[0]
+    assert changed_binding.principal_id == "static:other-developer"
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_filesystem_approval_policy_version_change_fails_pre_network() -> None:
+    from ssh_over_mcp.approvals.authorization import ExecutionAuthorizer
+
+    policy = Policy(
+        _approval_decision(
+            "/srv/app/data.bin",
+            policy_version="sha256:old-policy",
+        )
+    )
+    ledger = _ApprovalLedger()
+    transport = RecordingTransport(
+        SSHExecutionResult(
+            request_id="unused",
+            host="dev01",
+            exit_status=0,
+            stdout=b"data",
+            duration_ms=1,
+        )
+    )
+    client = ssh_package.SSHFilesystemClient(
+        authorizer=ExecutionAuthorizer(policy=policy, ledger=ledger),
+        audit=audit_recorder(),
+        transport=transport,
+    )
+
+    with pytest.raises(ssh_package.SSHApprovalRequired):
+        await client.read(
+            request("fs_read", "/srv/app/data.bin"),
+            max_bytes=4096,
+            context=_approval_context("policy-version-original"),
+        )
+
+    policy.decision = _approval_decision(
+        "/srv/app/data.bin",
+        policy_version="sha256:new-policy",
+    )
+    with pytest.raises(ssh_package.SSHApprovalRequired):
+        await client.read(
+            request("fs_read", "/srv/app/data.bin"),
+            max_bytes=4096,
+            context=_approval_context(
+                "policy-version-changed",
+                ledger.approval_id,
+            ),
+        )
+
+    assert len(ledger.consume_calls) == 1
+    _, changed_binding, _ = ledger.consume_calls[0]
+    assert changed_binding.policy_version == "sha256:new-policy"
     assert transport.calls == []
