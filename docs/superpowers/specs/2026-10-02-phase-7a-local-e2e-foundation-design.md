@@ -88,7 +88,12 @@ ssh-over-mcp MCP origin
    v
 real OpenSSH sshd
    |
-   | ForceCommand
+   | ForceCommand → fixed no-argument sudo target
+   v
+root-owned capability launcher
+   |
+   | immediately drop to host-agent UID/GID
+   | retain only CAP_SETUID + CAP_SETGID
    v
 ssh-over-mcp-host-agent
    |
@@ -110,7 +115,7 @@ This is a real Linux fixture. Mocks may support focused lower-level tests but do
 
 ### 6.1 Bootstrap authority
 
-Root is used only by operator-owned fixture infrastructure to prepare trusted host state:
+Root is used by operator-owned fixture infrastructure to prepare trusted host state:
 - fixture users/groups;
 - sshd configuration and host key;
 - root-owned host policy/config;
@@ -118,7 +123,7 @@ Root is used only by operator-owned fixture infrastructure to prepare trusted ho
 - test filesystem ownership;
 - narrowly scoped runtime directories.
 
-Root is not part of normal request execution.
+Normal request execution has exactly one additional bounded root transition: the fixed host-agent capability launcher begins as root only long enough to validate its invocation context and establish the final non-root host-agent identity/capability state. No repository/application module may be imported or executed while that launcher still has UID 0 or broader capabilities.
 
 ### 6.2 MCP/control plane
 
@@ -129,15 +134,37 @@ The MCP process keeps the existing Phase 5/6 authority model:
 - no raw model-visible secrets;
 - central policy/approval/audit remain authoritative before execution.
 
-### 6.3 Host agent
+### 6.3 Host-agent capability launcher
+
+Real sshd cannot directly provide the non-root ForceCommand process with the two Linux capabilities required by ADR 0005. Phase 7A therefore adds one fixed operator-installed launcher boundary.
+
+The launcher contract is:
+- ForceCommand invokes exactly one fixed no-argument sudo target;
+- the installed launcher is root-owned and not writable by the SSH account;
+- the sudo rule authorizes only that exact launcher command and no arguments;
+- the launcher rejects any argv;
+- before application import it validates the fixed SSH context (`SSH_ORIGINAL_COMMAND=mcp-v1`, no PTY);
+- it sanitizes/ignores caller-controlled Python/import environment before application import;
+- it sets the exact host-agent supplementary group set;
+- it drops real/effective/saved GID and UID to the configured non-root host-agent identity;
+- it retains only `CAP_SETUID` and `CAP_SETGID` in effective/permitted sets;
+- it has zero inheritable/ambient capabilities and no `CAP_KILL`, `CAP_SYS_ADMIN`, or generic privilege;
+- it verifies the resulting identity/capability state;
+- only after that verification may it import/run `ssh_over_mcp.host_agent.cli`.
+
+The launcher source may live in the repository for review, but the executable copy used by the trusted fixture is installed outside the checkout and is operator-owned. The E2E workflow verifies the installed artifact integrity before use.
+
+### 6.4 Host agent
 
 The host agent:
-- is reached only through real sshd ForceCommand;
+- is reached only through real sshd ForceCommand and the fixed capability launcher;
+- is non-root before any `ssh_over_mcp` application module is imported;
+- begins application execution with exactly `CAP_SETUID` and `CAP_SETGID` in effective/permitted sets and no other capabilities;
 - uses the existing authenticated manager client;
 - does not own writable cgroup authority;
 - keeps the existing capability/identity constraints required for the verified child identity transition.
 
-### 6.4 Containment manager
+### 6.5 Containment manager
 
 The containment manager:
 - owns only typed containment-management authority;
@@ -145,7 +172,7 @@ The containment manager:
 - does not receive SSH credentials, MCP credentials, or application policy authority;
 - does not spawn arbitrary commands.
 
-### 6.5 Workload
+### 6.6 Workload
 
 The workload must be verified from the real kernel to have:
 - configured workload UID/GID;
@@ -184,7 +211,7 @@ The first E2E matrix covers complete mainline behavior and high-value failure pa
 
 ### 8.2 Allowed execution
 An allowed `ssh_exec` request must traverse:
-MCP → central authorization → SSH → real sshd → ForceCommand → host-agent → containment manager → native executable.
+MCP → central authorization → SSH → real sshd → ForceCommand → fixed capability launcher → non-root host-agent → containment manager → native executable.
 
 The test verifies stdout, exit status, workload identity, and audit lifecycle.
 
@@ -343,10 +370,11 @@ Docs-only changes that do not change these boundaries do not require the expensi
 The existing `ssh-over-mcp-cgroup-live` pattern is extended rather than weakening ordinary CI.
 
 Operator-owned infrastructure outside the checkout owns:
-- root helper;
+- root E2E fixture helper;
 - root-owned helper config;
-- narrowly scoped sudo rule;
-- helper hash/integrity expectation;
+- fixed root-owned host-agent capability launcher;
+- narrowly scoped sudo rules for the reviewed fixed helpers only;
+- helper/launcher hash and ownership/mode integrity expectations;
 - delegated-cgroup/sshd/bootstrap authority.
 
 The GitHub runner remains:
@@ -355,7 +383,9 @@ The GitHub runner remains:
 - no Docker socket;
 - no generic root shell.
 
-The helper accepts only the reviewed fixed operation. Workflow/user input cannot inject arbitrary paths, UIDs, commands, sudo arguments, or helper flags.
+The E2E helper and capability launcher accept only their reviewed fixed operations. Workflow/user input cannot inject arbitrary paths, UIDs, commands, sudo arguments, launcher arguments, or helper flags.
+
+The capability launcher must prove that checked-out/application code is not imported while privileged. It transitions first to the exact non-root host-agent identity with only `CAP_SETUID`/`CAP_SETGID`, verifies that state, and only then enters the host-agent application.
 
 The E2E request is bound to an exact trusted 40-hex commit.
 
@@ -368,6 +398,8 @@ Phase 7A is split into four independently reviewable slices.
 Build only:
 - fixture identities/configuration;
 - real sshd + ForceCommand;
+- fixed no-argument capability launcher and exact sudo contract;
+- verified non-root host-agent startup with only `CAP_SETUID`/`CAP_SETGID`;
 - manager socket;
 - delegated cgroup;
 - deterministic bootstrap/teardown;
@@ -377,7 +409,7 @@ The completion focus is fixture privilege separation and cleanup.
 
 ### 7A2 — Happy-path product E2E
 Connect:
-MCP HTTP → policy/Ledger → SSH → sshd → host-agent → containment → workload → audit.
+MCP HTTP → policy/Ledger → SSH → sshd → capability launcher → non-root host-agent → containment → workload → audit.
 
 Cover discovery, allowed exec, typed filesystem operations, audit, and kernel workload identity.
 
@@ -430,28 +462,29 @@ A future live Cloudflare sandbox/account E2E requires explicit operator approval
 
 Phase 7A is complete only when:
 1. real sshd and ForceCommand are used;
-2. pinned SSH host-key trust is verified;
-3. real Security Ledger is used;
-4. approval admin authority is separate;
-5. authenticated containment manager is used;
-6. real delegated cgroup-v2 is used;
-7. workload identity/capability state is kernel-verified;
-8. allowed MCP → workload execution succeeds end to end;
-9. typed filesystem create-only semantics are proven end to end;
-10. central deny has zero execution side effect;
-11. host-local deny has zero workload exec;
-12. approval replay fails closed;
-13. host-key mismatch fails closed;
-14. Ledger outage fails closed;
-15. containment failure never releases the child to exec;
-16. secrets are absent from model-visible output/audit/log evidence;
-17. cleanup verification passes;
-18. exact-head dedicated E2E evidence exists for required changes;
-19. ordinary CI security posture is not weakened;
-20. development methodology is normative and linked from repository entrypoints;
-21. final review has no remaining Critical/Important finding;
-22. exact PR-head and merge-main CI gates pass;
-23. merged worktrees/branches and disposable fixture state are cleaned.
+2. the fixed capability launcher is root-owned, no-argument, exact-sudo authorized, integrity-checked, and enters application code only after reaching the exact non-root host-agent identity with only `CAP_SETUID`/`CAP_SETGID`;
+3. pinned SSH host-key trust is verified;
+4. real Security Ledger is used;
+5. approval admin authority is separate;
+6. authenticated containment manager is used;
+7. real delegated cgroup-v2 is used;
+8. workload identity/capability state is kernel-verified;
+9. allowed MCP → workload execution succeeds end to end;
+10. typed filesystem create-only semantics are proven end to end;
+11. central deny has zero execution side effect;
+12. host-local deny has zero workload exec;
+13. approval replay fails closed;
+14. host-key mismatch fails closed;
+15. Ledger outage fails closed;
+16. containment failure never releases the child to exec;
+17. secrets are absent from model-visible output/audit/log evidence;
+18. cleanup verification passes;
+19. exact-head dedicated E2E evidence exists for required changes;
+20. ordinary CI security posture is not weakened;
+21. development methodology is normative and linked from repository entrypoints;
+22. final review has no remaining Critical/Important finding;
+23. exact PR-head and merge-main CI gates pass;
+24. merged worktrees/branches and disposable fixture state are cleaned.
 
 ## 17. Later Phase 7 slices
 

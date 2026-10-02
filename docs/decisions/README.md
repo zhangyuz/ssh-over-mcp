@@ -18,3 +18,4 @@ Current ADRs:
 - [0004 — Separate containment management from workload privilege](0004-containment-manager-privilege-separation.md)
 - [0005 — Forked child performs the one-way workload identity drop](0005-workload-identity-drop.md)
 - [0006 — Full local E2E uses a dedicated operator-owned privilege fixture](0006-full-e2e-trust-model.md)
+- [0007 — ForceCommand host-agent capability handoff uses a fixed launcher](0007-host-agent-capability-launcher.md)

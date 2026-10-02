@@ -862,7 +862,7 @@ The implementation workflow performed no live Cloudflare account mutation; live 
 Status: **Phase 7A design approved; implementation not started.** The first slice is the real local E2E foundation defined in `docs/superpowers/specs/2026-10-02-phase-7a-local-e2e-foundation-design.md`. It establishes the product-level safety net and persists the normative development methodology before later host/credential hardening.
 
 Planned sequence:
-- 7A: real local E2E foundation and dedicated trust model;
+- 7A: real local E2E foundation and dedicated trust model, including the ADR 0007 fixed capability launcher bridging real sshd ForceCommand to the non-root host-agent `CAP_SETUID`/`CAP_SETGID` state;
 - 7B: systemd/AppArmor/SELinux and egress hardening;
 - 7C: SSH CA and secret-manager integration;
 - 7D: fuzz/property testing and Phase 7 final review.
