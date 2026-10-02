@@ -50,14 +50,15 @@ def test_first_initialization_creates_only_trusted_children_and_key(
 
     prepare_ledger_runtime(settings)
 
-    for child in (
-        settings.db_path.parent,
-        settings.execution_socket_path.parent,
-        settings.admin_socket_path.parent,
-    ):
+    expected_modes = {
+        settings.db_path.parent: 0o700,
+        settings.execution_socket_path.parent: 0o750,
+        settings.admin_socket_path.parent: 0o750,
+    }
+    for child, expected_mode in expected_modes.items():
         info = child.lstat()
         assert stat.S_ISDIR(info.st_mode)
-        assert stat.S_IMODE(info.st_mode) == 0o700
+        assert stat.S_IMODE(info.st_mode) == expected_mode
         assert info.st_uid == settings.service_uid
 
     key_info = settings.hmac_key_path.lstat()
@@ -94,8 +95,8 @@ def test_second_initialization_preserves_key_and_existing_database(
         ("key-short", 0o600),
         ("key-mode", 0o644),
         ("data-mode", 0o750),
-        ("exec-mode", 0o750),
-        ("admin-mode", 0o750),
+        ("exec-mode", 0o770),
+        ("admin-mode", 0o770),
     ],
 )
 def test_existing_unsafe_state_fails_without_repair(

@@ -20,7 +20,7 @@ def _bootstrap_error() -> LedgerBootstrapError:
     return LedgerBootstrapError("Security Ledger bootstrap failed")
 
 
-def _require_directory(path: Path, *, uid: int, gid: int) -> None:
+def _require_directory(path: Path, *, uid: int, gid: int, mode: int) -> None:
     try:
         resolved = path.resolve(strict=True)
         info = path.lstat()
@@ -31,24 +31,24 @@ def _require_directory(path: Path, *, uid: int, gid: int) -> None:
         or not stat.S_ISDIR(info.st_mode)
         or info.st_uid != uid
         or info.st_gid != gid
-        or stat.S_IMODE(info.st_mode) != 0o700
+        or stat.S_IMODE(info.st_mode) != mode
     ):
         raise _bootstrap_error()
 
 
-def _prepare_directory(path: Path, *, uid: int, gid: int) -> None:
+def _prepare_directory(path: Path, *, uid: int, gid: int, mode: int) -> None:
     try:
         path.lstat()
     except FileNotFoundError:
         try:
-            path.mkdir(mode=0o700)
+            path.mkdir(mode=mode)
             os.chown(path, uid, gid, follow_symlinks=False)
-            os.chmod(path, 0o700, follow_symlinks=False)
+            os.chmod(path, mode, follow_symlinks=False)
         except OSError:
             raise _bootstrap_error() from None
     except OSError:
         raise _bootstrap_error() from None
-    _require_directory(path, uid=uid, gid=gid)
+    _require_directory(path, uid=uid, gid=gid, mode=mode)
 
 
 def _write_all(fd: int, payload: bytes) -> None:
@@ -97,16 +97,19 @@ def prepare_ledger_runtime(settings: SecurityLedgerRuntimeSettings) -> None:
         data_dir,
         uid=settings.service_uid,
         gid=settings.service_gid,
+        mode=0o700,
     )
     _prepare_directory(
         execution_dir,
         uid=settings.service_uid,
         gid=settings.execution_socket_gid,
+        mode=0o750,
     )
     _prepare_directory(
         admin_dir,
         uid=settings.service_uid,
         gid=settings.admin_socket_gid,
+        mode=0o750,
     )
 
     _create_hmac_key(
