@@ -18,8 +18,11 @@ Phase 5A-C provide the local audit foundation:
 - existing mutation-outcome-uncertain and fs_write committed/durability-
   uncertain outcomes remain more specific if their audit append also fails.
 
-Phase 5C does not consume approvals yet. APPROVAL_REQUIRED continues to fail
-closed before network access; Phase 5D/5E add single-use approval consumption.
+Phase 5D now consumes exact single-use approvals for `ssh_exec`. An
+approval-required call without a usable grant remains pre-network and
+creates/reuses a ledger-owned approval; an exact granted retry is atomically
+consumed before `execution_started` and before any SSH connection is acquired.
+Filesystem approvals remain fail-closed until Phase 5E.
 
 ## Audit event requirements
 
@@ -78,20 +81,29 @@ At minimum:
 
 ## Approval binding
 
-Approvals SHOULD bind:
+Implemented approvals bind:
 
 - trusted identity/profile;
 - target host;
 - tool/operation;
-- normalized request hash;
+- normalized executable/cwd/path as applicable;
+- argv count + SHA-256 fingerprint;
+- environment names + per-value SHA-256 fingerprints;
+- stdin/content length + SHA-256 fingerprint when applicable;
+- effective server-owned execution limits;
 - privilege scope;
 - policy version;
-- expiration;
-- optional single-use nonce.
+- ledger-owned expiration.
 
 Changing any bound field invalidates the approval.
 
-An execution request MUST NOT contain a boolean or similar self-asserted field which converts an approval-required decision into an allow decision. Approval state must come from the trusted approval subsystem. Phase 5A/B already define and persist the binding/state machine, but Phase 5C intentionally does not consume grants; approval-required operations therefore still fail closed until the Phase 5D/5E integration slices.
+An execution request MUST NOT contain a boolean or similar self-asserted field
+which converts an approval-required decision into an allow decision. Approval
+state comes only from the trusted Security Ledger. Phase 5D MCP input can carry
+one opaque `approval_id`; it cannot carry grant/deny state, TTL, operator
+identity, or binding material. `ssh_exec` re-evaluates current policy and only
+reaches the network after exact atomic consumption. Phase 5E applies the same
+model to filesystem tools.
 
 ## Risk model
 

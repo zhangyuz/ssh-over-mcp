@@ -52,20 +52,24 @@ Input:
   "cwd": "/srv/projects/app",
   "env": {},
   "stdin": "",
-  "timeout_seconds": 30
+  "timeout_seconds": 30,
+  "approval_id": "apr_0123456789abcdef0123456789abcdef"
 }
 ```
 
 The server injects the trusted profile and fixed `privilege="user"`. Clients
 cannot provide profile, SSH address/port/user, credential reference, host key,
-request ID, privilege, output limit, or stdin limit.
+request ID, privilege, output limit, stdin limit, approval grant/deny state,
+approval TTL, or binding material. `approval_id` is optional and must be an
+opaque `apr_` plus 32 lowercase hexadecimal characters.
 
 Requirements and bounds:
 
 - MUST NOT use a shell to interpret `executable` or `args`;
 - executable, argv, cwd, and environment are evaluated by central policy before
   any SSH connection is acquired;
-- policy denial and approval-required outcomes do not reach the network path;
+- policy denial never reaches the network path; approval-required execution
+  reaches SSH only after an exact current grant is atomically consumed;
 - `stdin` is UTF-8 text with a 64 KiB MCP hard ceiling;
 - `timeout_seconds` is optional, positive, no greater than 60 seconds, and may
   only tighten the active server-owned executor timeout;
@@ -82,6 +86,23 @@ Policy denial, approval-required, credential, host-key, transport, and
 unexpected execution-boundary failures are mapped to stable public errors.
 Raw policy reasons, credential references, host keys, library exception text,
 and other secret-bearing internal details are not returned.
+
+For a central-policy `approval_required` decision, a call without a usable grant
+creates/reuses a ledger-owned approval and returns a stable error containing only
+the server-generated request ID, opaque approval ID, state, UTC expiry, and an
+instruction to retry the exact operation after approval. A supplied approval is
+single-use and bound to the trusted principal/profile, host, tool, privilege,
+current policy version, normalized executable/cwd, argv and environment
+fingerprints, stdin fingerprint/length, and effective execution limits. Any
+material change (including argv, an environment value, stdin, timeout, or policy
+version) prevents that grant from being consumed. A consumed/unusable handle
+never reaches SSH and yields a replacement/reused approval for the current exact
+binding rather than exposing why the supplied handle was unusable.
+
+Central policy is evaluated again on every retry. Current DENY is terminal;
+current ALLOW proceeds without consuming a stale approval; current
+`approval_required` requires exact atomic consumption before
+`SSHConnectionManager.get_connection()`.
 
 #### `ssh_shell`
 
@@ -229,10 +250,18 @@ Signal permissions are policy-controlled by process identity/scope where feasibl
 
 ### Approval / elevation
 
-- `request_elevation`
-- `approval_status`
+#### `approval_status`
 
-These tools create or inspect approval requests. They do not themselves grant privilege without a trusted approval path.
+Implemented in Phase 5D as a read-only MCP tool. Input is one opaque
+`approval_id`. The server scopes the lookup to the current trusted
+principal/profile and returns the approval ID, state, UTC expiry, host, tool,
+risk, bounded safe summary, and short keyed-HMAC binding fingerprint. Unknown
+IDs and IDs owned by another principal return the same `approval is not visible`
+error.
+
+MCP intentionally exposes no approval grant, deny, TTL, operator-identity, or
+binding-authority tool. Grant/deny authority remains on the separately
+peer-authenticated local Security Ledger admin endpoint / `approvalctl` path.
 
 ### Audit
 
@@ -277,14 +306,16 @@ Private-key bytes are never stored in this map. Startup fails closed if the
 file shape is invalid, a mapped path is not an existing absolute file, or any
 inventory credential reference lacks a mapping. Startup composes the existing
 `FileCredentialProvider -> SSHConnectionManager` boundary plus one shared
-`StructuredSSHTransport`; `SSHExecutor` consumes that transport after central
-policy allows execution. Composition does not resolve a credential or open SSH.
+`StructuredSSHTransport`; `SSHExecutor` consumes that transport only after its
+injected authorization gate returns success (direct policy allow or exact
+single-use approval consumption). Composition does not resolve a credential or
+open SSH.
 Application shutdown closes the pooled SSH connection manager after the MCP SDK
 lifespan exits.
 
 The registered MCP surface is now `hosts_list`, `host_info`,
-`policy_explain`, `ssh_exec`, `fs_stat`, `fs_read`, `fs_mkdir`, and
-`fs_write`.
+`policy_explain`, `approval_status`, `ssh_exec`, `fs_stat`, `fs_read`,
+`fs_mkdir`, and `fs_write`.
 Health/readiness remain ordinary HTTP routes and do not appear in the MCP tool
 registry.
 
