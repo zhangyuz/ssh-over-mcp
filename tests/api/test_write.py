@@ -12,8 +12,20 @@ from ssh_over_mcp.api import models
 from ssh_over_mcp.api.context import OperationContext
 from ssh_over_mcp.api.server import build_mcp_server
 from ssh_over_mcp.api.service import MCPService
+from ssh_over_mcp.audit.recorder import AuditRecorder
 from ssh_over_mcp.inventory.models import Host, Inventory
+
+
+class _AuditLedger:
+    async def append_audit(self, event) -> str:
+        return "evt_" + ("0" * 32)
+
+
+def _audit() -> AuditRecorder:
+    return AuditRecorder(_AuditLedger())
 from ssh_over_mcp.ssh import (
+    SSHAuditPersistenceError,
+    SSHAuditPersistenceOutcomeUncertain,
     SSHConnectionError,
     SSHFilesystemWriteCommittedUncertain,
     SSHFilesystemWriteResult,
@@ -310,6 +322,7 @@ async def test_server_registers_strict_create_only_fs_write_tool() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -351,6 +364,7 @@ async def test_server_fs_write_injects_principal_and_rejects_bad_input() -> None
     server = build_mcp_server(
         service=service,
         principal_provider=StaticPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -395,3 +409,43 @@ async def test_server_fs_write_injects_principal_and_rejects_bad_input() -> None
     assert "SUPERSECRET" not in _tool_error_text(invalid)
     assert extra.is_error is True
     assert len(service.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "public_error", "message"),
+    [
+        (
+            SSHAuditPersistenceError("SUPERSECRET audit detail"),
+            api_errors.AuditPersistenceError,
+            "audit persistence failed",
+        ),
+        (
+            SSHAuditPersistenceOutcomeUncertain(
+                "SUPERSECRET audit uncertainty"
+            ),
+            api_errors.AuditPersistenceOutcomeUncertainError,
+            "audit persistence outcome is uncertain; do not retry blindly",
+        ),
+    ],
+)
+async def test_fs_write_preserves_audit_persistence_failures(
+    error: Exception,
+    public_error,
+    message: str,
+) -> None:
+    filesystem = RecordingFilesystem()
+    filesystem.error = error
+    service = _service(filesystem)
+
+    with pytest.raises(public_error, match=message) as exc_info:
+        await service.fs_write(
+            _operation_context(),
+            models.FsWriteRequest(
+                host="visible",
+                path="/srv/app/new.bin",
+                data_base64="ZGF0YQ==",
+            ),
+        )
+
+    assert "SUPERSECRET" not in str(exc_info.value)

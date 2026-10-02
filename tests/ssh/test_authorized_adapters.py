@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
 import pytest
 
+import ssh_over_mcp.ssh.errors as ssh_errors
 from ssh_over_mcp.api.context import OperationContext
 from ssh_over_mcp.api.models import PrincipalContext
 from ssh_over_mcp.approvals.binding import fingerprint_bytes
+from ssh_over_mcp.audit.models import AuditEventType
+from ssh_over_mcp.audit.recorder import AuditRecorder
 from ssh_over_mcp.policy.models import (
     Decision,
     EvaluationRequest,
@@ -41,17 +45,41 @@ class RecordingAuthorizer:
         return self.decision
 
 
+class RecordingAuditLedger:
+    def __init__(self, *, fail_on_call: int | None = None) -> None:
+        self.fail_on_call = fail_on_call
+        self.calls = 0
+        self.events = []
+
+    async def append_audit(self, event) -> str:
+        self.calls += 1
+        if self.fail_on_call == self.calls:
+            raise RuntimeError("SUPERSECRET audit backend detail")
+        self.events.append(event)
+        return "evt_" + ("d" * 32)
+
+
 class RecordingTransport:
-    def __init__(self, *, stdout: bytes = b"") -> None:
+    def __init__(
+        self,
+        *,
+        stdout: bytes = b"",
+        exit_status: int | None = 0,
+        error: BaseException | None = None,
+    ) -> None:
         self.stdout = stdout
+        self.exit_status = exit_status
+        self.error = error
         self.calls = []
 
     async def run(self, **kwargs):
         self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
         return SSHExecutionResult(
             request_id=kwargs["request_id"],
             host=kwargs["host"],
-            exit_status=0,
+            exit_status=self.exit_status,
             stdout=self.stdout,
             duration_ms=1,
         )
@@ -108,6 +136,7 @@ async def test_executor_uses_authorizer_and_context_request_id() -> None:
     transport = RecordingTransport(stdout=b"ok")
     executor = SSHExecutor(
         authorizer=authorizer,
+        audit=AuditRecorder(RecordingAuditLedger()),
         connections=object(),
         transport=transport,
     )
@@ -150,6 +179,7 @@ async def test_executor_authorizer_failure_happens_before_transport() -> None:
     transport = RecordingTransport()
     executor = SSHExecutor(
         authorizer=authorizer,
+        audit=AuditRecorder(RecordingAuditLedger()),
         connections=object(),
         transport=transport,
     )
@@ -169,6 +199,7 @@ async def test_fs_read_binds_effective_read_limit_and_context_request_id() -> No
     transport = RecordingTransport(stdout=b"data")
     client = SSHFilesystemClient(
         authorizer=authorizer,
+        audit=AuditRecorder(RecordingAuditLedger()),
         transport=transport,
     )
     context = _context()
@@ -208,6 +239,7 @@ async def test_fs_write_binds_content_fingerprint_before_transport() -> None:
     transport = RecordingTransport()
     client = SSHFilesystemClient(
         authorizer=authorizer,
+        audit=AuditRecorder(RecordingAuditLedger()),
         transport=transport,
     )
     context = _context()
@@ -238,3 +270,170 @@ async def test_fs_write_binds_content_fingerprint_before_transport() -> None:
     assert envelope.request_id == context.request_id
     assert envelope.content_length == 4
     assert body == b"\x00\xffAB"
+
+
+@pytest.mark.asyncio
+async def test_executor_records_started_and_completed_events() -> None:
+    ledger = RecordingAuditLedger()
+    audit = AuditRecorder(ledger)
+    executor = SSHExecutor(
+        authorizer=RecordingAuthorizer(_allow_exec()),
+        connections=object(),
+        transport=RecordingTransport(stdout=b"ok"),
+        audit=audit,
+    )
+
+    result = await executor.execute(
+        _exec_request(),
+        context=_context(),
+    )
+
+    assert result.stdout == b"ok"
+    assert [event.event_type for event in ledger.events] == [
+        AuditEventType.EXECUTION_STARTED,
+        AuditEventType.EXECUTION_COMPLETED,
+    ]
+    assert ledger.events[1].stdout_bytes == 2
+
+
+@pytest.mark.asyncio
+async def test_executor_started_audit_failure_happens_before_transport() -> None:
+    audit_error = getattr(ssh_errors, "SSHAuditPersistenceError", None)
+    assert audit_error is not None
+
+    ledger = RecordingAuditLedger(fail_on_call=1)
+    transport = RecordingTransport()
+    executor = SSHExecutor(
+        authorizer=RecordingAuthorizer(_allow_exec()),
+        connections=object(),
+        transport=transport,
+        audit=AuditRecorder(ledger),
+    )
+
+    with pytest.raises(
+        audit_error,
+        match="audit persistence failed",
+    ) as exc_info:
+        await executor.execute(
+            _exec_request(),
+            context=_context(),
+        )
+
+    assert "SUPERSECRET" not in str(exc_info.value)
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_executor_success_audit_failure_is_non_retryable_uncertain() -> None:
+    uncertain_error = getattr(
+        ssh_errors,
+        "SSHAuditPersistenceOutcomeUncertain",
+        None,
+    )
+    assert uncertain_error is not None
+
+    ledger = RecordingAuditLedger(fail_on_call=2)
+    executor = SSHExecutor(
+        authorizer=RecordingAuthorizer(_allow_exec()),
+        connections=object(),
+        transport=RecordingTransport(stdout=b"ok"),
+        audit=AuditRecorder(ledger),
+    )
+
+    with pytest.raises(
+        uncertain_error,
+        match="audit persistence outcome is uncertain; do not retry blindly",
+    ) as exc_info:
+        await executor.execute(
+            _exec_request(),
+            context=_context(),
+        )
+
+    assert "SUPERSECRET" not in str(exc_info.value)
+    assert [event.event_type for event in ledger.events] == [
+        AuditEventType.EXECUTION_STARTED,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_executor_cancellation_records_cancelled_without_completion() -> None:
+    ledger = RecordingAuditLedger()
+    executor = SSHExecutor(
+        authorizer=RecordingAuthorizer(_allow_exec()),
+        connections=object(),
+        transport=RecordingTransport(error=asyncio.CancelledError()),
+        audit=AuditRecorder(ledger),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await executor.execute(
+            _exec_request(),
+            context=_context(),
+        )
+
+    assert [event.event_type for event in ledger.events] == [
+        AuditEventType.EXECUTION_STARTED,
+        AuditEventType.EXECUTION_CANCELLED,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_fs_read_completion_audit_failure_is_stable_audit_error() -> None:
+    audit_error = getattr(ssh_errors, "SSHAuditPersistenceError", None)
+    assert audit_error is not None
+
+    ledger = RecordingAuditLedger(fail_on_call=2)
+    client = SSHFilesystemClient(
+        authorizer=RecordingAuthorizer(_allow_path("/srv/app/file")),
+        transport=RecordingTransport(stdout=b"data"),
+        audit=AuditRecorder(ledger),
+    )
+    request = EvaluationRequest(
+        profile="developer",
+        host="dev01",
+        tool="fs_read",
+        path="/srv/app/file",
+        privilege="user",
+    )
+
+    with pytest.raises(
+        audit_error,
+        match="audit persistence failed",
+    ):
+        await client.read(
+            request,
+            context=_context(),
+            max_bytes=1024,
+        )
+
+
+@pytest.mark.asyncio
+async def test_fs_mkdir_uncertain_outcome_remains_more_specific_when_audit_fails() -> None:
+    ledger = RecordingAuditLedger(fail_on_call=2)
+    client = SSHFilesystemClient(
+        authorizer=RecordingAuthorizer(_allow_path("/srv/app/new-dir")),
+        transport=RecordingTransport(
+            error=ssh_errors.SSHRequestOutcomeUncertain(
+                "SUPERSECRET transport uncertainty"
+            )
+        ),
+        audit=AuditRecorder(ledger),
+    )
+    request = EvaluationRequest(
+        profile="developer",
+        host="dev01",
+        tool="fs_mkdir",
+        path="/srv/app/new-dir",
+        privilege="user",
+    )
+
+    with pytest.raises(
+        ssh_errors.SSHRequestOutcomeUncertain,
+        match="remote filesystem mutation outcome is uncertain",
+    ) as exc_info:
+        await client.mkdir(
+            request,
+            context=_context(),
+        )
+
+    assert "SUPERSECRET" not in str(exc_info.value)

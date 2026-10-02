@@ -1,13 +1,23 @@
 from __future__ import annotations
 
+import asyncio
+
 from ssh_over_mcp.api.context import OperationContext
 from ssh_over_mcp.approvals.authorization import ExecutionAuthorizationGate
 from ssh_over_mcp.approvals.binding import fingerprint_bytes
 from ssh_over_mcp.approvals.models import ApprovalExecutionFacts
+from ssh_over_mcp.audit.models import AuditEventType
+from ssh_over_mcp.audit.recorder import AuditPersistenceFailure, AuditRecorder
 from ssh_over_mcp.policy.models import EvaluationRequest
 
 from .connection import SSHConnectionManager
-from .errors import SSHPolicyDenied
+from .errors import (
+    SSHAuditPersistenceError,
+    SSHAuditPersistenceOutcomeUncertain,
+    SSHHostKeyVerificationError,
+    SSHPolicyDenied,
+    SSHRequestOutcomeUncertain,
+)
 from .protocol import ExecEnvelope, ExecutionLimits, encode_request
 from .transport import SSHExecutionResult, StructuredSSHTransport
 
@@ -19,6 +29,7 @@ class SSHExecutor:
         self,
         *,
         authorizer: ExecutionAuthorizationGate,
+        audit: AuditRecorder,
         connections: SSHConnectionManager,
         default_timeout_seconds: float = 60.0,
         default_max_output_bytes: int = 1024 * 1024,
@@ -27,6 +38,7 @@ class SSHExecutor:
         transport: StructuredSSHTransport | None = None,
     ) -> None:
         self.authorizer = authorizer
+        self.audit = audit
         self.connections = connections
         self.default_timeout_seconds = default_timeout_seconds
         self.default_max_output_bytes = default_max_output_bytes
@@ -67,16 +79,17 @@ class SSHExecutor:
             if max_stdin_bytes is not None
             else self.default_max_stdin_bytes
         )
+        facts = ApprovalExecutionFacts(
+            effective_timeout_seconds=timeout,
+            effective_max_output_bytes=output_limit,
+            effective_max_stdin_bytes=stdin_limit,
+            stdin_length=len(stdin),
+            stdin_fingerprint=fingerprint_bytes(stdin),
+        )
         decision = await self.authorizer.authorize(
             context,
             request,
-            ApprovalExecutionFacts(
-                effective_timeout_seconds=timeout,
-                effective_max_output_bytes=output_limit,
-                effective_max_stdin_bytes=stdin_limit,
-                stdin_length=len(stdin),
-                stdin_fingerprint=fingerprint_bytes(stdin),
-            ),
+            facts,
         )
         if not decision.normalized_executable:
             raise SSHPolicyDenied(decision)
@@ -98,10 +111,84 @@ class SSHExecutor:
         )
         payload = encode_request(envelope, stdin)
 
-        return await self.transport.run(
-            host=request.host,
-            payload=payload,
-            request_id=req_id,
-            timeout_seconds=timeout,
-            max_output_bytes=output_limit,
+        try:
+            await self.audit.execution_event(
+                AuditEventType.EXECUTION_STARTED,
+                context=context,
+                request=request,
+                decision=decision,
+                facts=facts,
+            )
+        except AuditPersistenceFailure:
+            raise SSHAuditPersistenceError(
+                "audit persistence failed"
+            ) from None
+
+        try:
+            result = await self.transport.run(
+                host=request.host,
+                payload=payload,
+                request_id=req_id,
+                timeout_seconds=timeout,
+                max_output_bytes=output_limit,
+            )
+        except asyncio.CancelledError:
+            try:
+                await self.audit.execution_event(
+                    AuditEventType.EXECUTION_CANCELLED,
+                    context=context,
+                    request=request,
+                    decision=decision,
+                    facts=facts,
+                )
+            except AuditPersistenceFailure:
+                pass
+            raise
+        except Exception as exc:
+            event_type = (
+                AuditEventType.HOST_KEY_FAILURE
+                if isinstance(exc, SSHHostKeyVerificationError)
+                else AuditEventType.EXECUTION_FAILED
+            )
+            try:
+                await self.audit.execution_event(
+                    event_type,
+                    context=context,
+                    request=request,
+                    decision=decision,
+                    facts=facts,
+                )
+            except AuditPersistenceFailure:
+                if isinstance(exc, SSHRequestOutcomeUncertain):
+                    raise exc
+                raise SSHAuditPersistenceError(
+                    "audit persistence failed"
+                ) from None
+            raise
+
+        event_type = (
+            AuditEventType.REMOTE_POLICY_DENIED
+            if (
+                result.exit_status == 77
+                and not result.timed_out
+                and not result.truncated
+                and result.exit_signal is None
+            )
+            else AuditEventType.EXECUTION_COMPLETED
         )
+        try:
+            await self.audit.execution_event(
+                event_type,
+                context=context,
+                request=request,
+                decision=decision,
+                facts=facts,
+                result=result,
+            )
+        except AuditPersistenceFailure:
+            raise SSHAuditPersistenceOutcomeUncertain(
+                "audit persistence outcome is uncertain; "
+                "do not retry blindly"
+            ) from None
+
+        return result

@@ -13,6 +13,7 @@ from ssh_over_mcp.approvals.authorization import (
     AuditLedger,
     AuditOnlyExecutionAuthorizer,
 )
+from ssh_over_mcp.audit.recorder import AuditRecorder
 from ssh_over_mcp.inventory.models import Inventory
 from ssh_over_mcp.policy.engine import PolicyEngine
 from ssh_over_mcp.ssh import (
@@ -77,6 +78,7 @@ class SSHRuntime:
     credentials: FileCredentialProvider
     connections: SSHConnectionManager
     transport: StructuredSSHTransport
+    audit: AuditRecorder
     executor: SSHExecutor
     filesystem: SSHFilesystemClient
 
@@ -151,19 +153,23 @@ def build_ssh_runtime(
         policy=policy,
         ledger=ledger,
     )
+    audit = AuditRecorder(ledger)
     executor = SSHExecutor(
         authorizer=authorizer,
+        audit=audit,
         connections=connections,
         transport=transport,
     )
     filesystem = SSHFilesystemClient(
         authorizer=authorizer,
+        audit=audit,
         transport=transport,
     )
     return SSHRuntime(
         credentials=credentials,
         connections=connections,
         transport=transport,
+        audit=audit,
         executor=executor,
         filesystem=filesystem,
     )

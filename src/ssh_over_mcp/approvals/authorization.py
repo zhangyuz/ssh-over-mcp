@@ -9,10 +9,13 @@ from ssh_over_mcp.policy.models import (
     EvaluationRequest,
     PolicyDecision,
 )
-from ssh_over_mcp.ssh.errors import SSHApprovalRequired, SSHPolicyDenied
+from ssh_over_mcp.ssh.errors import (
+    SSHApprovalRequired,
+    SSHAuditPersistenceError,
+    SSHPolicyDenied,
+)
 
-from .binding import build_approval_binding
-from .dispatcher import safe_summary_from_binding
+from .binding import build_approval_binding, safe_summary_from_binding
 from .models import ApprovalExecutionFacts
 
 
@@ -67,20 +70,25 @@ class AuditOnlyExecutionAuthorizer:
             binding,
             decision.risk,
         )
-        await self.ledger.append_audit(
-            AuditEventInput(
-                event_type=_EVENT_BY_DECISION[decision.decision],
-                request_id=context.request_id,
-                principal_id=context.principal.principal_id,
-                profile=context.principal.profile,
-                host=request.host,
-                tool=request.tool,
-                policy_version=decision.policy_version,
-                decision=decision.decision,
-                risk=decision.risk,
-                safe_summary=summary,
+        try:
+            await self.ledger.append_audit(
+                AuditEventInput(
+                    event_type=_EVENT_BY_DECISION[decision.decision],
+                    request_id=context.request_id,
+                    principal_id=context.principal.principal_id,
+                    profile=context.principal.profile,
+                    host=request.host,
+                    tool=request.tool,
+                    policy_version=decision.policy_version,
+                    decision=decision.decision,
+                    risk=decision.risk,
+                    safe_summary=summary,
+                )
             )
-        )
+        except Exception:  # noqa: BLE001
+            raise SSHAuditPersistenceError(
+                "audit persistence failed"
+            ) from None
 
         if decision.decision is Decision.DENY:
             raise SSHPolicyDenied(decision)

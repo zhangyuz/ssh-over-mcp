@@ -50,6 +50,7 @@ def build_application(
     mcp = build_mcp_server(
         service=service,
         principal_provider=principal_provider,
+        audit=ssh_runtime.audit,
     )
 
     @mcp.custom_route("/healthz", methods=["GET"])

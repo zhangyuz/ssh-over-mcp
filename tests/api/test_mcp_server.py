@@ -20,7 +20,17 @@ from ssh_over_mcp.api.models import (
     SSHExecResult,
 )
 from ssh_over_mcp.api.server import build_mcp_server
+from ssh_over_mcp.audit.recorder import AuditRecorder
 from ssh_over_mcp.policy.models import Decision, RiskLevel
+
+
+class _AuditLedger:
+    async def append_audit(self, event) -> str:
+        return "evt_" + ("0" * 32)
+
+
+def _audit() -> AuditRecorder:
+    return AuditRecorder(_AuditLedger())
 
 
 class StaticTestPrincipalProvider:
@@ -79,6 +89,7 @@ async def test_server_registers_closed_world_tool_surface() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -126,6 +137,7 @@ async def test_policy_explain_schema_restricts_tool_names() -> None:
     server = build_mcp_server(
         service=RecordingService(),
         principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -153,6 +165,7 @@ async def test_hosts_list_returns_safe_structured_output() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -179,6 +192,7 @@ async def test_host_info_hides_missing_and_hidden_with_public_error() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -198,6 +212,7 @@ async def test_policy_explain_returns_sanitized_structured_output() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -231,6 +246,7 @@ async def test_extra_profile_is_rejected_before_service_execution() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -253,6 +269,7 @@ async def test_oversized_policy_explain_is_rejected_before_service_execution() -
     server = build_mcp_server(
         service=service,
         principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -274,6 +291,7 @@ async def test_malformed_tool_input_is_rejected_before_service_execution() -> No
     server = build_mcp_server(
         service=service,
         principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -395,6 +413,7 @@ async def test_valid_tools_receive_unique_server_owned_operation_contexts() -> N
     server = build_mcp_server(
         service=service,
         principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:

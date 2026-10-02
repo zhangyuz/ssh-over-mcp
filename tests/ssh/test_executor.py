@@ -7,6 +7,7 @@ import pytest
 import ssh_over_mcp.ssh.errors as ssh_errors
 from ssh_over_mcp.api.context import OperationContext
 from ssh_over_mcp.api.models import PrincipalContext
+from ssh_over_mcp.audit.recorder import AuditRecorder
 from ssh_over_mcp.policy.models import (
     Decision,
     EvaluationRequest,
@@ -23,6 +24,15 @@ from ssh_over_mcp.ssh.protocol import (
     decode_request,
 )
 from ssh_over_mcp.ssh.transport import SSHExecutionResult, StructuredSSHTransport
+
+
+class RecordingAuditLedger:
+    async def append_audit(self, event) -> str:
+        return "evt_" + ("e" * 32)
+
+
+def audit_recorder() -> AuditRecorder:
+    return AuditRecorder(RecordingAuditLedger())
 
 
 class Policy:
@@ -162,6 +172,7 @@ def request() -> EvaluationRequest:
 async def test_policy_denial_happens_before_ssh():
     manager = Manager(Connection(Process()))
     executor = SSHExecutor(
+        audit=audit_recorder(),
         authorizer=Policy(
             PolicyDecision(
                 decision=Decision.DENY,
@@ -183,6 +194,7 @@ async def test_policy_denial_happens_before_ssh():
 async def test_approval_required_happens_before_ssh():
     manager = Manager(Connection(Process()))
     executor = SSHExecutor(
+        audit=audit_recorder(),
         authorizer=Policy(
             PolicyDecision(
                 decision=Decision.APPROVAL_REQUIRED,
@@ -206,6 +218,7 @@ async def test_fixed_remote_command_and_framed_payload():
     process = Process()
     connection = Connection(process)
     executor = SSHExecutor(
+        audit=audit_recorder(),
         authorizer=Policy(ALLOW),
         connections=Manager(connection),
     )
@@ -240,6 +253,7 @@ async def test_output_is_bounded_and_process_closed():
         delay=0.1,
     )
     executor = SSHExecutor(
+        audit=audit_recorder(),
         authorizer=Policy(ALLOW),
         connections=Manager(Connection(process)),
     )
@@ -260,6 +274,7 @@ async def test_remote_exit_before_local_deadline_is_not_local_timeout():
     process = Process(delay=0)
     process.exit_status = 143
     executor = SSHExecutor(
+        audit=audit_recorder(),
         authorizer=Policy(ALLOW),
         connections=Manager(Connection(process)),
     )
@@ -279,6 +294,7 @@ async def test_exact_remote_output_budget_is_not_local_truncation():
     process = Process(stdout=(b"12345",), delay=0)
     process.exit_status = 137
     executor = SSHExecutor(
+        audit=audit_recorder(),
         authorizer=Policy(ALLOW),
         connections=Manager(Connection(process)),
     )
@@ -298,6 +314,7 @@ async def test_exact_remote_output_budget_is_not_local_truncation():
 async def test_timeout_closes_remote_channel():
     process = Process(delay=0.2)
     executor = SSHExecutor(
+        audit=audit_recorder(),
         authorizer=Policy(ALLOW),
         connections=Manager(Connection(process)),
         cleanup_timeout_seconds=0.1,
@@ -317,6 +334,7 @@ async def test_timeout_closes_remote_channel():
 async def test_cancellation_aborts_remote_process():
     process = Process(delay=10)
     executor = SSHExecutor(
+        audit=audit_recorder(),
         authorizer=Policy(ALLOW),
         connections=Manager(Connection(process)),
         cleanup_timeout_seconds=0.05,
@@ -389,6 +407,7 @@ async def test_executor_delegates_allowed_request_to_injected_transport():
     manager = Manager(Connection(Process()))
     transport = RecordingTransport()
     executor = SSHExecutor(
+        audit=audit_recorder(),
         authorizer=Policy(ALLOW),
         connections=manager,
         transport=transport,

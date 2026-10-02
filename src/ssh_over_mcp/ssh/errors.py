@@ -52,3 +52,11 @@ class SSHRequestOutcomeUncertain(SSHCoreError):
 
 class SSHFilesystemWriteCommittedUncertain(SSHCoreError):
     """A file was published but its directory durability is uncertain."""
+
+
+class SSHAuditPersistenceError(SSHCoreError):
+    """A required audit event could not be persisted."""
+
+
+class SSHAuditPersistenceOutcomeUncertain(SSHCoreError):
+    """A side effect may have completed but its required audit did not."""

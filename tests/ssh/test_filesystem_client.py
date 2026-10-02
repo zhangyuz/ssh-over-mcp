@@ -7,6 +7,7 @@ import pytest
 import ssh_over_mcp.ssh as ssh_package
 from ssh_over_mcp.api.context import OperationContext
 from ssh_over_mcp.api.models import PrincipalContext
+from ssh_over_mcp.audit.recorder import AuditRecorder
 from ssh_over_mcp.policy.models import (
     Decision,
     EvaluationRequest,
@@ -21,6 +22,15 @@ from ssh_over_mcp.ssh.protocol import (
     decode_request,
 )
 from ssh_over_mcp.ssh.transport import SSHExecutionResult
+
+
+class RecordingAuditLedger:
+    async def append_audit(self, event) -> str:
+        return "evt_" + ("f" * 32)
+
+
+def audit_recorder() -> AuditRecorder:
+    return AuditRecorder(RecordingAuditLedger())
 
 
 class Policy:
@@ -60,7 +70,12 @@ class RecordingTransport:
 
     async def run(self, **kwargs):
         self.calls.append(kwargs)
-        return self.result
+        return self.result.model_copy(
+            update={
+                "request_id": kwargs["request_id"],
+                "host": kwargs["host"],
+            }
+        )
 
 
 def allow(*, normalized_path: str) -> PolicyDecision:
@@ -111,7 +126,7 @@ async def test_fs_stat_policy_normalizes_path_before_typed_transport():
             duration_ms=4,
         )
     )
-    client = client_type(authorizer=policy, transport=transport)
+    client = client_type(authorizer=policy, audit=audit_recorder(), transport=transport)
 
     result = await client.stat(
         request("fs_stat", "/srv/app/./config.yaml"),
@@ -159,7 +174,7 @@ async def test_fs_read_policy_normalizes_path_and_returns_raw_bytes():
             duration_ms=5,
         )
     )
-    client = client_type(authorizer=policy, transport=transport)
+    client = client_type(authorizer=policy, audit=audit_recorder(), transport=transport)
 
     result = await client.read(
         request("fs_read", "/srv/app/./data.bin"),
@@ -222,6 +237,7 @@ async def test_filesystem_policy_failure_happens_before_transport(
         )
     )
     client = ssh_package.SSHFilesystemClient(
+        audit=audit_recorder(),
         authorizer=policy,
         transport=transport,
     )
@@ -253,6 +269,7 @@ async def test_fs_read_invalid_bound_fails_before_policy_and_transport(max_bytes
         )
     )
     client = ssh_package.SSHFilesystemClient(
+        audit=audit_recorder(),
         authorizer=policy,
         transport=transport,
     )
@@ -281,6 +298,7 @@ async def test_fs_read_reserves_bounded_remote_diagnostic_budget():
         )
     )
     client = ssh_package.SSHFilesystemClient(
+        audit=audit_recorder(),
         authorizer=policy,
         transport=transport,
     )
@@ -310,6 +328,7 @@ async def test_fs_read_never_returns_success_data_over_requested_bound():
         )
     )
     client = ssh_package.SSHFilesystemClient(
+        audit=audit_recorder(),
         authorizer=policy,
         transport=transport,
     )
@@ -392,6 +411,7 @@ async def test_fs_read_normalizes_remote_failures_without_secret_echo(
     assert error_type is not None
 
     client = ssh_package.SSHFilesystemClient(
+        audit=audit_recorder(),
         authorizer=Policy(allow(normalized_path="/srv/app/data.bin")),
         transport=RecordingTransport(remote_result),
     )
@@ -425,6 +445,7 @@ async def test_fs_stat_rejects_mismatched_remote_path():
         separators=(",", ":"),
     ).encode()
     client = ssh_package.SSHFilesystemClient(
+        audit=audit_recorder(),
         authorizer=Policy(allow(normalized_path="/srv/app/config.yaml")),
         transport=RecordingTransport(
             SSHExecutionResult(
@@ -453,6 +474,7 @@ async def test_fs_stat_rejects_invalid_remote_json_without_echoing_payload():
     assert response_error is not None
 
     client = ssh_package.SSHFilesystemClient(
+        audit=audit_recorder(),
         authorizer=Policy(allow(normalized_path="/srv/app/config.yaml")),
         transport=RecordingTransport(
             SSHExecutionResult(
@@ -489,7 +511,7 @@ async def test_fs_mkdir_policy_normalizes_path_before_typed_transport():
             duration_ms=3,
         )
     )
-    client = client_type(authorizer=policy, transport=transport)
+    client = client_type(authorizer=policy, audit=audit_recorder(), transport=transport)
 
     result = await client.mkdir(
         request("fs_mkdir", "/srv/app/./new-directory"),
@@ -537,6 +559,7 @@ async def test_fs_mkdir_policy_failure_happens_before_transport(
         )
     )
     client = ssh_package.SSHFilesystemClient(
+        audit=audit_recorder(),
         authorizer=policy,
         transport=transport,
     )
@@ -554,6 +577,7 @@ async def test_fs_mkdir_policy_failure_happens_before_transport(
 @pytest.mark.asyncio
 async def test_fs_mkdir_remote_policy_denial_is_definite():
     client = ssh_package.SSHFilesystemClient(
+        audit=audit_recorder(),
         authorizer=Policy(allow(normalized_path="/srv/app/new-directory")),
         transport=RecordingTransport(
             SSHExecutionResult(
@@ -629,6 +653,7 @@ async def test_fs_mkdir_post_send_abnormal_result_is_outcome_uncertain(
     assert uncertain_error is not None
 
     client = ssh_package.SSHFilesystemClient(
+        audit=audit_recorder(),
         authorizer=Policy(allow(normalized_path="/srv/app/new-directory")),
         transport=RecordingTransport(remote_result),
     )
@@ -664,6 +689,7 @@ async def test_fs_mkdir_transport_uncertain_failure_stays_uncertain():
     )
     assert uncertain_error is not None
     client = ssh_package.SSHFilesystemClient(
+        audit=audit_recorder(),
         authorizer=Policy(allow(normalized_path="/srv/app/new-directory")),
         transport=RaisingTransport(
             uncertain_error("SUPERSECRET transport uncertainty")
@@ -685,6 +711,7 @@ async def test_fs_mkdir_transport_uncertain_failure_stays_uncertain():
 @pytest.mark.asyncio
 async def test_fs_mkdir_status_77_with_local_timeout_is_still_uncertain():
     client = ssh_package.SSHFilesystemClient(
+        audit=audit_recorder(),
         authorizer=Policy(allow(normalized_path="/srv/app/new-directory")),
         transport=RecordingTransport(
             SSHExecutionResult(
@@ -729,6 +756,7 @@ async def test_fs_write_policy_normalizes_path_and_sends_binary_body():
         )
     )
     client = ssh_package.SSHFilesystemClient(
+        audit=audit_recorder(),
         authorizer=policy,
         transport=transport,
     )
@@ -782,6 +810,7 @@ async def test_fs_write_policy_failure_happens_before_transport(
         )
     )
     client = ssh_package.SSHFilesystemClient(
+        audit=audit_recorder(),
         authorizer=policy,
         transport=transport,
     )
@@ -800,6 +829,7 @@ async def test_fs_write_policy_failure_happens_before_transport(
 @pytest.mark.asyncio
 async def test_fs_write_remote_policy_denial_is_definite():
     client = ssh_package.SSHFilesystemClient(
+        audit=audit_recorder(),
         authorizer=Policy(allow(normalized_path="/srv/app/new.bin")),
         transport=RecordingTransport(
             SSHExecutionResult(
@@ -835,6 +865,7 @@ async def test_fs_write_status_74_preserves_committed_durability_uncertain():
     assert committed_type is not None
 
     client = ssh_package.SSHFilesystemClient(
+        audit=audit_recorder(),
         authorizer=Policy(allow(normalized_path="/srv/app/new.bin")),
         transport=RecordingTransport(
             SSHExecutionResult(
@@ -904,6 +935,7 @@ async def test_fs_write_post_send_abnormal_result_is_outcome_uncertain(
     remote_result,
 ):
     client = ssh_package.SSHFilesystemClient(
+        audit=audit_recorder(),
         authorizer=Policy(allow(normalized_path="/srv/app/new.bin")),
         transport=RecordingTransport(remote_result),
     )
@@ -931,6 +963,7 @@ async def test_fs_write_status_74_with_local_timeout_is_generic_uncertain():
     assert committed_type is not None
 
     client = ssh_package.SSHFilesystemClient(
+        audit=audit_recorder(),
         authorizer=Policy(allow(normalized_path="/srv/app/new.bin")),
         transport=RecordingTransport(
             SSHExecutionResult(
@@ -961,6 +994,7 @@ async def test_fs_write_status_74_with_local_timeout_is_generic_uncertain():
 @pytest.mark.asyncio
 async def test_fs_write_transport_uncertain_failure_stays_uncertain():
     client = ssh_package.SSHFilesystemClient(
+        audit=audit_recorder(),
         authorizer=Policy(allow(normalized_path="/srv/app/new.bin")),
         transport=RaisingTransport(
             ssh_package.SSHRequestOutcomeUncertain(

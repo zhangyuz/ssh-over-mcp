@@ -11,8 +11,20 @@ from ssh_over_mcp.api import models
 from ssh_over_mcp.api.context import OperationContext
 from ssh_over_mcp.api.server import build_mcp_server
 from ssh_over_mcp.api.service import MCPService
+from ssh_over_mcp.audit.recorder import AuditRecorder
 from ssh_over_mcp.inventory.models import Host, Inventory
+
+
+class _AuditLedger:
+    async def append_audit(self, event) -> str:
+        return "evt_" + ("0" * 32)
+
+
+def _audit() -> AuditRecorder:
+    return AuditRecorder(_AuditLedger())
 from ssh_over_mcp.ssh import (
+    SSHAuditPersistenceError,
+    SSHAuditPersistenceOutcomeUncertain,
     SSHConnectionError,
     SSHFilesystemMkdirResult,
     SSHRequestOutcomeUncertain,
@@ -226,6 +238,7 @@ async def test_server_registers_strict_create_only_fs_mkdir_tool() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -263,6 +276,7 @@ async def test_server_fs_mkdir_injects_principal_and_rejects_extra_fields() -> N
     server = build_mcp_server(
         service=service,
         principal_provider=StaticPrincipalProvider(),
+        audit=_audit(),
     )
     async with Client(server) as client:
         ok = await client.call_tool(
@@ -307,6 +321,45 @@ async def test_fs_mkdir_unexpected_failure_is_conservatively_uncertain() -> None
         api_errors.FilesystemMutationOutcomeUncertainError,
         match="do not retry blindly",
     ) as exc_info:
+        await service.fs_mkdir(
+            _operation_context(),
+            models.FsMkdirRequest(
+                host="visible",
+                path="/srv/app/new-directory",
+            ),
+        )
+
+    assert "SUPERSECRET" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "public_error", "message"),
+    [
+        (
+            SSHAuditPersistenceError("SUPERSECRET audit detail"),
+            api_errors.AuditPersistenceError,
+            "audit persistence failed",
+        ),
+        (
+            SSHAuditPersistenceOutcomeUncertain(
+                "SUPERSECRET audit uncertainty"
+            ),
+            api_errors.AuditPersistenceOutcomeUncertainError,
+            "audit persistence outcome is uncertain; do not retry blindly",
+        ),
+    ],
+)
+async def test_fs_mkdir_preserves_audit_persistence_failures(
+    error: Exception,
+    public_error,
+    message: str,
+) -> None:
+    filesystem = RecordingFilesystem()
+    filesystem.error = error
+    service = _service(filesystem)
+
+    with pytest.raises(public_error, match=message) as exc_info:
         await service.fs_mkdir(
             _operation_context(),
             models.FsMkdirRequest(

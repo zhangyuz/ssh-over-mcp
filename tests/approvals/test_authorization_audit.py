@@ -181,10 +181,11 @@ async def test_audit_only_authorizer_records_failure_before_raising(
 
 
 @pytest.mark.asyncio
-async def test_audit_only_authorizer_ledger_failure_is_pre_authorized_failure() -> None:
+async def test_audit_only_authorizer_ledger_failure_is_stable_and_sanitized() -> None:
     from ssh_over_mcp.approvals.authorization import (
         AuditOnlyExecutionAuthorizer,
     )
+    from ssh_over_mcp.ssh.errors import SSHAuditPersistenceError
 
     ledger = Ledger(RuntimeError("SUPERSECRET ledger failure"))
     authorizer = AuditOnlyExecutionAuthorizer(
@@ -192,11 +193,15 @@ async def test_audit_only_authorizer_ledger_failure_is_pre_authorized_failure() 
         ledger=ledger,
     )
 
-    with pytest.raises(RuntimeError, match="SUPERSECRET ledger failure"):
+    with pytest.raises(
+        SSHAuditPersistenceError,
+        match="audit persistence failed",
+    ) as exc_info:
         await authorizer.authorize(
             _context(),
             _request(),
             _facts(),
         )
 
+    assert "SUPERSECRET" not in str(exc_info.value)
     assert len(ledger.events) == 1

@@ -11,6 +11,8 @@ from ssh_over_mcp.policy.models import (
 )
 from ssh_over_mcp.ssh.errors import (
     SSHApprovalRequired,
+    SSHAuditPersistenceError,
+    SSHAuditPersistenceOutcomeUncertain,
     SSHConnectionError,
     SSHCredentialError,
     SSHFilesystemWriteCommittedUncertain,
@@ -27,6 +29,8 @@ from ssh_over_mcp.ssh.errors import (
 from .context import OperationContext
 from .errors import (
     ApprovalRequiredError,
+    AuditPersistenceError,
+    AuditPersistenceOutcomeUncertainError,
     FilesystemMutationOutcomeUncertainError,
     FilesystemOperationError,
     FilesystemWriteCommittedUncertainError,
@@ -231,6 +235,12 @@ class MCPService:
             ) from None
         except SSHConnectionError:
             raise SSHTransportError("SSH transport failed") from None
+        except SSHAuditPersistenceOutcomeUncertain:
+            raise AuditPersistenceOutcomeUncertainError(
+                "audit persistence outcome is uncertain; do not retry blindly"
+            ) from None
+        except SSHAuditPersistenceError:
+            raise AuditPersistenceError("audit persistence failed") from None
         except Exception:  # noqa: BLE001
             # This is the public adapter boundary: foreign SSH/library
             # exceptions must never cross it with raw detail.
@@ -289,6 +299,12 @@ class MCPService:
             ) from None
         except SSHConnectionError:
             raise SSHTransportError("SSH transport failed") from None
+        except SSHAuditPersistenceOutcomeUncertain:
+            raise AuditPersistenceOutcomeUncertainError(
+                "audit persistence outcome is uncertain; do not retry blindly"
+            ) from None
+        except SSHAuditPersistenceError:
+            raise AuditPersistenceError("audit persistence failed") from None
         except SSHRemotePolicyDenied:
             raise RemotePolicyDeniedError(
                 "remote filesystem policy denied request"
@@ -364,6 +380,12 @@ class MCPService:
             ) from None
         except SSHConnectionError:
             raise SSHTransportError("SSH transport failed") from None
+        except SSHAuditPersistenceOutcomeUncertain:
+            raise AuditPersistenceOutcomeUncertainError(
+                "audit persistence outcome is uncertain; do not retry blindly"
+            ) from None
+        except SSHAuditPersistenceError:
+            raise AuditPersistenceError("audit persistence failed") from None
         except SSHRemotePolicyDenied:
             raise RemotePolicyDeniedError(
                 "remote filesystem policy denied request"
@@ -433,6 +455,12 @@ class MCPService:
             ) from None
         except SSHConnectionError:
             raise SSHTransportError("SSH transport failed") from None
+        except SSHAuditPersistenceOutcomeUncertain:
+            raise AuditPersistenceOutcomeUncertainError(
+                "audit persistence outcome is uncertain; do not retry blindly"
+            ) from None
+        except SSHAuditPersistenceError:
+            raise AuditPersistenceError("audit persistence failed") from None
         except SSHRemotePolicyDenied:
             raise RemotePolicyDeniedError(
                 "remote filesystem policy denied request"
@@ -498,6 +526,12 @@ class MCPService:
             ) from None
         except SSHConnectionError:
             raise SSHTransportError("SSH transport failed") from None
+        except SSHAuditPersistenceOutcomeUncertain:
+            raise AuditPersistenceOutcomeUncertainError(
+                "audit persistence outcome is uncertain; do not retry blindly"
+            ) from None
+        except SSHAuditPersistenceError:
+            raise AuditPersistenceError("audit persistence failed") from None
         except SSHRemotePolicyDenied:
             raise RemotePolicyDeniedError(
                 "remote filesystem policy denied request"

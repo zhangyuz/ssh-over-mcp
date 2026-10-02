@@ -12,10 +12,22 @@ from ssh_over_mcp.api import models
 from ssh_over_mcp.api.context import OperationContext
 from ssh_over_mcp.api.server import build_mcp_server
 from ssh_over_mcp.api.service import MCPService
+from ssh_over_mcp.audit.recorder import AuditRecorder
 from ssh_over_mcp.inventory.models import Host, Inventory
+
+
+class _AuditLedger:
+    async def append_audit(self, event) -> str:
+        return "evt_" + ("0" * 32)
+
+
+def _audit() -> AuditRecorder:
+    return AuditRecorder(_AuditLedger())
 from ssh_over_mcp.policy.models import Decision, PolicyDecision, RiskLevel
 from ssh_over_mcp.ssh import (
     SSHApprovalRequired,
+    SSHAuditPersistenceError,
+    SSHAuditPersistenceOutcomeUncertain,
     SSHConnectionError,
     SSHCredentialError,
     SSHFilesystemReadResult,
@@ -265,6 +277,16 @@ def _policy_failure(
             "FilesystemOperationError",
             "remote filesystem operation failed",
         ),
+        (
+            SSHAuditPersistenceError("SUPERSECRET audit detail"),
+            "AuditPersistenceError",
+            "audit persistence failed",
+        ),
+        (
+            SSHAuditPersistenceOutcomeUncertain("SUPERSECRET audit uncertainty"),
+            "AuditPersistenceOutcomeUncertainError",
+            "audit persistence outcome is uncertain; do not retry blindly",
+        ),
     ],
 )
 async def test_filesystem_service_sanitizes_remote_failures(
@@ -326,6 +348,7 @@ async def test_server_registers_strict_read_only_filesystem_tools() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -364,6 +387,7 @@ async def test_server_fs_read_injects_principal_and_rejects_extra_fields() -> No
     server = build_mcp_server(
         service=service,
         principal_provider=StaticPrincipalProvider(),
+        audit=_audit(),
     )
     async with Client(server) as client:
         ok = await client.call_tool(
@@ -402,6 +426,7 @@ async def test_server_invalid_fs_read_input_is_sanitized() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
