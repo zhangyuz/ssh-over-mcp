@@ -943,3 +943,76 @@ async def test_consumed_mkdir_approval_is_not_restored_after_transport_abort(
         assert retry_transport.calls == []
     finally:
         database.close()
+
+
+@pytest.mark.asyncio
+async def test_consumed_approval_survives_execution_start_audit_failure(
+    tmp_path: Path,
+) -> None:
+    clock = Clock(datetime(2026, 10, 2, 10, 0, tzinfo=UTC))
+    database, store = _open_store(tmp_path, clock)
+    try:
+        request, decision, facts = _approval_case("ssh_exec")
+        binding = build_approval_binding(
+            _principal(),
+            request,
+            decision,
+            facts,
+        )
+        pending = store.ensure_approval(
+            binding,
+            safe_summary_from_binding(binding, decision.risk),
+            _request_id("crash-window-pending"),
+        )
+        store.grant(
+            pending.approval_id,
+            operator_identity="uid:0:gid:0",
+        )
+
+        class FailExecutionStartLedger(AsyncStoreLedger):
+            async def append_audit(self, event) -> str:
+                raise RuntimeError("SUPERSECRET execution-start audit outage")
+
+        ledger = FailExecutionStartLedger(store)
+        transport = RecordingTransport(stdout=b"must-not-run")
+        executor = SSHExecutor(
+            authorizer=ExecutionAuthorizer(
+                policy=MutablePolicy(decision),
+                ledger=ledger,
+            ),
+            audit=AuditRecorder(ledger),
+            connections=object(),
+            transport=transport,
+        )
+
+        with pytest.raises(
+            SSHAuditPersistenceError,
+            match="audit persistence failed",
+        ):
+            await executor.execute(
+                request,
+                context=_context(
+                    "crash-window-retry",
+                    approval_id=pending.approval_id,
+                ),
+                stdin=b"hello",
+                timeout_seconds=60.0,
+                max_output_bytes=1024,
+                max_stdin_bytes=1024,
+            )
+
+        status = store.get_approval(pending.approval_id)
+        assert status is not None
+        assert status.state is ApprovalState.CONSUMED
+        assert transport.calls == []
+
+        event_types = [
+            row[0]
+            for row in database.connection.execute(
+                "SELECT event_type FROM audit_events ORDER BY sequence"
+            )
+        ]
+        assert event_types[-1] == "approval_consumed"
+        assert "execution_completed" not in event_types
+    finally:
+        database.close()
