@@ -27,13 +27,14 @@
 - The Portal upstream URL is exactly `http://<private-hostname>:8000/mcp`.
 - Portal upstream auth remains `auth_type=bearer` using the Phase 6A origin bearer; that bearer is not mounted into `cloudflared`.
 - Gateway routing must be enabled before private server registration/capability sync.
+- Reference Compose requires Docker Compose 2.33.1+ because `gw_priority` selects the connector default gateway.
 - CI remains self-hosted only; no Docker socket is added to the runner.
 - Carry forward the unresolved Phase 6 application-image bit-reproducibility minor; 6C may improve connector pinning but must not claim the full criterion closed.
 
 ## Review Focus
 
 - Tunnel token must never appear in resolved Compose environment, command argv, logs, inspect output beyond a file path, or repository examples. Task 1 owns static/secret tests; Task 2 owns live inspect/process checks.
-- A malicious operator-supplied private hostname must not escape Docker alias semantics or become a Compose key/value injection. Task 1 owns strict hostname validation in the contract test/reference env guidance.
+- The private hostname must remain deployment-only routing data: it may appear only as the MCP network alias and docs/operator inputs, never as MCP environment, profile, principal, or tool input. Task 1 owns the static contract; Task 2 owns resolved-config/DNS proof.
 - `cloudflared` must have no path to SSH keys, origin bearer, Ledger DB/HMAC, or Ledger sockets. Tasks 1–2 own mount inspection.
 - Connector failure must leave MCP private and unpublished rather than creating any alternate host listener. Task 2 owns the live negative proof.
 - Portal/Gateway instructions must not imply Gateway is the application authorization/audit boundary or that background sync traffic receives the same Gateway inspection as real-time tool calls. Task 3 owns the documentation assertions.
@@ -44,6 +45,7 @@
 
 - Modify `deploy/compose/compose.yaml`: add profile-gated `cloudflared`, private-hostname alias, and `cloudflare_egress`.
 - Modify `deploy/compose/reference.env.example`: add non-secret private-hostname and Tunnel-token-file path variables.
+- Modify `tests/ops/test_compose_contract.py`: extend the existing raw-YAML service/network/env-key contract for the profile-gated connector while preserving all 6B authority assertions.
 - Create `tests/ops/test_cloudflare_connector_contract.py`: daemon-free connector image/network/mount/secret contract.
 - Create `tests/live/test_cloudflare_connector_reference.py`: resolved-config, image identity, container inspect, DNS/private-origin reachability, and connector-failure isolation tests without contacting a real account.
 - Modify `tests/live/README.md`: exact 6C local connector-reference probe.
@@ -53,6 +55,7 @@
 **Files:**
 - Modify: `deploy/compose/compose.yaml`
 - Modify: `deploy/compose/reference.env.example`
+- Modify: `tests/ops/test_compose_contract.py`
 - Create: `tests/ops/test_cloudflare_connector_contract.py`
 
 **Interfaces:**
@@ -64,7 +67,7 @@
 
 Pin the final contract: service profile exactly `["cloudflare"]`; exact pinned image/digest; `user == "65532:65532"`; read-only root, drop ALL, no-new-privileges, never privileged; command exactly uses `tunnel run --token-file /run/secrets/cloudflare-tunnel-token` because `--no-autoupdate` is already in the pinned image entrypoint; no `TUNNEL_TOKEN` environment; only mount target is the token file read-only; networks exactly `origin_internal` + `cloudflare_egress`; `cloudflare_egress.gw_priority == 1`; no ports, host namespaces, Docker socket, Ledger volume, SSH secret, app config, or origin bearer mount.
 
-Run targeted pytest and verify RED because the connector does not exist yet.
+Also update the existing 6B raw-YAML expectations only after watching RED: its exact service set becomes the five services including profile-gated `cloudflared`, top-level networks gain `cloudflare_egress`, and the env example key set gains the two 6C inputs. Preserve every existing 6B mount/identity/zero-port assertion. Run targeted pytest and verify RED because the connector does not exist yet.
 
 - [ ] **Step 2: Pin private-hostname interpolation contract**
 
@@ -117,7 +120,7 @@ This test is live-Docker opt-in only.
 
 Start the Phase 6B MCP stack normally, then create the connector with the `cloudflare` profile without starting it. Inspect: read-only root, CapDrop ALL, no added caps, no-new-privileges, user 65532:65532, exactly the token-file mount, exactly origin_internal + cloudflare_egress, `cloudflare_egress` selected as the default gateway, no PortBindings, and command containing only the token-file path rather than token contents.
 
-Require the fixture Tunnel token host file to be mode `0600` and the container mount to be read-only.
+Require the fixture Tunnel token host file to be mode `0600` and the container mount to be read-only. Document that native Linux bind mounts preserve numeric ownership, so production token files must be owned/readable by UID/GID `65532:65532` with mode `0400` or `0600`; Docker Desktop behavior is not treated as proof of native-Linux ownership remapping.
 
 - [ ] **Step 4: Prove private hostname resolves to MCP without exposing a host port**
 
@@ -127,7 +130,7 @@ The probe must not mount the origin bearer; this proves private routing and orig
 
 - [ ] **Step 5: Prove connector failure cannot expose origin**
 
-Start `cloudflared` with the deliberately fake token file and allow it to fail/retry. Regardless of connector state, MCP must remain healthy locally, MCP PortBindings must stay empty, no new host listener on port 8000 may appear, and Ledger/MCP mount/network boundaries must remain unchanged. Inspect connector logs and require the distinctive fake token value to be absent. Stop/remove the connector and verify MCP remains healthy.
+Capture the host-listener baseline first, then start `cloudflared` with the deliberately fake token file for a bounded interval of at most 10 seconds and allow it to fail/retry. Regardless of connector state, MCP must remain healthy locally, MCP PortBindings must stay empty, the host-listener state for port 8000 must be unchanged from baseline, and Ledger/MCP mount/network boundaries must remain unchanged. Inspect connector logs and require the distinctive fake token value to be absent. Stop/remove the connector and verify MCP remains healthy.
 
 Do not assert on Cloudflare network error wording; only local security state is authoritative.
 
@@ -135,6 +138,7 @@ Do not assert on Cloudflare network error wording; only local security state is 
 
 Run on the authorized Mac x86 Docker host:
 ```bash
+docker build --platform linux/amd64 -t ssh-over-mcp:phase6c .
 SSH_OVER_MCP_RUN_LIVE_CLOUDFLARE_REFERENCE=1 \
 SSH_OVER_MCP_COMPOSE_IMAGE=ssh-over-mcp:phase6c \
 python -m pytest -q tests/live/test_cloudflare_connector_reference.py
@@ -148,47 +152,56 @@ Commit: `git commit -m "Test: prove Cloudflare connector isolation"`
 
 **Files:**
 - Modify: `docs/cloudflare-deployment.md`
+- Create: `tests/ops/test_cloudflare_deployment_docs.py`
 - Create or modify no executable Cloudflare-account automation.
 
 **Interfaces:**
 - Consumes `SSH_OVER_MCP_PRIVATE_HOSTNAME`, Tunnel token file, and the existing Phase 6A origin bearer.
 - Produces an operator checklist only.
 
-- [ ] **Step 1: Document Tunnel connector setup**
+- [ ] **Step 1: Write RED documentation-contract tests**
 
-Document: create/select a remotely managed Tunnel manually; copy only the Tunnel run token into an operator-owned file outside the repo; permission-protect that file and point `SSH_OVER_MCP_CLOUDFLARED_TOKEN_FILE` at it; set `SSH_OVER_MCP_PRIVATE_HOSTNAME`; start only after the 6B local stack is healthy with the `cloudflare` profile.
+Create `tests/ops/test_cloudflare_deployment_docs.py` and assert the guide does not yet satisfy the 6C contract: it must eventually contain the exact private URL form `http://<private-hostname>:8000/mcp`, `auth_type: bearer`, the phrase `Route traffic through Cloudflare Gateway`, an explicit statement that no 6C command mutates the account automatically, and distinct explanations of Tunnel token versus origin bearer. Run the focused test and verify RED against the current 6B document.
 
-State explicitly that anyone with the Tunnel token can run that tunnel, so the token is a secret.
-- [ ] **Step 2: Document private-hostname route**
+- [ ] **Step 2: Document Tunnel connector setup and token ownership**
+
+Document: create/select a remotely managed Tunnel manually; copy only the Tunnel run token into an operator-owned file outside the repo; point `SSH_OVER_MCP_CLOUDFLARED_TOKEN_FILE` at it; set `SSH_OVER_MCP_PRIVATE_HOSTNAME`; require Docker Compose 2.33.1+; start the connector profile only after the 6B local stack is healthy.
+
+State explicitly that anyone with the Tunnel token can run that tunnel. On native Linux, require the token file to be owned/readable by numeric connector identity `65532:65532` with mode `0400` or `0600`; never weaken this by running cloudflared as root.
+
+- [ ] **Step 3: Document the private-hostname route**
 
 In the Cloudflare dashboard/operator flow: connect the network with the Tunnel; create a private hostname route for exactly `SSH_OVER_MCP_PRIVATE_HOSTNAME` to that connector; do not create a public-origin DNS record for the MCP origin; verify route/connector health before Portal registration.
 
-Explain that the same hostname must resolve inside the connector's Docker `origin_internal` network through the MCP alias.
+Explain that the same hostname resolves inside the connector's `origin_internal` Docker network through the MCP alias and is deployment routing data only, not application identity/profile input.
 
-- [ ] **Step 3: Document Portal upstream registration**
+- [ ] **Step 4: Document Portal upstream registration**
 
-Register:
+Register exactly:
 ```text
 HTTP URL: http://<private-hostname>:8000/mcp
 auth_type: bearer
 auth_credentials: <existing origin bearer>
 ```
 
-The origin bearer is entered/stored in Portal upstream credentials, not in cloudflared configuration.
+The origin bearer is entered/stored in Portal upstream credentials, never cloudflared configuration. Turn on **Route traffic through Cloudflare Gateway** before Save/connect; wait for Ready/capability synchronization. Include no API command which mutates the live account.
 
-Turn on **Route traffic through Cloudflare Gateway before Save and connect server**. Wait until server status becomes Ready and capability synchronization succeeds.
+- [ ] **Step 5: Add Gateway validation and scope guidance**
 
-Do not include API commands that mutate the account in 6C.
+Require the operator to verify a real-time tool call appears in Gateway HTTP logs and that optional DLP can inspect/block real-time Portal tool traffic. State that application policy/approval/audit remains authoritative and that background credential/capability synchronization is not equivalent to the real-time Gateway-inspected path.
 
-- [ ] **Step 4: Add Gateway validation checklist**
+- [ ] **Step 6: Run docs/static tests and commit**
 
-Require the operator to verify: a real-time tool call appears in Gateway HTTP logs; optional DLP can inspect/block real-time portal tool traffic; no application authorization decision depends on Gateway; background admin credential/capability synchronization may bypass the real-time Gateway inspection path and must not be described as equivalent audit coverage.
+Run:
+```bash
+python -m pytest -q tests/ops/test_cloudflare_deployment_docs.py tests/ops/test_cloudflare_connector_contract.py
+python -m ruff check tests/ops/test_cloudflare_deployment_docs.py
+git diff --check
+```
+Expected: PASS.
 
-- [ ] **Step 5: Add docs contract test if needed**
+Commit: `git commit -m "Docs: document Phase 6C private Cloudflare route"`
 
-If easy to regress, extend the static ops test to assert the deployment doc includes the exact private URL form, bearer distinction, Gateway-routing requirement, and explicit no-live-account-mutation statement.
-
-Run docs/static tests and commit: `git commit -m "Docs: document Phase 6C private Cloudflare route"`
 ### Task 4: Whole-slice review, PR, exact-head CI, merge, and cleanup
 
 **Files:**
