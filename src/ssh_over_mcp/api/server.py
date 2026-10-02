@@ -435,6 +435,7 @@ def build_mcp_server(
         host: MCPHostAlias,
         path: str,
         data_base64: str,
+        approval_id: MCPApprovalID | None = None,
     ) -> FsWriteResult:
         """Create one absent remote regular file from bounded base64 bytes."""
 
@@ -443,11 +444,12 @@ def build_mcp_server(
                 host=host,
                 path=path,
                 data_base64=data_base64,
+                approval_id=approval_id,
             )
         except ValidationError:
             raise ToolError("invalid tool input") from None
 
-        context = operation_context()
+        context = operation_context(approval_id=request.approval_id)
         await record_request_received(
             context,
             tool="fs_write",

@@ -279,6 +279,7 @@ class FsWriteRequest(BaseModel):
     data_base64: str = Field(
         max_length=MAX_MCP_FILESYSTEM_WRITE_BASE64_CHARS,
     )
+    approval_id: MCPApprovalID | None = None
 
     @field_validator("data_base64")
     @classmethod

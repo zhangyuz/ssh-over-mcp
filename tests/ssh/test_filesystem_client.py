@@ -1403,3 +1403,158 @@ async def test_fs_mkdir_concurrent_replay_reaches_transport_once() -> None:
     assert len(failures) == 1
     assert isinstance(failures[0], ssh_package.SSHApprovalRequired)
     assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_fs_write_approval_binds_decoded_content_without_raw_secret() -> None:
+    import base64
+
+    from ssh_over_mcp.approvals.authorization import ExecutionAuthorizer
+    from ssh_over_mcp.approvals.binding import fingerprint_bytes
+
+    raw = b"SUPERSECRET-CONTENT"
+    policy = Policy(_approval_decision("/srv/app/new.bin"))
+    ledger = _ApprovalLedger()
+    transport = RecordingTransport(
+        SSHExecutionResult(
+            request_id="unused",
+            host="dev01",
+            exit_status=0,
+            duration_ms=1,
+        )
+    )
+    client = ssh_package.SSHFilesystemClient(
+        authorizer=ExecutionAuthorizer(policy=policy, ledger=ledger),
+        audit=audit_recorder(),
+        transport=transport,
+    )
+
+    with pytest.raises(ssh_package.SSHApprovalRequired):
+        await client.write(
+            request("fs_write", "/srv/app/new.bin"),
+            raw,
+            context=_approval_context("write-pending"),
+        )
+
+    binding, _, _ = ledger.ensure_calls[0]
+    assert binding.tool == "fs_write"
+    assert binding.normalized_path == "/srv/app/new.bin"
+    assert binding.content_length == len(raw)
+    assert binding.content_fingerprint == fingerprint_bytes(raw)
+    serialized = binding.model_dump_json()
+    assert raw.decode("ascii") not in serialized
+    assert base64.b64encode(raw).decode("ascii") not in serialized
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_fs_write_same_path_different_content_invalidates_old_approval() -> None:
+    from ssh_over_mcp.approvals.authorization import ExecutionAuthorizer
+
+    policy = Policy(_approval_decision("/srv/app/new.bin"))
+    ledger = _ApprovalLedger()
+    transport = RecordingTransport(
+        SSHExecutionResult(
+            request_id="unused",
+            host="dev01",
+            exit_status=0,
+            duration_ms=1,
+        )
+    )
+    client = ssh_package.SSHFilesystemClient(
+        authorizer=ExecutionAuthorizer(policy=policy, ledger=ledger),
+        audit=audit_recorder(),
+        transport=transport,
+    )
+
+    original = b"ABCD"
+    changed = b"ABCE"
+    with pytest.raises(ssh_package.SSHApprovalRequired):
+        await client.write(
+            request("fs_write", "/srv/app/new.bin"),
+            original,
+            context=_approval_context("write-content-a"),
+        )
+
+    with pytest.raises(ssh_package.SSHApprovalRequired):
+        await client.write(
+            request("fs_write", "/srv/app/new.bin"),
+            changed,
+            context=_approval_context("write-content-b", ledger.approval_id),
+        )
+
+    assert len(ledger.consume_calls) == 1
+    _, changed_binding, _ = ledger.consume_calls[0]
+    original_binding, _, _ = ledger.ensure_calls[0]
+    assert changed_binding.content_length == original_binding.content_length
+    assert changed_binding.content_fingerprint != original_binding.content_fingerprint
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_fs_write_exact_approval_consumes_before_transport() -> None:
+    from ssh_over_mcp.approvals.authorization import ExecutionAuthorizer
+
+    data = b"data"
+    policy = Policy(_approval_decision("/srv/app/new.bin"))
+    ledger = _ApprovalLedger()
+    transport = RecordingTransport(
+        SSHExecutionResult(
+            request_id="unused",
+            host="dev01",
+            exit_status=0,
+            duration_ms=1,
+        )
+    )
+    client = ssh_package.SSHFilesystemClient(
+        authorizer=ExecutionAuthorizer(policy=policy, ledger=ledger),
+        audit=audit_recorder(),
+        transport=transport,
+    )
+
+    with pytest.raises(ssh_package.SSHApprovalRequired):
+        await client.write(
+            request("fs_write", "/srv/app/new.bin"),
+            data,
+            context=_approval_context("write-exact-pending"),
+        )
+
+    await client.write(
+        request("fs_write", "/srv/app/new.bin"),
+        data,
+        context=_approval_context("write-exact-granted", ledger.approval_id),
+    )
+
+    assert len(ledger.consume_calls) == 1
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_fs_write_granted_approval_cannot_override_current_deny() -> None:
+    from ssh_over_mcp.approvals.authorization import ExecutionAuthorizer
+
+    ledger = _ApprovalLedger()
+    policy = Policy(deny(Decision.DENY))
+    transport = RecordingTransport(
+        SSHExecutionResult(
+            request_id="unused",
+            host="dev01",
+            exit_status=0,
+            duration_ms=1,
+        )
+    )
+    client = ssh_package.SSHFilesystemClient(
+        authorizer=ExecutionAuthorizer(policy=policy, ledger=ledger),
+        audit=audit_recorder(),
+        transport=transport,
+    )
+
+    with pytest.raises(ssh_package.SSHPolicyDenied):
+        await client.write(
+            request("fs_write", "/srv/app/new.bin"),
+            b"data",
+            context=_approval_context("write-deny", ledger.approval_id),
+        )
+
+    assert ledger.consume_calls == []
+    assert transport.calls == []
