@@ -21,9 +21,10 @@ class SSHPolicyDenied(SSHCoreError):
 
 
 class SSHApprovalRequired(SSHCoreError):
-    def __init__(self, decision):
+    def __init__(self, decision, *, approval_status=None):
         super().__init__(decision.reason)
         self.decision = decision
+        self.approval_status = approval_status
 
 
 class SSHRemoteResponseError(SSHCoreError):
