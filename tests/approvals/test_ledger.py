@@ -250,7 +250,10 @@ def test_consume_requires_exact_binding_and_is_single_use(tmp_path: Path) -> Non
                 binding,
                 "req_" + "4" * 32,
             )
-        assert _events(database).count("approval_consumed") == 1
+        events = _events(database)
+        assert events.count("approval_consumed") == 1
+        assert events.count("approval_required") == 2
+        assert events[-2:] == ["approval_required", "approval_consumed"]
     finally:
         database.close()
 

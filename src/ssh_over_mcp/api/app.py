@@ -44,6 +44,7 @@ def build_application(
     service = MCPService(
         inventory=bundle.inventory,
         policy=policy,
+        approval_client=ledger_client,
         ssh_executor=ssh_runtime.executor,
         ssh_filesystem=ssh_runtime.filesystem,
     )

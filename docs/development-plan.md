@@ -583,11 +583,13 @@ without adding an execution capability at that slice boundary:
 The MCP `ssh_exec` slice is implemented:
 
 - strict closed-world MCP arguments contain only logical host, executable, argv,
-  cwd, bounded environment, UTF-8 stdin, and an optional tightening timeout;
+  cwd, bounded environment, UTF-8 stdin, an optional tightening timeout, and an
+  optional opaque `approval_id`;
 - the static/trusted principal and fixed user privilege are injected server-side;
 - central policy remains inside the existing `SSHExecutor` path and runs before
   SSH connection acquisition;
-- denial and approval-required outcomes never fall back to raw shell;
+- denial never falls back to raw shell; approval-required execution also stays
+  pre-network unless an exact, current, single-use grant is atomically consumed;
 - client input cannot widen server-owned timeout/stdin/output limits;
 - binary stdout/stderr are returned losslessly as explicit base64 fields;
 - internal policy reasons, credential references, host keys, and raw SSH/library
@@ -744,9 +746,37 @@ Phase 5C mandatory audit lifecycle integration is implemented:
 - installed-package import-order regression tests keep the audit/approval/SSH
   domain layers free of circular initialization dependencies.
 
-Phase 5C does not consume approvals. APPROVAL_REQUIRED still fails closed before
-network access. Phase 5D/5E add single-use approval-aware execution while
-preserving this audit-before-network structure.
+Phase 5D single-use `ssh_exec` approvals are implemented:
+
+- `SSHExecutor` now uses `ExecutionAuthorizer`; filesystem tools deliberately
+  retain the Phase 5C audit-only authorizer until Phase 5E;
+- an approval-required `ssh_exec` call without a usable grant creates/reuses a
+  ledger-owned approval and returns a public `request_id`, opaque `approval_id`,
+  state, UTC expiry, and exact-retry instruction;
+- `approval_status` is the only MCP approval tool and is read-only,
+  principal-scoped, and oracle-resistant: unknown and other-principal handles
+  return the same not-visible error; MCP exposes no grant/deny/TTL/binding
+  authority;
+- supplied grants are bound to trusted principal/profile, host, tool,
+  privilege, policy version, normalized executable/cwd, argv fingerprint,
+  environment value fingerprints, stdin fingerprint/length, and effective
+  execution limits; changing any bound field prevents consumption;
+- a successful exact retry atomically records `approval_required` then
+  `approval_consumed` in the ledger before `execution_started` and before any SSH
+  connection acquisition; the grant is single-use;
+- an unusable, consumed, expired, foreign, or wrong-binding handle cannot act as
+  an oracle: the current exact binding gets a safe replacement/reused approval
+  status while network access remains zero;
+- current central policy is re-evaluated on every retry: DENY remains terminal,
+  current ALLOW does not consume a stale approval, and APPROVAL_REQUIRED requires
+  the exact current binding;
+- real Linux HTTP + Unix-socket ledger coverage proves approval-before-network,
+  replay resistance, remote-failure-after-consume semantics, audit ordering, and
+  that raw argv/environment values/stdin/credential material do not enter ledger
+  frames.
+
+Phase 5E extends the same approval contract to filesystem operations without
+changing the Phase 5D MCP authority boundary.
 
 ## Phase 6 — Cloudflare reference deployment
 

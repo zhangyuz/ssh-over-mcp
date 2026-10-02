@@ -1,3 +1,6 @@
+from datetime import datetime
+
+
 class ApiError(RuntimeError):
     """Base class for stable Phase 4 application errors."""
 
@@ -26,8 +29,36 @@ class PolicyDeniedError(ApiError):
     """Stable public error for central-policy denial."""
 
 
+class ApprovalNotVisibleError(ApiError):
+    """Stable public error for hidden or unknown approvals."""
+
+
+class ApprovalStatusUnavailableError(ApiError):
+    """Stable public error when approval status cannot be queried."""
+
+
 class ApprovalRequiredError(ApiError):
     """Stable public error for approval-required execution."""
+
+    @classmethod
+    def for_status(
+        cls,
+        *,
+        request_id: str,
+        approval_id: str,
+        state: str,
+        expires_at: datetime,
+    ) -> "ApprovalRequiredError":
+        state_text = str(state)
+        expiry_text = expires_at.isoformat()
+        return cls(
+            "approval required: "
+            f"request_id={request_id} "
+            f"approval_id={approval_id} "
+            f"state={state_text} "
+            f"expires_at={expiry_text}; "
+            "retry the exact operation with this approval_id only after approval"
+        )
 
 
 class SSHCredentialUnavailableError(ApiError):

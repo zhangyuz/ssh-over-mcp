@@ -213,6 +213,10 @@ def test_build_ssh_runtime_shares_one_structured_transport(tmp_path: Path) -> No
 def test_build_ssh_runtime_shares_transport_with_filesystem_client(
     tmp_path: Path,
 ) -> None:
+    from ssh_over_mcp.approvals.authorization import (
+        AuditOnlyExecutionAuthorizer,
+        ExecutionAuthorizer,
+    )
     key_path = _write_key(tmp_path)
     inventory = _inventory()
 
@@ -227,7 +231,14 @@ def test_build_ssh_runtime_shares_transport_with_filesystem_client(
 
     assert isinstance(runtime.filesystem, SSHFilesystemClient)
     assert runtime.filesystem.transport is runtime.transport
-    assert runtime.filesystem.authorizer is runtime.executor.authorizer
+    assert isinstance(runtime.executor.authorizer, ExecutionAuthorizer)
+    assert isinstance(
+        runtime.filesystem.authorizer,
+        AuditOnlyExecutionAuthorizer,
+    )
+    assert runtime.filesystem.authorizer is not runtime.executor.authorizer
     assert runtime.executor.authorizer.policy is policy
     assert runtime.executor.authorizer.ledger is ledger
+    assert runtime.filesystem.authorizer.policy is policy
+    assert runtime.filesystem.authorizer.ledger is ledger
     assert ledger.events == []

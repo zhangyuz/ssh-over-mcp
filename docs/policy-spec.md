@@ -156,7 +156,12 @@ The implementation evaluates **all matching rules**. Any matching deny wins. At 
 
 Host membership is evaluated against the explicitly requested server-side profile. Role inheritance grants inherited policy rules; it does **not** implicitly grant a child role access to hosts which only list its parent role.
 
-Requests cannot assert that approval has already been granted. Until the trusted approval subsystem is implemented, operations in an approval-required risk class remain `approval_required` and cannot be converted to `allow` by request data.
+Requests cannot assert that approval has already been granted. For Phase 5D
+`ssh_exec`, central policy still returns `approval_required`; the separate
+`ExecutionAuthorizer` re-evaluates that policy decision and asks the trusted
+Security Ledger to atomically consume an exact single-use grant before network
+access. The only approval-related MCP execution input is an opaque
+`approval_id`; it does not alter the policy decision itself.
 
 The canonical loadable example is `config/policy.example.yaml`.
 

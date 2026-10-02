@@ -17,6 +17,8 @@ from ssh_over_mcp.audit.recorder import (
 from .context import OperationContext, new_request_id
 from .errors import ApiError
 from .models import (
+    ApprovalStatusRequest,
+    ApprovalStatusResult,
     ExplainableTool,
     FsMkdirRequest,
     FsMkdirResult,
@@ -28,6 +30,7 @@ from .models import (
     FsWriteResult,
     HostsListResult,
     HostSummary,
+    MCPApprovalID,
     MCPHostAlias,
     PolicyExplainRequest,
     PolicyExplainResult,
@@ -103,11 +106,14 @@ def build_mcp_server(
 ) -> MCPServer:
     mcp = StrictMCPServer("ssh-over-mcp")
 
-    def operation_context() -> OperationContext:
+    def operation_context(
+        approval_id: MCPApprovalID | None = None,
+    ) -> OperationContext:
         return OperationContext(
             request_id=new_request_id(),
             principal=principal_provider.get_principal(),
             received_at=datetime.now(UTC),
+            approval_id=approval_id,
         )
 
     async def record_request_received(
@@ -204,6 +210,41 @@ def build_mcp_server(
     @mcp.tool(
         annotations=_READ_ONLY_ANNOTATIONS,
     )
+    async def approval_status(
+        approval_id: MCPApprovalID,
+    ) -> ApprovalStatusResult:
+        """Return principal-scoped status for one opaque approval handle."""
+
+        try:
+            request = ApprovalStatusRequest(approval_id=approval_id)
+        except ValidationError:
+            raise ToolError("invalid tool input") from None
+
+        context = operation_context()
+        await record_request_received(
+            context,
+            tool="approval_status",
+        )
+        try:
+            result = await service.approval_status(context, request)
+        except ApiError as exc:
+            await record_discovery_outcome(
+                AuditEventType.EXECUTION_FAILED,
+                context,
+                tool="approval_status",
+            )
+            raise ToolError(str(exc)) from exc
+
+        await record_discovery_outcome(
+            AuditEventType.EXECUTION_COMPLETED,
+            context,
+            tool="approval_status",
+        )
+        return result
+
+    @mcp.tool(
+        annotations=_READ_ONLY_ANNOTATIONS,
+    )
     async def policy_explain(
         host: MCPHostAlias,
         tool: ExplainableTool,
@@ -266,6 +307,7 @@ def build_mcp_server(
         env: dict[str, str] | None = None,
         stdin: str = "",
         timeout_seconds: float | None = None,
+        approval_id: MCPApprovalID | None = None,
     ) -> SSHExecResult:
         """Execute one policy-gated structured SSH command."""
 
@@ -278,11 +320,12 @@ def build_mcp_server(
                 env={} if env is None else env,
                 stdin=stdin,
                 timeout_seconds=timeout_seconds,
+                approval_id=approval_id,
             )
         except ValidationError:
             raise ToolError("invalid tool input") from None
 
-        context = operation_context()
+        context = operation_context(approval_id=request.approval_id)
         await record_request_received(
             context,
             tool="ssh_exec",

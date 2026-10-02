@@ -10,8 +10,9 @@ import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from ssh_over_mcp.approvals.authorization import (
-    AuditLedger,
+    ApprovalLedger,
     AuditOnlyExecutionAuthorizer,
+    ExecutionAuthorizer,
 )
 from ssh_over_mcp.audit.recorder import AuditRecorder
 from ssh_over_mcp.inventory.models import Inventory
@@ -131,7 +132,7 @@ def build_ssh_runtime(
     inventory: Inventory,
     policy: PolicyEngine,
     credential_map: Mapping[str, Path],
-    ledger: AuditLedger,
+    ledger: ApprovalLedger,
 ) -> SSHRuntime:
     validated = _validate_mapping(credential_map)
     required_refs = {
@@ -149,19 +150,23 @@ def build_ssh_runtime(
         credentials=credentials,
     )
     transport = StructuredSSHTransport(connections=connections)
-    authorizer = AuditOnlyExecutionAuthorizer(
+    execution_authorizer = ExecutionAuthorizer(
+        policy=policy,
+        ledger=ledger,
+    )
+    filesystem_authorizer = AuditOnlyExecutionAuthorizer(
         policy=policy,
         ledger=ledger,
     )
     audit = AuditRecorder(ledger)
     executor = SSHExecutor(
-        authorizer=authorizer,
+        authorizer=execution_authorizer,
         audit=audit,
         connections=connections,
         transport=transport,
     )
     filesystem = SSHFilesystemClient(
-        authorizer=authorizer,
+        authorizer=filesystem_authorizer,
         audit=audit,
         transport=transport,
     )

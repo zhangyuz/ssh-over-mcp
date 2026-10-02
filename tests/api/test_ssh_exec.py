@@ -12,8 +12,15 @@ from ssh_over_mcp.api import models
 from ssh_over_mcp.api.context import OperationContext
 from ssh_over_mcp.api.server import build_mcp_server
 from ssh_over_mcp.api.service import MCPService
+from ssh_over_mcp.approvals.models import (
+    ApprovalSafeSummary,
+    ApprovalState,
+    ApprovalStatus,
+)
 from ssh_over_mcp.audit.recorder import AuditRecorder
 from ssh_over_mcp.inventory.models import Host, Inventory
+
+APR_ID = "apr_" + ("a" * 32)
 
 
 class _AuditLedger:
@@ -47,10 +54,12 @@ def test_ssh_exec_request_is_closed_world_and_bounded() -> None:
         env={"LANG": "C"},
         stdin="hello",
         timeout_seconds=30,
+        approval_id=APR_ID,
     )
 
     assert request.stdin == "hello"
     assert request.timeout_seconds == 30
+    assert request.approval_id == APR_ID
 
     with pytest.raises(ValidationError):
         request_type(
@@ -72,6 +81,26 @@ def test_ssh_exec_request_is_closed_world_and_bounded() -> None:
             executable="/bin/echo",
             timeout_seconds=60.001,
         )
+
+    with pytest.raises(ValidationError):
+        request_type(
+            host="dev01",
+            executable="/bin/echo",
+            approval_id="apr_SUPERSECRET",
+        )
+
+    for forbidden_field, forbidden_value in (
+        ("grant", True),
+        ("deny", True),
+        ("approval_ttl_seconds", 3600),
+        ("binding_hmac", "SUPERSECRET"),
+    ):
+        with pytest.raises(ValidationError):
+            request_type(
+                host="dev01",
+                executable="/bin/echo",
+                **{forbidden_field: forbidden_value},
+            )
 
 
 def test_ssh_exec_result_uses_explicit_lossless_base64_fields() -> None:
@@ -103,7 +132,7 @@ def test_ssh_exec_result_uses_explicit_lossless_base64_fields() -> None:
     }
 
 
-def _operation_context() -> OperationContext:
+def _operation_context(approval_id: str | None = None) -> OperationContext:
     return OperationContext(
         request_id="req_" + "1" * 32,
         principal=models.PrincipalContext(
@@ -111,6 +140,7 @@ def _operation_context() -> OperationContext:
             profile="developer",
         ),
         received_at=datetime(2026, 10, 1, tzinfo=UTC),
+        approval_id=approval_id,
     )
 
 
@@ -237,6 +267,23 @@ async def test_ssh_exec_injects_principal_and_returns_lossless_output() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ssh_exec_threads_approval_only_through_operation_context() -> None:
+    executor = RecordingExecutor()
+    service = _service(executor)
+
+    context = _operation_context(approval_id=APR_ID)
+    await service.ssh_exec(
+        context,
+        _request(approval_id=APR_ID),
+    )
+
+    assert len(executor.calls) == 1
+    evaluation, kwargs = executor.calls[0]
+    assert kwargs["context"].approval_id == APR_ID
+    assert "approval_id" not in type(evaluation).model_fields
+
+
+@pytest.mark.asyncio
 async def test_ssh_exec_cannot_expand_runtime_limits() -> None:
     executor = RecordingExecutor()
     executor.default_timeout_seconds = 10.0
@@ -275,6 +322,41 @@ def _policy_failure(
         risk=RiskLevel.HIGH,
         approval_required=approval_required,
         policy_version="sha256:public",
+    )
+
+
+def _approval_status() -> ApprovalStatus:
+    return ApprovalStatus(
+        approval_id=APR_ID,
+        state=ApprovalState.PENDING,
+        expires_at=datetime(2026, 10, 1, 18, 10, tzinfo=UTC),
+        host="visible",
+        tool="ssh_exec",
+        risk=RiskLevel.HIGH,
+        safe_summary=ApprovalSafeSummary(
+            principal_id="static:developer",
+            profile="developer",
+            host="visible",
+            tool="ssh_exec",
+            privilege="user",
+            policy_version="sha256:public",
+            risk=RiskLevel.HIGH,
+            normalized_executable="/usr/bin/git",
+            normalized_cwd="/srv/app",
+            normalized_path=None,
+            argv_count=1,
+            argv_fingerprint="sha256:" + ("1" * 64),
+            env_names=(),
+            stdin_length=5,
+            stdin_fingerprint="sha256:" + ("2" * 64),
+            content_length=None,
+            content_fingerprint=None,
+            effective_timeout_seconds=30.0,
+            effective_max_output_bytes=1024 * 1024,
+            effective_max_stdin_bytes=1024 * 1024,
+            effective_tool_bytes=None,
+        ),
+        binding_fingerprint="hmac-sha256:v1:" + ("3" * 16),
     )
 
 
@@ -335,6 +417,47 @@ _ERROR_CASES = (
         "SSH execution failed",
     ),
 )
+
+
+@pytest.mark.asyncio
+async def test_ssh_exec_approval_required_error_has_safe_exact_retry_contract() -> None:
+    decision = _policy_failure(
+        Decision.APPROVAL_REQUIRED,
+        approval_required=True,
+    )
+    executor = RaisingExecutor(
+        SSHApprovalRequired(
+            decision,
+            approval_status=_approval_status(),
+        )
+    )
+    service = _service(executor)
+
+    with pytest.raises(api_errors.ApprovalRequiredError) as exc_info:
+        await service.ssh_exec(
+            _operation_context(),
+            _request(),
+        )
+
+    rendered = str(exc_info.value)
+    assert rendered == (
+        "approval required: "
+        f"request_id={'req_' + '1' * 32} "
+        f"approval_id={APR_ID} "
+        "state=pending "
+        "expires_at=2026-10-01T18:10:00+00:00; "
+        "retry the exact operation with this approval_id only after approval"
+    )
+    for forbidden in (
+        "SUPERSECRET",
+        "secret://",
+        "/usr/bin/git",
+        "/srv/app",
+        "static:developer",
+        "sha256:",
+        "hmac-sha256:",
+    ):
+        assert forbidden not in rendered
 
 
 @pytest.mark.asyncio
@@ -422,6 +545,7 @@ async def test_server_registers_strict_ssh_exec_tool() -> None:
         "env",
         "stdin",
         "timeout_seconds",
+        "approval_id",
     }
     assert tool.input_schema["additionalProperties"] is False
     assert tool.annotations is not None
@@ -441,6 +565,10 @@ async def test_server_registers_strict_ssh_exec_tool() -> None:
         "max_output_bytes",
         "max_stdin_bytes",
         "privilege",
+        "grant",
+        "deny",
+        "approval_ttl_seconds",
+        "binding_hmac",
     ):
         assert forbidden not in schema_text
 
@@ -465,6 +593,7 @@ async def test_server_ssh_exec_injects_principal_and_returns_result() -> None:
                 "env": {"LANG": "C"},
                 "stdin": "hello",
                 "timeout_seconds": 30,
+                "approval_id": APR_ID,
             },
         )
 
@@ -481,6 +610,8 @@ async def test_server_ssh_exec_injects_principal_and_returns_result() -> None:
     assert request.host == "visible"
     assert request.executable == "/usr/bin/git"
     assert request.stdin == "hello"
+    assert request.approval_id == APR_ID
+    assert context.approval_id == APR_ID
 
 
 @pytest.mark.asyncio
@@ -526,6 +657,22 @@ async def test_server_invalid_ssh_exec_input_is_sanitized() -> None:
                 "host": "visible",
                 "executable": "/usr/bin/id",
                 "stdin": secret_stdin,
+            },
+        )
+
+    assert result.is_error is True
+    text = _tool_error_text(result)
+    assert "invalid tool input" in text
+    assert "SUPERSECRET" not in text
+    assert service.calls == []
+
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "ssh_exec",
+            {
+                "host": "visible",
+                "executable": "/usr/bin/id",
+                "approval_id": "apr_SUPERSECRET-not-a-valid-id",
             },
         )
 
