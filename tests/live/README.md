@@ -283,6 +283,8 @@ Ordinary pytest leaves `SSH_OVER_MCP_RUN_LIVE_COMPOSE` unset, so the live
 Compose cases skip. GitHub CI remains on the hardened self-hosted runner with
 no Docker socket; the live Compose proof stays on the separately authorized
 Mac x86 Docker host.
+
+
 ## Phase 6C Cloudflare connector reference probe
 
 Phase 6C adds an opt-in local proof for the pinned `cloudflared` connector
@@ -316,6 +318,7 @@ The fixture token file is mode `0600`. On native Linux, bind mounts preserve
 numeric ownership, so production token files must be readable by connector
 UID/GID `65532:65532` with mode `0400` or `0600`. Docker Desktop behavior
 is not evidence of native-Linux ownership remapping.
+
 Ordinary pytest leaves
 `SSH_OVER_MCP_RUN_LIVE_CLOUDFLARE_REFERENCE` unset, so these cases skip.
 The hardened self-hosted CI runner still receives no Docker socket; the live
