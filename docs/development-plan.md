@@ -717,12 +717,36 @@ Phase 5B local Security Ledger infrastructure is implemented:
   dual-endpoint authority separation, inode-safe cleanup, service restart, and
   secret-retention boundaries.
 
-Phase 5B intentionally does **not** integrate the ledger into MCP, policy,
-readiness, SSH execution, or filesystem execution. Therefore the main MCP
-service does not yet depend on ledger availability and no existing operation is
-claimed to fail closed on ledger outage. Phase 5C adds mandatory request/audit
-lifecycle integration and the pre-network ledger-failure gate; Phase 5D/5E add
-approval-aware execution.
+Phase 5C mandatory audit lifecycle integration is implemented:
+
+- runtime configuration now requires the execution-ledger Unix socket path plus
+  the expected ledger service UID/GID; the MCP process authenticates the local
+  ledger server with SO_PEERCRED;
+- /healthz remains process liveness, while /readyz requires a successful local
+  ledger ping and still performs no SSH/remote-host probe;
+- every MCP invocation receives one server-owned OperationContext/request ID and
+  records request_received before entering its domain operation;
+- SSHExecutor and SSHFilesystemClient retain the authorization gate internally:
+  central policy is evaluated once, its allow/deny/approval-required event is
+  persisted, and execution_started is persisted before any structured SSH
+  transport call;
+- discovery/read-only completion audit failure is a stable audit-persistence
+  error; an otherwise-successful side-effecting operation whose required
+  completion audit cannot be persisted becomes non-retryable
+  audit-persistence-outcome-uncertain;
+- existing fs_mkdir mutation-outcome-uncertain and fs_write status-74
+  committed/durability-uncertain classifications remain more specific even if
+  their outcome audit also fails;
+- cancellation records execution_cancelled without fabricating completion;
+- audit rows retain bounded metadata/fingerprints only and never stdout/stderr
+  bodies, stdin/file bodies, raw argv, secret environment values, credentials,
+  or host keys;
+- installed-package import-order regression tests keep the audit/approval/SSH
+  domain layers free of circular initialization dependencies.
+
+Phase 5C does not consume approvals. APPROVAL_REQUIRED still fails closed before
+network access. Phase 5D/5E add single-use approval-aware execution while
+preserving this audit-before-network structure.
 
 ## Phase 6 — Cloudflare reference deployment
 

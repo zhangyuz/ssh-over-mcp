@@ -15,6 +15,7 @@
 11. **Secrets are never model-facing.** SSH private keys, service tokens, origin credentials, and secret environment variables are not returned by tools or stored in tool descriptions.
 12. **Policy changes are versioned.** Audit events record the policy version/hash used for the decision.
 13. **Containment authority is not workload authority.** Untrusted executed code MUST NOT inherit the ability to move itself out of its request cgroup, modify ancestor cgroup controls, or invoke manager operations which weaken its request-specific containment.
+14. **Required audit persistence is fail-closed.** The Phase 5 control plane must persist request/policy/execution-start audit state before SSH side effects. Ledger unavailability makes readiness fail and blocks the network path; a lost required post-attempt audit can never be reported as ordinary side-effecting success.
 
 ## Defense layers
 
