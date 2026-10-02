@@ -2,7 +2,7 @@
 
 Date: 2026-10-02
 
-Status: approved design; implementation not started
+Status: implementation complete; final closure requires exact-head CI and post-merge cleanup
 
 Base commit: `408f8ad1435f0a67eea20342b31c3a30ffe9a4ee`
 
@@ -657,9 +657,89 @@ local security boundary.
 
 ## 25. Review/implementation gate
 
-This document defines the approved architecture only.
+The written-spec gate was satisfied before implementation. Phase 6A through 6D
+were implemented through approved Superpowers plans, TDD, adversarial review,
+and self-hosted exact-head CI gates. No live Cloudflare account mutation was
+performed by repository code or by the implementation workflow.
 
-After this spec is committed, the user reviews the written artifact. Only after
-written-spec approval may `superpowers:writing-plans` produce the detailed
-implementation plan. Product code, Dockerfiles, Compose files, and deployment
-scripts must not be changed before that gate.
+The implementation is complete at this point, but Phase 6 is **not closed**
+until the final Phase 6D PR head and the resulting merge-main commit both pass
+the authoritative self-hosted CI and the merged Phase 6 worktree/branches are
+cleaned. The final merge-main CI is a post-merge gate.
+
+## 26. Phase 6 implementation evidence
+
+### 26.1 Acceptance criteria 1-20
+
+| # | Acceptance criterion | Executable/source evidence | State before final merge |
+|---:|---|---|---|
+| 1 | Production image builds reproducibly and runs non-root | `Dockerfile`; `tests/ops/test_container_reproducibility_contract.py`; `tests/live/test_reproducible_image.py::test_two_no_cache_builds_are_bit_reproducible`; `tests/live/test_container_image.py` | Green |
+| 2 | Bare server default remains `127.0.0.1` | `src/ssh_over_mcp/api/runtime.py`; `tests/api/test_runtime.py::test_runtime_settings_default_to_loopback_without_origin_token` | Green |
+| 3 | Compose explicitly opts into container-private `0.0.0.0` | `deploy/compose/compose.yaml`; `tests/ops/test_compose_contract.py::test_compose_pins_exact_runtime_environment_and_entrypoints` | Green |
+| 4 | Resolved Compose publishes zero MCP host ports | `tests/ops/test_compose_contract.py::test_compose_has_exact_private_service_network_and_volume_surface`; `tests/live/test_compose_deployment.py`; `tests/live/test_cloudflare_connector_reference.py` | Green |
+| 5 | Ledger and MCP remain different process identities | `tests/ops/test_compose_contract.py::test_compose_pins_exact_numeric_identities_and_capabilities`; live Compose identity assertions | Green |
+| 6 | Execution and admin sockets are separate mounts | `tests/ops/test_compose_contract.py::test_compose_mount_visibility_preserves_ledger_authority_domains`; live Compose mount/isolation probe | Green |
+| 7 | MCP cannot access ledger DB, HMAC key, or admin socket | `tests/integration/test_phase5_authority_separation.py::test_mcp_runtime_has_socket_identity_only_not_ledger_storage_authority`; Compose static/live mount tests | Green |
+| 8 | cloudflared cannot access SSH keys or ledger secrets | `tests/ops/test_cloudflare_connector_contract.py::test_cloudflared_service_is_hardened_and_token_file_only`; `tests/live/test_cloudflare_connector_reference.py::test_created_connector_has_only_connector_authority` | Green |
+| 9 | Origin bearer is required for `/mcp` and secret-safe | `tests/api/test_origin_auth.py` including invalid-header, secret-retention, auth-before-parser, and health/readiness cases | Green |
+| 10 | Ledger failure makes MCP not-ready and blocks execution | `tests/live/test_compose_deployment.py` outage/recovery case; `tests/integration/test_phase5_security.py::test_approval_persistence_outages_block_transport` | Green |
+| 11 | cloudflared failure does not expose origin | `tests/live/test_cloudflare_connector_reference.py::test_connector_failure_does_not_expose_origin` | Green |
+| 12 | Approval and audit state survive intended restart | `tests/live/test_compose_deployment.py` restart-persistence case; `tests/integration/test_phase5_security.py::test_restart_matrix_preserves_terminal_states_and_expiry_once` | Green |
+| 13 | Unsafe ledger key/directory/peer configuration fails closed | `tests/approvals/test_bootstrap.py`; wrong-UID/right-GID and stale-endpoint cases in `tests/live/test_compose_deployment.py` | Green |
+| 14 | Existing Phase 5 adversarial tests remain green | `tests/integration/test_phase5_security.py`, `test_phase5_authority_separation.py`, and `test_phase5_secret_retention.py` rerun in the Phase 6D targeted gate | Green |
+| 15 | Deployment-specific negative tests remain green | Phase 6A origin-auth negatives; Phase 6B Compose/live negatives; Phase 6C connector/live negatives; Phase 6D reproducibility/auth-guidance contracts | Green |
+| 16 | Ruff and complete Python test suite pass | Linux/amd64 Phase 6D gate: Ruff + compileall + full pytest; closure-evidence tests intentionally RED until this section was written | Green after closure docs GREEN rerun |
+| 17 | Python 3.13/3.14 exact-head CI passes only on configured self-hosted Ubuntu 26.04 x86 runner | `.github/workflows/ci.yml`; Task 4 requires exact PR-head and merge-main `push` runs | **Pending Task 4** |
+| 18 | Final whole-branch review has no Critical/Important issue | Fresh `408f8ad..HEAD` author security review plus source invariant checklist; no Critical/Important finding before closure docs | Green; final post-PR-head review still required |
+| 19 | Obsolete Phase 6 branches/worktrees removed after merge | Task 4 cleanup contract | **Pending Task 4** |
+| 20 | Live Cloudflare account changes remain explicit operator action | `docs/cloudflare-deployment.md`; `tests/ops/test_cloudflare_deployment_docs.py`; source/script scan finds no Cloudflare API mutation path | Green |
+
+### 26.2 Carried Phase 5 security invariants
+
+| ID | Carried invariant | Regression/source evidence | State |
+|---|---|---|---|
+| P5-1 | MCP caller cannot select trusted principal/profile | `tests/integration/test_phase5_authority_separation.py::test_mcp_registry_has_only_phase5_public_authority`; static profile remains runtime env in `tests/api/test_runtime.py`; Phase 6 auth docs prohibit claim/header profile selection | Green |
+| P5-2 | MCP cannot grant or deny approvals | `test_mcp_registry_has_only_phase5_public_authority`; execution/admin dispatcher separation test; only `approval_status` remains public | Green |
+| P5-3 | DENY cannot be overridden by approval | `tests/approvals/test_execution_authorizer.py::test_deny_never_consumes_supplied_approval`; Phase 5 current-policy matrix | Green |
+| P5-4 | Approval-required operation cannot reach SSH before atomic consume | `tests/approvals/test_execution_authorizer.py::test_granted_exact_approval_is_consumed_before_authorization`; Phase 5 single-use integration matrix | Green |
+| P5-5 | Consumed approval cannot replay concurrently or after restart | `tests/integration/test_phase5_security.py::test_concurrent_single_use_matrix_reaches_operation_once`; restart matrix; `tests/approvals/test_ledger_concurrency.py::test_concurrent_consume_has_exactly_one_success` | Green |
+| P5-6 | Material input changes approval binding | `tests/integration/test_phase5_security.py::test_binding_mismatch_matrix_stays_pre_consume`; execution-authorizer binding-change regression | Green |
+| P5-7 | Current policy/version change invalidates stale required grant | `tests/integration/test_phase5_security.py::test_current_policy_change_matrix`; execution-authorizer policy-change regressions | Green |
+| P5-8 | Ledger time owns expiry semantics | Phase 5 restart/expiry matrix; `tests/approvals/test_service.py::test_service_restart_preserves_approval_states_and_applies_expiry` | Green |
+| P5-9 | Execution client cannot acquire admin authority | `tests/integration/test_phase5_authority_separation.py::test_execution_and_admin_dispatchers_enforce_disjoint_authority`; Phase 6B separate socket mounts/UIDs | Green |
+| P5-10 | MCP process does not open SQLite ledger storage | `test_mcp_runtime_has_socket_identity_only_not_ledger_storage_authority`; Phase 6B MCP has no data-volume mount | Green |
+| P5-11 | HMAC key is unavailable to MCP | Same authority-separation test plus Compose mount-visibility/static/live tests | Green |
+| P5-12 | Ledger/audit outage fails closed | `tests/integration/test_phase5_security.py::test_approval_persistence_outages_block_transport`; audit-outage matrix; Phase 6B outage live probe | Green |
+| P5-13 | Approval does not bypass host-agent/OS policy | Phase 6 adds no approval authority to host-agent; full host-agent/SSH suite remains green; whole-phase source review shows only strict-default peer helper reuse for Ledger namespace visibility | Green |
+| P5-14 | No raw shell fallback is exposed | `test_mcp_registry_has_only_phase5_public_authority` explicitly excludes `ssh_shell`; MCP server schema/registry tests remain green | Green |
+| P5-15 | No destructive filesystem tool is exposed | `test_mcp_registry_has_only_phase5_public_authority` explicitly excludes `fs_delete`; filesystem registry remains typed/create-only | Green |
+| P5-16 | Audit rows exclude credentials/raw argv/env/stdin/file bodies/unbounded output | `tests/integration/test_phase5_secret_retention.py`; `tests/api/test_audit_lifecycle.py` bounded/secret-safe regressions | Green |
+| P5-17 | `fs_write` status 74 stays committed/durability-uncertain, distinct from generic uncertainty | `tests/api/test_filesystem_approval_http.py` status-74 assertions; `tests/api/test_write.py::test_fs_write_committed_uncertain_outcome_is_preserved`; Phase 5 security audit-outage case | Green |
+| P5-18 | Consume is one execution attempt, not one successful execution | `tests/integration/test_phase5_security.py::test_consumed_mkdir_approval_is_not_restored_after_transport_abort`; `test_consumed_approval_survives_execution_start_audit_failure`; replay transport remains zero | Green |
+
+### 26.3 Phase 6D review evidence and remaining gates
+
+Before this status was written, the Phase 6D adversarial targeted set covering
+Phase 5 security/authority/secret retention and Phase 6A-6D static contracts
+passed. The Mac x86 live gate also passed the reproducible-image probe, the
+Phase 6A image probe (3/3), the Phase 6B Compose probe (6/6), and the Phase 6C
+connector probe (5/5).
+
+The whole-Phase-6 review found no remaining Critical or Important issue. It
+confirmed zero published MCP ports, static application profile authority,
+separate Ledger/admin/storage authority, a file-only cloudflared Tunnel token,
+no application handling of Cloudflare client/API credentials, and no automated
+live Cloudflare account mutation.
+
+Ruling carried into final closure: the shared Mac host test virtual environment
+has a stale editable `/work` path, so Mac live probes set `PYTHONPATH` to the
+exact Phase 6D worktree `src`. The cost if this ruling is wrong is host-side
+Python dependency shadowing; this is mitigated by the complete Linux/amd64 test
+suite and by the actual workload assertions running inside built Linux
+containers.
+
+Final closure still requires Task 4 exact-head PR CI, exact merge-main push CI,
+and post-merge branch/worktree cleanup. Live Cloudflare account provisioning
+remains an operator action. Phase 7 retains OS sandbox/egress examples, SSH CA,
+secret-manager integration, fuzz/property testing, and the broader hardening
+checklist.
