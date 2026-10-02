@@ -216,6 +216,8 @@ def test_mcp_runtime_has_socket_identity_only_not_ledger_storage_authority() -> 
         "ledger_socket_path",
         "ledger_server_uid",
         "ledger_server_gid",
+        "bind_host",
+        "origin_bearer_token_file",
         "port",
     }
 
