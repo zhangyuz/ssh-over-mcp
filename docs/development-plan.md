@@ -800,6 +800,44 @@ Phase 5E filesystem approvals are implemented:
   not enter ledger protocol frames, persistent audit/approval rows, or public
   errors.
 
+The final Phase 5 whole-surface security review is complete:
+
+- exact implementation commit `2fc7acb3611347a42315703db3c6fc98837fb996`;
+- authoritative hardened Ubuntu 26.04 x86 workflow run `37009047426` passed runner
+  hardening checks, Ruff, cgroup-v2 probe, Python 3.13/3.14 compile, and both
+  full pytest suites;
+- adversarial coverage spans approval restart state, five-tool concurrent
+  single-use consumption, current-policy change, full material-binding
+  mismatch, ledger/audit outage boundaries, post-consume mutation outcomes,
+  authority separation, and secret retention;
+- one Important review finding was fixed before closure: a clean-interpreter
+  import cycle between approval authorization and the SSH package; a dedicated
+  regression now pins the import boundary;
+- the MCP registry exposes only `approval_status` for approval inspection and
+  accepts opaque `approval_id` handles only on policy-gated execution tools;
+  grant/deny authority remains isolated on the authenticated local admin
+  endpoint;
+- approval consumption remains one attempt rather than one successful
+  execution, including execution-start audit failure, cancellation, timeout,
+  remote policy denial, status 69, status 74, and transport uncertainty;
+- host-agent policy, create-only mutation primitives, mode ceilings, and
+  no-overwrite semantics remain independently authoritative;
+- no raw-shell or destructive filesystem MCP capability was introduced;
+- all 18 Phase 5 security invariants were reviewed against source structure and
+  executable adversarial evidence, with no remaining Critical or Important
+  finding.
+
+Explicitly deferred beyond Phase 5:
+
+- OAuth/user-claim principal IDs and remote approval UI;
+- multi-node/reusable approval semantics;
+- remote SIEM/audit export implementation;
+- MCP audit-query authority;
+- raw-shell break-glass enablement;
+- destructive filesystem namespace mutation;
+- privileged-helper approval;
+- online HMAC-key rotation/migration.
+
 ## Phase 6 — Cloudflare reference deployment
 
 Provide:

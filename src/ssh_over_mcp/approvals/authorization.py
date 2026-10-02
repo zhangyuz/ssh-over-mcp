@@ -9,11 +9,6 @@ from ssh_over_mcp.policy.models import (
     EvaluationRequest,
     PolicyDecision,
 )
-from ssh_over_mcp.ssh.errors import (
-    SSHApprovalRequired,
-    SSHAuditPersistenceError,
-    SSHPolicyDenied,
-)
 
 from .binding import build_approval_binding, safe_summary_from_binding
 from .models import (
@@ -82,6 +77,12 @@ class AuditOnlyExecutionAuthorizer:
         request: EvaluationRequest,
         facts: ApprovalExecutionFacts,
     ) -> PolicyDecision:
+        from ssh_over_mcp.ssh.errors import (
+            SSHApprovalRequired,
+            SSHAuditPersistenceError,
+            SSHPolicyDenied,
+        )
+
         decision = self.policy.evaluate(request)
         binding = build_approval_binding(
             context.principal,
@@ -143,6 +144,8 @@ class ExecutionAuthorizer:
         decision: PolicyDecision,
         binding: ApprovalBindingInput,
     ) -> None:
+        from ssh_over_mcp.ssh.errors import SSHAuditPersistenceError
+
         summary = safe_summary_from_binding(binding, decision.risk)
         try:
             await self.ledger.append_audit(
@@ -170,6 +173,12 @@ class ExecutionAuthorizer:
         request: EvaluationRequest,
         facts: ApprovalExecutionFacts,
     ) -> PolicyDecision:
+        from ssh_over_mcp.ssh.errors import (
+            SSHApprovalRequired,
+            SSHAuditPersistenceError,
+            SSHPolicyDenied,
+        )
+
         decision = self.policy.evaluate(request)
         binding = build_approval_binding(
             context.principal,
