@@ -229,6 +229,62 @@ uncertain with the same do-not-retry-blindly rule. Definite credential,
 host-key, connection, and channel-open failures remain pre-request transport
 errors.
 
+#### Phase 5E filesystem approvals
+
+`fs_stat`, `fs_read`, `fs_mkdir`, and `fs_write` each accept one additional
+optional field:
+
+```json
+{
+  "approval_id": "apr_0123456789abcdef0123456789abcdef"
+}
+```
+
+The field is an opaque handle only. Clients still cannot submit approval
+grant/deny state, TTL, operator identity, binding HMAC/fingerprint, trusted
+profile, request ID, SSH coordinates, credentials, mutation mode/owner,
+recursive/parents, overwrite, append, move, or delete controls.
+
+On an `approval_required` decision without a usable grant, the tool creates or
+reuses a ledger-owned approval and returns the same stable public retry contract
+as `ssh_exec`: server request ID, approval ID, state, UTC expiry, and an
+instruction to retry the exact operation only after approval. `approval_status`
+remains the only MCP approval-inspection tool; granting or denying remains on
+the separately authenticated local admin endpoint.
+
+Every retry re-evaluates current central policy. DENY is terminal; ALLOW does
+not consume a stale handle; `approval_required` consumes a matching grant
+atomically before any structured SSH transport call. A consumed, expired,
+foreign, wrong-tool, wrong-path, wrong-principal, or wrong-policy-version
+handle remains pre-network and cannot reveal why it was unusable.
+
+The exact binding is tool-specific:
+
+- `fs_stat`: trusted principal/profile, host, tool, user privilege, current
+  policy version, normalized path, effective timeout, and stat response output
+  bound;
+- `fs_read`: the same identity/path fields plus effective transport output
+  bound and requested/effective `max_bytes`; changing only `max_bytes`
+  invalidates the grant;
+- `fs_mkdir`: trusted identity/path fields plus effective timeout/output bound;
+- `fs_write`: trusted identity/path fields plus effective timeout/output bound,
+  decoded content length, and SHA-256 content fingerprint. Raw decoded bytes
+  and the client base64 representation are never approval-binding payloads.
+
+Approval never widens the existing operation. The 1 MiB MCP `fs_read` hard cap,
+64 KiB decoded `fs_write` hard cap, central normalized path, host-agent
+profile-scoped roots and byte limits, descriptor-pinned reads, create-only
+mkdir/write primitives, mode ceilings, and no-overwrite semantics remain
+authoritative.
+
+Consumption authorizes one attempt, not one successful outcome. After consume,
+timeouts, cancellation, remote failure, or ambiguous mutation outcomes leave
+the approval consumed. `fs_mkdir` retains the generic `filesystem mutation
+outcome uncertain; do not retry blindly` contract for post-send ambiguity.
+A clean `fs_write` status 74 retains the more specific `filesystem write
+committed; durability uncertain; do not retry blindly` contract and is not
+collapsed into generic mutation or audit uncertainty.
+
 ### Processes
 
 - `process_list`
