@@ -283,3 +283,40 @@ Ordinary pytest leaves `SSH_OVER_MCP_RUN_LIVE_COMPOSE` unset, so the live
 Compose cases skip. GitHub CI remains on the hardened self-hosted runner with
 no Docker socket; the live Compose proof stays on the separately authorized
 Mac x86 Docker host.
+## Phase 6C Cloudflare connector reference probe
+
+Phase 6C adds an opt-in local proof for the pinned `cloudflared` connector
+without mutating a real Cloudflare account. Run it only on the authorized
+Mac x86 Docker host:
+
+```bash
+docker build --platform linux/amd64 -t ssh-over-mcp:phase6c .
+SSH_OVER_MCP_RUN_LIVE_CLOUDFLARE_REFERENCE=1 \
+SSH_OVER_MCP_COMPOSE_IMAGE=ssh-over-mcp:phase6c \
+python -m pytest -q tests/live/test_cloudflare_connector_reference.py
+```
+
+The fixture uses a deliberately fake Tunnel token file and a disposable
+Compose project. It never attempts account provisioning or Portal mutation.
+The probe verifies:
+
+- the resolved Compose profile contains the exact pinned
+  `cloudflare/cloudflared:2026.9.3` digest and no token value in environment;
+- the connector image defaults to numeric non-root identity `65532:65532`;
+- the created connector has a read-only root, no Linux capabilities,
+  `NoNewPrivs`, no published ports, and only the Tunnel-token file mount;
+- connector networking is limited to `origin_internal` and
+  `cloudflare_egress`, with the latter selected for default egress;
+- the private hostname resolves to MCP inside `origin_internal` while
+  unauthenticated `/mcp` requests still receive HTTP 401;
+- a fake-token connector failure neither publishes port 8000 nor changes the
+  MCP/Ledger authority boundary, and the fake token does not appear in logs.
+
+The fixture token file is mode `0600`. On native Linux, bind mounts preserve
+numeric ownership, so production token files must be readable by connector
+UID/GID `65532:65532` with mode `0400` or `0600`. Docker Desktop behavior
+is not evidence of native-Linux ownership remapping.
+Ordinary pytest leaves
+`SSH_OVER_MCP_RUN_LIVE_CLOUDFLARE_REFERENCE` unset, so these cases skip.
+The hardened self-hosted CI runner still receives no Docker socket; the live
+connector proof remains on the separately authorized Mac x86 Docker host.
