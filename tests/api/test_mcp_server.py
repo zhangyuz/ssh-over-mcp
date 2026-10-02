@@ -462,3 +462,27 @@ async def test_valid_tools_receive_unique_server_owned_operation_contexts() -> N
         request_ids.add(context.request_id)
 
     assert len(request_ids) == len(calls)
+
+
+@pytest.mark.asyncio
+async def test_host_alias_schema_matches_audit_identity_bound() -> None:
+    server = build_mcp_server(
+        service=RecordingService(),
+        principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
+    )
+
+    async with Client(server) as client:
+        listed = await client.list_tools()
+
+    schemas = {tool.name: tool.input_schema for tool in listed.tools}
+    assert schemas["host_info"]["properties"]["alias"]["maxLength"] == 256
+    for name in (
+        "policy_explain",
+        "ssh_exec",
+        "fs_stat",
+        "fs_read",
+        "fs_mkdir",
+        "fs_write",
+    ):
+        assert schemas[name]["properties"]["host"]["maxLength"] == 256

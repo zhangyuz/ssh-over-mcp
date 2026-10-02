@@ -28,6 +28,7 @@ from .models import (
     FsWriteResult,
     HostsListResult,
     HostSummary,
+    MCPHostAlias,
     PolicyExplainRequest,
     PolicyExplainResult,
     SSHExecRequest,
@@ -172,7 +173,7 @@ def build_mcp_server(
     @mcp.tool(
         annotations=_READ_ONLY_ANNOTATIONS,
     )
-    async def host_info(alias: str) -> HostSummary:
+    async def host_info(alias: MCPHostAlias) -> HostSummary:
         """Return public metadata for one visible host alias."""
 
         context = operation_context()
@@ -204,7 +205,7 @@ def build_mcp_server(
         annotations=_READ_ONLY_ANNOTATIONS,
     )
     async def policy_explain(
-        host: str,
+        host: MCPHostAlias,
         tool: ExplainableTool,
         executable: str | None = None,
         args: tuple[str, ...] = (),
@@ -215,12 +216,6 @@ def build_mcp_server(
     ) -> PolicyExplainResult:
         """Explain central policy without executing the request."""
 
-        context = operation_context()
-        await record_request_received(
-            context,
-            tool="policy_explain",
-            host=host,
-        )
         try:
             request = PolicyExplainRequest(
                 host=host,
@@ -232,16 +227,24 @@ def build_mcp_server(
                 env={} if env is None else env,
                 privilege=privilege,
             )
+        except ValidationError:
+            raise ToolError("invalid tool input") from None
+
+        context = operation_context()
+        await record_request_received(
+            context,
+            tool="policy_explain",
+            host=host,
+        )
+        try:
             result = service.explain_policy(context, request)
-        except (ValidationError, ApiError) as exc:
+        except ApiError as exc:
             await record_discovery_outcome(
                 AuditEventType.EXECUTION_FAILED,
                 context,
                 tool="policy_explain",
                 host=host,
             )
-            if isinstance(exc, ValidationError):
-                raise ToolError("invalid tool input") from None
             raise ToolError(str(exc)) from exc
 
         await record_discovery_outcome(
@@ -256,7 +259,7 @@ def build_mcp_server(
         annotations=_EXEC_ANNOTATIONS,
     )
     async def ssh_exec(
-        host: str,
+        host: MCPHostAlias,
         executable: str,
         args: tuple[str, ...] = (),
         cwd: str | None = None,
@@ -266,12 +269,6 @@ def build_mcp_server(
     ) -> SSHExecResult:
         """Execute one policy-gated structured SSH command."""
 
-        context = operation_context()
-        await record_request_received(
-            context,
-            tool="ssh_exec",
-            host=host,
-        )
         try:
             request = SSHExecRequest(
                 host=host,
@@ -282,9 +279,17 @@ def build_mcp_server(
                 stdin=stdin,
                 timeout_seconds=timeout_seconds,
             )
-            return await service.ssh_exec(context, request)
         except ValidationError:
             raise ToolError("invalid tool input") from None
+
+        context = operation_context()
+        await record_request_received(
+            context,
+            tool="ssh_exec",
+            host=host,
+        )
+        try:
+            return await service.ssh_exec(context, request)
         except ApiError as exc:
             raise ToolError(str(exc)) from None
 
@@ -292,10 +297,15 @@ def build_mcp_server(
         annotations=_READ_ONLY_ANNOTATIONS,
     )
     async def fs_stat(
-        host: str,
+        host: MCPHostAlias,
         path: str,
     ) -> FsStatResult:
         """Return policy-gated metadata for one remote filesystem object."""
+
+        try:
+            request = FsStatRequest(host=host, path=path)
+        except ValidationError:
+            raise ToolError("invalid tool input") from None
 
         context = operation_context()
         await record_request_received(
@@ -304,10 +314,7 @@ def build_mcp_server(
             host=host,
         )
         try:
-            request = FsStatRequest(host=host, path=path)
             return await service.fs_stat(context, request)
-        except ValidationError:
-            raise ToolError("invalid tool input") from None
         except ApiError as exc:
             raise ToolError(str(exc)) from None
 
@@ -315,11 +322,20 @@ def build_mcp_server(
         annotations=_READ_ONLY_ANNOTATIONS,
     )
     async def fs_read(
-        host: str,
+        host: MCPHostAlias,
         path: str,
         max_bytes: int,
     ) -> FsReadResult:
         """Read one bounded remote regular file without shell fallback."""
+
+        try:
+            request = FsReadRequest(
+                host=host,
+                path=path,
+                max_bytes=max_bytes,
+            )
+        except ValidationError:
+            raise ToolError("invalid tool input") from None
 
         context = operation_context()
         await record_request_received(
@@ -328,14 +344,7 @@ def build_mcp_server(
             host=host,
         )
         try:
-            request = FsReadRequest(
-                host=host,
-                path=path,
-                max_bytes=max_bytes,
-            )
             return await service.fs_read(context, request)
-        except ValidationError:
-            raise ToolError("invalid tool input") from None
         except ApiError as exc:
             raise ToolError(str(exc)) from None
 
@@ -343,10 +352,15 @@ def build_mcp_server(
         annotations=_CREATE_ONLY_ANNOTATIONS,
     )
     async def fs_mkdir(
-        host: str,
+        host: MCPHostAlias,
         path: str,
     ) -> FsMkdirResult:
         """Create one policy-gated remote directory at an absent path."""
+
+        try:
+            request = FsMkdirRequest(host=host, path=path)
+        except ValidationError:
+            raise ToolError("invalid tool input") from None
 
         context = operation_context()
         await record_request_received(
@@ -355,10 +369,7 @@ def build_mcp_server(
             host=host,
         )
         try:
-            request = FsMkdirRequest(host=host, path=path)
             return await service.fs_mkdir(context, request)
-        except ValidationError:
-            raise ToolError("invalid tool input") from None
         except ApiError as exc:
             raise ToolError(str(exc)) from None
 
@@ -366,11 +377,20 @@ def build_mcp_server(
         annotations=_CREATE_ONLY_ANNOTATIONS,
     )
     async def fs_write(
-        host: str,
+        host: MCPHostAlias,
         path: str,
         data_base64: str,
     ) -> FsWriteResult:
         """Create one absent remote regular file from bounded base64 bytes."""
+
+        try:
+            request = FsWriteRequest(
+                host=host,
+                path=path,
+                data_base64=data_base64,
+            )
+        except ValidationError:
+            raise ToolError("invalid tool input") from None
 
         context = operation_context()
         await record_request_received(
@@ -379,14 +399,7 @@ def build_mcp_server(
             host=host,
         )
         try:
-            request = FsWriteRequest(
-                host=host,
-                path=path,
-                data_base64=data_base64,
-            )
             return await service.fs_write(context, request)
-        except ValidationError:
-            raise ToolError("invalid tool input") from None
         except ApiError as exc:
             raise ToolError(str(exc)) from None
 

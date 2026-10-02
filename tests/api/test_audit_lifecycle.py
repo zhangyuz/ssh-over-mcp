@@ -251,3 +251,88 @@ async def test_request_received_audit_failure_blocks_domain_call() -> None:
             assert "SUPERSECRET" not in text
 
     assert service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_oversized_host_is_rejected_before_request_audit() -> None:
+    ledger = RecordingLedger()
+    service = RecordingService()
+    server = build_mcp_server(
+        service=service,
+        principal_provider=PrincipalProvider(),
+        audit=AuditRecorder(ledger),
+    )
+    secret_host = "SUPERSECRET_" + ("h" * 300)
+
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "fs_stat",
+            {
+                "host": secret_host,
+                "path": "/srv/app/file",
+            },
+        )
+
+    assert result.is_error is True
+    rendered = "\n".join(
+        getattr(block, "text", "")
+        for block in result.content
+    )
+    assert "SUPERSECRET" not in rendered
+    assert ledger.events == []
+    assert service.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_name", "arguments"),
+    [
+        (
+            "policy_explain",
+            {
+                "host": "host-a",
+                "tool": "ssh_exec",
+                "args": ["SUPERSECRET_" + ("x" * 4097)],
+            },
+        ),
+        (
+            "ssh_exec",
+            {
+                "host": "host-a",
+                "executable": "/bin/echo",
+                "stdin": "SUPERSECRET_" + ("x" * (64 * 1024)),
+            },
+        ),
+        (
+            "fs_write",
+            {
+                "host": "host-a",
+                "path": "/srv/app/new.bin",
+                "data_base64": "SUPERSECRET%%%",
+            },
+        ),
+    ],
+)
+async def test_invalid_request_model_input_is_rejected_before_request_audit(
+    tool_name: str,
+    arguments: dict[str, object],
+) -> None:
+    ledger = RecordingLedger()
+    service = RecordingService()
+    server = build_mcp_server(
+        service=service,
+        principal_provider=PrincipalProvider(),
+        audit=AuditRecorder(ledger),
+    )
+
+    async with Client(server) as client:
+        result = await client.call_tool(tool_name, arguments)
+
+    assert result.is_error is True
+    rendered = "\n".join(
+        getattr(block, "text", "")
+        for block in result.content
+    )
+    assert "SUPERSECRET" not in rendered
+    assert ledger.events == []
+    assert service.calls == []

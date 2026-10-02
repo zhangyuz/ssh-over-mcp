@@ -6,9 +6,12 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from ssh_over_mcp.inventory.models import MAX_HOST_ALIAS_CHARS
 from ssh_over_mcp.policy.models import Decision, RiskLevel
 
 MAX_MCP_METADATA_BYTES = 64 * 1024
+MAX_MCP_HOST_CHARS = MAX_HOST_ALIAS_CHARS
+MAX_MCP_IDENTITY_CHARS = 256
 MAX_MCP_PATH_CHARS = 4096
 MAX_MCP_ARG_COUNT = 256
 MAX_MCP_ARG_CHARS = 4096
@@ -24,6 +27,10 @@ MAX_MCP_FILESYSTEM_WRITE_BASE64_CHARS = (
     ((MAX_MCP_FILESYSTEM_WRITE_BYTES + 2) // 3) * 4
 )
 
+MCPHostAlias = Annotated[
+    str,
+    Field(min_length=1, max_length=MAX_MCP_HOST_CHARS),
+]
 _MCP_PATH = Annotated[str, Field(max_length=MAX_MCP_PATH_CHARS)]
 _MCP_ARG = Annotated[str, Field(max_length=MAX_MCP_ARG_CHARS)]
 _MCP_ENV_NAME = Annotated[
@@ -47,14 +54,20 @@ ExplainableTool = Literal[
 class PrincipalContext(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    principal_id: str = Field(min_length=1)
-    profile: str = Field(min_length=1)
+    principal_id: str = Field(
+        min_length=1,
+        max_length=MAX_MCP_IDENTITY_CHARS,
+    )
+    profile: str = Field(
+        min_length=1,
+        max_length=MAX_MCP_IDENTITY_CHARS,
+    )
 
 
 class HostSummary(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    alias: str = Field(min_length=1)
+    alias: MCPHostAlias
     labels: tuple[str, ...] = Field(default_factory=tuple)
     capabilities: tuple[str, ...] = Field(default_factory=tuple)
 
@@ -68,7 +81,7 @@ class HostsListResult(BaseModel):
 class PolicyExplainRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    host: str = Field(min_length=1)
+    host: MCPHostAlias
     tool: ExplainableTool
     executable: _MCP_PATH | None = None
     args: tuple[_MCP_ARG, ...] = Field(
@@ -110,7 +123,7 @@ class PolicyExplainResult(BaseModel):
 class SSHExecRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    host: str = Field(min_length=1)
+    host: MCPHostAlias
     executable: str = Field(
         min_length=1,
         max_length=MAX_MCP_PATH_CHARS,
@@ -151,7 +164,7 @@ class SSHExecResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     request_id: str = Field(min_length=1)
-    host: str = Field(min_length=1)
+    host: MCPHostAlias
     exit_status: int | None = None
     exit_signal: str | None = None
     stdout_base64: str = ""
@@ -164,7 +177,7 @@ class SSHExecResult(BaseModel):
 class FsStatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    host: str = Field(min_length=1)
+    host: MCPHostAlias
     path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)
 
 
@@ -172,7 +185,7 @@ class FsStatResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     request_id: str = Field(min_length=1)
-    host: str = Field(min_length=1)
+    host: MCPHostAlias
     path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)
     kind: Literal["regular", "directory"]
     size: int = Field(ge=0)
@@ -185,7 +198,7 @@ class FsStatResult(BaseModel):
 class FsReadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    host: str = Field(min_length=1)
+    host: MCPHostAlias
     path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)
     max_bytes: int = Field(
         strict=True,
@@ -198,7 +211,7 @@ class FsReadResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     request_id: str = Field(min_length=1)
-    host: str = Field(min_length=1)
+    host: MCPHostAlias
     path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)
     data_base64: str
 
@@ -206,7 +219,7 @@ class FsReadResult(BaseModel):
 class FsMkdirRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    host: str = Field(min_length=1)
+    host: MCPHostAlias
     path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)
 
 
@@ -214,14 +227,14 @@ class FsMkdirResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     request_id: str = Field(min_length=1)
-    host: str = Field(min_length=1)
+    host: MCPHostAlias
     path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)
 
 
 class FsWriteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    host: str = Field(min_length=1)
+    host: MCPHostAlias
     path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)
     data_base64: str = Field(
         max_length=MAX_MCP_FILESYSTEM_WRITE_BASE64_CHARS,
@@ -252,6 +265,6 @@ class FsWriteResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     request_id: str = Field(min_length=1)
-    host: str = Field(min_length=1)
+    host: MCPHostAlias
     path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)
     content_length: int = Field(ge=0, le=MAX_MCP_FILESYSTEM_WRITE_BYTES)
