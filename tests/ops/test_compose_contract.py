@@ -47,7 +47,7 @@ def test_compose_has_exact_private_service_network_and_volume_surface() -> None:
     assert set(services["mcp"]["networks"]) == {"origin_internal", "ssh_egress"}
     assert services["mcp"]["networks"]["origin_internal"]["aliases"] == [
         "ssh-over-mcp-origin",
-        "${SSH_OVER_MCP_PRIVATE_HOSTNAME:?set SSH_OVER_MCP_PRIVATE_HOSTNAME}",
+        "${SSH_OVER_MCP_PRIVATE_HOSTNAME:-mcp.internal.example}",
     ]
 
 

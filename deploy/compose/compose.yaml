@@ -82,7 +82,7 @@ services:
       origin_internal:
         aliases:
           - "ssh-over-mcp-origin"
-          - "${SSH_OVER_MCP_PRIVATE_HOSTNAME:?set SSH_OVER_MCP_PRIVATE_HOSTNAME}"
+          - "${SSH_OVER_MCP_PRIVATE_HOSTNAME:-mcp.internal.example}"
       ssh_egress: {}
     healthcheck:
       test:
@@ -134,9 +134,11 @@ services:
         gw_priority: 1
     volumes:
       - type: bind
-        source: ${SSH_OVER_MCP_CLOUDFLARED_TOKEN_FILE:?set SSH_OVER_MCP_CLOUDFLARED_TOKEN_FILE}
+        source: ${SSH_OVER_MCP_CLOUDFLARED_TOKEN_FILE:-/nonexistent/ssh-over-mcp-cloudflare-tunnel-token}
         target: /run/secrets/cloudflare-tunnel-token
         read_only: true
+        bind:
+          create_host_path: false
 
   approvalctl:
     profiles: ["admin"]

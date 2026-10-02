@@ -17,7 +17,7 @@ _CLOUDFLARED_IMAGE = (
 )
 _TOKEN_TARGET = "/run/secrets/cloudflare-tunnel-token"
 _PRIVATE_HOSTNAME_INTERPOLATION = (
-    "${SSH_OVER_MCP_PRIVATE_HOSTNAME:?set SSH_OVER_MCP_PRIVATE_HOSTNAME}"
+    "${SSH_OVER_MCP_PRIVATE_HOSTNAME:-mcp.internal.example}"
 )
 
 
@@ -85,10 +85,11 @@ def test_cloudflared_service_is_hardened_and_token_file_only() -> None:
         "type": "bind",
         "source": (
             "${SSH_OVER_MCP_CLOUDFLARED_TOKEN_FILE:"
-            "?set SSH_OVER_MCP_CLOUDFLARED_TOKEN_FILE}"
+            "-/nonexistent/ssh-over-mcp-cloudflare-tunnel-token}"
         ),
         "target": _TOKEN_TARGET,
         "read_only": True,
+        "bind": {"create_host_path": False},
     }
 
     rendered = repr(service)
@@ -185,3 +186,23 @@ def test_private_hostname_preflight_rejects_unsafe_values(hostname: str) -> None
 )
 def test_private_hostname_preflight_accepts_lowercase_dns_names(hostname: str) -> None:
     assert _is_valid_private_hostname(hostname) is True
+
+
+def test_phase6b_compose_contract_does_not_require_cloudflare_inputs() -> None:
+    document = _document()
+    aliases = document["services"]["mcp"]["networks"]["origin_internal"]["aliases"]
+    connector_mount = document["services"]["cloudflared"]["volumes"][0]
+
+    assert aliases == [
+        "ssh-over-mcp-origin",
+        "${SSH_OVER_MCP_PRIVATE_HOSTNAME:-mcp.internal.example}",
+    ]
+    assert connector_mount["source"] == (
+        "${SSH_OVER_MCP_CLOUDFLARED_TOKEN_FILE:"
+        "-/nonexistent/ssh-over-mcp-cloudflare-tunnel-token}"
+    )
+    assert connector_mount["bind"] == {"create_host_path": False}
+
+    raw = _COMPOSE.read_text(encoding="utf-8")
+    assert "${SSH_OVER_MCP_PRIVATE_HOSTNAME:?set" not in raw
+    assert "${SSH_OVER_MCP_CLOUDFLARED_TOKEN_FILE:?set" not in raw
