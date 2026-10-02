@@ -1,0 +1,17 @@
+.git
+.worktrees
+.venv
+.pytest_cache
+.ruff_cache
+.superpowers
+__pycache__
+.env
+.env.*
+secrets
+*.pem
+*.key
+*.crt
+known_hosts.local
+dist
+build
+*.egg-info

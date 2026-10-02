@@ -221,3 +221,28 @@ The launcher does not create users, groups, the delegated root, or initial
 source membership. Those remain operator responsibilities outside checked-out
 test code. Request-scope cleanup remains bounded and the operator helper owns
 final fixture teardown on success or failure.
+
+
+## Phase 6A hardened application image probe
+
+The Phase 6A production image has a separate opt-in live security probe. Run
+it only on an authorized Docker host which can build and execute Linux/amd64
+containers:
+
+```bash
+docker build --platform linux/amd64 -t ssh-over-mcp:phase6a .
+SSH_OVER_MCP_RUN_LIVE_CONTAINER=1 \
+SSH_OVER_MCP_CONTAINER_IMAGE=ssh-over-mcp:phase6a \
+python -m pytest -q tests/live/test_container_image.py
+```
+
+The probe verifies that the image defaults to numeric non-root identity
+`10001:10001`; runs successfully with a read-only root filesystem, all Linux
+capabilities dropped, and `NoNewPrivs=1`; has no Docker socket; imports the
+package and resolves all four project console entry points; and carries no
+repository-local secret/config material under the application working tree.
+
+Ordinary pytest does not set `SSH_OVER_MCP_RUN_LIVE_CONTAINER=1`, so these
+live cases skip. The hardened self-hosted CI runner intentionally has no
+Docker socket; image build/runtime validation therefore runs on the authorized
+Mac x86 Docker host rather than weakening the CI runner to support Docker.
