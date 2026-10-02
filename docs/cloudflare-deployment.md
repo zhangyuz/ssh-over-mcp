@@ -260,3 +260,107 @@ Cloudflare background credential/capability synchronization is not equivalent
 to the real-time Gateway-inspected tool-call path. Do not treat Gateway HTTP
 logs as complete replacement audit coverage for ssh-over-mcp's Security
 Ledger.
+
+## Phase 6D Portal authentication and operating model
+
+Phase 6D adds the client-authentication and multi-profile operating guidance.
+It does not change ssh-over-mcp's application authorization model and does not
+automate Cloudflare account changes.
+
+### Interactive clients: Managed OAuth
+
+Interactive and non-browser MCP clients authenticate to the Portal through
+Cloudflare Managed OAuth using the standard OAuth 2.0 authorization code flow.
+Managed OAuth is enabled by default for new MCP portals under the current
+Cloudflare provider behavior. For an existing Portal Access application,
+operators can enable Managed OAuth under Advanced settings.
+
+Managed OAuth belongs to the Portal Access application. Managed OAuth is not
+the origin bearer: the origin bearer remains the separate Portal-to-origin
+credential configured on the linked private MCP server.
+
+A successful Cloudflare login does not select `SSH_OVER_MCP_PROFILE`, principal
+identity, tool authority, or approval authority inside ssh-over-mcp, and does
+not bypass ssh-over-mcp policy or approval. The application continues to use
+the single static profile selected by its operator at process startup.
+
+### Headless clients: Access service tokens
+
+For a headless client, create an Access service token and keep its client ID
+and secret in caller secret storage. Configure the same token through a
+`Service Auth` policy on both layers Cloudflare evaluates for the session:
+
+1. the Portal Access application;
+2. each linked MCP-server Access application the headless client is allowed to
+   reach.
+
+For those linked server mappings, turn `Require user auth` off so the mapping
+uses `on_behalf=false`. Servers that still require per-user OAuth are excluded
+from service-token sessions.
+
+The headless caller presents both:
+
+- `CF-Access-Client-Id`;
+- `CF-Access-Client-Secret`.
+
+Keep these credentials only in caller secret storage. Never place them in
+repository files, model prompts, tool arguments, MCP/container environment, or
+application logs. A service-token identity is an Access decision at the Portal
+edge; it is not an ssh-over-mcp principal/profile selector.
+
+### Four credential classes
+
+The runtime/deployment model deliberately separates four credential classes:
+
+1. **Tunnel token** — authorizes a `cloudflared` replica to run the selected
+   Tunnel;
+2. **origin bearer** — authenticates Portal-to-private-origin MCP requests;
+3. **Access service-token ID/secret** — authenticates an approved headless
+   caller to Cloudflare Access/Portal;
+4. **Cloudflare API token** — optional administrative API credential for
+   explicit account-management automation; it is not needed by the runtime
+   reference.
+
+These four credential classes are not interchangeable. Do not copy one into a
+configuration field or secret file intended for another.
+
+### Multi-profile deployment
+
+The security rule is: one deployment instance = one static
+`SSH_OVER_MCP_PROFILE`.
+
+Materially different privilege profiles use separate Compose project/service
+instances, separate private hostnames, and separate origin bearers. For
+example, a developer instance and an administrative instance are separate
+origins even when the same Portal presents both as available upstreams.
+
+The caller never supplies a profile selector to ssh-over-mcp. A Portal route,
+OAuth identity, service-token identity, request header, query value, or tool
+argument cannot switch the process to a different profile. OAuth
+claim-to-profile mapping remains deferred beyond Phase 6.
+
+Use Cloudflare Access/Portal policy to control which callers can discover or
+reach a higher-privilege upstream, while ssh-over-mcp independently enforces
+that upstream's static profile, policy, approvals, host-agent policy, and OS
+policy. Privilege selection comes from deployment configuration, not request
+headers.
+
+### Gateway, DLP, and observability
+
+Gateway-routed real-time Portal tool calls can appear in Gateway HTTP logs.
+HTTP/DLP policies may inspect or block matching real-time upstream traffic as
+defense-in-depth.
+
+DLP AI prompt profiles do not apply to MCP Portal traffic. Use the HTTP/DLP
+controls Cloudflare supports for that traffic rather than assuming AI-prompt
+DLP coverage.
+
+Optional Cloudflare Logpush/SIEM export is useful observability, but it is not
+a replacement for Security Ledger execution audit. Cloudflare background
+credential/capability synchronization is also not equivalent to the
+real-time Gateway-inspected tool-call path.
+
+Application policy, approvals, host-agent/OS policy, and Security Ledger audit
+remain authoritative for SSH execution decisions. Cloudflare controls can
+reduce exposure and add inspection, but they cannot grant application
+authority that ssh-over-mcp would otherwise deny.

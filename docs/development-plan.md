@@ -840,15 +840,22 @@ Explicitly deferred beyond Phase 5:
 
 ## Phase 6 — Cloudflare reference deployment
 
-Provide:
+Status: **Phase 6 implementation complete; final closure requires exact-head PR and merge-main CI plus post-merge branch/worktree cleanup.**
 
-- container image;
-- Docker Compose reference;
-- no-public-port private networking pattern;
-- Cloudflare Tunnel route instructions;
-- MCP Portal + Managed OAuth instructions;
-- service-token instructions;
-- Gateway logging/DLP guidance.
+Delivered and verified:
+
+- digest/hash-locked reproducible `linux/amd64` production image with two independent no-cache builds producing the same image ID/layers;
+- non-root hardened container runtime and explicit loopback/private bind contract;
+- Docker Compose reference with zero public MCP ports, separate MCP/Ledger/admin identities and mounts, restart persistence, and fail-closed outage/bootstrap behavior;
+- pinned non-root `cloudflared` connector isolated to the origin and Cloudflare-egress networks with a file-only Tunnel token;
+- private-hostname MCP Portal route guidance with origin bearer separation;
+- Managed OAuth instructions for interactive clients and Access service-token instructions for headless clients;
+- four-credential separation (Tunnel token, origin bearer, Access service token, optional Cloudflare API token);
+- Gateway HTTP logging/DLP guidance with explicit limits and Security Ledger remaining the authoritative execution audit;
+- separate-instance/static-profile guidance for materially different roles;
+- full Phase 5 security/authority/secret-retention regressions and Phase 6A-6D static/live deployment probes.
+
+The implementation workflow performs no live Cloudflare account mutation; live Cloudflare account provisioning remains an operator action. Final Phase 6 closure is gated on the Phase 6D exact-head PR and merge-main CI plus post-merge cleanup.
 
 ## Phase 7 — hardening
 

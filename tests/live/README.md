@@ -323,3 +323,32 @@ Ordinary pytest leaves
 `SSH_OVER_MCP_RUN_LIVE_CLOUDFLARE_REFERENCE` unset, so these cases skip.
 The hardened self-hosted CI runner still receives no Docker socket; the live
 connector proof remains on the separately authorized Mac x86 Docker host.
+
+
+## Phase 6D reproducible production image probe
+
+Phase 6D closes the production-image reproducibility gate for the supported
+reference platform `linux/amd64`. The Dockerfile pins the Python base by OCI
+digest, consumes committed SHA-256 hash locks for build/runtime dependencies,
+and fixes filesystem/image timestamps with `SOURCE_DATE_EPOCH=315532800`.
+
+Run the two-build proof only on the authorized Mac x86 Docker host:
+
+```bash
+SSH_OVER_MCP_RUN_LIVE_REPRODUCIBLE_IMAGE=1 \
+PYTHONPATH="$PWD/src" \
+python -m pytest -q tests/live/test_reproducible_image.py
+```
+
+The probe performs two independent BuildKit builds with `--no-cache`,
+`--provenance=false`, and `--sbom=false`. It requires exact equality of
+the resulting image IDs and rootfs layer digests, compares runtime config and
+installed package inventory, and reruns the non-root/zero-capability/
+`NoNewPrivs` runtime assertions.
+
+A differing image ID is a hard failure. Do not replace this gate with a weaker
+package-version or layer-count comparison.
+
+Ordinary pytest leaves `SSH_OVER_MCP_RUN_LIVE_REPRODUCIBLE_IMAGE` unset, so
+this Docker-dependent probe remains skipped on the hardened self-hosted CI
+runner, which intentionally has no Docker socket.

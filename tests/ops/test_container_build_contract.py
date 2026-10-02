@@ -42,7 +42,9 @@ def test_dockerfile_pins_hardened_runtime_contract() -> None:
     assert path.is_file()
     dockerfile = path.read_text(encoding="utf-8")
 
-    assert dockerfile.count("FROM python:3.13-slim-bookworm") == 2
+    base = ("python:3.13-slim-bookworm@"
+            "sha256:5024f48ba9441d4b13a95d3945abc6365538e3a31109833367a1923523c6efed")
+    assert dockerfile.count(f"FROM {base}") == 2
     assert "USER 10001:10001" in dockerfile
     assert "EXPOSE 8000" in dockerfile
     assert 'CMD ["ssh-over-mcp-server"]' in dockerfile
