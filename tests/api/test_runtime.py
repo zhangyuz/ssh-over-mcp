@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from ssh_over_mcp.api.errors import RuntimeConfigurationError
 from ssh_over_mcp.api.runtime import MCPRuntimeSettings, load_runtime_settings
@@ -258,3 +259,17 @@ def test_runtime_settings_reject_invalid_origin_token_paths(token_path: str) -> 
         load_runtime_settings(env)
 
     assert str(exc_info.value) == "runtime configuration is invalid"
+
+
+def test_runtime_settings_model_rejects_private_bind_without_origin_token() -> None:
+    with pytest.raises(ValidationError):
+        MCPRuntimeSettings(
+            config_path=Path("/etc/ssh-over-mcp/config.yaml"),
+            credential_map_path=Path("/etc/ssh-over-mcp/credentials.yaml"),
+            profile="developer",
+            ledger_socket_path=Path("/run/ssh-over-mcp/ledger-exec.sock"),
+            ledger_server_uid=2104,
+            ledger_server_gid=3104,
+            bind_host="0.0.0.0",
+            port=8000,
+        )

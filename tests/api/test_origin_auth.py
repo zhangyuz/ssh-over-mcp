@@ -319,3 +319,13 @@ def test_origin_auth_leaves_health_and_readiness_credential_free(
     assert ready.status_code == expected_ready
     assert _TOKEN.decode() not in health.text
     assert _TOKEN.decode() not in ready.text
+
+
+def test_application_middleware_repr_redacts_origin_bearer(tmp_path: Path) -> None:
+    token_file = _write_token(tmp_path)
+    app = build_application(_settings(tmp_path, token_file))
+
+    rendered = repr(app.user_middleware)
+
+    assert _TOKEN.decode() not in rendered
+    assert "<origin bearer redacted>" in rendered

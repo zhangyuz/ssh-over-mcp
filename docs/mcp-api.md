@@ -327,12 +327,19 @@ Read-only and restricted to profiles permitted to inspect audit events.
 
 ## MCP transport
 
-The first Phase 4 server uses the official MCP Python SDK v2 and exposes
-Streamable HTTP at `/mcp` with stateless JSON responses. Until verified OAuth
-identity is added, the packaged server binds only to `127.0.0.1` and uses one
-operator-configured static principal profile from `SSH_OVER_MCP_PROFILE`.
-Clients cannot override that profile through tool arguments, query parameters,
-or arbitrary request metadata.
+The server uses the official MCP Python SDK v2 and exposes Streamable HTTP at
+`/mcp` with stateless JSON responses. The packaged server defaults to
+`127.0.0.1`. Phase 6A adds one explicit container/private-network opt-in:
+`SSH_OVER_MCP_BIND_HOST` accepts exactly `127.0.0.1` or `0.0.0.0`, with
+`127.0.0.1` as the default. Any `0.0.0.0` runtime loaded from the environment
+MUST also configure `SSH_OVER_MCP_ORIGIN_BEARER_TOKEN_FILE`, or startup fails
+closed.
+
+The server still uses one operator-configured static principal profile from
+`SSH_OVER_MCP_PROFILE`. The origin bearer authenticates the upstream HTTP
+caller only; it never selects or changes the principal/profile. Clients cannot
+override the profile through tool arguments, query parameters, arbitrary
+request metadata, or bearer contents.
 
 Local liveness/readiness are ordinary HTTP endpoints:
 
@@ -341,13 +348,21 @@ Local liveness/readiness are ordinary HTTP endpoints:
   Security Ledger execution endpoint answers its bounded ping; ledger failure
   returns HTTP 503 with `{"status":"not_ready"}`.
 
-They are not MCP tools and they do not probe inventory hosts or establish SSH
-sessions. Runtime configuration uses required `SSH_OVER_MCP_CONFIG`,
-`SSH_OVER_MCP_CREDENTIAL_MAP`, `SSH_OVER_MCP_PROFILE`,
-`SSH_OVER_MCP_LEDGER_EXEC_SOCKET_PATH`,
-`SSH_OVER_MCP_LEDGER_SERVICE_UID`, and
-`SSH_OVER_MCP_LEDGER_SERVICE_GID`, plus optional
-`SSH_OVER_MCP_PORT` (default 8000).
+They are not MCP tools, do not require the origin bearer, and do not probe
+inventory hosts or establish SSH sessions. Runtime configuration uses required
+`SSH_OVER_MCP_CONFIG`, `SSH_OVER_MCP_CREDENTIAL_MAP`,
+`SSH_OVER_MCP_PROFILE`, `SSH_OVER_MCP_LEDGER_EXEC_SOCKET_PATH`,
+`SSH_OVER_MCP_LEDGER_SERVICE_UID`, and `SSH_OVER_MCP_LEDGER_SERVICE_GID`, plus
+optional `SSH_OVER_MCP_PORT` (default 8000), `SSH_OVER_MCP_BIND_HOST` (default
+`127.0.0.1`), and `SSH_OVER_MCP_ORIGIN_BEARER_TOKEN_FILE`.
+
+When the bearer-token file is configured, `/mcp` requires exactly one
+`Authorization: Bearer <token>` header before MCP request parsing. The mounted
+file must be an absolute canonical regular file containing 1-4096 visible
+ASCII bytes; its contents are loaded once during application construction and
+are not stored in `MCPRuntimeSettings`, returned in errors, or exposed by
+health/readiness. Loopback with no token file preserves the previous local-only
+behavior.
 
 The credential-map file is operator-owned YAML or JSON. It contains only
 logical inventory credential references mapped to absolute paths of already
@@ -375,9 +390,10 @@ The registered MCP surface is now `hosts_list`, `host_info`,
 Health/readiness remain ordinary HTTP routes and do not appear in the MCP tool
 registry.
 
-The Streamable HTTP endpoint rejects request bodies larger than 128 KiB before
-MCP parsing. OAuth/claim-to-profile mapping remains a later Cloudflare-phase
-concern.
+The Streamable HTTP endpoint rejects authenticated request bodies larger than
+128 KiB before MCP parsing. When origin authentication is configured, a missing
+or invalid bearer is rejected with HTTP 401 before that body-size parser runs.
+OAuth/claim-to-profile mapping remains deferred beyond Phase 6A.
 
 ## Annotations
 

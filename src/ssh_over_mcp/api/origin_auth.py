@@ -4,6 +4,7 @@ import hmac
 import os
 import stat
 from pathlib import Path
+from typing import Self
 
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -53,6 +54,21 @@ def load_origin_bearer_token(path: Path) -> bytes:
     if any(byte < 0x21 or byte > 0x7E for byte in token):
         raise _invalid_runtime_configuration() from None
     return token
+
+
+class _RedactedBearerToken(bytes):
+    def __new__(cls, value: bytes) -> Self:
+        return super().__new__(cls, value)
+
+    def __repr__(self) -> str:
+        return "<origin bearer redacted>"
+
+    def __str__(self) -> str:
+        return "<origin bearer redacted>"
+
+
+def redact_origin_bearer_token(token: bytes) -> bytes:
+    return _RedactedBearerToken(token)
 
 
 class OriginBearerAuthMiddleware:

@@ -3,9 +3,9 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .errors import RuntimeConfigurationError
 
@@ -36,6 +36,12 @@ class MCPRuntimeSettings(BaseModel):
         if value is None:
             return None
         return _validate_absolute_canonical_path(value, "origin bearer token file")
+
+    @model_validator(mode="after")
+    def require_origin_auth_for_private_bind(self) -> Self:
+        if self.bind_host == "0.0.0.0" and self.origin_bearer_token_file is None:
+            raise ValueError("origin bearer token file is required for private bind")
+        return self
 
 
 def _validate_absolute_canonical_path(value: Path, label: str) -> Path:
@@ -84,9 +90,6 @@ def load_runtime_settings(
         if origin_token_file_value is None or not origin_token_file_value.strip()
         else Path(origin_token_file_value)
     )
-    if bind_host_value == "0.0.0.0" and origin_token_file is None:
-        raise RuntimeConfigurationError("runtime configuration is invalid")
-
     try:
         port = int(port_value, 10)
         ledger_uid = int(ledger_uid_value, 10)
