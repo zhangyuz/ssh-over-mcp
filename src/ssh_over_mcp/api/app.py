@@ -12,6 +12,11 @@ from ssh_over_mcp.config.loader import load_config
 from ssh_over_mcp.policy.engine import PolicyEngine
 
 from .ledger_runtime import build_ledger_client
+from .origin_auth import (
+    OriginBearerAuthMiddleware,
+    load_origin_bearer_token,
+    redact_origin_bearer_token,
+)
 from .principal import StaticPrincipalProvider
 from .runtime import MCPRuntimeSettings
 from .server import build_mcp_server
@@ -73,7 +78,7 @@ def build_application(
         stateless_http=True,
         json_response=True,
         max_request_body_size=MAX_MCP_HTTP_REQUEST_BYTES,
-        host="127.0.0.1",
+        host=settings.bind_host,
     )
     mcp_lifespan = app.router.lifespan_context
 
@@ -86,4 +91,10 @@ def build_application(
                 await ssh_runtime.connections.close()
 
     app.router.lifespan_context = lifespan
+    if settings.origin_bearer_token_file is not None:
+        token = load_origin_bearer_token(settings.origin_bearer_token_file)
+        app.add_middleware(
+            OriginBearerAuthMiddleware,
+            token=redact_origin_bearer_token(token),
+        )
     return app

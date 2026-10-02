@@ -13,7 +13,7 @@ def main() -> None:
     application = build_application(settings)
     uvicorn.run(
         application,
-        host="127.0.0.1",
+        host=settings.bind_host,
         port=settings.port,
     )
 

@@ -33,6 +33,22 @@ Managed OAuth is the preferred portal authentication mechanism for interactive M
 
 Autonomous agents and CI-style callers may use Cloudflare Access service tokens where portal/server policy permits. Service-token credentials are machine secrets and MUST NOT be exposed to the model.
 
+## Phase 6A application image
+
+Phase 6A provides the hardened application image and origin-authentication
+boundary only. Build the Linux/amd64 reference image with:
+
+```bash
+docker build --platform linux/amd64 -t ssh-over-mcp:phase6a .
+```
+
+The image defaults to numeric non-root identity `10001:10001` and contains no
+environment-specific policy, SSH credential, ledger HMAC key, or Cloudflare
+credential. A direct container run still requires operator-mounted application
+config, SSH key files, and the Security Ledger execution socket. The private
+Compose topology arrives in Phase 6B; Tunnel/private-route and Portal operator
+commands arrive in Phase 6C.
+
 ## Private origin
 
 The MCP origin SHOULD remain private:
@@ -45,7 +61,21 @@ The MCP origin SHOULD remain private:
 
 ## Origin authentication
 
-Cloudflare access to the MCP origin SHOULD use an origin credential or upstream auth mode supported by the Portal. The origin should not assume that private network reachability alone authenticates callers.
+Phase 6A implements a static Portal-to-origin bearer boundary. Configure an
+absolute mounted secret path in `SSH_OVER_MCP_ORIGIN_BEARER_TOKEN_FILE`; when
+configured, `/mcp` accepts only `Authorization: Bearer <token>`. Binding the
+server to `0.0.0.0` through `SSH_OVER_MCP_BIND_HOST` is rejected unless that
+token-file setting is present. Health/readiness remain credential-free and
+bounded.
+
+This origin bearer is **not** a Cloudflare Access service token. The origin
+bearer authenticates Portal-to-origin traffic. An Access service token
+authenticates an approved headless client to Cloudflare Access/Portal. Neither
+credential changes the server-owned `SSH_OVER_MCP_PROFILE`.
+
+Private reachability alone is therefore never treated as caller
+authentication. Portal/Tunnel configuration instructions are intentionally
+deferred to Phases 6B/6C.
 
 ## Gateway
 
@@ -61,15 +91,12 @@ A portal allow policy answers who may reach the MCP service. The SSH control pla
 
 ## Deployment profiles
 
-For a simple deployment where end-user identity is not propagated to the origin, separate upstream profiles MAY be exposed, for example:
+Phase 6A keeps one static server-owned profile per MCP process. Operators who
+need materially different profiles deploy separate origin instances with
+separate `SSH_OVER_MCP_PROFILE` values and origin credentials; the current
+server does not multiplex caller-selected profiles behind paths such as
+`/mcp/read` or `/mcp/admin`.
 
-```text
-/mcp/read
-/mcp/dev
-/mcp/ops
-/mcp/admin
-```
-
-Each endpoint maps to a server-side policy profile and a distinct origin credential. Portal Access policy determines which upstream profile a user or service token may reach.
-
-If true per-user authorization is required inside the origin, the upstream MCP service should implement an appropriate user-aware authorization design rather than trusting unverified identity headers.
+If true per-user authorization is required inside the origin, a later
+user-aware authorization design must verify upstream identity rather than
+trusting unverified identity headers.
