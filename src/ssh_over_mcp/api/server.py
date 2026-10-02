@@ -342,15 +342,20 @@ def build_mcp_server(
     async def fs_stat(
         host: MCPHostAlias,
         path: str,
+        approval_id: MCPApprovalID | None = None,
     ) -> FsStatResult:
         """Return policy-gated metadata for one remote filesystem object."""
 
         try:
-            request = FsStatRequest(host=host, path=path)
+            request = FsStatRequest(
+                host=host,
+                path=path,
+                approval_id=approval_id,
+            )
         except ValidationError:
             raise ToolError("invalid tool input") from None
 
-        context = operation_context()
+        context = operation_context(approval_id=request.approval_id)
         await record_request_received(
             context,
             tool="fs_stat",
@@ -368,6 +373,7 @@ def build_mcp_server(
         host: MCPHostAlias,
         path: str,
         max_bytes: int,
+        approval_id: MCPApprovalID | None = None,
     ) -> FsReadResult:
         """Read one bounded remote regular file without shell fallback."""
 
@@ -376,11 +382,12 @@ def build_mcp_server(
                 host=host,
                 path=path,
                 max_bytes=max_bytes,
+                approval_id=approval_id,
             )
         except ValidationError:
             raise ToolError("invalid tool input") from None
 
-        context = operation_context()
+        context = operation_context(approval_id=request.approval_id)
         await record_request_received(
             context,
             tool="fs_read",

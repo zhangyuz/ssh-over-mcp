@@ -12,6 +12,11 @@ from ssh_over_mcp.api import models
 from ssh_over_mcp.api.context import OperationContext
 from ssh_over_mcp.api.server import build_mcp_server
 from ssh_over_mcp.api.service import MCPService
+from ssh_over_mcp.approvals.models import (
+    ApprovalSafeSummary,
+    ApprovalState,
+    ApprovalStatus,
+)
 from ssh_over_mcp.audit.recorder import AuditRecorder
 from ssh_over_mcp.inventory.models import Host, Inventory
 
@@ -41,8 +46,10 @@ from ssh_over_mcp.ssh import (
     SSHRequestTimeout,
 )
 
+APR_ID = "apr_" + ("a" * 32)
 
-def _operation_context() -> OperationContext:
+
+def _operation_context(approval_id: str | None = None) -> OperationContext:
     return OperationContext(
         request_id="req_" + "1" * 32,
         principal=models.PrincipalContext(
@@ -50,8 +57,43 @@ def _operation_context() -> OperationContext:
             profile="developer",
         ),
         received_at=datetime(2026, 10, 1, tzinfo=UTC),
+        approval_id=approval_id,
     )
 
+
+def _approval_status(tool: str = "fs_stat") -> ApprovalStatus:
+    return ApprovalStatus(
+        approval_id=APR_ID,
+        state=ApprovalState.PENDING,
+        expires_at=datetime(2026, 10, 1, 18, 10, tzinfo=UTC),
+        host="visible",
+        tool=tool,
+        risk=RiskLevel.HIGH,
+        safe_summary=ApprovalSafeSummary(
+            principal_id="static:developer",
+            profile="developer",
+            host="visible",
+            tool=tool,
+            privilege="user",
+            policy_version="sha256:test",
+            risk=RiskLevel.HIGH,
+            normalized_executable=None,
+            normalized_cwd=None,
+            normalized_path="/srv/app/file",
+            argv_count=0,
+            argv_fingerprint="sha256:" + ("1" * 64),
+            env_names=(),
+            stdin_length=None,
+            stdin_fingerprint=None,
+            content_length=None,
+            content_fingerprint=None,
+            effective_timeout_seconds=60.0,
+            effective_max_output_bytes=64 * 1024 if tool == "fs_stat" else 4096,
+            effective_max_stdin_bytes=None,
+            effective_tool_bytes=None if tool == "fs_stat" else 4096,
+        ),
+        binding_fingerprint="hmac-sha256:v1:" + ("2" * 16),
+    )
 
 def _inventory() -> Inventory:
     return Inventory(
@@ -115,6 +157,40 @@ def _service(filesystem: RecordingFilesystem) -> MCPService:
     )
 
 
+def test_read_only_filesystem_requests_accept_only_opaque_approval_id() -> None:
+    stat = models.FsStatRequest(
+        host="visible",
+        path="/srv/app/file",
+        approval_id=APR_ID,
+    )
+    read = models.FsReadRequest(
+        host="visible",
+        path="/srv/app/file",
+        max_bytes=4096,
+        approval_id=APR_ID,
+    )
+    assert stat.approval_id == APR_ID
+    assert read.approval_id == APR_ID
+
+    for request_type, kwargs in (
+        (models.FsStatRequest, {"host": "visible", "path": "/srv/app/file"}),
+        (
+            models.FsReadRequest,
+            {"host": "visible", "path": "/srv/app/file", "max_bytes": 4096},
+        ),
+    ):
+        with pytest.raises(ValidationError):
+            request_type(**kwargs, approval_id="apr_SUPERSECRET")
+        for field, value in (
+            ("grant", True),
+            ("deny", True),
+            ("approval_ttl_seconds", 600),
+            ("binding_hmac", "SUPERSECRET"),
+        ):
+            with pytest.raises(ValidationError):
+                request_type(**kwargs, **{field: value})
+
+
 @pytest.mark.asyncio
 async def test_fs_stat_hides_host_before_filesystem_client() -> None:
     filesystem = RecordingFilesystem()
@@ -156,6 +232,41 @@ async def test_fs_stat_injects_principal_and_returns_metadata() -> None:
     assert result.mode == 0o640
     assert result.uid == 2103
     assert result.gid == 3103
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["fs_stat", "fs_read"])
+async def test_read_only_filesystem_threads_approval_only_through_context(
+    operation: str,
+) -> None:
+    filesystem = RecordingFilesystem()
+    service = _service(filesystem)
+    context = _operation_context(approval_id=APR_ID)
+
+    if operation == "fs_stat":
+        await service.fs_stat(
+            context,
+            models.FsStatRequest(
+                host="visible",
+                path="/srv/app/file",
+                approval_id=APR_ID,
+            ),
+        )
+        _, seen_context, evaluation = filesystem.calls[0]
+    else:
+        await service.fs_read(
+            context,
+            models.FsReadRequest(
+                host="visible",
+                path="/srv/app/file",
+                max_bytes=4096,
+                approval_id=APR_ID,
+            ),
+        )
+        _, seen_context, evaluation, _ = filesystem.calls[0]
+
+    assert seen_context.approval_id == APR_ID
+    assert "approval_id" not in type(evaluation).model_fields
 
 
 @pytest.mark.asyncio
@@ -216,6 +327,47 @@ def _policy_failure(
         approval_required=approval_required,
         policy_version="sha256:test",
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["fs_stat", "fs_read"])
+async def test_filesystem_approval_required_returns_safe_retry_handle(
+    operation: str,
+) -> None:
+    filesystem = RecordingFilesystem()
+    decision = _policy_failure(
+        Decision.APPROVAL_REQUIRED,
+        approval_required=True,
+    )
+    filesystem.error = SSHApprovalRequired(
+        decision,
+        approval_status=_approval_status(operation),
+    )
+    service = _service(filesystem)
+
+    with pytest.raises(api_errors.ApprovalRequiredError) as exc_info:
+        if operation == "fs_stat":
+            await service.fs_stat(
+                _operation_context(),
+                models.FsStatRequest(host="visible", path="/srv/app/file"),
+            )
+        else:
+            await service.fs_read(
+                _operation_context(),
+                models.FsReadRequest(
+                    host="visible",
+                    path="/srv/app/file",
+                    max_bytes=4096,
+                ),
+            )
+
+    rendered = str(exc_info.value)
+    assert f"approval_id={APR_ID}" in rendered
+    assert "state=pending" in rendered
+    assert "expires_at=2026-10-01T18:10:00+00:00" in rendered
+    assert "retry the exact operation with this approval_id only after approval" in rendered
+    for forbidden in ("SUPERSECRET", "/srv/app/file", "sha256:", "hmac-sha256:"):
+        assert forbidden not in rendered
 
 
 @pytest.mark.asyncio
@@ -356,11 +508,14 @@ async def test_server_registers_strict_read_only_filesystem_tools() -> None:
 
     tools = {tool.name: tool for tool in listed.tools}
     assert {"fs_stat", "fs_read"}.issubset(tools)
-    assert set(tools["fs_stat"].input_schema["properties"]) == {"host", "path"}
+    assert set(tools["fs_stat"].input_schema["properties"]) == {
+        "host", "path", "approval_id"
+    }
     assert set(tools["fs_read"].input_schema["properties"]) == {
         "host",
         "path",
         "max_bytes",
+        "approval_id",
     }
     for name in ("fs_stat", "fs_read"):
         tool = tools[name]
@@ -377,6 +532,10 @@ async def test_server_registers_strict_read_only_filesystem_tools() -> None:
             "credential_ref",
             "host_key",
             "request_id",
+            "grant",
+            "deny",
+            "approval_ttl_seconds",
+            "binding_hmac",
         ):
             assert forbidden not in schema
 
@@ -396,6 +555,7 @@ async def test_server_fs_read_injects_principal_and_rejects_extra_fields() -> No
                 "host": "visible",
                 "path": "/srv/app/file",
                 "max_bytes": 4096,
+                "approval_id": APR_ID,
             },
         )
         rejected = await client.call_tool(
@@ -417,6 +577,8 @@ async def test_server_fs_read_injects_principal_and_rejects_extra_fields() -> No
         profile="developer",
     )
     assert request.max_bytes == 4096
+    assert request.approval_id == APR_ID
+    assert context.approval_id == APR_ID
     assert rejected.is_error is True
     assert len(service.calls) == 1
 
@@ -444,6 +606,22 @@ async def test_server_invalid_fs_read_input_is_sanitized() -> None:
         getattr(block, "text", "")
         for block in result.content
     )
+    assert "invalid tool input" in text
+    assert "SUPERSECRET" not in text
+    assert service.calls == []
+
+    async with Client(server) as client:
+        malformed = await client.call_tool(
+            "fs_read",
+            {
+                "host": "visible",
+                "path": "/srv/app/file",
+                "max_bytes": 4096,
+                "approval_id": "apr_SUPERSECRET-invalid",
+            },
+        )
+    assert malformed.is_error is True
+    text = "\n".join(getattr(block, "text", "") for block in malformed.content)
     assert "invalid tool input" in text
     assert "SUPERSECRET" not in text
     assert service.calls == []

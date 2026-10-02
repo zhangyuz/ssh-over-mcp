@@ -216,6 +216,7 @@ class FsStatRequest(BaseModel):
 
     host: MCPHostAlias
     path: str = Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)
+    approval_id: MCPApprovalID | None = None
 
 
 class FsStatResult(BaseModel):
@@ -242,6 +243,7 @@ class FsReadRequest(BaseModel):
         ge=1,
         le=MAX_MCP_FILESYSTEM_READ_BYTES,
     )
+    approval_id: MCPApprovalID | None = None
 
 
 class FsReadResult(BaseModel):

@@ -1014,3 +1014,217 @@ async def test_fs_write_transport_uncertain_failure_stays_uncertain():
         )
 
     assert "SUPERSECRET" not in str(exc_info.value)
+
+
+class _ApprovalRemoteError(RuntimeError):
+    def __init__(self, code: str) -> None:
+        super().__init__("approval unavailable")
+        self.code = code
+
+
+class _ApprovalLedger:
+    def __init__(self) -> None:
+        self.binding = None
+        self.ensure_calls = []
+        self.consume_calls = []
+        self.approval_id = "apr_" + ("a" * 32)
+
+    async def append_audit(self, event) -> str:
+        return "evt_" + ("a" * 32)
+
+    def _status(self, binding, risk, state):
+        from ssh_over_mcp.approvals.binding import safe_summary_from_binding
+        from ssh_over_mcp.approvals.models import ApprovalStatus
+
+        return ApprovalStatus(
+            approval_id=self.approval_id,
+            state=state,
+            expires_at=datetime(2026, 10, 1, 18, 10, tzinfo=UTC),
+            host=binding.host,
+            tool=binding.tool,
+            risk=risk,
+            safe_summary=safe_summary_from_binding(binding, risk),
+            binding_fingerprint="hmac-sha256:v1:" + ("b" * 16),
+        )
+
+    async def ensure_approval(self, *, binding, risk, request_id):
+        from ssh_over_mcp.approvals.models import ApprovalState
+
+        self.ensure_calls.append((binding, risk, request_id))
+        if self.binding is None:
+            self.binding = binding
+        return self._status(binding, risk, ApprovalState.PENDING)
+
+    async def consume_approval(self, *, approval_id, binding, request_id):
+        from ssh_over_mcp.approvals.models import ApprovalState
+
+        self.consume_calls.append((approval_id, binding, request_id))
+        if approval_id != self.approval_id or binding != self.binding:
+            raise _ApprovalRemoteError("conflict")
+        return self._status(binding, RiskLevel.HIGH, ApprovalState.CONSUMED)
+
+
+def _approval_decision(path: str) -> PolicyDecision:
+    return PolicyDecision(
+        decision=Decision.APPROVAL_REQUIRED,
+        reason="operator approval required",
+        risk=RiskLevel.HIGH,
+        normalized_path=path,
+        approval_required=True,
+        policy_version="sha256:approval-policy",
+    )
+
+
+def _approval_context(
+    label: str,
+    approval_id: str | None = None,
+) -> OperationContext:
+    base = operation_context(label)
+    return base.model_copy(update={"approval_id": approval_id})
+
+
+@pytest.mark.asyncio
+async def test_fs_stat_approval_exact_retry_consumes_before_transport() -> None:
+    from ssh_over_mcp.approvals.authorization import ExecutionAuthorizer
+
+    policy = Policy(_approval_decision("/srv/app/config.yaml"))
+    ledger = _ApprovalLedger()
+    transport = RecordingTransport(
+        SSHExecutionResult(
+            request_id="unused",
+            host="dev01",
+            exit_status=0,
+            stdout=json.dumps(
+                {
+                    "gid": 3103,
+                    "kind": "regular",
+                    "mode": 0o640,
+                    "mtime_ns": 123456,
+                    "path": "/srv/app/config.yaml",
+                    "size": 7,
+                    "uid": 2103,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode(),
+            duration_ms=1,
+        )
+    )
+    client = ssh_package.SSHFilesystemClient(
+        authorizer=ExecutionAuthorizer(policy=policy, ledger=ledger),
+        audit=audit_recorder(),
+        transport=transport,
+    )
+
+    with pytest.raises(ssh_package.SSHApprovalRequired) as exc_info:
+        await client.stat(
+            request("fs_stat", "/srv/app/./config.yaml"),
+            context=_approval_context("fs-stat-pending"),
+        )
+
+    assert exc_info.value.approval_status is not None
+    assert exc_info.value.approval_status.approval_id == ledger.approval_id
+    assert transport.calls == []
+    binding, risk, _ = ledger.ensure_calls[0]
+    assert binding.tool == "fs_stat"
+    assert binding.normalized_path == "/srv/app/config.yaml"
+    assert binding.effective_timeout_seconds == 60.0
+    assert binding.effective_max_output_bytes == 64 * 1024
+    assert risk is RiskLevel.HIGH
+
+    await client.stat(
+        request("fs_stat", "/srv/app/./config.yaml"),
+        context=_approval_context("fs-stat-granted", ledger.approval_id),
+    )
+
+    assert len(ledger.consume_calls) == 1
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_fs_read_approval_binds_requested_read_limit() -> None:
+    from ssh_over_mcp.approvals.authorization import ExecutionAuthorizer
+
+    policy = Policy(_approval_decision("/srv/app/data.bin"))
+    ledger = _ApprovalLedger()
+    transport = RecordingTransport(
+        SSHExecutionResult(
+            request_id="unused",
+            host="dev01",
+            exit_status=0,
+            stdout=b"data",
+            duration_ms=1,
+        )
+    )
+    client = ssh_package.SSHFilesystemClient(
+        authorizer=ExecutionAuthorizer(policy=policy, ledger=ledger),
+        audit=audit_recorder(),
+        transport=transport,
+    )
+
+    with pytest.raises(ssh_package.SSHApprovalRequired):
+        await client.read(
+            request("fs_read", "/srv/app/data.bin"),
+            max_bytes=4096,
+            context=_approval_context("fs-read-pending"),
+        )
+
+    binding, _, _ = ledger.ensure_calls[0]
+    assert binding.tool == "fs_read"
+    assert binding.normalized_path == "/srv/app/data.bin"
+    assert binding.effective_tool_bytes == 4096
+    assert binding.effective_max_output_bytes == 4096
+    assert transport.calls == []
+
+    with pytest.raises(ssh_package.SSHApprovalRequired):
+        await client.read(
+            request("fs_read", "/srv/app/data.bin"),
+            max_bytes=8192,
+            context=_approval_context("fs-read-mismatch", ledger.approval_id),
+        )
+
+    assert len(ledger.consume_calls) == 1
+    _, mismatched_binding, _ = ledger.consume_calls[0]
+    assert mismatched_binding.effective_tool_bytes == 8192
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_filesystem_approval_cannot_cross_authorize_tool_or_path() -> None:
+    from ssh_over_mcp.approvals.authorization import ExecutionAuthorizer
+
+    policy = Policy(_approval_decision("/srv/app/file-a"))
+    ledger = _ApprovalLedger()
+    transport = RecordingTransport(
+        SSHExecutionResult(
+            request_id="unused",
+            host="dev01",
+            exit_status=0,
+            duration_ms=1,
+        )
+    )
+    client = ssh_package.SSHFilesystemClient(
+        authorizer=ExecutionAuthorizer(policy=policy, ledger=ledger),
+        audit=audit_recorder(),
+        transport=transport,
+    )
+
+    with pytest.raises(ssh_package.SSHApprovalRequired):
+        await client.stat(
+            request("fs_stat", "/srv/app/file-a"),
+            context=_approval_context("bind-original"),
+        )
+
+    policy.decision = _approval_decision("/srv/app/file-b")
+    with pytest.raises(ssh_package.SSHApprovalRequired):
+        await client.read(
+            request("fs_read", "/srv/app/file-b"),
+            max_bytes=4096,
+            context=_approval_context("bind-mismatch", ledger.approval_id),
+        )
+
+    assert len(ledger.consume_calls) == 1
+    _, mismatched_binding, _ = ledger.consume_calls[0]
+    assert mismatched_binding.tool == "fs_read"
+    assert mismatched_binding.normalized_path == "/srv/app/file-b"
+    assert transport.calls == []
