@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from datetime import UTC, datetime
 
 import pytest
 from mcp import Client
@@ -8,12 +9,25 @@ from pydantic import ValidationError
 
 from ssh_over_mcp.api import errors as api_errors
 from ssh_over_mcp.api import models
+from ssh_over_mcp.api.context import OperationContext
 from ssh_over_mcp.api.server import build_mcp_server
 from ssh_over_mcp.api.service import MCPService
+from ssh_over_mcp.audit.recorder import AuditRecorder
 from ssh_over_mcp.inventory.models import Host, Inventory
+
+
+class _AuditLedger:
+    async def append_audit(self, event) -> str:
+        return "evt_" + ("0" * 32)
+
+
+def _audit() -> AuditRecorder:
+    return AuditRecorder(_AuditLedger())
 from ssh_over_mcp.policy.models import Decision, PolicyDecision, RiskLevel
 from ssh_over_mcp.ssh.errors import (
     SSHApprovalRequired,
+    SSHAuditPersistenceError,
+    SSHAuditPersistenceOutcomeUncertain,
     SSHConnectionError,
     SSHCredentialError,
     SSHHostKeyVerificationError,
@@ -87,6 +101,17 @@ def test_ssh_exec_result_uses_explicit_lossless_base64_fields() -> None:
         "timed_out",
         "truncated",
     }
+
+
+def _operation_context() -> OperationContext:
+    return OperationContext(
+        request_id="req_" + "1" * 32,
+        principal=models.PrincipalContext(
+            principal_id="static:developer",
+            profile="developer",
+        ),
+        received_at=datetime(2026, 10, 1, tzinfo=UTC),
+    )
 
 
 def _inventory() -> Inventory:
@@ -168,7 +193,7 @@ async def test_ssh_exec_hides_host_before_executor() -> None:
         match="host is not visible",
     ):
         await service.ssh_exec(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             _request("hidden"),
         )
 
@@ -181,7 +206,7 @@ async def test_ssh_exec_injects_principal_and_returns_lossless_output() -> None:
     service = _service(executor)
 
     result = await service.ssh_exec(
-        models.PrincipalContext(principal_id="static:developer", profile="developer"),
+        _operation_context(),
         _request(),
     )
 
@@ -197,6 +222,7 @@ async def test_ssh_exec_injects_principal_and_returns_lossless_output() -> None:
     assert evaluation.privilege == "user"
 
     assert kwargs == {
+        "context": _operation_context(),
         "stdin": b"hello",
         "timeout_seconds": 30,
     }
@@ -222,7 +248,7 @@ async def test_ssh_exec_cannot_expand_runtime_limits() -> None:
         match="execution limits are invalid",
     ):
         await service.ssh_exec(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             _request(timeout_seconds=30),
         )
 
@@ -231,7 +257,7 @@ async def test_ssh_exec_cannot_expand_runtime_limits() -> None:
         match="execution limits are invalid",
     ):
         await service.ssh_exec(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             _request(timeout_seconds=5, stdin="hello"),
         )
 
@@ -294,6 +320,16 @@ _ERROR_CASES = (
         "SSH transport failed",
     ),
     (
+        SSHAuditPersistenceError("SUPERSECRET audit detail"),
+        "AuditPersistenceError",
+        "audit persistence failed",
+    ),
+    (
+        SSHAuditPersistenceOutcomeUncertain("SUPERSECRET audit uncertainty"),
+        "AuditPersistenceOutcomeUncertainError",
+        "audit persistence outcome is uncertain; do not retry blindly",
+    ),
+    (
         RuntimeError("SUPERSECRET raw library exception"),
         "SSHExecutionError",
         "SSH execution failed",
@@ -319,7 +355,7 @@ async def test_ssh_exec_normalizes_internal_failures(
         match=public_message,
     ) as exc_info:
         await service.ssh_exec(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             _request(),
         )
 
@@ -368,6 +404,7 @@ async def test_server_registers_strict_ssh_exec_tool() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -414,6 +451,7 @@ async def test_server_ssh_exec_injects_principal_and_returns_result() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -434,8 +472,12 @@ async def test_server_ssh_exec_injects_principal_and_returns_result() -> None:
     assert result.structured_content["request_id"] == "req_server_1234"
     assert result.structured_content["stdout_base64"] == "b2s="
     assert len(service.calls) == 1
-    principal, request = service.calls[0]
-    assert principal == models.PrincipalContext(principal_id="static:developer", profile="developer")
+    context, request = service.calls[0]
+    assert isinstance(context, OperationContext)
+    assert context.principal == models.PrincipalContext(
+        principal_id="static:developer",
+        profile="developer",
+    )
     assert request.host == "visible"
     assert request.executable == "/usr/bin/git"
     assert request.stdin == "hello"
@@ -447,6 +489,7 @@ async def test_server_rejects_client_owned_execution_identity_fields() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -472,6 +515,7 @@ async def test_server_invalid_ssh_exec_input_is_sanitized() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticPrincipalProvider(),
+        audit=_audit(),
     )
     secret_stdin = "SUPERSECRET-" + ("x" * (64 * 1024))
 
@@ -504,7 +548,7 @@ async def test_ssh_exec_without_executor_fails_closed() -> None:
         match="SSH execution is unavailable",
     ):
         await service.ssh_exec(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             _request(),
         )
 
@@ -515,6 +559,7 @@ async def test_server_sdk_type_validation_is_sanitized() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:

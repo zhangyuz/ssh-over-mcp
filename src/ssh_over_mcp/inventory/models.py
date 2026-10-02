@@ -5,6 +5,7 @@ import re
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _ALIAS_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+MAX_HOST_ALIAS_CHARS = 256
 
 
 class Host(BaseModel):
@@ -38,10 +39,13 @@ class Inventory(BaseModel):
             raise ValueError("inventory must contain at least one host")
 
         for alias in hosts:
-            if not _ALIAS_RE.fullmatch(alias):
+            if (
+                len(alias) > MAX_HOST_ALIAS_CHARS
+                or not _ALIAS_RE.fullmatch(alias)
+            ):
                 raise ValueError(
-                    "host aliases may contain only letters, digits, '.', "
-                    "'_', and '-'"
+                    "host aliases must be at most 256 characters and contain "
+                    "only letters, digits, '.', '_', and '-'"
                 )
 
         return hosts

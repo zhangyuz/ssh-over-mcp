@@ -14,6 +14,7 @@ from ssh_over_mcp.api.app import build_application
 from ssh_over_mcp.api.errors import PrincipalConfigurationError
 from ssh_over_mcp.api.runtime import MCPRuntimeSettings
 from ssh_over_mcp.api.service import MCPService
+from ssh_over_mcp.approvals.client import LedgerClientError
 from ssh_over_mcp.ssh import FileCredentialProvider, SSHConnectionManager
 
 _CONFIG = """
@@ -59,11 +60,38 @@ def settings(tmp_path: Path, *, profile: str = "developer") -> MCPRuntimeSetting
         config_path=write_config(tmp_path),
         credential_map_path=write_credential_map(tmp_path),
         profile=profile,
+        ledger_socket_path=tmp_path / "ledger-exec.sock",
+        ledger_server_uid=2104,
+        ledger_server_gid=3104,
         port=8000,
     )
 
 
-def test_health_and_readiness_are_plain_http_routes(tmp_path: Path) -> None:
+class ReadyLedgerClient:
+    async def ping(self) -> None:
+        return None
+
+    async def append_audit(self, event) -> str:
+        return f"evt_{event.request_id}"
+
+
+class FailingLedgerClient:
+    async def ping(self) -> None:
+        raise LedgerClientError("SUPERSECRET ledger transport detail")
+
+
+def patch_ready_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "ssh_over_mcp.api.app.build_ledger_client",
+        lambda _settings: ReadyLedgerClient(),
+    )
+
+
+def test_health_and_readiness_are_plain_http_routes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    patch_ready_ledger(monkeypatch)
     app = build_application(settings(tmp_path))
 
     with TestClient(app) as client:
@@ -77,6 +105,27 @@ def test_health_and_readiness_are_plain_http_routes(tmp_path: Path) -> None:
 
     route_paths = {getattr(route, "path", None) for route in app.routes}
     assert {"/mcp", "/healthz", "/readyz"} <= route_paths
+
+
+def test_readiness_fails_closed_when_ledger_is_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "ssh_over_mcp.api.app.build_ledger_client",
+        lambda _settings: FailingLedgerClient(),
+    )
+    app = build_application(settings(tmp_path))
+
+    with TestClient(app) as client:
+        health = client.get("/healthz")
+        ready = client.get("/readyz")
+
+    assert health.status_code == 200
+    assert health.json() == {"status": "ok"}
+    assert ready.status_code == 503
+    assert ready.json() == {"status": "not_ready"}
+    assert "SUPERSECRET" not in ready.text
 
 
 def test_unknown_static_profile_fails_application_construction(
@@ -99,6 +148,7 @@ def test_health_and_readiness_do_not_execute_domain_operations(
     monkeypatch.setattr(MCPService, "list_hosts", forbidden)
     monkeypatch.setattr(MCPService, "get_host", forbidden)
     monkeypatch.setattr(MCPService, "explain_policy", forbidden)
+    patch_ready_ledger(monkeypatch)
 
     app = build_application(settings(tmp_path))
 
@@ -119,6 +169,7 @@ def test_application_lifecycle_does_not_resolve_credentials_or_open_ssh(
 
     monkeypatch.setattr(FileCredentialProvider, "resolve", forbidden_resolve)
     monkeypatch.setattr(SSHConnectionManager, "get_connection", forbidden_connect)
+    patch_ready_ledger(monkeypatch)
 
     app = build_application(settings(tmp_path))
 
@@ -149,6 +200,8 @@ async def test_streamable_http_round_trip_at_mcp_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    patch_ready_ledger(monkeypatch)
+
     async def forbidden_connection(*_args, **_kwargs):
         raise AssertionError("policy denial must happen before SSH")
 

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
+from ssh_over_mcp.api.context import OperationContext
 from ssh_over_mcp.api.errors import (
     HostNotVisibleError,
     InvalidExplainToolError,
@@ -17,6 +20,14 @@ from ssh_over_mcp.policy.models import (
     PolicyDecision,
     RiskLevel,
 )
+
+
+def operation_context(principal: PrincipalContext) -> OperationContext:
+    return OperationContext(
+        request_id="req_" + "1" * 32,
+        principal=principal,
+        received_at=datetime(2026, 10, 1, tzinfo=UTC),
+    )
 
 
 def host(
@@ -98,7 +109,7 @@ def test_list_hosts_returns_only_visible_aliases_and_empty_public_metadata(
         policy=RecordingPolicy(policy_decision(Decision.ALLOW)),
     )
 
-    result = service.list_hosts(developer)
+    result = service.list_hosts(operation_context(developer))
 
     assert [item.alias for item in result.hosts] == [
         "developer-host",
@@ -134,7 +145,7 @@ def test_get_host_hides_unknown_and_role_hidden_aliases(
         HostNotVisibleError,
         match="host is not visible",
     ):
-        service.get_host(developer, alias)
+        service.get_host(operation_context(developer), alias)
 
 
 def test_policy_explain_injects_principal_and_returns_sanitized_allow(
@@ -145,7 +156,7 @@ def test_policy_explain_injects_principal_and_returns_sanitized_allow(
     service = MCPService(inventory=inventory, policy=policy)
 
     result = service.explain_policy(
-        developer,
+        operation_context(developer),
         PolicyExplainRequest(
             host="open-host",
             tool="ssh_exec",
@@ -203,7 +214,7 @@ def test_policy_explain_maps_decision_to_stable_public_reason(
     )
 
     result = service.explain_policy(
-        developer,
+        operation_context(developer),
         PolicyExplainRequest(
             host="open-host",
             tool="fs_write",
@@ -230,7 +241,7 @@ def test_policy_explain_hides_host_before_policy_evaluation(
         match="host is not visible",
     ):
         service.explain_policy(
-            developer,
+            operation_context(developer),
             PolicyExplainRequest(
                 host=alias,
                 tool="fs_stat",
@@ -256,7 +267,7 @@ def test_policy_explain_rejects_unrecognized_tool_before_evaluation(
         InvalidExplainToolError,
         match="policy explanation tool is invalid",
     ):
-        service.explain_policy(developer, request)
+        service.explain_policy(operation_context(developer), request)
 
     assert policy.requests == []
 

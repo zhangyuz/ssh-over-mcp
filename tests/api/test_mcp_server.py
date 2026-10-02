@@ -1,19 +1,36 @@
 from __future__ import annotations
 
+from datetime import UTC
 from typing import Any
 
 import pytest
 from mcp import Client
 
+from ssh_over_mcp.api.context import OperationContext
 from ssh_over_mcp.api.errors import HostNotVisibleError
 from ssh_over_mcp.api.models import (
+    FsMkdirResult,
+    FsReadResult,
+    FsStatResult,
+    FsWriteResult,
     HostsListResult,
     HostSummary,
     PolicyExplainResult,
     PrincipalContext,
+    SSHExecResult,
 )
 from ssh_over_mcp.api.server import build_mcp_server
+from ssh_over_mcp.audit.recorder import AuditRecorder
 from ssh_over_mcp.policy.models import Decision, RiskLevel
+
+
+class _AuditLedger:
+    async def append_audit(self, event) -> str:
+        return "evt_" + ("0" * 32)
+
+
+def _audit() -> AuditRecorder:
+    return AuditRecorder(_AuditLedger())
 
 
 class StaticTestPrincipalProvider:
@@ -25,28 +42,28 @@ class RecordingService:
     def __init__(self) -> None:
         self.calls: list[tuple[str, Any]] = []
 
-    def list_hosts(self, principal: PrincipalContext) -> HostsListResult:
-        self.calls.append(("hosts_list", principal))
+    def list_hosts(self, context: OperationContext) -> HostsListResult:
+        self.calls.append(("hosts_list", context.principal))
         return HostsListResult(
             hosts=(HostSummary(alias="host-a"),)
         )
 
     def get_host(
         self,
-        principal: PrincipalContext,
+        context: OperationContext,
         alias: str,
     ) -> HostSummary:
-        self.calls.append(("host_info", (principal, alias)))
+        self.calls.append(("host_info", (context.principal, alias)))
         if alias != "host-a":
             raise HostNotVisibleError("host is not visible")
         return HostSummary(alias=alias)
 
     def explain_policy(
         self,
-        principal: PrincipalContext,
+        context: OperationContext,
         request,
     ) -> PolicyExplainResult:
-        self.calls.append(("policy_explain", (principal, request)))
+        self.calls.append(("policy_explain", (context.principal, request)))
         return PolicyExplainResult(
             decision=Decision.ALLOW,
             reason="allowed by central policy",
@@ -72,6 +89,7 @@ async def test_server_registers_closed_world_tool_surface() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -119,6 +137,7 @@ async def test_policy_explain_schema_restricts_tool_names() -> None:
     server = build_mcp_server(
         service=RecordingService(),
         principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -146,6 +165,7 @@ async def test_hosts_list_returns_safe_structured_output() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -172,6 +192,7 @@ async def test_host_info_hides_missing_and_hidden_with_public_error() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -191,6 +212,7 @@ async def test_policy_explain_returns_sanitized_structured_output() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -224,6 +246,7 @@ async def test_extra_profile_is_rejected_before_service_execution() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -246,6 +269,7 @@ async def test_oversized_policy_explain_is_rejected_before_service_execution() -
     server = build_mcp_server(
         service=service,
         principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -267,6 +291,7 @@ async def test_malformed_tool_input_is_rejected_before_service_execution() -> No
     server = build_mcp_server(
         service=service,
         principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -274,3 +299,190 @@ async def test_malformed_tool_input_is_rejected_before_service_execution() -> No
 
     assert result.is_error is True
     assert service.calls == []
+
+
+class ContextRecordingService:
+    def __init__(self) -> None:
+        self.contexts: list[tuple[str, OperationContext]] = []
+
+    def _record(self, tool: str, context: OperationContext) -> None:
+        self.contexts.append((tool, context))
+
+    def list_hosts(self, context: OperationContext) -> HostsListResult:
+        self._record("hosts_list", context)
+        return HostsListResult(hosts=(HostSummary(alias="host-a"),))
+
+    def get_host(
+        self,
+        context: OperationContext,
+        alias: str,
+    ) -> HostSummary:
+        self._record("host_info", context)
+        return HostSummary(alias=alias)
+
+    def explain_policy(
+        self,
+        context: OperationContext,
+        request,
+    ) -> PolicyExplainResult:
+        self._record("policy_explain", context)
+        return PolicyExplainResult(
+            decision=Decision.ALLOW,
+            reason="allowed by central policy",
+            risk=RiskLevel.LOW,
+            normalized_executable=request.executable,
+            normalized_cwd=request.cwd,
+            normalized_path=request.path,
+            approval_required=False,
+            policy_version="sha256:test",
+        )
+
+    async def ssh_exec(
+        self,
+        context: OperationContext,
+        request,
+    ) -> SSHExecResult:
+        self._record("ssh_exec", context)
+        return SSHExecResult(
+            request_id=context.request_id,
+            host=request.host,
+            exit_status=0,
+            duration_ms=1,
+        )
+
+    async def fs_stat(
+        self,
+        context: OperationContext,
+        request,
+    ) -> FsStatResult:
+        self._record("fs_stat", context)
+        return FsStatResult(
+            request_id=context.request_id,
+            host=request.host,
+            path=request.path,
+            kind="regular",
+            size=4,
+            mode=0o600,
+            uid=1000,
+            gid=1000,
+            mtime_ns=1,
+        )
+
+    async def fs_read(
+        self,
+        context: OperationContext,
+        request,
+    ) -> FsReadResult:
+        self._record("fs_read", context)
+        return FsReadResult(
+            request_id=context.request_id,
+            host=request.host,
+            path=request.path,
+            data_base64="ZGF0YQ==",
+        )
+
+    async def fs_mkdir(
+        self,
+        context: OperationContext,
+        request,
+    ) -> FsMkdirResult:
+        self._record("fs_mkdir", context)
+        return FsMkdirResult(
+            request_id=context.request_id,
+            host=request.host,
+            path=request.path,
+        )
+
+    async def fs_write(
+        self,
+        context: OperationContext,
+        request,
+    ) -> FsWriteResult:
+        self._record("fs_write", context)
+        return FsWriteResult(
+            request_id=context.request_id,
+            host=request.host,
+            path=request.path,
+            content_length=len(request.decoded_data()),
+        )
+
+
+@pytest.mark.asyncio
+async def test_valid_tools_receive_unique_server_owned_operation_contexts() -> None:
+    service = ContextRecordingService()
+    server = build_mcp_server(
+        service=service,
+        principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
+    )
+
+    async with Client(server) as client:
+        calls = (
+            ("hosts_list", {}),
+            ("host_info", {"alias": "host-a"}),
+            (
+                "policy_explain",
+                {"host": "host-a", "tool": "fs_stat", "path": "/srv/app/file"},
+            ),
+            (
+                "ssh_exec",
+                {"host": "host-a", "executable": "/bin/echo", "args": ["ok"]},
+            ),
+            ("fs_stat", {"host": "host-a", "path": "/srv/app/file"}),
+            (
+                "fs_read",
+                {"host": "host-a", "path": "/srv/app/file", "max_bytes": 4},
+            ),
+            ("fs_mkdir", {"host": "host-a", "path": "/srv/app/new"}),
+            (
+                "fs_write",
+                {
+                    "host": "host-a",
+                    "path": "/srv/app/new.bin",
+                    "data_base64": "ZGF0YQ==",
+                },
+            ),
+        )
+        for name, arguments in calls:
+            result = await client.call_tool(name, arguments)
+            assert result.is_error is False
+
+    assert [name for name, _context in service.contexts] == [
+        name for name, _arguments in calls
+    ]
+    request_ids = set()
+    for _name, context in service.contexts:
+        assert isinstance(context, OperationContext)
+        assert context.principal == PrincipalContext(
+            principal_id="static:developer",
+            profile="developer",
+        )
+        assert context.received_at.tzinfo is UTC
+        assert context.approval_id is None
+        request_ids.add(context.request_id)
+
+    assert len(request_ids) == len(calls)
+
+
+@pytest.mark.asyncio
+async def test_host_alias_schema_matches_audit_identity_bound() -> None:
+    server = build_mcp_server(
+        service=RecordingService(),
+        principal_provider=StaticTestPrincipalProvider(),
+        audit=_audit(),
+    )
+
+    async with Client(server) as client:
+        listed = await client.list_tools()
+
+    schemas = {tool.name: tool.input_schema for tool in listed.tools}
+    assert schemas["host_info"]["properties"]["alias"]["maxLength"] == 256
+    for name in (
+        "policy_explain",
+        "ssh_exec",
+        "fs_stat",
+        "fs_read",
+        "fs_mkdir",
+        "fs_write",
+    ):
+        assert schemas[name]["properties"]["host"]["maxLength"] == 256

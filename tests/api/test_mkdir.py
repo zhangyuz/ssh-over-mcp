@@ -1,19 +1,45 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from mcp import Client
 from pydantic import ValidationError
 
 from ssh_over_mcp.api import errors as api_errors
 from ssh_over_mcp.api import models
+from ssh_over_mcp.api.context import OperationContext
 from ssh_over_mcp.api.server import build_mcp_server
 from ssh_over_mcp.api.service import MCPService
+from ssh_over_mcp.audit.recorder import AuditRecorder
 from ssh_over_mcp.inventory.models import Host, Inventory
+
+
+class _AuditLedger:
+    async def append_audit(self, event) -> str:
+        return "evt_" + ("0" * 32)
+
+
+def _audit() -> AuditRecorder:
+    return AuditRecorder(_AuditLedger())
 from ssh_over_mcp.ssh import (
+    SSHAuditPersistenceError,
+    SSHAuditPersistenceOutcomeUncertain,
     SSHConnectionError,
     SSHFilesystemMkdirResult,
     SSHRequestOutcomeUncertain,
 )
+
+
+def _operation_context() -> OperationContext:
+    return OperationContext(
+        request_id="req_" + "1" * 32,
+        principal=models.PrincipalContext(
+            principal_id="static:developer",
+            profile="developer",
+        ),
+        received_at=datetime(2026, 10, 1, tzinfo=UTC),
+    )
 
 
 def _inventory() -> Inventory:
@@ -42,8 +68,8 @@ class RecordingFilesystem:
         self.calls = []
         self.error: Exception | None = None
 
-    async def mkdir(self, request):
-        self.calls.append(request)
+    async def mkdir(self, request, *, context):
+        self.calls.append((context, request))
         if self.error is not None:
             raise self.error
         return SSHFilesystemMkdirResult(
@@ -98,7 +124,7 @@ async def test_fs_mkdir_hides_host_before_filesystem_client() -> None:
         match="host is not visible",
     ):
         await service.fs_mkdir(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             models.FsMkdirRequest(
                 host="hidden",
                 path="/srv/app/new-directory",
@@ -114,7 +140,7 @@ async def test_fs_mkdir_injects_principal_and_returns_created_path() -> None:
     service = _service(filesystem)
 
     result = await service.fs_mkdir(
-        models.PrincipalContext(principal_id="static:developer", profile="developer"),
+        _operation_context(),
         models.FsMkdirRequest(
             host="visible",
             path="/srv/app/./new-directory",
@@ -122,7 +148,8 @@ async def test_fs_mkdir_injects_principal_and_returns_created_path() -> None:
     )
 
     assert len(filesystem.calls) == 1
-    evaluation = filesystem.calls[0]
+    seen_context, evaluation = filesystem.calls[0]
+    assert seen_context == _operation_context()
     assert evaluation.profile == "developer"
     assert evaluation.host == "visible"
     assert evaluation.tool == "fs_mkdir"
@@ -148,7 +175,7 @@ async def test_fs_mkdir_uncertain_outcome_is_sanitized_and_non_retryable() -> No
         match="do not retry blindly",
     ) as exc_info:
         await service.fs_mkdir(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             models.FsMkdirRequest(
                 host="visible",
                 path="/srv/app/new-directory",
@@ -170,7 +197,7 @@ async def test_fs_mkdir_pre_request_connection_failure_is_definite_transport_err
         match="SSH transport failed",
     ) as exc_info:
         await service.fs_mkdir(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             models.FsMkdirRequest(
                 host="visible",
                 path="/srv/app/new-directory",
@@ -211,6 +238,7 @@ async def test_server_registers_strict_create_only_fs_mkdir_tool() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -248,6 +276,7 @@ async def test_server_fs_mkdir_injects_principal_and_rejects_extra_fields() -> N
     server = build_mcp_server(
         service=service,
         principal_provider=StaticPrincipalProvider(),
+        audit=_audit(),
     )
     async with Client(server) as client:
         ok = await client.call_tool(
@@ -269,8 +298,12 @@ async def test_server_fs_mkdir_injects_principal_and_rejects_extra_fields() -> N
     assert ok.is_error is False
     assert ok.structured_content["request_id"] == "req_tool_mkdir_1234"
     assert len(service.calls) == 1
-    principal, request = service.calls[0]
-    assert principal == models.PrincipalContext(principal_id="static:developer", profile="developer")
+    context, request = service.calls[0]
+    assert isinstance(context, OperationContext)
+    assert context.principal == models.PrincipalContext(
+        principal_id="static:developer",
+        profile="developer",
+    )
     assert request.path == "/srv/app/new-directory"
 
     assert rejected.is_error is True
@@ -289,7 +322,46 @@ async def test_fs_mkdir_unexpected_failure_is_conservatively_uncertain() -> None
         match="do not retry blindly",
     ) as exc_info:
         await service.fs_mkdir(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
+            models.FsMkdirRequest(
+                host="visible",
+                path="/srv/app/new-directory",
+            ),
+        )
+
+    assert "SUPERSECRET" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "public_error", "message"),
+    [
+        (
+            SSHAuditPersistenceError("SUPERSECRET audit detail"),
+            api_errors.AuditPersistenceError,
+            "audit persistence failed",
+        ),
+        (
+            SSHAuditPersistenceOutcomeUncertain(
+                "SUPERSECRET audit uncertainty"
+            ),
+            api_errors.AuditPersistenceOutcomeUncertainError,
+            "audit persistence outcome is uncertain; do not retry blindly",
+        ),
+    ],
+)
+async def test_fs_mkdir_preserves_audit_persistence_failures(
+    error: Exception,
+    public_error,
+    message: str,
+) -> None:
+    filesystem = RecordingFilesystem()
+    filesystem.error = error
+    service = _service(filesystem)
+
+    with pytest.raises(public_error, match=message) as exc_info:
+        await service.fs_mkdir(
+            _operation_context(),
             models.FsMkdirRequest(
                 host="visible",
                 path="/srv/app/new-directory",

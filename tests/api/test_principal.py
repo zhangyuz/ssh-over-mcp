@@ -158,3 +158,38 @@ def test_policy_explain_request_rejects_aggregate_metadata_over_64_kib() -> None
             tool="ssh_exec",
             args=tuple("x" * 4000 for _ in range(17)),
         )
+
+
+@pytest.mark.parametrize(
+    ("principal_id", "profile"),
+    [
+        ("p" * 257, "developer"),
+        ("static:developer", "r" * 257),
+    ],
+)
+def test_principal_context_rejects_identity_over_audit_bound(
+    principal_id: str,
+    profile: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        PrincipalContext(
+            principal_id=principal_id,
+            profile=profile,
+        )
+
+
+def test_static_principal_provider_sanitizes_oversized_profile() -> None:
+    profile = "r" * 257
+    oversized_policy = PolicyDocument(
+        roles={profile: RoleSpec()},
+        rules=(),
+    )
+
+    with pytest.raises(
+        PrincipalConfigurationError,
+        match="configured principal profile is invalid",
+    ):
+        StaticPrincipalProvider(
+            profile=profile,
+            policy=oversized_policy,
+        )

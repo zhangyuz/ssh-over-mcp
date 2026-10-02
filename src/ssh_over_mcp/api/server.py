@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from mcp.server import MCPServer
@@ -7,6 +8,13 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import ValidationError
 
+from ssh_over_mcp.audit.models import AuditEventType
+from ssh_over_mcp.audit.recorder import (
+    AuditPersistenceFailure,
+    AuditRecorder,
+)
+
+from .context import OperationContext, new_request_id
 from .errors import ApiError
 from .models import (
     ExplainableTool,
@@ -20,6 +28,7 @@ from .models import (
     FsWriteResult,
     HostsListResult,
     HostSummary,
+    MCPHostAlias,
     PolicyExplainRequest,
     PolicyExplainResult,
     SSHExecRequest,
@@ -90,41 +99,113 @@ def build_mcp_server(
     *,
     service: MCPService,
     principal_provider: PrincipalProvider,
+    audit: AuditRecorder,
 ) -> MCPServer:
     mcp = StrictMCPServer("ssh-over-mcp")
 
+    def operation_context() -> OperationContext:
+        return OperationContext(
+            request_id=new_request_id(),
+            principal=principal_provider.get_principal(),
+            received_at=datetime.now(UTC),
+        )
+
+    async def record_request_received(
+        context: OperationContext,
+        *,
+        tool: str,
+        host: str | None = None,
+    ) -> None:
+        try:
+            await audit.request_received(
+                context,
+                tool=tool,
+                host=host,
+            )
+        except AuditPersistenceFailure:
+            raise ToolError("audit persistence failed") from None
+
+    async def record_discovery_outcome(
+        event_type: AuditEventType,
+        context: OperationContext,
+        *,
+        tool: str,
+        host: str | None = None,
+    ) -> None:
+        try:
+            await audit.simple_event(
+                event_type,
+                context=context,
+                tool=tool,
+                host=host,
+            )
+        except AuditPersistenceFailure:
+            raise ToolError("audit persistence failed") from None
+
     @mcp.tool(
         annotations=_READ_ONLY_ANNOTATIONS,
     )
-    def hosts_list() -> HostsListResult:
+    async def hosts_list() -> HostsListResult:
         """List hosts visible to the server-owned principal."""
 
+        context = operation_context()
+        await record_request_received(
+            context,
+            tool="hosts_list",
+        )
         try:
-            return service.list_hosts(
-                principal_provider.get_principal()
-            )
+            result = service.list_hosts(context)
         except ApiError as exc:
+            await record_discovery_outcome(
+                AuditEventType.EXECUTION_FAILED,
+                context,
+                tool="hosts_list",
+            )
             raise ToolError(str(exc)) from exc
+
+        await record_discovery_outcome(
+            AuditEventType.EXECUTION_COMPLETED,
+            context,
+            tool="hosts_list",
+        )
+        return result
 
     @mcp.tool(
         annotations=_READ_ONLY_ANNOTATIONS,
     )
-    def host_info(alias: str) -> HostSummary:
+    async def host_info(alias: MCPHostAlias) -> HostSummary:
         """Return public metadata for one visible host alias."""
 
+        context = operation_context()
+        await record_request_received(
+            context,
+            tool="host_info",
+            host=alias,
+        )
         try:
-            return service.get_host(
-                principal_provider.get_principal(),
-                alias,
-            )
+            result = service.get_host(context, alias)
         except ApiError as exc:
+            await record_discovery_outcome(
+                AuditEventType.EXECUTION_FAILED,
+                context,
+                tool="host_info",
+                host=alias,
+            )
             raise ToolError(str(exc)) from exc
+
+        await record_discovery_outcome(
+            AuditEventType.EXECUTION_COMPLETED,
+            context,
+            tool="host_info",
+            host=alias,
+        )
+        return result
 
     @mcp.tool(
         annotations=_READ_ONLY_ANNOTATIONS,
     )
-    def policy_explain(
-        host: str,
+    async def policy_explain(
+        host: MCPHostAlias,
         tool: ExplainableTool,
         executable: str | None = None,
         args: tuple[str, ...] = (),
@@ -136,27 +217,49 @@ def build_mcp_server(
         """Explain central policy without executing the request."""
 
         try:
-            return service.explain_policy(
-                principal_provider.get_principal(),
-                PolicyExplainRequest(
-                    host=host,
-                    tool=tool,
-                    executable=executable,
-                    args=args,
-                    cwd=cwd,
-                    path=path,
-                    env={} if env is None else env,
-                    privilege=privilege,
-                ),
+            request = PolicyExplainRequest(
+                host=host,
+                tool=tool,
+                executable=executable,
+                args=args,
+                cwd=cwd,
+                path=path,
+                env={} if env is None else env,
+                privilege=privilege,
             )
+        except ValidationError:
+            raise ToolError("invalid tool input") from None
+
+        context = operation_context()
+        await record_request_received(
+            context,
+            tool="policy_explain",
+            host=host,
+        )
+        try:
+            result = service.explain_policy(context, request)
         except ApiError as exc:
+            await record_discovery_outcome(
+                AuditEventType.EXECUTION_FAILED,
+                context,
+                tool="policy_explain",
+                host=host,
+            )
             raise ToolError(str(exc)) from exc
+
+        await record_discovery_outcome(
+            AuditEventType.EXECUTION_COMPLETED,
+            context,
+            tool="policy_explain",
+            host=host,
+        )
+        return result
 
     @mcp.tool(
         annotations=_EXEC_ANNOTATIONS,
     )
     async def ssh_exec(
-        host: str,
+        host: MCPHostAlias,
         executable: str,
         args: tuple[str, ...] = (),
         cwd: str | None = None,
@@ -176,12 +279,17 @@ def build_mcp_server(
                 stdin=stdin,
                 timeout_seconds=timeout_seconds,
             )
-            return await service.ssh_exec(
-                principal_provider.get_principal(),
-                request,
-            )
         except ValidationError:
             raise ToolError("invalid tool input") from None
+
+        context = operation_context()
+        await record_request_received(
+            context,
+            tool="ssh_exec",
+            host=host,
+        )
+        try:
+            return await service.ssh_exec(context, request)
         except ApiError as exc:
             raise ToolError(str(exc)) from None
 
@@ -189,19 +297,24 @@ def build_mcp_server(
         annotations=_READ_ONLY_ANNOTATIONS,
     )
     async def fs_stat(
-        host: str,
+        host: MCPHostAlias,
         path: str,
     ) -> FsStatResult:
         """Return policy-gated metadata for one remote filesystem object."""
 
         try:
             request = FsStatRequest(host=host, path=path)
-            return await service.fs_stat(
-                principal_provider.get_principal(),
-                request,
-            )
         except ValidationError:
             raise ToolError("invalid tool input") from None
+
+        context = operation_context()
+        await record_request_received(
+            context,
+            tool="fs_stat",
+            host=host,
+        )
+        try:
+            return await service.fs_stat(context, request)
         except ApiError as exc:
             raise ToolError(str(exc)) from None
 
@@ -209,7 +322,7 @@ def build_mcp_server(
         annotations=_READ_ONLY_ANNOTATIONS,
     )
     async def fs_read(
-        host: str,
+        host: MCPHostAlias,
         path: str,
         max_bytes: int,
     ) -> FsReadResult:
@@ -221,12 +334,17 @@ def build_mcp_server(
                 path=path,
                 max_bytes=max_bytes,
             )
-            return await service.fs_read(
-                principal_provider.get_principal(),
-                request,
-            )
         except ValidationError:
             raise ToolError("invalid tool input") from None
+
+        context = operation_context()
+        await record_request_received(
+            context,
+            tool="fs_read",
+            host=host,
+        )
+        try:
+            return await service.fs_read(context, request)
         except ApiError as exc:
             raise ToolError(str(exc)) from None
 
@@ -234,19 +352,24 @@ def build_mcp_server(
         annotations=_CREATE_ONLY_ANNOTATIONS,
     )
     async def fs_mkdir(
-        host: str,
+        host: MCPHostAlias,
         path: str,
     ) -> FsMkdirResult:
         """Create one policy-gated remote directory at an absent path."""
 
         try:
             request = FsMkdirRequest(host=host, path=path)
-            return await service.fs_mkdir(
-                principal_provider.get_principal(),
-                request,
-            )
         except ValidationError:
             raise ToolError("invalid tool input") from None
+
+        context = operation_context()
+        await record_request_received(
+            context,
+            tool="fs_mkdir",
+            host=host,
+        )
+        try:
+            return await service.fs_mkdir(context, request)
         except ApiError as exc:
             raise ToolError(str(exc)) from None
 
@@ -254,7 +377,7 @@ def build_mcp_server(
         annotations=_CREATE_ONLY_ANNOTATIONS,
     )
     async def fs_write(
-        host: str,
+        host: MCPHostAlias,
         path: str,
         data_base64: str,
     ) -> FsWriteResult:
@@ -266,12 +389,17 @@ def build_mcp_server(
                 path=path,
                 data_base64=data_base64,
             )
-            return await service.fs_write(
-                principal_provider.get_principal(),
-                request,
-            )
         except ValidationError:
             raise ToolError("invalid tool input") from None
+
+        context = operation_context()
+        await record_request_received(
+            context,
+            tool="fs_write",
+            host=host,
+        )
+        try:
+            return await service.fs_write(context, request)
         except ApiError as exc:
             raise ToolError(str(exc)) from None
 

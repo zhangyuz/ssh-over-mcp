@@ -7,6 +7,8 @@ from .credentials import (
 )
 from .errors import (
     SSHApprovalRequired,
+    SSHAuditPersistenceError,
+    SSHAuditPersistenceOutcomeUncertain,
     SSHConnectionError,
     SSHCredentialError,
     SSHFilesystemWriteCommittedUncertain,
@@ -42,6 +44,8 @@ __all__ = [
     "FileCredentialProvider",
     "ProtocolError",
     "SSHApprovalRequired",
+    "SSHAuditPersistenceError",
+    "SSHAuditPersistenceOutcomeUncertain",
     "SSHConnectionError",
     "SSHConnectionManager",
     "SSHCredential",

@@ -46,6 +46,14 @@ class SSHExecutionError(ApiError):
     """Stable public error for unexpected execution-boundary failure."""
 
 
+class AuditPersistenceError(ApiError):
+    """Stable public error when required audit persistence fails."""
+
+
+class AuditPersistenceOutcomeUncertainError(ApiError):
+    """A side effect may have completed but required audit persistence failed."""
+
+
 class RemotePolicyDeniedError(ApiError):
     """Stable public error for host-agent policy denial."""
 

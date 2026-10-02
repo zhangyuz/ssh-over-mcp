@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from datetime import UTC, datetime
 
 import pytest
 from mcp import Client
@@ -8,12 +9,25 @@ from pydantic import ValidationError
 
 from ssh_over_mcp.api import errors as api_errors
 from ssh_over_mcp.api import models
+from ssh_over_mcp.api.context import OperationContext
 from ssh_over_mcp.api.server import build_mcp_server
 from ssh_over_mcp.api.service import MCPService
+from ssh_over_mcp.audit.recorder import AuditRecorder
 from ssh_over_mcp.inventory.models import Host, Inventory
+
+
+class _AuditLedger:
+    async def append_audit(self, event) -> str:
+        return "evt_" + ("0" * 32)
+
+
+def _audit() -> AuditRecorder:
+    return AuditRecorder(_AuditLedger())
 from ssh_over_mcp.policy.models import Decision, PolicyDecision, RiskLevel
 from ssh_over_mcp.ssh import (
     SSHApprovalRequired,
+    SSHAuditPersistenceError,
+    SSHAuditPersistenceOutcomeUncertain,
     SSHConnectionError,
     SSHCredentialError,
     SSHFilesystemReadResult,
@@ -26,6 +40,17 @@ from ssh_over_mcp.ssh import (
     SSHRemoteResponseError,
     SSHRequestTimeout,
 )
+
+
+def _operation_context() -> OperationContext:
+    return OperationContext(
+        request_id="req_" + "1" * 32,
+        principal=models.PrincipalContext(
+            principal_id="static:developer",
+            profile="developer",
+        ),
+        received_at=datetime(2026, 10, 1, tzinfo=UTC),
+    )
 
 
 def _inventory() -> Inventory:
@@ -54,8 +79,8 @@ class RecordingFilesystem:
         self.calls = []
         self.error: Exception | None = None
 
-    async def stat(self, request):
-        self.calls.append(("stat", request))
+    async def stat(self, request, *, context):
+        self.calls.append(("stat", context, request))
         if self.error is not None:
             raise self.error
         return SSHFilesystemStatResult(
@@ -70,8 +95,8 @@ class RecordingFilesystem:
             mtime_ns=123456,
         )
 
-    async def read(self, request, *, max_bytes):
-        self.calls.append(("read", request, max_bytes))
+    async def read(self, request, *, context, max_bytes):
+        self.calls.append(("read", context, request, max_bytes))
         if self.error is not None:
             raise self.error
         return SSHFilesystemReadResult(
@@ -100,7 +125,7 @@ async def test_fs_stat_hides_host_before_filesystem_client() -> None:
         match="host is not visible",
     ):
         await service.fs_stat(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             models.FsStatRequest(host="hidden", path="/srv/app/file"),
         )
 
@@ -113,12 +138,13 @@ async def test_fs_stat_injects_principal_and_returns_metadata() -> None:
     service = _service(filesystem)
 
     result = await service.fs_stat(
-        models.PrincipalContext(principal_id="static:developer", profile="developer"),
+        _operation_context(),
         models.FsStatRequest(host="visible", path="/srv/app/file"),
     )
 
-    operation, evaluation = filesystem.calls[0]
+    operation, seen_context, evaluation = filesystem.calls[0]
     assert operation == "stat"
+    assert seen_context == _operation_context()
     assert evaluation.profile == "developer"
     assert evaluation.host == "visible"
     assert evaluation.tool == "fs_stat"
@@ -138,7 +164,7 @@ async def test_fs_read_is_bounded_and_returns_lossless_base64() -> None:
     service = _service(filesystem)
 
     result = await service.fs_read(
-        models.PrincipalContext(principal_id="static:developer", profile="developer"),
+        _operation_context(),
         models.FsReadRequest(
             host="visible",
             path="/srv/app/file",
@@ -146,8 +172,9 @@ async def test_fs_read_is_bounded_and_returns_lossless_base64() -> None:
         ),
     )
 
-    operation, evaluation, max_bytes = filesystem.calls[0]
+    operation, seen_context, evaluation, max_bytes = filesystem.calls[0]
     assert operation == "read"
+    assert seen_context == _operation_context()
     assert evaluation.profile == "developer"
     assert evaluation.tool == "fs_read"
     assert evaluation.path == "/srv/app/file"
@@ -250,6 +277,16 @@ def _policy_failure(
             "FilesystemOperationError",
             "remote filesystem operation failed",
         ),
+        (
+            SSHAuditPersistenceError("SUPERSECRET audit detail"),
+            "AuditPersistenceError",
+            "audit persistence failed",
+        ),
+        (
+            SSHAuditPersistenceOutcomeUncertain("SUPERSECRET audit uncertainty"),
+            "AuditPersistenceOutcomeUncertainError",
+            "audit persistence outcome is uncertain; do not retry blindly",
+        ),
     ],
 )
 async def test_filesystem_service_sanitizes_remote_failures(
@@ -266,7 +303,7 @@ async def test_filesystem_service_sanitizes_remote_failures(
         match=message,
     ) as exc_info:
         await service.fs_stat(
-            models.PrincipalContext(principal_id="static:developer", profile="developer"),
+            _operation_context(),
             models.FsStatRequest(host="visible", path="/srv/app/file"),
         )
     assert "SUPERSECRET" not in str(exc_info.value)
@@ -311,6 +348,7 @@ async def test_server_registers_strict_read_only_filesystem_tools() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:
@@ -349,6 +387,7 @@ async def test_server_fs_read_injects_principal_and_rejects_extra_fields() -> No
     server = build_mcp_server(
         service=service,
         principal_provider=StaticPrincipalProvider(),
+        audit=_audit(),
     )
     async with Client(server) as client:
         ok = await client.call_tool(
@@ -371,8 +410,12 @@ async def test_server_fs_read_injects_principal_and_rejects_extra_fields() -> No
 
     assert ok.is_error is False
     assert ok.structured_content["data_base64"] == "AP9BQg=="
-    _, principal, request = service.calls[0]
-    assert principal == models.PrincipalContext(principal_id="static:developer", profile="developer")
+    _, context, request = service.calls[0]
+    assert isinstance(context, OperationContext)
+    assert context.principal == models.PrincipalContext(
+        principal_id="static:developer",
+        profile="developer",
+    )
     assert request.max_bytes == 4096
     assert rejected.is_error is True
     assert len(service.calls) == 1
@@ -383,6 +426,7 @@ async def test_server_invalid_fs_read_input_is_sanitized() -> None:
     server = build_mcp_server(
         service=service,
         principal_provider=StaticPrincipalProvider(),
+        audit=_audit(),
     )
 
     async with Client(server) as client:

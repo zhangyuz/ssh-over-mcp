@@ -11,6 +11,8 @@ from ssh_over_mcp.policy.models import (
 )
 from ssh_over_mcp.ssh.errors import (
     SSHApprovalRequired,
+    SSHAuditPersistenceError,
+    SSHAuditPersistenceOutcomeUncertain,
     SSHConnectionError,
     SSHCredentialError,
     SSHFilesystemWriteCommittedUncertain,
@@ -24,8 +26,11 @@ from ssh_over_mcp.ssh.errors import (
     SSHRequestTimeout,
 )
 
+from .context import OperationContext
 from .errors import (
     ApprovalRequiredError,
+    AuditPersistenceError,
+    AuditPersistenceOutcomeUncertainError,
     FilesystemMutationOutcomeUncertainError,
     FilesystemOperationError,
     FilesystemWriteCommittedUncertainError,
@@ -115,8 +120,9 @@ class MCPService:
 
     def list_hosts(
         self,
-        principal: PrincipalContext,
+        context: OperationContext,
     ) -> HostsListResult:
+        principal = context.principal
         visible = tuple(
             self._summary(alias)
             for alias, host in sorted(self._inventory.hosts.items())
@@ -126,17 +132,19 @@ class MCPService:
 
     def get_host(
         self,
-        principal: PrincipalContext,
+        context: OperationContext,
         alias: str,
     ) -> HostSummary:
+        principal = context.principal
         self._visible_host(principal, alias)
         return self._summary(alias)
 
     def explain_policy(
         self,
-        principal: PrincipalContext,
+        context: OperationContext,
         request: PolicyExplainRequest,
     ) -> PolicyExplainResult:
+        principal = context.principal
         self._visible_host(principal, request.host)
         if request.tool not in _EXPLAINABLE_TOOLS:
             raise InvalidExplainToolError(
@@ -171,9 +179,10 @@ class MCPService:
 
     async def ssh_exec(
         self,
-        principal: PrincipalContext,
+        context: OperationContext,
         request: SSHExecRequest,
     ) -> SSHExecResult:
+        principal = context.principal
         self._visible_host(principal, request.host)
         if self._ssh_executor is None:
             raise SSHExecutionError("SSH execution is unavailable")
@@ -204,6 +213,7 @@ class MCPService:
                     env=request.env,
                     privilege="user",
                 ),
+                context=context,
                 stdin=stdin,
                 timeout_seconds=request.timeout_seconds,
             )
@@ -225,6 +235,12 @@ class MCPService:
             ) from None
         except SSHConnectionError:
             raise SSHTransportError("SSH transport failed") from None
+        except SSHAuditPersistenceOutcomeUncertain:
+            raise AuditPersistenceOutcomeUncertainError(
+                "audit persistence outcome is uncertain; do not retry blindly"
+            ) from None
+        except SSHAuditPersistenceError:
+            raise AuditPersistenceError("audit persistence failed") from None
         except Exception:  # noqa: BLE001
             # This is the public adapter boundary: foreign SSH/library
             # exceptions must never cross it with raw detail.
@@ -244,9 +260,10 @@ class MCPService:
 
     async def fs_stat(
         self,
-        principal: PrincipalContext,
+        context: OperationContext,
         request: FsStatRequest,
     ) -> FsStatResult:
+        principal = context.principal
         self._visible_host(principal, request.host)
         if self._ssh_filesystem is None:
             raise FilesystemOperationError(
@@ -261,7 +278,8 @@ class MCPService:
                     tool="fs_stat",
                     path=request.path,
                     privilege="user",
-                )
+                ),
+                context=context,
             )
         except SSHPolicyDenied:
             raise PolicyDeniedError(
@@ -281,6 +299,12 @@ class MCPService:
             ) from None
         except SSHConnectionError:
             raise SSHTransportError("SSH transport failed") from None
+        except SSHAuditPersistenceOutcomeUncertain:
+            raise AuditPersistenceOutcomeUncertainError(
+                "audit persistence outcome is uncertain; do not retry blindly"
+            ) from None
+        except SSHAuditPersistenceError:
+            raise AuditPersistenceError("audit persistence failed") from None
         except SSHRemotePolicyDenied:
             raise RemotePolicyDeniedError(
                 "remote filesystem policy denied request"
@@ -316,9 +340,10 @@ class MCPService:
 
     async def fs_read(
         self,
-        principal: PrincipalContext,
+        context: OperationContext,
         request: FsReadRequest,
     ) -> FsReadResult:
+        principal = context.principal
         self._visible_host(principal, request.host)
         if self._ssh_filesystem is None:
             raise FilesystemOperationError(
@@ -334,6 +359,7 @@ class MCPService:
                     path=request.path,
                     privilege="user",
                 ),
+                context=context,
                 max_bytes=request.max_bytes,
             )
         except SSHPolicyDenied:
@@ -354,6 +380,12 @@ class MCPService:
             ) from None
         except SSHConnectionError:
             raise SSHTransportError("SSH transport failed") from None
+        except SSHAuditPersistenceOutcomeUncertain:
+            raise AuditPersistenceOutcomeUncertainError(
+                "audit persistence outcome is uncertain; do not retry blindly"
+            ) from None
+        except SSHAuditPersistenceError:
+            raise AuditPersistenceError("audit persistence failed") from None
         except SSHRemotePolicyDenied:
             raise RemotePolicyDeniedError(
                 "remote filesystem policy denied request"
@@ -384,9 +416,10 @@ class MCPService:
 
     async def fs_mkdir(
         self,
-        principal: PrincipalContext,
+        context: OperationContext,
         request: FsMkdirRequest,
     ) -> FsMkdirResult:
+        principal = context.principal
         self._visible_host(principal, request.host)
         if self._ssh_filesystem is None:
             raise FilesystemOperationError(
@@ -401,7 +434,8 @@ class MCPService:
                     tool="fs_mkdir",
                     path=request.path,
                     privilege="user",
-                )
+                ),
+                context=context,
             )
         except SSHPolicyDenied:
             raise PolicyDeniedError(
@@ -421,6 +455,12 @@ class MCPService:
             ) from None
         except SSHConnectionError:
             raise SSHTransportError("SSH transport failed") from None
+        except SSHAuditPersistenceOutcomeUncertain:
+            raise AuditPersistenceOutcomeUncertainError(
+                "audit persistence outcome is uncertain; do not retry blindly"
+            ) from None
+        except SSHAuditPersistenceError:
+            raise AuditPersistenceError("audit persistence failed") from None
         except SSHRemotePolicyDenied:
             raise RemotePolicyDeniedError(
                 "remote filesystem policy denied request"
@@ -445,9 +485,10 @@ class MCPService:
 
     async def fs_write(
         self,
-        principal: PrincipalContext,
+        context: OperationContext,
         request: FsWriteRequest,
     ) -> FsWriteResult:
+        principal = context.principal
         self._visible_host(principal, request.host)
         if self._ssh_filesystem is None:
             raise FilesystemOperationError(
@@ -465,6 +506,7 @@ class MCPService:
                     privilege="user",
                 ),
                 data,
+                context=context,
             )
         except SSHPolicyDenied:
             raise PolicyDeniedError(
@@ -484,6 +526,12 @@ class MCPService:
             ) from None
         except SSHConnectionError:
             raise SSHTransportError("SSH transport failed") from None
+        except SSHAuditPersistenceOutcomeUncertain:
+            raise AuditPersistenceOutcomeUncertainError(
+                "audit persistence outcome is uncertain; do not retry blindly"
+            ) from None
+        except SSHAuditPersistenceError:
+            raise AuditPersistenceError("audit persistence failed") from None
         except SSHRemotePolicyDenied:
             raise RemotePolicyDeniedError(
                 "remote filesystem policy denied request"

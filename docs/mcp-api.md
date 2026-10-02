@@ -252,11 +252,16 @@ or arbitrary request metadata.
 Local liveness/readiness are ordinary HTTP endpoints:
 
 - `GET /healthz` -> `{"status":"ok"}`;
-- `GET /readyz` -> `{"status":"ready"}`.
+- `GET /readyz` -> `{"status":"ready"}` only when the authenticated local
+  Security Ledger execution endpoint answers its bounded ping; ledger failure
+  returns HTTP 503 with `{"status":"not_ready"}`.
 
 They are not MCP tools and they do not probe inventory hosts or establish SSH
 sessions. Runtime configuration uses required `SSH_OVER_MCP_CONFIG`,
-`SSH_OVER_MCP_CREDENTIAL_MAP`, and `SSH_OVER_MCP_PROFILE`, plus optional
+`SSH_OVER_MCP_CREDENTIAL_MAP`, `SSH_OVER_MCP_PROFILE`,
+`SSH_OVER_MCP_LEDGER_EXEC_SOCKET_PATH`,
+`SSH_OVER_MCP_LEDGER_SERVICE_UID`, and
+`SSH_OVER_MCP_LEDGER_SERVICE_GID`, plus optional
 `SSH_OVER_MCP_PORT` (default 8000).
 
 The credential-map file is operator-owned YAML or JSON. It contains only
@@ -306,6 +311,8 @@ Errors should distinguish:
 - output truncated;
 - filesystem mutation outcome uncertain / do not retry blindly;
 - filesystem write committed / durability uncertain / do not retry blindly;
+- required audit persistence failure;
+- post-attempt audit persistence outcome uncertain / do not retry blindly;
 - execution failure.
 
 Do not return secret values in error details.

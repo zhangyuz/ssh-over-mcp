@@ -8,34 +8,30 @@ The project is intentionally **not** a thin wrapper around `/bin/bash`. Every op
 
 ## Current status
 
-**Phase 3d2b2b2c2b2b1 — Linux service identity contract.**
+**Phase 5C — mandatory audit lifecycle integration.**
 
-Remote ForceCommand execution remains disabled.
+The merged Phase 4 MCP surface provides discovery/policy explanation,
+policy-gated structured `ssh_exec`, read-only `fs_stat/fs_read`, and
+create-only `fs_mkdir/fs_write`. Raw shell and destructive filesystem
+namespace mutation remain absent.
 
-Production containment now has an explicit OS-identity plan for four roles:
+Phase 5A/B add trusted operation identity plus a dedicated local Security Ledger
+service with peer-authenticated execution/admin Unix sockets, SQLite
+persistence, ledger-owned approval state, and the local `approvalctl` operator
+CLI. Phase 5C makes that ledger mandatory for the MCP runtime:
 
-- containment manager identity;
-- SSH host-agent identity;
-- untrusted workload identity;
-- dedicated manager-client group.
+- readiness requires an authenticated local ledger ping;
+- every MCP call gets one server-owned request ID and a persisted
+  `request_received` event;
+- policy decisions and `execution_started` are persisted before structured SSH
+  transport can begin;
+- execution outcome events retain bounded secret-safe metadata only;
+- required audit failure is fail-closed, and lost post-attempt audit persistence
+  cannot be reported as ordinary side-effecting success.
 
-Manager, host-agent, and workload UIDs must be distinct. Host-agent/workload
-UID/GID and the manager-client GID must be non-root. Real, effective, and saved
-UID/GID are checked against policy, and supplementary groups must match the
-configured set exactly.
-
-The identity plan derives:
-
-- manager and host-agent process identity policies;
-- workload process identity policy with no supplementary groups;
-- bidirectional manager/host-agent SO_PEERCRED policies;
-- secure endpoint owner/group policy.
-
-The manager-client group is shared only by manager and host-agent. Workload is
-excluded from that group.
-
-**Remote command execution remains disabled in the ForceCommand CLI.**
-
+Approval consumption is intentionally not enabled yet. An
+`APPROVAL_REQUIRED` policy decision still fails closed before network access;
+Phase 5D/5E add exact single-use approval-aware execution.
 
 ## Documentation is the source of truth
 

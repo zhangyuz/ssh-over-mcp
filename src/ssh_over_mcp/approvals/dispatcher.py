@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from ssh_over_mcp.host_agent.containment_manager_peer import LinuxPeerCredentials
-from ssh_over_mcp.policy.models import RiskLevel
 
+from .binding import safe_summary_from_binding
 from .ledger import (
     LedgerConflictError,
     LedgerExpiredError,
@@ -11,7 +11,7 @@ from .ledger import (
     LedgerPersistenceError,
     SecurityLedgerStore,
 )
-from .models import ApprovalBindingInput, ApprovalSafeSummary, ApprovalStatus
+from .models import ApprovalStatus
 from .protocol import (
     AppendAuditRequest,
     ApprovalListItem,
@@ -31,35 +31,6 @@ from .protocol import (
     PongResponse,
     ShowApprovalRequest,
 )
-
-
-def safe_summary_from_binding(
-    binding: ApprovalBindingInput,
-    risk: RiskLevel,
-) -> ApprovalSafeSummary:
-    return ApprovalSafeSummary(
-        principal_id=binding.principal_id,
-        profile=binding.profile,
-        host=binding.host,
-        tool=binding.tool,
-        privilege=binding.privilege,
-        policy_version=binding.policy_version,
-        risk=risk,
-        normalized_executable=binding.normalized_executable,
-        normalized_cwd=binding.normalized_cwd,
-        normalized_path=binding.normalized_path,
-        argv_count=binding.argv_count,
-        argv_fingerprint=binding.argv_fingerprint,
-        env_names=tuple(item.name for item in binding.env_fingerprints),
-        stdin_length=binding.stdin_length,
-        stdin_fingerprint=binding.stdin_fingerprint,
-        content_length=binding.content_length,
-        content_fingerprint=binding.content_fingerprint,
-        effective_timeout_seconds=binding.effective_timeout_seconds,
-        effective_max_output_bytes=binding.effective_max_output_bytes,
-        effective_max_stdin_bytes=binding.effective_max_stdin_bytes,
-        effective_tool_bytes=binding.effective_tool_bytes,
-    )
 
 
 def _error(message_id: str, code: str) -> ErrorResponse:
