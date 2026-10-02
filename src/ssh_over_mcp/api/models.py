@@ -31,6 +31,10 @@ MCPHostAlias = Annotated[
     str,
     Field(min_length=1, max_length=MAX_MCP_HOST_CHARS),
 ]
+MCPApprovalID = Annotated[
+    str,
+    Field(pattern=r"^apr_[0-9a-f]{32}$"),
+]
 _MCP_PATH = Annotated[str, Field(max_length=MAX_MCP_PATH_CHARS)]
 _MCP_ARG = Annotated[str, Field(max_length=MAX_MCP_ARG_CHARS)]
 _MCP_ENV_NAME = Annotated[
@@ -143,6 +147,7 @@ class SSHExecRequest(BaseModel):
         gt=0,
         le=MAX_MCP_EXEC_TIMEOUT_SECONDS,
     )
+    approval_id: MCPApprovalID | None = None
 
     @model_validator(mode="after")
     def validate_execution_bounds(self) -> SSHExecRequest:

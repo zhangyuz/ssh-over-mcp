@@ -28,6 +28,7 @@ from .models import (
     FsWriteResult,
     HostsListResult,
     HostSummary,
+    MCPApprovalID,
     MCPHostAlias,
     PolicyExplainRequest,
     PolicyExplainResult,
@@ -103,11 +104,14 @@ def build_mcp_server(
 ) -> MCPServer:
     mcp = StrictMCPServer("ssh-over-mcp")
 
-    def operation_context() -> OperationContext:
+    def operation_context(
+        approval_id: MCPApprovalID | None = None,
+    ) -> OperationContext:
         return OperationContext(
             request_id=new_request_id(),
             principal=principal_provider.get_principal(),
             received_at=datetime.now(UTC),
+            approval_id=approval_id,
         )
 
     async def record_request_received(
@@ -266,6 +270,7 @@ def build_mcp_server(
         env: dict[str, str] | None = None,
         stdin: str = "",
         timeout_seconds: float | None = None,
+        approval_id: MCPApprovalID | None = None,
     ) -> SSHExecResult:
         """Execute one policy-gated structured SSH command."""
 
@@ -278,11 +283,12 @@ def build_mcp_server(
                 env={} if env is None else env,
                 stdin=stdin,
                 timeout_seconds=timeout_seconds,
+                approval_id=approval_id,
             )
         except ValidationError:
             raise ToolError("invalid tool input") from None
 
-        context = operation_context()
+        context = operation_context(approval_id=request.approval_id)
         await record_request_received(
             context,
             tool="ssh_exec",

@@ -221,9 +221,17 @@ class MCPService:
             raise PolicyDeniedError(
                 "request denied by central policy"
             ) from None
-        except SSHApprovalRequired:
-            raise ApprovalRequiredError(
-                "approval required by central policy"
+        except SSHApprovalRequired as exc:
+            status = exc.approval_status
+            if status is None:
+                raise ApprovalRequiredError(
+                    "approval required by central policy"
+                ) from None
+            raise ApprovalRequiredError.for_status(
+                request_id=context.request_id,
+                approval_id=status.approval_id,
+                state=status.state,
+                expires_at=status.expires_at,
             ) from None
         except SSHCredentialError:
             raise SSHCredentialUnavailableError(
