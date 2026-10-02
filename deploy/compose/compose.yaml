@@ -1,0 +1,144 @@
+services:
+  ledger-init:
+    image: ${SSH_OVER_MCP_IMAGE:-ssh-over-mcp:phase6b}
+    entrypoint: ["ssh-over-mcp-ledger-init"]
+    user: "0:0"
+    read_only: true
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN", "DAC_OVERRIDE"]
+    security_opt: ["no-new-privileges:true"]
+    network_mode: "none"
+    environment: &ledger-environment
+      SSH_OVER_MCP_LEDGER_DB_PATH: "/var/lib/ssh-over-mcp/ledger/ledger.db"
+      SSH_OVER_MCP_LEDGER_HMAC_KEY_PATH: "/var/lib/ssh-over-mcp/ledger/ledger.key"
+      SSH_OVER_MCP_LEDGER_SERVICE_UID: "10002"
+      SSH_OVER_MCP_LEDGER_SERVICE_GID: "10002"
+      SSH_OVER_MCP_LEDGER_EXEC_SOCKET_PATH: "/run/ssh-over-mcp-exec/ledger/ledger.sock"
+      SSH_OVER_MCP_LEDGER_EXEC_SOCKET_GID: "10003"
+      SSH_OVER_MCP_LEDGER_EXEC_SOCKET_MODE: "0660"
+      SSH_OVER_MCP_LEDGER_EXEC_PEER_UID: "10001"
+      SSH_OVER_MCP_LEDGER_EXEC_PEER_GID: "10003"
+      SSH_OVER_MCP_LEDGER_ADMIN_SOCKET_PATH: "/run/ssh-over-mcp-admin/ledger/ledger.sock"
+      SSH_OVER_MCP_LEDGER_ADMIN_SOCKET_GID: "10005"
+      SSH_OVER_MCP_LEDGER_ADMIN_SOCKET_MODE: "0660"
+      SSH_OVER_MCP_LEDGER_ADMIN_PEER_UID: "10004"
+      SSH_OVER_MCP_LEDGER_ADMIN_PEER_GID: "10005"
+    volumes:
+      - type: volume
+        source: ledger-data
+        target: /var/lib/ssh-over-mcp
+      - type: volume
+        source: ledger-exec
+        target: /run/ssh-over-mcp-exec
+      - type: volume
+        source: ledger-admin
+        target: /run/ssh-over-mcp-admin
+
+  ledger:
+    image: ${SSH_OVER_MCP_IMAGE:-ssh-over-mcp:phase6b}
+    entrypoint: ["ssh-over-mcp-ledger"]
+    user: "10002:10002"
+    group_add: ["10003", "10005"]
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    network_mode: "none"
+    depends_on:
+      ledger-init:
+        condition: service_completed_successfully
+    environment: *ledger-environment
+    volumes:
+      - type: volume
+        source: ledger-data
+        target: /var/lib/ssh-over-mcp
+      - type: volume
+        source: ledger-exec
+        target: /run/ssh-over-mcp-exec
+      - type: volume
+        source: ledger-admin
+        target: /run/ssh-over-mcp-admin
+
+  mcp:
+    image: ${SSH_OVER_MCP_IMAGE:-ssh-over-mcp:phase6b}
+    entrypoint: ["ssh-over-mcp-server"]
+    user: "10001:10003"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      ledger:
+        condition: service_started
+    expose: ["8000"]
+    environment:
+      SSH_OVER_MCP_CONFIG: "/etc/ssh-over-mcp/config.yaml"
+      SSH_OVER_MCP_CREDENTIAL_MAP: "/etc/ssh-over-mcp/credentials.yaml"
+      SSH_OVER_MCP_PROFILE: "${SSH_OVER_MCP_PROFILE:?set SSH_OVER_MCP_PROFILE}"
+      SSH_OVER_MCP_LEDGER_EXEC_SOCKET_PATH: "/run/ssh-over-mcp-exec/ledger/ledger.sock"
+      SSH_OVER_MCP_LEDGER_SERVICE_UID: "10002"
+      SSH_OVER_MCP_LEDGER_SERVICE_GID: "10002"
+      SSH_OVER_MCP_BIND_HOST: "0.0.0.0"
+      SSH_OVER_MCP_ORIGIN_BEARER_TOKEN_FILE: "/run/secrets/origin-bearer"
+    networks:
+      origin_internal:
+        aliases: ["ssh-over-mcp-origin"]
+      ssh_egress: {}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/readyz',timeout=2).read()"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 2s
+    volumes:
+      - type: bind
+        source: ${SSH_OVER_MCP_CONFIG_FILE:?set SSH_OVER_MCP_CONFIG_FILE}
+        target: /etc/ssh-over-mcp/config.yaml
+        read_only: true
+      - type: bind
+        source: ${SSH_OVER_MCP_CREDENTIAL_MAP_FILE:?set SSH_OVER_MCP_CREDENTIAL_MAP_FILE}
+        target: /etc/ssh-over-mcp/credentials.yaml
+        read_only: true
+      - type: bind
+        source: ${SSH_OVER_MCP_SSH_SECRETS_DIR:?set SSH_OVER_MCP_SSH_SECRETS_DIR}
+        target: /run/secrets/ssh
+        read_only: true
+      - type: bind
+        source: ${SSH_OVER_MCP_ORIGIN_BEARER_FILE:?set SSH_OVER_MCP_ORIGIN_BEARER_FILE}
+        target: /run/secrets/origin-bearer
+        read_only: true
+      - type: volume
+        source: ledger-exec
+        target: /run/ssh-over-mcp-exec
+        read_only: true
+
+  approvalctl:
+    profiles: ["admin"]
+    image: ${SSH_OVER_MCP_IMAGE:-ssh-over-mcp:phase6b}
+    entrypoint: ["ssh-over-mcp-approvalctl"]
+    user: "10004:10005"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    network_mode: "none"
+    environment:
+      SSH_OVER_MCP_LEDGER_ADMIN_SOCKET_PATH: "/run/ssh-over-mcp-admin/ledger/ledger.sock"
+      SSH_OVER_MCP_LEDGER_SERVICE_UID: "10002"
+      SSH_OVER_MCP_LEDGER_SERVICE_GID: "10002"
+    volumes:
+      - type: volume
+        source: ledger-admin
+        target: /run/ssh-over-mcp-admin
+        read_only: true
+
+volumes:
+  ledger-data: {}
+  ledger-exec: {}
+  ledger-admin: {}
+
+networks:
+  origin_internal:
+    internal: true
+  ssh_egress: {}

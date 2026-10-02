@@ -246,3 +246,40 @@ Ordinary pytest does not set `SSH_OVER_MCP_RUN_LIVE_CONTAINER=1`, so these
 live cases skip. The hardened self-hosted CI runner intentionally has no
 Docker socket; image build/runtime validation therefore runs on the authorized
 Mac x86 Docker host rather than weakening the CI runner to support Docker.
+
+
+## Phase 6B private Compose authority probe
+
+Phase 6B adds an opt-in live Docker Compose proof for the local private
+reference deployment. Run it only on the authorized Mac x86 Docker host:
+
+```bash
+docker build --platform linux/amd64 -t ssh-over-mcp:phase6b .
+SSH_OVER_MCP_RUN_LIVE_COMPOSE=1 \
+SSH_OVER_MCP_COMPOSE_IMAGE=ssh-over-mcp:phase6b \
+python -m pytest -q tests/live/test_compose_deployment.py
+```
+
+The probe creates a unique disposable Compose project and tears it down with
+its named volumes. It verifies the resolved Compose configuration before
+startup and then proves the live Linux authority boundary:
+
+- ledger bootstrap runs with only `CHOWN` and `DAC_OVERRIDE`;
+- MCP and Ledger run non-root with zero effective capabilities and
+  `NoNewPrivs=1`;
+- MCP receives only the read-only execution-socket volume, while
+  `approvalctl` receives only the read-only admin-socket volume;
+- legitimate AF_UNIX clients work through read-only mounts but cannot mutate
+  the socket directories;
+- the Ledger rejects a wrong UID even when that process has the correct socket
+  GID;
+- no MCP host port is published;
+- approval, audit, DB, and HMAC state survive a graceful Ledger restart;
+- Ledger outage makes MCP readiness return 503;
+- an unexpected stale endpoint path makes Ledger startup fail closed and is
+  not removed automatically.
+
+Ordinary pytest leaves `SSH_OVER_MCP_RUN_LIVE_COMPOSE` unset, so the live
+Compose cases skip. GitHub CI remains on the hardened self-hosted runner with
+no Docker socket; the live Compose proof stays on the separately authorized
+Mac x86 Docker host.

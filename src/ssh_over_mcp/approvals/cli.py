@@ -18,7 +18,7 @@ from .client import (
     LedgerClientError,
     SecurityLedgerAdminClient,
 )
-from .transport import UnixLedgerTransport
+from .transport import LedgerTransportError, UnixLedgerTransport
 
 _APPROVAL_ID = re.compile(r"^apr_[0-9a-f]{32}$")
 _PREFIX = "SSH_OVER_MCP_LEDGER_"
@@ -149,7 +149,7 @@ def run(
                 stdout=output,
             )
         )
-    except (LedgerClientError, ValueError):
+    except (LedgerClientError, LedgerTransportError, ValueError):
         errors.write("Security Ledger approval command failed\n")
         return 1
 

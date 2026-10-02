@@ -46,6 +46,8 @@ def _validate_kernel_id(value: int, label: str) -> None:
 
 def read_linux_unix_peer_credentials(
     sock: socket.socket,
+    *,
+    allow_invisible_pid: bool = False,
 ) -> LinuxPeerCredentials:
     """Read kernel-captured credentials for a connected AF_UNIX peer."""
 
@@ -90,7 +92,7 @@ def read_linux_unix_peer_credentials(
         )
 
     pid, uid, gid = _UCRED.unpack(raw)
-    if pid <= 0:
+    if pid < 0 or (pid == 0 and not allow_invisible_pid):
         raise ContainmentUnavailableError(
             "invalid containment-manager peer pid"
         )
@@ -105,10 +107,15 @@ def read_linux_unix_peer_credentials(
 def authenticate_linux_unix_peer(
     sock: socket.socket,
     policy: LinuxPeerCredentialPolicy,
+    *,
+    allow_invisible_pid: bool = False,
 ) -> LinuxPeerCredentials:
     """Fail closed unless the kernel-reported peer matches policy."""
 
-    credentials = read_linux_unix_peer_credentials(sock)
+    credentials = read_linux_unix_peer_credentials(
+        sock,
+        allow_invisible_pid=allow_invisible_pid,
+    )
 
     if credentials.uid != policy.expected_uid:
         raise ContainmentManagerPeerAuthError(

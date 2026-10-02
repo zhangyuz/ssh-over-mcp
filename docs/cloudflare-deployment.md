@@ -46,7 +46,7 @@ The image defaults to numeric non-root identity `10001:10001` and contains no
 environment-specific policy, SSH credential, ledger HMAC key, or Cloudflare
 credential. A direct container run still requires operator-mounted application
 config, SSH key files, and the Security Ledger execution socket. The private
-Compose topology arrives in Phase 6B; Tunnel/private-route and Portal operator
+Compose topology is documented below; Tunnel/private-route and Portal operator
 commands arrive in Phase 6C.
 
 ## Private origin
@@ -75,7 +75,7 @@ credential changes the server-owned `SSH_OVER_MCP_PROFILE`.
 
 Private reachability alone is therefore never treated as caller
 authentication. Portal/Tunnel configuration instructions are intentionally
-deferred to Phases 6B/6C.
+deferred to Phase 6C.
 
 ## Gateway
 
@@ -100,3 +100,59 @@ server does not multiplex caller-selected profiles behind paths such as
 If true per-user authorization is required inside the origin, a later
 user-aware authorization design must verify upstream identity rather than
 trusting unverified identity headers.
+
+## Phase 6B local private Compose reference
+
+Phase 6B provides the local private deployment boundary before any live
+Cloudflare account changes. Build the reference image first:
+
+```bash
+docker build --platform linux/amd64 -t ssh-over-mcp:phase6b .
+```
+
+Copy `deploy/compose/reference.env.example` to an operator-owned location
+outside the repository and replace its placeholder values with absolute host
+paths. The env file names paths only; secret bytes remain in mounted files.
+
+Start the private origin with:
+
+```bash
+docker compose --env-file /absolute/path/reference.env \
+  -f deploy/compose/compose.yaml up -d --wait mcp
+```
+
+The reference publishes **no host MCP port**. Readiness is checked by the
+container healthcheck against `127.0.0.1:8000/readyz`; operators must not add
+a temporary public port merely for health inspection.
+
+Use the profile-gated ephemeral `approvalctl` service for approval
+administration. Supported operator commands remain exactly `list`, `show`,
+`grant`, and `deny`:
+
+```bash
+docker compose --env-file /absolute/path/reference.env \
+  -f deploy/compose/compose.yaml --profile admin run --rm approvalctl <command>
+```
+
+A normal Ledger restart preserves the named data volume and therefore preserves
+the HMAC key, approvals, and audit rows. `docker compose down -v` is
+intentionally destructive: it deletes the named ledger volumes and must not be
+used when state must be retained.
+
+The numeric trust boundary is explicit:
+
+- MCP runs as `10001:10003`;
+- Ledger runs as `10002:10002`, with only supplementary socket groups
+  `10003` and `10005`;
+- `approvalctl` runs as `10004:10005`;
+- MCP mounts only the read-only execution-socket volume;
+- `approvalctl` mounts only the read-only admin-socket volume;
+- only Ledger/bootstrap mount the DB/HMAC data volume.
+
+Linux `SO_PEERCRED` still requires the exact configured UID/GID after the
+filesystem socket permission check. Rootless Docker or user-namespace remapping
+is not claimed equivalent until a live peer-identity proof validates the
+kernel-visible IDs.
+
+Cloudflare Tunnel, private-hostname routing, MCP Portal registration, and live
+Access/Gateway changes remain Phase 6C work.

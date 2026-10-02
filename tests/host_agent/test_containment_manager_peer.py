@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import socket
+import struct
 
 import pytest
 
@@ -149,3 +150,47 @@ def test_invalid_peer_policy_kernel_ids_are_rejected(field, value):
 
     with pytest.raises(ValueError):
         LinuxPeerCredentialPolicy(**values)
+
+
+class _InvisiblePidSocket:
+    family = socket.AF_UNIX
+
+    def getsockopt(self, level, option, size=None):
+        if option == socket.SO_TYPE:
+            return socket.SOCK_STREAM
+        if option == socket.SO_PEERCRED:
+            assert size == struct.calcsize("=iII")
+            return struct.pack("=iII", 0, os.getuid(), os.getgid())
+        raise AssertionError((level, option, size))
+
+    def getpeername(self):
+        return "/peer"
+
+
+def test_zero_pid_peer_credentials_fail_closed_by_default() -> None:
+    if not hasattr(socket, "SO_PEERCRED"):
+        pytest.skip("Linux SO_PEERCRED is required")
+
+    with pytest.raises(
+        ContainmentUnavailableError,
+        match="invalid containment-manager peer pid",
+    ):
+        read_linux_unix_peer_credentials(_InvisiblePidSocket())
+
+
+def test_zero_pid_peer_credentials_can_be_authorized_for_isolated_pid_namespace() -> None:
+    if not hasattr(socket, "SO_PEERCRED"):
+        pytest.skip("Linux SO_PEERCRED is required")
+
+    credentials = authenticate_linux_unix_peer(
+        _InvisiblePidSocket(),
+        LinuxPeerCredentialPolicy(
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        ),
+        allow_invisible_pid=True,
+    )
+
+    assert credentials.pid == 0
+    assert credentials.uid == os.getuid()
+    assert credentials.gid == os.getgid()

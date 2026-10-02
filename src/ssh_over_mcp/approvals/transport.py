@@ -127,6 +127,7 @@ class UnixLedgerTransport:
                 authenticate_linux_unix_peer(
                     sock,
                     self._expected_server,
+                    allow_invisible_pid=True,
                 )
             except ContainmentManagerPeerAuthError:
                 raise LedgerTransportError(
@@ -162,6 +163,7 @@ def serve_one_ledger_connection(
             peer = authenticate_linux_unix_peer(
                 connection,
                 peer_policy,
+                allow_invisible_pid=True,
             )
         except ContainmentManagerPeerAuthError:
             raise LedgerTransportError(

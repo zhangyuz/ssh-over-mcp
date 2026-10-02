@@ -93,6 +93,7 @@ names = {
     "ssh-over-mcp-host-agent",
     "ssh-over-mcp-server",
     "ssh-over-mcp-ledger",
+    "ssh-over-mcp-ledger-init",
     "ssh-over-mcp-approvalctl",
 }
 dist = distribution("ssh-over-mcp")
