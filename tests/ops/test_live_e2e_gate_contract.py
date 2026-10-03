@@ -468,3 +468,12 @@ def test_failed_probe_emits_only_fixed_sshd_stage(
     captured = capsys.readouterr()
     assert captured.err == "local E2E sshd stage: AUTH_ACCEPTED\n"
     assert "SUPERSECRET" not in captured.err
+
+
+def test_authorized_keys_is_root_owned_user_readable_and_not_writable() -> None:
+    module = _load_gate()
+    source = inspect.getsource(module._SystemGuestOps._prepare_keys)
+
+    assert "os.chown(AUTHORIZED_KEYS, 0, 0)" in source
+    assert "os.chmod(AUTHORIZED_KEYS, 0o644)" in source
+    assert "os.chmod(AUTHORIZED_KEYS, 0o600)" not in source

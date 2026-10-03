@@ -540,7 +540,7 @@ class _SystemGuestOps:
         public_key = Path(str(CLIENT_KEY) + ".pub").read_text(encoding="ascii").strip()
         AUTHORIZED_KEYS.write_text(f"restrict {public_key}\n", encoding="ascii")
         os.chown(AUTHORIZED_KEYS, 0, 0)
-        os.chmod(AUTHORIZED_KEYS, 0o600)
+        os.chmod(AUTHORIZED_KEYS, 0o644)
 
     def _prepare_state_and_policy(self) -> None:
         WORK_DIR.mkdir(mode=0o755)
