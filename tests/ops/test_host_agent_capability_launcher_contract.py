@@ -91,7 +91,7 @@ def test_launcher_constants_pin_identity_paths_and_capability_mask() -> None:
         "/opt/ssh-over-mcp-e2e/workspace/src"
     )
     assert module.APPLICATION_SITE_PACKAGES == Path(
-        "/opt/ssh-over-mcp-e2e/venv/lib/python3.13/site-packages"
+        "/opt/ssh-over-mcp-e2e/venv/lib/python3.14/site-packages"
     )
     assert module.CAP_SETGID == 6
     assert module.CAP_SETUID == 7
