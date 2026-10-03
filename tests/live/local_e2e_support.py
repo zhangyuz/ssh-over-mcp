@@ -12,7 +12,7 @@ from ssh_over_mcp.inventory.models import Host, Inventory
 from ssh_over_mcp.ssh.connection import SSHConnectionManager
 from ssh_over_mcp.ssh.credentials import FileCredentialProvider
 from ssh_over_mcp.ssh.protocol import ExecEnvelope, ExecutionLimits, encode_request
-from ssh_over_mcp.ssh.transport import StructuredSSHTransport
+from ssh_over_mcp.ssh.transport import SSHExecutionResult, StructuredSSHTransport
 
 _EXPECTED_VALUES = {
     "SSH_OVER_MCP_LIVE_E2E_HOST": "127.0.0.1",
@@ -52,6 +52,36 @@ _REQUEST_ID = "req_0000000000000000000000000000e2e1"
 
 class LocalE2EFixtureError(RuntimeError):
     """The operator-provided local E2E fixture metadata is invalid."""
+
+
+class LocalE2ELauncherError(LocalE2EFixtureError):
+    """The fixed capability launcher failed closed."""
+
+
+class LocalE2ERemoteExecutionError(LocalE2EFixtureError):
+    """The remote E2E execution failed without exposing remote stderr."""
+
+
+def _require_successful_remote_result(result: SSHExecutionResult) -> None:
+    if (
+        result.exit_status == 0
+        and result.exit_signal is None
+        and not result.timed_out
+        and not result.truncated
+        and not result.stderr
+    ):
+        return
+
+    if (
+        result.exit_status == 70
+        and result.exit_signal is None
+        and not result.timed_out
+        and not result.truncated
+        and result.stderr == b"ssh-over-mcp host-agent launcher failed\n"
+    ):
+        raise LocalE2ELauncherError("fixed host-agent capability launcher failed closed")
+
+    raise LocalE2ERemoteExecutionError("real structured SSH fixture failed remotely")
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,16 +317,7 @@ async def run_real_ssh_fixture() -> dict[str, object]:
     finally:
         await connections.close()
 
-    if (
-        result.exit_status != 0
-        or result.exit_signal is not None
-        or result.timed_out
-        or result.truncated
-        or result.stderr
-    ):
-        raise LocalE2EFixtureError(
-            "real structured SSH fixture did not complete successfully"
-        )
+    _require_successful_remote_result(result)
 
     try:
         state = json.loads(result.stdout.decode("utf-8"))

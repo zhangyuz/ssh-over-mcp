@@ -148,3 +148,40 @@ def test_fixture_request_id_matches_control_plane_shape() -> None:
     import re
     support = _load_support()
     assert re.fullmatch(r"req_[0-9a-f]{32}", support._REQUEST_ID)
+
+
+def test_remote_result_classifies_fixed_launcher_failure_without_echoing_secret() -> None:
+    module = _load_support()
+    from ssh_over_mcp.ssh.transport import SSHExecutionResult
+
+    result = SSHExecutionResult(
+        request_id="req_" + ("1" * 32),
+        host="e2e-host",
+        exit_status=70,
+        stderr=b"ssh-over-mcp host-agent launcher failed\n",
+        duration_ms=1,
+    )
+
+    with pytest.raises(module.LocalE2ELauncherError) as exc:
+        module._require_successful_remote_result(result)
+
+    assert "launcher" in str(exc.value).lower()
+    assert "ssh-over-mcp host-agent launcher failed" not in str(exc.value)
+
+
+def test_remote_result_classifies_other_stderr_as_generic_without_echoing_secret() -> None:
+    module = _load_support()
+    from ssh_over_mcp.ssh.transport import SSHExecutionResult
+
+    result = SSHExecutionResult(
+        request_id="req_" + ("2" * 32),
+        host="e2e-host",
+        exit_status=70,
+        stderr=b"SUPERSECRET remote failure\n",
+        duration_ms=1,
+    )
+
+    with pytest.raises(module.LocalE2ERemoteExecutionError) as exc:
+        module._require_successful_remote_result(result)
+
+    assert "SUPERSECRET" not in str(exc.value)
