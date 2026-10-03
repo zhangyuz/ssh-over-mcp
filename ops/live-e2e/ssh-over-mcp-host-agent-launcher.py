@@ -19,7 +19,7 @@ APPLICATION_SOURCE = Path(
     "/opt/ssh-over-mcp-e2e/workspace/src"
 )
 APPLICATION_SITE_PACKAGES = Path(
-    "/opt/ssh-over-mcp-e2e/venv/lib/python3.13/site-packages"
+    "/opt/ssh-over-mcp-e2e/venv/lib/python3.14/site-packages"
 )
 
 CAP_SETGID = 6

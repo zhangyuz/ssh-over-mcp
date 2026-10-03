@@ -406,7 +406,7 @@ the `gha-live` sudo policy contains exactly one command:
 
 ## Disposable full-E2E orchestrator
 
-Phase 7A full-product E2E does **not** run capability-bearing target code on a persistent Linux runner. ADR 0006 requires a disposable Linux VM for every Level-3 run.
+Phase 7A full-product E2E does **not** run capability-bearing target code on a persistent Linux runner. ADR 0006 requires a disposable Linux VM for every Level-3 run, and ADR 0008 requires that the VM have no virtual network device.
 
 The persistent host role is a dedicated native Intel-macOS account:
 
@@ -420,19 +420,22 @@ The account is non-admin, non-root, and has **no sudo**. It must not be reused f
 
 Host prerequisites:
 - Intel macOS x86_64 with Hypervisor support;
-- Lima 2.2.0;
-- trusted-main repository checkout only for the orchestrator source;
+- QEMU 11.1.2 (`qemu-system-x86_64` and `qemu-img`) installed by the operator;
+- the pinned Ubuntu 26.04 base image available in the orchestrator's fixed cache and re-hashed before every run;
+- trusted-main repository checkout only for orchestrator source and trusted runtime lock;
 - no Docker socket requirement;
 - no production SSH keys, Cloudflare credentials, Ledger secrets, or application credentials.
 
-The E2E provider is a fresh Lima `vz` Ubuntu 26.04 x86_64 guest using:
+The E2E guest uses:
 
 ```text
 https://cloud-images.ubuntu.com/releases/resolute/release-20260720/ubuntu-26.04-server-cloudimg-amd64.img
 sha256:117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477
 ```
 
-The guest has no host filesystem mounts or product port-forward dependency; containerd is disabled, `propagateProxyEnv` is false, and the Lima host resolver is disabled. The target commit never becomes a host worktree. The orchestrator uses a private temporary bare repository and transfers the target only as a Git bundle.
+The host creates a fresh qcow2 overlay and starts QEMU with HVF and `-nic none`. The guest receives no host filesystem share/mount, no QEMU monitor, no Docker socket, no production secret, and no target-controlled host socket/device. The target commit never becomes a host worktree.
+
+The orchestrator uses a private temporary bare repository to create the exact Git bundle. It also prepares a Python 3.14 linux/amd64 wheelhouse from trusted-main `requirements/runtime.lock` using hash enforcement, then packages the bundle, lock, wheelhouse, exact expected commit, and trusted offline bootstrap into read-only payload/seed media. Guest bootstrap performs no apt/PyPI/GitHub access.
 
 The trusted workflow is manual-only from `main` and receives one exact `commit_sha`. The workflow run `headSha` identifies the trusted-main workflow revision, not the tested commit.
 
@@ -441,12 +444,16 @@ Target identity is established by equality of:
 ```text
 commit_sha
 = bare target ref
+= payload expected commit
 = guest checkout HEAD
 = guest EXPECTED_COMMIT
+= serial result commit
 ```
 
-The GitHub read token remains host-only and is not present in guest command environments.
+The GitHub read token remains host-only and is not present in seed/payload media or guest command environments.
 
-The fixed instance name is `ssh-over-mcp-e2e`. A pre-existing instance is a hard failure requiring operator inspection. After a run, the host orchestrator performs `limactl delete --force ssh-over-mcp-e2e`, verifies the instance is absent, and removes the temporary bare repository/bundle.
+The guest returns bounded evidence only over a host-owned serial log. Success requires exactly one `SSH_OVER_MCP_E2E_RESULT=<commit>:PASS` record matching the requested commit and a clean QEMU exit.
 
-In-guest cleanup is still tested independently. Destroying the whole disposable guest is an additional containment boundary, not a substitute for product cleanup assertions.
+A stale QEMU/provider process/artifact before a run is a hard failure requiring operator inspection. After every attempted run the orchestrator terminates only the QEMU PID it created, waits for exit, and removes the overlay, seed ISO, payload ISO, serial log, temporary bare repository/bundle, and wheelhouse. Failure to remove run-owned state fails the workflow.
+
+In-guest cleanup is still tested independently. Destroying the whole disposable guest state is an additional containment boundary, not a substitute for product cleanup assertions.

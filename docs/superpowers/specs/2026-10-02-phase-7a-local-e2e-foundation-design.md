@@ -303,17 +303,17 @@ Each Level-3 E2E run has an outer persistent-host lifecycle and an inner disposa
 The trusted orchestrator must:
 1. run only trusted-main workflow/orchestration code under a dedicated non-admin account;
 2. validate the requested target as an exact 40-hex commit;
-3. fail closed if the fixed Lima instance name already exists;
+3. fail closed on stale QEMU/provider artifacts or processes from an earlier run;
 4. fetch the target into a temporary bare Git repository without checking out its worktree on the host;
 5. create a Git bundle containing the exact target commit;
-6. start a fresh pinned Ubuntu 26.04 x86_64 Lima guest with no host filesystem mounts;
-7. copy only the source bundle and trusted orchestration metadata into the guest;
-8. never pass GitHub tokens, production credentials, or unrelated host secrets into the guest;
-9. collect bounded E2E evidence;
-10. stop/delete the guest it created in a `finally` path and verify the instance is absent;
-11. remove the temporary bare repository/bundle.
+6. build a hash-verified Python 3.14 linux/amd64 wheelhouse from the trusted-main `requirements/runtime.lock`;
+7. construct read-only cloud-init seed and payload media containing only trusted bootstrap data, exact target bundle, expected commit, runtime lock, and wheelhouse;
+8. start a fresh pinned Ubuntu 26.04 x86_64 QEMU/HVF guest with `-nic none`, no host mounts/shares, no monitor, and serial-only result output;
+9. never pass GitHub tokens, production credentials, unrelated host secrets, host sockets, or host network devices into the guest;
+10. collect a bounded commit-bound serial result after QEMU exits;
+11. remove overlay/media/log/bare-repository/bundle/wheelhouse state in a `finally` path and verify no stale provider process/artifact remains.
 
-Unknown pre-existing guest state causes fail-closed startup rather than silent reuse or deletion.
+Unknown pre-existing provider state causes fail-closed startup rather than silent reuse or deletion.
 
 ### 10.2 Disposable guest lifecycle
 
@@ -393,14 +393,14 @@ The reference persistent orchestrator is:
 - a dedicated native macOS x86 account such as `gha-e2e-orchestrator`;
 - non-admin/non-root with no passwordless sudo;
 - a self-hosted runner used only by the trusted-main manual E2E workflow;
-- Lima 2.2.0 with the `vz` driver on Intel macOS with Hypervisor support;
+- QEMU 11.1.2 using HVF on Intel macOS with Hypervisor support;
 - no target-commit checkout or execution on the persistent host.
 
 The trusted guest image is Ubuntu 26.04 x86_64 server cloud image dated 2026-07-20 with SHA-256 `117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477`.
 
-The guest is started with no host filesystem mounts and no product port forwards. The target commit is transferred as a Git bundle produced from a host-side bare repository. The GitHub token used to fetch the bundle remains on the orchestrator and is never copied into the guest.
+The guest has **no virtual network device** (`-nic none`), no host filesystem mount/share, no QEMU monitor, no Docker socket, and no production secret. The target commit is transferred only inside a read-only payload image as a Git bundle produced from a host-side bare repository. Runtime wheels are prepared on the host from the trusted-main hash-locked runtime requirements and installed offline inside the guest. The GitHub token used to fetch the bundle remains on the orchestrator and is never copied into the guest.
 
-The capability-bearing target checkout may become root inside the disposable guest. That is explicitly accepted by ADR 0006 because the VM is the containment boundary and receives only test-scoped state. It may not gain authority over the persistent orchestrator.
+The capability-bearing target checkout may become root inside the disposable guest. That is explicitly accepted by ADR 0006/0008 because the VM has no target-controlled network or host-filesystem/device path and receives only test-scoped state. It may not gain authority over the persistent orchestrator.
 
 The real sshd path inside the guest remains:
 
@@ -425,7 +425,7 @@ The E2E request is bound to an exact target commit through all of:
 
 The workflow run's GitHub `headSha` identifies the trusted-main workflow revision and is not the tested-commit identity.
 
-After every run the Lima instance must be destroyed and its absence verified. If a fixed-name guest exists before the run, stop for operator inspection rather than silently deleting unknown state.
+After every run QEMU must exit and the disposable overlay, seed/payload media, serial log, temporary bundle/repository, and wheelhouse must be removed. Stale provider state before a run requires operator inspection rather than silent reuse.
 
 ## 13. Implementation slicing
 
@@ -433,7 +433,7 @@ Phase 7A is split into four independently reviewable slices.
 
 ### 7A1 — E2E fixture foundation
 Build only:
-- trusted native-macOS Lima orchestrator and pinned guest definition;
+- trusted native-macOS QEMU/HVF orchestrator and pinned no-network guest definition;
 - exact-commit bare-Git → bundle transfer with no host target checkout;
 - fixture identities/configuration;
 - real sshd + ForceCommand;
@@ -520,12 +520,12 @@ Phase 7A is complete only when:
 17. secrets are absent from model-visible output/audit/log evidence;
 18. in-guest cleanup verification passes;
 19. capability-bearing target checkout executes only inside a fresh disposable Linux VM, never on the persistent orchestrator;
-20. the guest receives no host filesystem mount, GitHub token, production credential, or unrelated host secret;
+20. the guest receives no virtual network device, host filesystem mount/share, GitHub token, production credential, unrelated host secret, or target-controlled host socket/device;
 21. exact-target E2E evidence exists and whole-guest destruction is verified after every run;
 22. ordinary CI security posture is not weakened;
 23. development methodology is normative and linked from repository entrypoints;
 24. final review has no remaining Critical/Important finding and exact PR-head/merge-main ordinary CI gates pass;
-25. merged worktrees/branches, host-side bundle state, guest instance, and disposable in-guest fixture state are cleaned.
+25. merged worktrees/branches, host-side bundle/wheelhouse/overlay/media/log state, QEMU process, and disposable in-guest fixture state are cleaned.
 
 ## 17. Later Phase 7 slices
 

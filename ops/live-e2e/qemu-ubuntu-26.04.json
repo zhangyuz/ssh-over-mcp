@@ -1,0 +1,15 @@
+{
+  "qemu_version": "11.1.2",
+  "arch": "x86_64",
+  "accelerator": "hvf",
+  "image_url": "https://cloud-images.ubuntu.com/releases/resolute/release-20260720/ubuntu-26.04-server-cloudimg-amd64.img",
+  "image_digest": "sha256:117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477",
+  "cpus": 4,
+  "memory_mib": 6144,
+  "disk_gib": 30,
+  "python_version": "3.14",
+  "python_abi": "cp314",
+  "network": false,
+  "host_shares": false,
+  "serial_result_prefix": "SSH_OVER_MCP_E2E_RESULT="
+}

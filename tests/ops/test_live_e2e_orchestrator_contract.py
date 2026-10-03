@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -11,9 +12,12 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "run-live-local-e2e-orchestrator.py"
-LIMA_CONFIG = ROOT / "ops" / "live-e2e" / "lima-ubuntu-26.04.yaml"
+PROVIDER = ROOT / "ops" / "live-e2e" / "qemu-ubuntu-26.04.json"
+OLD_LIMA = ROOT / "ops" / "live-e2e" / "lima-ubuntu-26.04.yaml"
 WORKFLOW = ROOT / ".github" / "workflows" / "live-local-e2e.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+RUNTIME_LOCK = ROOT / "requirements" / "runtime.lock"
+
 IMAGE_URL = (
     "https://cloud-images.ubuntu.com/releases/resolute/release-20260720/"
     "ubuntu-26.04-server-cloudimg-amd64.img"
@@ -21,8 +25,10 @@ IMAGE_URL = (
 IMAGE_DIGEST = (
     "sha256:117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477"
 )
+
+
 def _load_script() -> ModuleType:
-    assert SCRIPT.is_file(), "trusted Mac E2E orchestrator must exist"
+    assert SCRIPT.is_file()
     name = "ssh_over_mcp_live_e2e_orchestrator"
     spec = importlib.util.spec_from_file_location(name, SCRIPT)
     assert spec is not None and spec.loader is not None
@@ -35,35 +41,45 @@ def _load_script() -> ModuleType:
     return module
 
 
-def test_lima_config_pins_disposable_ubuntu_guest_without_host_mounts() -> None:
-    assert LIMA_CONFIG.is_file()
-    document = yaml.safe_load(LIMA_CONFIG.read_text(encoding="utf-8"))
+def test_provider_pins_qemu_hvf_no_network_guest() -> None:
+    assert PROVIDER.is_file(), "QEMU/HVF provider metadata must exist"
+    assert not OLD_LIMA.exists(), "Lima provider must not remain authoritative"
 
-    assert document["arch"] == "x86_64"
-    assert document["vmType"] == "vz"
-    assert document["images"] == [
-        {"location": IMAGE_URL, "arch": "x86_64", "digest": IMAGE_DIGEST}
-    ]
-    assert document["mounts"] == []
-    assert document["containerd"] == {"system": False, "user": False}
-    assert document.get("portForwards", []) == []
-    assert document["propagateProxyEnv"] is False
-    assert document["hostResolver"] == {"enabled": False}
-    assert document["cpus"] >= 2
-    assert document["memory"].endswith("GiB")
-    assert document["disk"].endswith("GiB")
+    document = json.loads(PROVIDER.read_text(encoding="utf-8"))
+    assert document == {
+        "qemu_version": "11.1.2",
+        "arch": "x86_64",
+        "accelerator": "hvf",
+        "image_url": IMAGE_URL,
+        "image_digest": IMAGE_DIGEST,
+        "cpus": 4,
+        "memory_mib": 6144,
+        "disk_gib": 30,
+        "python_version": "3.14",
+        "python_abi": "cp314",
+        "network": False,
+        "host_shares": False,
+        "serial_result_prefix": "SSH_OVER_MCP_E2E_RESULT=",
+    }
 
 
-def test_orchestrator_constants_pin_provider_and_guest_boundary() -> None:
+def test_orchestrator_constants_pin_no_network_provider() -> None:
     module = _load_script()
 
-    assert module.LIMA_VERSION == "2.2.0"
-    assert module.INSTANCE_NAME == "ssh-over-mcp-e2e"
-    assert module.EXPECTED_REPOSITORY == "zhangyuz/ssh-over-mcp"
-    assert module.GUEST_BUNDLE == Path("/tmp/ssh-over-mcp-target.bundle")
-    assert module.GUEST_WORKSPACE == Path("/opt/ssh-over-mcp-e2e/workspace")
-    assert module.GUEST_CONFIG == Path("/etc/ssh-over-mcp/live-e2e-gate.conf")
+    assert module.QEMU_VERSION == "11.1.2"
+    assert module.QEMU_SYSTEM == Path("/usr/local/bin/qemu-system-x86_64")
+    assert module.QEMU_IMG == Path("/usr/local/bin/qemu-img")
+    assert module.HDIUTIL == Path("/usr/bin/hdiutil")
+    assert module.IMAGE_URL == IMAGE_URL
     assert module.IMAGE_DIGEST == IMAGE_DIGEST
+    assert module.PYTHON_VERSION == "3.14"
+    assert module.PYTHON_ABI == "cp314"
+    assert module.RESULT_PREFIX == "SSH_OVER_MCP_E2E_RESULT="
+    assert module.TRUSTED_RUNTIME_LOCK == RUNTIME_LOCK
+    assert module.BASE_IMAGE == Path(
+        "/Users/gha-e2e-orchestrator/Library/Caches/ssh-over-mcp-e2e/"
+        "ubuntu-26.04-server-cloudimg-amd64.img"
+    )
 
 
 @pytest.mark.parametrize(
@@ -76,23 +92,42 @@ def test_orchestrator_rejects_non_exact_target_commit(value: str) -> None:
         module._validated_target_commit(value)
 
 
-def test_orchestrator_normalizes_exact_target_commit() -> None:
+def test_orchestrator_requires_trusted_main_actions_context() -> None:
     module = _load_script()
-    assert module._validated_target_commit("A" * 40) == "a" * 40
+    valid = {
+        "GITHUB_ACTIONS": "true",
+        "GITHUB_EVENT_NAME": "workflow_dispatch",
+        "GITHUB_REPOSITORY": "zhangyuz/ssh-over-mcp",
+        "GITHUB_REF": "refs/heads/main",
+        "GITHUB_SHA": "a" * 40,
+    }
+    assert module._validated_workflow_context(valid) == "a" * 40
+
+    for case in (
+        {**valid, "GITHUB_ACTIONS": "false"},
+        {**valid, "GITHUB_EVENT_NAME": "pull_request_target"},
+        {**valid, "GITHUB_REPOSITORY": "someone/else"},
+        {**valid, "GITHUB_REF": "refs/heads/feature"},
+        {**valid, "GITHUB_SHA": "abc"},
+    ):
+        with pytest.raises(module.OrchestratorError):
+            module._validated_workflow_context(case)
 
 
-def test_guest_environment_drops_host_tokens_and_runner_secrets() -> None:
+def test_provider_environment_drops_host_tokens_and_secrets() -> None:
     module = _load_script()
-    env = {
-        "HOME": "/Users/gha-e2e-orchestrator",
-        "PATH": "/usr/local/bin:/usr/bin:/bin",
+    hostile = {
+        "HOME": "/tmp/attacker-home",
+        "PATH": "/tmp/attacker-bin",
+        "PYTHONPATH": "/tmp/inject",
+        "DYLD_INSERT_LIBRARIES": "/tmp/inject.dylib",
         "GITHUB_TOKEN": "token",
         "GH_TOKEN": "gh-token",
         "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "oidc",
         "SSH_AUTH_SOCK": "/tmp/agent",
-        "RANDOM_SECRET": "secret",
+        "SSH_OVER_MCP_E2E_GITHUB_TOKEN": "read-token",
     }
-    assert module._guest_command_environment(env) == {
+    assert module._provider_environment(hostile) == {
         "HOME": "/Users/gha-e2e-orchestrator",
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
@@ -119,22 +154,155 @@ def test_host_git_plan_is_bare_bundle_only() -> None:
     assert all("checkout" not in command for command in commands)
 
 
-def test_lima_start_command_uses_fixed_plain_no_mount_guest() -> None:
+def test_wheel_download_is_hash_locked_cp314_linux_x86() -> None:
     module = _load_script()
-    assert module._lima_start_command(LIMA_CONFIG) == [
-        "limactl",
-        "start",
-        "--name=ssh-over-mcp-e2e",
-        "--tty=false",
-        "--plain",
-        "--mount-none",
-        "--timeout=10m",
-        str(LIMA_CONFIG),
+    wheelhouse = Path("/tmp/e2e/wheels")
+    command = module._wheel_download_command(RUNTIME_LOCK, wheelhouse)
+
+    assert command[:3] == [sys.executable, "-m", "pip"]
+    for flag in ("--require-hashes", "--only-binary=:all:", "--no-deps"):
+        assert flag in command
+    assert command[command.index("--implementation") + 1] == "cp"
+    assert command[command.index("--python-version") + 1] == "3.14"
+    assert command[command.index("--abi") + 1] == "cp314"
+    platforms = [
+        command[index + 1]
+        for index, value in enumerate(command)
+        if value == "--platform"
+    ]
+    assert platforms == ["manylinux_2_17_x86_64", "manylinux2014_x86_64"]
+    assert command[command.index("-r") + 1] == str(RUNTIME_LOCK)
+    assert command[command.index("-d") + 1] == str(wheelhouse)
+    assert "--index-url" not in command
+    assert "--extra-index-url" not in command
+
+
+def test_qemu_overlay_plan_uses_verified_base_only() -> None:
+    module = _load_script()
+    base = Path("/cache/base.img")
+    overlay = Path("/tmp/e2e/overlay.qcow2")
+    assert module._overlay_command(base, overlay) == [
+        "/usr/local/bin/qemu-img",
+        "create",
+        "-f",
+        "qcow2",
+        "-F",
+        "qcow2",
+        "-b",
+        str(base),
+        str(overlay),
+        "30G",
     ]
 
 
+def test_qemu_command_has_no_network_or_host_share_channel() -> None:
+    module = _load_script()
+    overlay = Path("/tmp/e2e/overlay.qcow2")
+    seed = Path("/tmp/e2e/seed.iso")
+    payload = Path("/tmp/e2e/payload.iso")
+    serial = Path("/tmp/e2e/serial.log")
+    command = module._qemu_command(overlay, seed, payload, serial)
+    rendered = " ".join(command)
+
+    assert command[0] == "/usr/local/bin/qemu-system-x86_64"
+    assert ["-accel", "hvf"] == command[command.index("-accel"): command.index("-accel") + 2]
+    assert ["-nic", "none"] == command[command.index("-nic"): command.index("-nic") + 2]
+    assert ["-display", "none"] == command[
+        command.index("-display"): command.index("-display") + 2
+    ]
+    assert ["-monitor", "none"] == command[
+        command.index("-monitor"): command.index("-monitor") + 2
+    ]
+    assert f"file:{serial}" in command
+    assert f"file={seed},format=raw,media=cdrom,readonly=on" in command
+    assert f"file={payload},format=raw,media=cdrom,readonly=on" in command
+
+    forbidden = (
+        "-net ",
+        "-netdev",
+        "user,",
+        "tap,",
+        "socket,",
+        "virtiofs",
+        "9p",
+        "hostfwd",
+        "vnc",
+        "usb-redir",
+        "smb=",
+    )
+    assert not any(token in rendered for token in forbidden)
+
+
+def test_iso_command_is_fixed() -> None:
+    module = _load_script()
+    source = Path("/tmp/e2e/payload")
+    output = Path("/tmp/e2e/payload.iso")
+    assert module._iso_command(source, output, "SOM_E2E_PAYLOAD") == [
+        "/usr/bin/hdiutil",
+        "makehybrid",
+        "-o",
+        str(output),
+        str(source),
+        "-iso",
+        "-joliet",
+        "-iso-volume-name",
+        "SOM_E2E_PAYLOAD",
+        "-joliet-volume-name",
+        "SOM_E2E_PAYLOAD",
+    ]
+
+
+def test_trusted_bootstrap_is_offline_and_commit_bound() -> None:
+    module = _load_script()
+    target = "a" * 40
+    script = module._bootstrap_script(target)
+
+    assert target in script
+    assert "--no-index" in script
+    assert "--require-hashes" in script
+    assert "/opt/ssh-over-mcp-e2e/venv" in script
+    assert "python3 -m venv" in script
+    assert "git clone /mnt/som-payload/target.bundle" in script
+    assert "SSH_OVER_MCP_E2E_RESULT=" in script
+    assert "/dev/ttyS0" in script
+    assert "trap - EXIT" in script
+    assert 'mountpoint -q "$PAYLOAD"' in script
+    assert "mount -o" not in script
+    for forbidden in (
+        "apt-get",
+        "apt ",
+        "curl ",
+        "wget ",
+        "https://",
+        "http://",
+        "git fetch",
+        "git clone https",
+        "pip install -U",
+    ):
+        assert forbidden not in script
+
+
+def test_serial_result_requires_exact_commit_and_single_pass_record() -> None:
+    module = _load_script()
+    target = "a" * 40
+    assert module._parse_serial_result(
+        f"boot noise\nSSH_OVER_MCP_E2E_RESULT={target}:PASS\n", target
+    ) is True
+
+    for raw in (
+        "",
+        f"SSH_OVER_MCP_E2E_RESULT={'b' * 40}:PASS\n",
+        f"SSH_OVER_MCP_E2E_RESULT={target}:FAIL:70\n",
+        (
+            f"SSH_OVER_MCP_E2E_RESULT={target}:PASS\n"
+            f"SSH_OVER_MCP_E2E_RESULT={target}:PASS\n"
+        ),
+    ):
+        with pytest.raises(module.OrchestratorError):
+            module._parse_serial_result(raw, target)
+
+
 def test_orchestrator_source_never_uses_shell_true_or_os_system() -> None:
-    assert SCRIPT.is_file()
     source = SCRIPT.read_text(encoding="utf-8")
     tree = ast.parse(source)
     assert "shell=True" not in source
@@ -149,97 +317,83 @@ def test_orchestrator_source_never_uses_shell_true_or_os_system() -> None:
 
 
 class _FakeLifecycle:
-    def __init__(self, *, preexisting: bool = False, fail_gate: bool = False) -> None:
-        self.preexisting = preexisting
-        self.fail_gate = fail_gate
+    def __init__(self, *, stale: bool = False, fail_wait: bool = False) -> None:
+        self.stale = stale
+        self.fail_wait = fail_wait
         self.events: list[object] = []
 
     def verify_host(self) -> None:
         self.events.append("verify_host")
 
-    def instance_exists(self) -> bool:
-        self.events.append("instance_exists")
-        return self.preexisting
+    def provider_state_exists(self) -> bool:
+        self.events.append("provider_state_exists")
+        return self.stale
 
     def create_bundle(self, target: str) -> Path:
         self.events.append(("create_bundle", target))
         return Path("/tmp/target.bundle")
 
+    def prepare_guest(self, target: str, bundle: Path) -> None:
+        self.events.append(("prepare_guest", target, bundle))
+
     def start_guest(self) -> None:
         self.events.append("start_guest")
 
-    def copy_bundle(self, bundle: Path) -> None:
-        self.events.append(("copy_bundle", bundle))
-
-    def bootstrap_guest(self, target: str) -> None:
-        self.events.append(("bootstrap_guest", target))
-
-    def guest_head(self) -> str:
-        self.events.append("guest_head")
-        return "a" * 40
-
-    def run_guest_gate(self) -> int:
-        self.events.append("run_guest_gate")
-        if self.fail_gate:
-            raise RuntimeError("gate failed")
+    def wait_guest(self) -> int:
+        self.events.append("wait_guest")
+        if self.fail_wait:
+            raise RuntimeError("guest failed")
         return 0
 
-    def delete_guest(self) -> None:
-        self.events.append("delete_guest")
+    def verify_result(self, target: str) -> None:
+        self.events.append(("verify_result", target))
 
-    def verify_guest_absent(self) -> None:
-        self.events.append("verify_guest_absent")
+    def cleanup_guest(self) -> None:
+        self.events.append("cleanup_guest")
 
     def cleanup_host(self) -> None:
         self.events.append("cleanup_host")
 
 
-def test_orchestrator_lifecycle_destroys_guest_after_success() -> None:
+def test_orchestrator_lifecycle_always_cleans_guest_and_host() -> None:
     module = _load_script()
     ops = _FakeLifecycle()
     assert module._orchestrate("a" * 40, ops) == 0
     assert ops.events == [
         "verify_host",
-        "instance_exists",
+        "provider_state_exists",
         ("create_bundle", "a" * 40),
+        ("prepare_guest", "a" * 40, Path("/tmp/target.bundle")),
         "start_guest",
-        ("copy_bundle", Path("/tmp/target.bundle")),
-        ("bootstrap_guest", "a" * 40),
-        "guest_head",
-        "run_guest_gate",
-        "delete_guest",
-        "verify_guest_absent",
+        "wait_guest",
+        ("verify_result", "a" * 40),
+        "cleanup_guest",
         "cleanup_host",
     ]
 
 
-def test_orchestrator_lifecycle_destroys_guest_after_gate_failure() -> None:
+def test_orchestrator_cleanup_runs_after_guest_failure() -> None:
     module = _load_script()
-    ops = _FakeLifecycle(fail_gate=True)
-    with pytest.raises(RuntimeError, match="gate failed"):
+    ops = _FakeLifecycle(fail_wait=True)
+    with pytest.raises(RuntimeError, match="guest failed"):
         module._orchestrate("a" * 40, ops)
-    assert ops.events[-3:] == [
-        "delete_guest",
-        "verify_guest_absent",
-        "cleanup_host",
-    ]
+    assert ops.events[-2:] == ["cleanup_guest", "cleanup_host"]
 
 
-def test_orchestrator_does_not_delete_preexisting_guest() -> None:
+def test_orchestrator_refuses_stale_provider_state_without_deleting_it() -> None:
     module = _load_script()
-    ops = _FakeLifecycle(preexisting=True)
-    with pytest.raises(module.OrchestratorError, match="already exists"):
+    ops = _FakeLifecycle(stale=True)
+    with pytest.raises(module.OrchestratorError, match="stale"):
         module._orchestrate("a" * 40, ops)
-    assert "delete_guest" not in ops.events
-    assert "cleanup_host" in ops.events
+    assert "start_guest" not in ops.events
+    assert "cleanup_guest" not in ops.events
+    assert ops.events[-1] == "cleanup_host"
 
 
-def test_workflow_is_trusted_main_manual_mac_orchestrator_only() -> None:
-    assert WORKFLOW.is_file()
+def test_workflow_is_trusted_main_manual_qemu_orchestrator_only() -> None:
     workflow = yaml.load(WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
     assert set(workflow["on"]) == {"workflow_dispatch"}
-    commit = workflow["on"]["workflow_dispatch"]["inputs"]["commit_sha"]
-    assert commit["required"] == "true"
+    assert workflow["on"]["workflow_dispatch"]["inputs"]["commit_sha"]["required"] == "true"
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["concurrency"]["cancel-in-progress"] == "false"
     job = workflow["jobs"]["e2e"]
@@ -250,137 +404,60 @@ def test_workflow_is_trusted_main_manual_mac_orchestrator_only() -> None:
     rendered = WORKFLOW.read_text(encoding="utf-8")
     assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in rendered
     assert "persist-credentials: false" in rendered
-    assert "ref: ${{ github.sha }}" in rendered
     assert "scripts/run-live-local-e2e-orchestrator.py" in rendered
-    assert "${{ inputs.commit_sha }}" in rendered
+    assert "inputs.commit_sha" in rendered
+    assert "qemu-system-x86_64" in rendered
+    assert "limactl" not in rendered
     assert "sudo " not in rendered
     assert "/var/run/docker.sock" not in rendered
 
 
-def test_ordinary_ci_runner_contract_is_not_replaced_by_e2e_orchestrator() -> None:
+def test_ordinary_ci_runner_contract_is_unchanged() -> None:
     rendered = CI_WORKFLOW.read_text(encoding="utf-8")
     assert "runs-on: [self-hosted, linux, x64, ssh-over-mcp-mac-x86]" in rendered
     assert "ssh-over-mcp-e2e-orchestrator" not in rendered
 
 
-class _PartialStartFailureLifecycle(_FakeLifecycle):
-    def __init__(self) -> None:
-        super().__init__()
-        self._exists_checks = 0
-
-    def instance_exists(self) -> bool:
-        self.events.append("instance_exists")
-        self._exists_checks += 1
-        return self._exists_checks > 1
-
-    def start_guest(self) -> None:
-        self.events.append("start_guest")
-        raise RuntimeError("partial start failure")
-
-
-def test_orchestrator_deletes_guest_created_by_failed_start_attempt() -> None:
-    module = _load_script()
-    ops = _PartialStartFailureLifecycle()
-
-    with pytest.raises(RuntimeError, match="partial start failure"):
-        module._orchestrate("a" * 40, ops)
-
-    assert ops.events == [
-        "verify_host",
-        "instance_exists",
-        ("create_bundle", "a" * 40),
-        "start_guest",
-        "instance_exists",
-        "delete_guest",
-        "verify_guest_absent",
-        "cleanup_host",
-    ]
-
-
-def test_orchestrator_pins_dedicated_host_account_and_environment() -> None:
-    module = _load_script()
-
-    assert module.ORCHESTRATOR_USER == "gha-e2e-orchestrator"
-    assert module.ORCHESTRATOR_HOME == Path("/Users/gha-e2e-orchestrator")
-    assert module.ORCHESTRATOR_PATH == "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-
-    hostile = {
-        "HOME": "/tmp/attacker-home",
-        "PATH": "/tmp/attacker-bin",
-        "PYTHONPATH": "/tmp/inject",
-        "DYLD_INSERT_LIBRARIES": "/tmp/inject.dylib",
-        "GITHUB_TOKEN": "token",
-    }
-    assert module._guest_command_environment(hostile) == {
-        "HOME": "/Users/gha-e2e-orchestrator",
-        "LANG": "C.UTF-8",
-        "LC_ALL": "C.UTF-8",
-        "PATH": "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-    }
-
-
-def test_operator_docs_pin_disposable_guest_trust_model() -> None:
-    ops_readme = (ROOT / "ops" / "live-e2e" / "README.md").read_text(encoding="utf-8")
-    runner_doc = (ROOT / "docs" / "self-hosted-runner.md").read_text(encoding="utf-8")
-    combined = ops_readme + "\n" + runner_doc
-
+def test_operator_docs_pin_no_network_qemu_boundary() -> None:
+    combined = (
+        (ROOT / "ops" / "live-e2e" / "README.md").read_text(encoding="utf-8")
+        + "\n"
+        + (ROOT / "docs" / "self-hosted-runner.md").read_text(encoding="utf-8")
+    )
     for required in (
-        "gha-e2e-orchestrator",
-        "ssh-over-mcp-e2e-orchestrator",
-        "Lima 2.2.0",
+        "QEMU 11.1.2",
+        "`-nic none`",
         "117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477",
-        "no host filesystem mounts",
-        "no sudo",
-        "Git bundle",
+        "Python 3.14",
+        "wheelhouse",
+        "serial",
         "commit_sha",
         "EXPECTED_COMMIT",
-        "limactl delete --force",
     ):
         assert required in combined
-
-    assert "whole disposable guest" in combined.lower()
-    assert "workflow run `headSha`" in combined
+    assert "Lima/VZ" in combined
 
 
-def test_orchestrator_requires_trusted_main_actions_context() -> None:
-    module = _load_script()
-    valid = {
-        "GITHUB_ACTIONS": "true",
-        "GITHUB_EVENT_NAME": "workflow_dispatch",
-        "GITHUB_REPOSITORY": "zhangyuz/ssh-over-mcp",
-        "GITHUB_REF": "refs/heads/main",
-        "GITHUB_SHA": "a" * 40,
-    }
-    assert module._validated_workflow_context(valid) == "a" * 40
-
-    bad_cases = [
-        {**valid, "GITHUB_ACTIONS": "false"},
-        {**valid, "GITHUB_EVENT_NAME": "pull_request_target"},
-        {**valid, "GITHUB_REPOSITORY": "someone/else"},
-        {**valid, "GITHUB_REF": "refs/heads/feature"},
-        {**valid, "GITHUB_SHA": "abc"},
-    ]
-    for case in bad_cases:
-        with pytest.raises(module.OrchestratorError):
-            module._validated_workflow_context(case)
-
-
-def test_bundle_failure_drops_host_read_token(
+def test_provider_state_marker_precedes_target_fetch_and_is_removed_on_cleanup(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module = _load_script()
-    lifecycle = module._SystemLifecycle(
-        {module.HOST_TOKEN_ENV: "test-read-token"}
-    )
+    cache = tmp_path / "cache"
+    state = cache / "active-run.json"
+    monkeypatch.setattr(module, "CACHE_DIR", cache)
+    monkeypatch.setattr(module, "PROVIDER_STATE", state)
+
+    lifecycle = module._SystemLifecycle({module.HOST_TOKEN_ENV: "read-token"})
 
     def fail_run(*args, **kwargs):
         del args, kwargs
         raise RuntimeError("git failed")
 
     monkeypatch.setattr(module, "_run", fail_run)
-    try:
-        with pytest.raises(RuntimeError, match="git failed"):
-            lifecycle.create_bundle("a" * 40)
-        assert module.HOST_TOKEN_ENV not in lifecycle._host_env
-    finally:
-        lifecycle.cleanup_host()
+    with pytest.raises(RuntimeError, match="git failed"):
+        lifecycle.create_bundle("a" * 40)
+
+    assert state.is_file()
+    lifecycle.cleanup_host()
+    assert not state.exists()

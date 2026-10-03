@@ -859,10 +859,10 @@ The implementation workflow performed no live Cloudflare account mutation; live 
 
 ## Phase 7 — hardening
 
-Status: **Phase 7A design approved; implementation not started.** The first slice is the real local E2E foundation defined in `docs/superpowers/specs/2026-10-02-phase-7a-local-e2e-foundation-design.md`. It establishes the product-level safety net and persists the normative development methodology before later host/credential hardening.
+Status: **Phase 7A1 bootstrap merged; no-network provider security hotfix in progress.** PR #104 landed the methodology, disposable-guest trust model, capability launcher, guest gate, and trusted-main orchestration bootstrap, but it made no live-E2E claim. Review then found that Lima/VZ still exposes a reachable user-mode network to guest root; ADR 0008 therefore requires QEMU/HVF with `-nic none` before any target-commit Level-3 E2E is accepted.
 
 Planned sequence:
-- 7A: real local E2E foundation and disposable-guest trust model: a dedicated non-admin Mac x86 orchestrator starts a fresh pinned Ubuntu 26.04 Lima VM for every run; capability-bearing target code executes only inside that guest, while ADR 0007 bridges real sshd ForceCommand to the non-root host-agent `CAP_SETUID`/`CAP_SETGID` state;
+- 7A: real local E2E foundation and disposable-guest trust model: a dedicated non-admin Mac x86 orchestrator starts a fresh pinned Ubuntu 26.04 QEMU/HVF VM with `-nic none` for every run; capability-bearing target code executes only inside that no-network guest, while ADR 0007 bridges real sshd ForceCommand to the non-root host-agent `CAP_SETUID`/`CAP_SETGID` state and ADR 0008 prevents guest-root network reachability to the persistent host/LAN;
 - 7B: systemd/AppArmor/SELinux and egress hardening;
 - 7C: SSH CA and secret-manager integration;
 - 7D: fuzz/property testing and Phase 7 final review.

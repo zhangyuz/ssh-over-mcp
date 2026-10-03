@@ -78,16 +78,16 @@ Full Level-3 E2E uses a dedicated native Intel-macOS account named `gha-e2e-orch
 
 The account is non-admin, non-root, has **no sudo**, and has an isolated home at `/Users/gha-e2e-orchestrator`. It is separate from the ordinary Docker-based validation runner.
 
-The trusted host provider is Lima 2.2.0 using Virtualization.framework (`vz`) on x86_64. The guest image is the dated Ubuntu 26.04 server cloud image:
+The trusted host provider is QEMU 11.1.2 using Hypervisor.framework (`hvf`) on x86_64. ADR 0008 rejects Lima/VZ for Level-3 E2E because its user-mode network remains reachable from guest root even when mounts and product port forwards are disabled. The guest image remains the dated Ubuntu 26.04 server cloud image:
 
 ```text
 https://cloud-images.ubuntu.com/releases/resolute/release-20260720/ubuntu-26.04-server-cloudimg-amd64.img
 sha256:117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477
 ```
 
-The guest is created with no host filesystem mounts, no product port forwards, containerd disabled, `propagateProxyEnv: false`, and the Lima host resolver disabled. The target commit never becomes a host worktree. The trusted-main orchestrator fetches the exact target into a private temporary bare Git repository and transfers only a Git bundle into the disposable guest.
+The QEMU guest is created with `-nic none`, no host filesystem share/mount, no monitor, no Docker socket, and no target-controlled host socket/device. The target commit never becomes a host worktree. The trusted-main orchestrator fetches the exact target into a private temporary bare Git repository, prepares a hash-verified Python 3.14 linux/amd64 wheelhouse from trusted-main `requirements/runtime.lock`, and packages the bundle/wheelhouse/expected-commit/trusted bootstrap into read-only payload/seed media.
 
-The host-only read token is used only by Git/askpass while creating the bundle. It is not copied into the guest and is absent from guest command environments.
+The host-only read token is used only by Git/askpass while creating the bundle. It is not copied into seed/payload media and is absent from guest command environments. The guest installs dependencies offline and returns only a commit-bound result over serial output.
 
 ## Exact target identity
 
@@ -106,12 +106,8 @@ A mismatch fails closed before the guest gate runs.
 
 ## Guest lifecycle
 
-The fixed Lima instance name is `ssh-over-mcp-e2e`. If it already exists before a run, orchestration stops for operator inspection and does not silently reuse or delete it.
+Before each run the orchestrator rejects stale QEMU/provider state rather than silently reusing it. Every run gets a fresh disposable qcow2 overlay plus fresh seed/payload media and serial log.
 
-After every attempted run, the orchestrator executes the equivalent of:
+After every attempted run the orchestrator terminates only the QEMU process it created (if still alive), waits for exit, and removes the overlay, seed ISO, payload ISO, serial log, temporary bare repository/bundle, and wheelhouse. Failure to remove run-owned state fails the workflow.
 
-```text
-limactl delete --force ssh-over-mcp-e2e
-```
-
-and verifies the instance is absent. In-guest process/socket/cgroup/key/data cleanup remains part of the test, but destruction of the **whole disposable guest** is the final outer containment boundary.
+In-guest process/socket/cgroup/key/data cleanup remains part of the test. QEMU process termination plus deletion of the **whole disposable guest state** is the final outer containment boundary.
