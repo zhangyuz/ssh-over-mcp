@@ -4,9 +4,9 @@
 
 **Goal:** Establish a production-representative local Linux E2E safety net from authenticated MCP ingress through real SSH/ForceCommand/containment to workload/filesystem/audit behavior without weakening ordinary CI.
 
-**Architecture:** A dedicated non-admin native macOS x86 orchestrator executes only trusted-main orchestration code. It fetches the exact target commit into a temporary bare Git repository, creates a bundle, starts a fresh pinned Ubuntu 26.04 Lima `vz` guest with no host mounts, copies the bundle into that guest, and runs all root/capability-bearing target code only inside the VM. Real guest sshd ForceCommand reaches one fixed root-owned capability launcher which drops to the non-root host-agent identity with only `CAP_SETUID`/`CAP_SETGID` before importing application code. In-guest cleanup is verified and the entire guest is destroyed after every run.
+**Architecture:** A dedicated non-admin native macOS x86 orchestrator executes only trusted-main orchestration code. It fetches the exact target into a temporary bare Git repository, prepares a hash-verified Python 3.14 linux/amd64 wheelhouse from trusted-main `requirements/runtime.lock`, builds read-only cloud-init/payload media, and boots a fresh pinned Ubuntu 26.04 QEMU/HVF guest with `-nic none`. Capability-bearing target code runs only inside the VM. Guest bootstrap clones the exact bundle, installs runtime dependencies offline, and runs real sshd → ForceCommand → fixed launcher → host-agent → containment → workload. Results return only through a commit-bound serial record. In-guest cleanup is verified and the QEMU process/overlay/media/log/temp host state are destroyed after every run.
 
-**Tech Stack:** macOS x86_64, Lima 2.2.0 / Virtualization.framework (`vz`), pinned Ubuntu 26.04 x86_64 cloud image, Python 3.13/3.14, OpenSSH, sudo, Linux capabilities via `prctl/capset`, cgroup v2, AsyncSSH, MCP Python SDK v2 Streamable HTTP, Security Ledger Unix sockets/SQLite, pytest, GitHub Actions self-hosted runners.
+**Tech Stack:** macOS x86_64, QEMU 11.1.2 with Hypervisor.framework (`hvf`), pinned Ubuntu 26.04 x86_64 cloud image, cloud-init seed/payload ISO media, Python 3.14 runtime wheelhouse plus ordinary Python 3.13/3.14 CI, OpenSSH, sudo, Linux capabilities via `prctl/capset`, cgroup v2, AsyncSSH, MCP Python SDK v2 Streamable HTTP, Security Ledger Unix sockets/SQLite, pytest, GitHub Actions self-hosted runners.
 
 **Spec:** `docs/superpowers/specs/2026-10-02-phase-7a-local-e2e-foundation-design.md`
 
@@ -19,10 +19,10 @@
 - Full E2E uses a separate native macOS x86 orchestrator account/label: `gha-e2e-orchestrator` on `[self-hosted, macOS, X64, ssh-over-mcp-e2e-orchestrator]`.
 - The orchestrator account is non-admin/non-root, has no passwordless sudo, and executes only the trusted-main workflow/orchestration script.
 - The target commit MUST NOT be checked out or executed as a host worktree. The orchestrator fetches it into a temporary bare Git repository and creates a bundle.
-- Fixed Lima provider: version `2.2.0`, driver `vz`, architecture `x86_64`, fixed instance name `ssh-over-mcp-e2e`, serialized workflow concurrency.
+- Fixed provider: QEMU `11.1.2`, x86_64 guest, HVF acceleration, serialized workflow concurrency, and a host-side fixed provider-state namespace owned by the orchestrator account.
 - Fixed guest image: Ubuntu 26.04 x86_64 server cloud image dated `2026-07-20`, digest `sha256:117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477`.
-- Guest starts with no host filesystem mounts, no Docker socket, and no product port-forward dependency. GitHub tokens and production/host secrets MUST NOT enter the guest.
-- If the fixed Lima instance exists before a run, fail closed for operator inspection; never silently reuse/delete unknown pre-existing guest state.
+- Guest starts with `-nic none`, no host filesystem mount/share, no Docker socket, no monitor, and no host socket/device channel except fixed host-owned serial output. GitHub tokens and production/host secrets MUST NOT enter the guest.
+- If stale QEMU/provider process/artifact state exists before a run, fail closed for operator inspection; never silently reuse/delete unknown state.
 - The trusted orchestrator creates a root-owned guest expected-commit file from the workflow `commit_sha`; guest checkout HEAD must equal that exact value.
 - Fixed in-guest probe identity: `2204:3204`; manager `2201:3201`; host agent/SSH account `2202:3202`; workload `2203:3203`; manager-client supplementary GID `3299`.
 - Fixed SSH account name: `ssh-over-mcp-e2e-host`; fixed probe account name: `ssh-over-mcp-e2e-probe`.
@@ -33,14 +33,14 @@
 - No `ssh_over_mcp` application module may be imported/executed while the launcher itself has UID 0 or capabilities broader than the final host-agent set.
 - Final host-agent application state is non-root `2202:3202`, supplementary groups exactly `{3299}`, effective/permitted capabilities exactly `CAP_SETGID|CAP_SETUID`, inheritable/ambient capabilities zero.
 - Workload state remains UID/GID `2203:3203`, no supplementary groups, zero effective/permitted/inheritable/ambient capabilities, `NoNewPrivs=1`.
-- Capability-bearing target code may obtain root-equivalent authority only inside the disposable guest. Whole-guest destruction is mandatory even when in-guest cleanup passes.
+- Capability-bearing target code may obtain root-equivalent authority only inside the no-network disposable guest. QEMU process exit plus overlay/media/log/temp-state destruction is mandatory even when in-guest cleanup passes.
 - No live Cloudflare account mutation is part of Phase 7A.
 - Every E2E-sensitive PR after trusted workflow bootstrap requires exact-target full E2E before merge; every merge/phase-closure candidate requires merge-main E2E too.
 
 ## PR / Slice Sequence
 
 1. **7A1-bootstrap PR — Tasks 1–2:** land launcher source, disposable-guest orchestrator/config, guest gate source, trusted-main manual workflow, and static/security tests. This PR does not claim target-commit live E2E success because its workflow definition is not trusted-main until merge.
-2. Operator provisions only the dedicated native macOS `gha-e2e-orchestrator` account/runner; no root helper/sudo policy is installed on the persistent host.
+2. Operator provisions only the dedicated native macOS `gha-e2e-orchestrator` account/runner, QEMU 11.1.2, and the pinned Ubuntu base image; no root helper/sudo policy is installed on the persistent host.
 3. **7A1-live PR — Task 3:** prove real sshd → launcher → host-agent → manager → cgroup → workload inside a fresh disposable guest for the exact PR head using the already-trusted workflow from main.
 4. **7A2 PR — Tasks 4–5:** happy-path MCP/Ledger/SSH/filesystem/audit/multi-profile E2E in fresh guests.
 5. **7A3 PR — Tasks 6–7:** adversarial/fail-closed E2E in fresh guests.
@@ -52,7 +52,7 @@ The bootstrap ordering is intentional: an unmerged PR cannot modify the host-sid
 
 1. **Python/import code executing while launcher is still root.** Task 1 tests the launcher under AST/order instrumentation and requires `-I -S`, environment sanitation, privilege verification, and delayed application import.
 2. **ForceCommand/sudo environment loss or spoofing.** Tasks 1–3 test exact `SSH_ORIGINAL_COMMAND=mcp-v1`, no PTY, expected `SUDO_USER/UID/GID`, exact sudo command, and successful real sshd invocation.
-3. **Capability-bearing target code escaping a persistent fixture or stale guest being reused.** Tasks 2–3 prove target worktrees never execute on the host, host mounts/tokens are absent from the guest, pre-existing fixed-name guests fail closed, deliberate probe failure still verifies in-guest cleanup, and the entire VM is deleted afterward.
+3. **Capability-bearing target code escaping the VM.** Tasks 2–3 prove target worktrees never execute on the host, QEMU receives `-nic none`, no host mount/share/token/socket/device enters the guest, stale provider state fails closed, deliberate probe failure still verifies in-guest cleanup, and QEMU/overlay/media/log/temp artifacts are destroyed afterward.
 4. **A test-control path turning into a generic root RPC.** Task 7 allows only one fixed control message, `STOP_MANAGER\n`, over an inherited socketpair; any other bytes fail the run and no paths/commands/IDs are accepted.
 5. **Full E2E passing while a lower security boundary is bypassed.** Tasks 4–7 assert real origin auth, Ledger authorization/audit, pinned host key, sshd logs, host-local policy, launcher state, manager peer auth, cgroup membership, workload identity, and side-effect counters together.
 
@@ -62,9 +62,9 @@ The bootstrap ordering is intentional: an unmerged PR cannot modify the host-sid
 
 - Create `ops/live-e2e/ssh-over-mcp-host-agent-launcher.py` — standalone stdlib-only root-to-host-agent capability handoff.
 - Create `ops/live-e2e/ssh-over-mcp-live-e2e-gate` — disposable-guest root fixture lifecycle owner.
-- Create `ops/live-e2e/lima-ubuntu-26.04.yaml` — pinned no-host-mount guest definition.
+- Create `ops/live-e2e/qemu-ubuntu-26.04.json` — pinned no-network guest/image/provider constants consumed by trusted-main orchestration.
 - Create `ops/live-e2e/README.md` — orchestrator/guest provisioning contract; no persistent-host root installer.
-- Create `scripts/run-live-local-e2e-orchestrator.py` — trusted-main Mac host bare-Git/bundle/Lima lifecycle controller.
+- Create `scripts/run-live-local-e2e-orchestrator.py` — trusted-main Mac host bare-Git/bundle/wheelhouse/ISO/QEMU lifecycle controller.
 - Create `.github/workflows/live-local-e2e.yml` — trusted-main, manual exact-target E2E workflow.
 - Create `tests/ops/test_host_agent_capability_launcher_contract.py` — launcher static/order/security contract.
 - Create `tests/ops/test_live_e2e_orchestrator_contract.py` — persistent-host isolation/provider/workflow contract.
@@ -155,17 +155,17 @@ git commit -m "Ops: add fixed host-agent capability launcher"
 
 ---
 
-### Task 2: Add the trusted disposable-guest orchestrator and guest gate bootstrap
+### Task 2: Add the trusted no-network QEMU guest orchestrator and guest gate bootstrap
 
-**Slice:** 7A1-bootstrap
+**Slice:** 7A1-bootstrap security hotfix
 
 **Files:**
-- Create: `ops/live-e2e/lima-ubuntu-26.04.yaml`
-- Create: `ops/live-e2e/ssh-over-mcp-live-e2e-gate`
-- Create: `scripts/run-live-local-e2e-orchestrator.py`
-- Create: `tests/ops/test_live_e2e_orchestrator_contract.py`
-- Create: `tests/ops/test_live_e2e_gate_contract.py`
-- Create: `.github/workflows/live-local-e2e.yml`
+- Replace: `ops/live-e2e/lima-ubuntu-26.04.yaml` with `ops/live-e2e/qemu-ubuntu-26.04.json`
+- Modify: `ops/live-e2e/ssh-over-mcp-live-e2e-gate`
+- Modify: `scripts/run-live-local-e2e-orchestrator.py`
+- Modify: `tests/ops/test_live_e2e_orchestrator_contract.py`
+- Modify: `tests/ops/test_live_e2e_gate_contract.py` only if provider-neutral guest assumptions need correction
+- Modify: `.github/workflows/live-local-e2e.yml`
 - Modify: `ops/live-e2e/README.md`
 - Modify: `docs/self-hosted-runner.md`
 
@@ -173,106 +173,103 @@ git commit -m "Ops: add fixed host-agent capability launcher"
 - Host orchestrator account: `gha-e2e-orchestrator`, native macOS x86, non-admin/non-root, no sudo.
 - Workflow label: `[self-hosted, macOS, X64, ssh-over-mcp-e2e-orchestrator]`.
 - Orchestrator accepts exactly one target 40-hex commit and no target-controlled path/command input.
-- Fixed Lima instance: `ssh-over-mcp-e2e`; provider Lima `2.2.0`, `vz`, x86_64.
-- Guest image is dated Ubuntu 26.04 server image with digest `sha256:117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477`.
-- Guest has no host mounts; target source crosses the boundary only as a Git bundle.
+- Fixed QEMU provider: `qemu-system-x86_64`/`qemu-img` version `11.1.2`, HVF acceleration, x86_64.
+- Fixed Ubuntu 26.04 server cloud image dated `2026-07-20`, digest `sha256:117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477`.
+- Provider args include `-nic none`, `-display none`, `-monitor none`, fixed serial file output, read-only seed/payload media, and one disposable qcow2 overlay. No 9p/virtiofs/share/socket passthrough is allowed.
 - Host target fetch occurs in a temporary bare Git repository; no target worktree is checked out on the host.
-- GitHub token is host-only and is excluded from guest command environments.
+- Host builds the guest Python 3.14 linux/amd64 wheelhouse using trusted-main `requirements/runtime.lock`, `pip download --require-hashes --only-binary=:all:` and fixed manylinux/cp314 selectors.
+- Guest receives only: exact target bundle, expected commit, trusted bootstrap, trusted-main runtime lock, hash-verified wheelhouse, and test-scoped metadata through read-only media.
+- GitHub token is host-only and excluded from media, serial, guest environment, and target code.
 - Guest workspace: `/opt/ssh-over-mcp-e2e/workspace`; expected-commit config: `/etc/ssh-over-mcp/live-e2e-gate.conf`.
 - Guest gate executes as root inside the disposable VM only and owns guest identities/sshd/sudo/cgroup/test lifecycle.
-- Host orchestrator always destroys the VM it created and verifies absence even when the guest gate fails.
+- Host accepts success only after QEMU exits and serial contains exactly one valid `SSH_OVER_MCP_E2E_RESULT=<commit>:PASS` record for the requested target.
+- Host always removes overlay/seed/payload/serial/bare/bundle/wheelhouse temp state in `finally`; stale provider state before run is a hard failure.
 
-- [ ] **Step 1: Write RED host-orchestrator/provider trust-contract tests**
+- [ ] **Step 1: Write RED no-network provider contract tests**
 
 Require:
-- Lima config pins the dated Ubuntu 26.04 x86_64 image + digest and `vmType: vz` / `arch: x86_64`;
-- no Lima mounts/host-path exposure and no product port-forward entry;
-- orchestrator validates exact 40-hex target SHA;
-- orchestrator checks `limactl version 2.2.0`, `kern.hv_support=1`, and fixed instance absence before creation;
-- target repository is initialized/fetched as bare and never checked out on the host;
-- bundle is created from a local ref whose object ID is re-read and equals target SHA;
-- host-side commands use argument arrays, never `shell=True` or interpolated shell command strings;
-- target bundle is the only target-controlled payload copied into the guest;
-- host workflow token/credential variables are explicitly excluded from guest command environments;
-- `limactl start` uses trusted-main config with fixed instance name and no mounts;
-- guest checkout HEAD is queried by trusted orchestrator and compared to target SHA before guest gate invocation;
-- cleanup is in `finally`: delete only the instance created by this run, verify absent, remove bare repo/bundle;
-- a pre-existing fixed-name instance causes hard failure and is not auto-deleted;
+- old Lima config/path is absent from provider contract;
+- provider constants pin QEMU 11.1.2, dated Ubuntu image URL/digest, fixed resource bounds, and Python 3.14 wheel ABI;
+- QEMU command includes `-accel hvf` and `-nic none`;
+- QEMU command contains no `-net`, `-netdev`, user/slirp/tap/socket network backend, 9p, virtiofs, filesystem share, monitor socket, VNC, USB redirection, or target-controlled argument;
+- guest disks/media are explicit argument-array entries: pinned base-backed disposable overlay plus read-only seed/payload media;
+- serial output is a host-owned temporary regular file and is the only result channel;
+- target repository is initialized/fetched as bare and never checked out/executed on host;
+- runtime wheel download uses trusted-main lock with `--require-hashes`, `--only-binary=:all:`, cp314/manylinux x86_64 selectors, and no target-controlled requirement path/index URL;
+- payload manifest contains only allowlisted files and their SHA-256 values;
+- GitHub token/host secrets are absent from QEMU environment, seed, payload, and serial contract;
+- cloud-init bootstrap performs no apt/network operation and installs wheels with `--no-index` from payload;
+- exact guest checkout HEAD is verified before guest gate invocation;
+- serial PASS record must match requested commit exactly;
+- cleanup is in `finally` and removes only artifacts created by this run;
+- stale provider state is a hard failure;
 - ordinary `.github/workflows/ci.yml` remains unchanged.
 
-Run focused tests and require RED.
+Run focused tests and require RED against the merged Lima provider.
 
-- [ ] **Step 2: Implement the pinned Lima guest definition**
+- [ ] **Step 2: Implement pinned QEMU provider metadata**
 
-Pin:
-- `https://cloud-images.ubuntu.com/releases/resolute/release-20260720/ubuntu-26.04-server-cloudimg-amd64.img`;
-- exact SHA-256 above;
-- `arch: x86_64`;
-- `vmType: vz`;
-- fixed CPU/memory/disk;
-- `mounts: []`;
-- containerd disabled;
-- no product port-forward declarations.
+Create `ops/live-e2e/qemu-ubuntu-26.04.json` with exact:
+- QEMU version `11.1.2`;
+- image URL/digest;
+- x86_64/HVF provider;
+- CPU/memory/disk bounds;
+- Python `3.14` / `cp314` wheel target;
+- fixed serial result prefix;
+- no-network/no-share booleans asserted by tests.
 
-The orchestrator additionally uses Lima plain/no-mount mode. Lima's internal control SSH is orchestration infrastructure, not a product test port-forward.
+Remove the Lima provider file after all trusted-main references migrate.
 
-- [ ] **Step 3: Implement the trusted-main Mac orchestrator**
+- [ ] **Step 3: Implement trusted-main host preparation**
 
-The script:
-1. validates its one target SHA;
-2. verifies provider/version/HV support and fixed guest absence;
-3. creates one private temporary host directory under the orchestrator account;
-4. initializes a bare Git repository, fetches exact target using host-only read credentials, creates/re-verifies a local target ref, and creates a Git bundle;
-5. starts the fresh guest from trusted-main Lima config;
-6. performs trusted guest bootstrap for git, openssh-server, sudo, Python/venv, and test prerequisites;
-7. copies the bundle into the guest with `limactl copy`;
-8. clones/checks out inside `/opt/ssh-over-mcp-e2e/workspace` and verifies guest HEAD equals target SHA;
-9. writes exact target SHA to root-owned guest config;
-10. invokes `sudo /usr/bin/python3 /opt/ssh-over-mcp-e2e/workspace/ops/live-e2e/ssh-over-mcp-live-e2e-gate` inside the VM;
-11. captures bounded output/evidence;
-12. in `finally`, deletes the created VM, verifies absence, and removes host temp state.
+The orchestrator:
+1. validates workflow context + one exact target SHA;
+2. verifies Intel macOS, HV support, QEMU/qemu-img exact approved version, and absence of stale provider state;
+3. creates one private owner-only temporary directory;
+4. initializes a bare Git repository, fetches exact target using host-only read credentials, re-reads object ID, and creates a Git bundle;
+5. downloads/validates the pinned Ubuntu base image if the operator cache is absent, or verifies the cached image digest before every use;
+6. downloads Python 3.14 linux/amd64 wheels from trusted-main runtime lock using hash enforcement and copies only resulting wheels + lock into payload staging;
+7. creates a qcow2 overlay backed by the verified base image;
+8. builds cloud-init seed ISO and read-only payload ISO using trusted bootstrap content only;
+9. constructs the fixed QEMU argument array and starts QEMU with `-nic none`/HVF/no monitor/no display;
+10. waits boundedly for QEMU exit; does not execute any target checkout on the host;
+11. parses one commit-bound serial result;
+12. in `finally`, terminates only the QEMU PID started by this run if still alive and removes all run-owned temp artifacts.
 
-No GitHub token is copied into the guest. Do not mount host repository/home into the guest.
+- [ ] **Step 4: Implement trusted offline guest bootstrap**
 
-- [ ] **Step 4: Write RED/implement the in-guest root gate static contract**
+Cloud-init/seed logic must:
+- use no networking and issue no apt/curl/git remote fetch;
+- mount/read the payload media;
+- create `/opt/ssh-over-mcp-e2e/venv` with system Python 3.14;
+- install trusted runtime lock from local wheelhouse only (`--no-index --find-links ... --require-hashes`);
+- clone target bundle locally, detach checkout exact expected SHA, and verify it;
+- write root-owned `EXPECTED_COMMIT` config;
+- invoke target guest gate;
+- always run in-guest cleanup path;
+- emit exactly one serial PASS/FAIL result bound to expected SHA and power off.
 
-The gate is stdlib-only at root and accepts no CLI arguments. It reads exactly one `EXPECTED_COMMIT=<40hex>` from guest root-owned config and verifies canonical guest workspace HEAD/clean tree before fixture setup.
+No host secret appears in seed/payload. Target code cannot alter host orchestration or QEMU args.
 
-Static tests require fixed guest paths/UIDs/GIDs/port, strict stale-state rejection, `finally` cleanup, no Docker calls, and no caller-selected path/identity/command/capability input.
+- [ ] **Step 5: Update trusted-main manual workflow**
 
-It may create guest-local users/groups/sudoers/launcher because ADR 0006 makes the whole VM disposable; this authority must never move to the persistent Mac orchestrator.
+Workflow remains `workflow_dispatch` only, `contents: read`, trusted-main checkout, dedicated non-admin Mac runner, serialized concurrency. Replace Lima checks/postconditions with:
+- QEMU version and HV availability preflight;
+- no sudo/admin membership;
+- trusted orchestrator invocation only;
+- post-step verification that no run-owned QEMU process/temp provider state remains.
 
-- [ ] **Step 5: Implement the manual trusted-main workflow**
+The workflow run `headSha` still proves trusted-main orchestrator revision, not target identity.
 
-Workflow requirements:
-- `workflow_dispatch` only with one required full `commit_sha` input;
-- `permissions: contents: read`;
-- `[self-hosted, macOS, X64, ssh-over-mcp-e2e-orchestrator]`;
-- concurrency serializes the fixed Lima instance and does not cancel a running E2E;
-- checkout trusted-main workflow/orchestrator only with pinned `actions/checkout`, no persisted credentials;
-- validate runner is macOS x86_64, non-root/non-admin, Lima 2.2.0, HV support enabled;
-- run only trusted-main `scripts/run-live-local-e2e-orchestrator.py <commit_sha>` for the target;
-- post-step verify fixed Lima instance is absent.
+- [ ] **Step 6: Update operator documentation / ADR consistency**
 
-The workflow run `headSha` proves trusted-main orchestrator revision, not target identity.
+Document QEMU 11.1.2 provisioning, pinned base-image cache/digest, no-NIC boundary, offline wheelhouse, read-only media, serial result semantics, and cleanup. Explicitly record that Lima/VZ is rejected for Level-3 E2E because its usernet remains reachable from guest root.
 
-- [ ] **Step 6: Document orchestrator provisioning**
+- [ ] **Step 7: Run focused + full ordinary verification and merge hotfix before live provisioning**
 
-Document dedicated non-admin Mac account/home permissions, native runner registration, no sudo requirement, Lima 2.2.0/HV prerequisite, guest image digest, host-only read token behavior, no host mounts, and fixed-name stale-instance handling.
+Run provider/launcher/gate/workflow contract tests, full ordinary pytest, Ruff, compileall, and diff check. Fresh security review must have no Critical/Important finding. Merge only after exact PR-head ordinary CI and exact merge-main ordinary CI.
 
-- [ ] **Step 7: Run static/full ordinary verification and commit bootstrap PR**
-
-Run launcher/orchestrator/gate/workflow contract tests, full ordinary pytest, Ruff, compileall, diff check. No live target-commit E2E claim yet.
-
-Commit:
-```bash
-git add ops/live-e2e scripts/run-live-local-e2e-orchestrator.py         .github/workflows/live-local-e2e.yml tests/ops         docs/self-hosted-runner.md
-git commit -m "Ops: bootstrap disposable full-E2E guest"
-```
-
-Fresh review must have no Critical/Important finding. Merge only after exact PR-head ordinary CI and exact merge-main ordinary CI.
-
-**External provisioning gate:** after merge, provision/register only the dedicated non-admin native Mac orchestrator runner. Do not give it sudo and do not reuse the ordinary Docker runner as a VM host-control surface.
+**External provisioning gate:** only after this hotfix is merged may the operator install QEMU 11.1.2/register the dedicated native Mac orchestrator and provision the pinned base image. Do not run target-commit live E2E on the merged Lima provider.
 
 ---
 
@@ -357,7 +354,7 @@ Require:
 - the workflow run itself is anchored to trusted `main`; its GitHub run `headSha` is **not** used as the tested-commit identity;
 - workflow input, host bare-fetch object ID, bundle target ref, guest `git rev-parse HEAD`, and guest root-owned `EXPECTED_COMMIT` all equal the requested PR head SHA;
 - fixture test GREEN;
-- in-guest cleanup assertions GREEN and trusted host orchestrator confirms the Lima instance is deleted.
+- in-guest cleanup assertions GREEN and trusted host orchestrator confirms the QEMU guest is deleted.
 
 - [ ] **Step 7: Commit / PR / merge-main gate**
 
@@ -669,7 +666,7 @@ Include carried Phase 5/6 authority/secret/deployment regression suites in the f
 
 - [ ] **Step 3: Update operator/live documentation from actual implementation**
 
-Document exact orchestrator label/account, Lima/provider version, pinned Ubuntu image digest, guest/kernel evidence, fixed identities/port, launcher digest, test counts, in-guest cleanup result, whole-VM destruction result, and operator provisioning procedure. Never document secrets.
+Document exact orchestrator label/account, QEMU/provider version, pinned Ubuntu image digest, guest/kernel evidence, fixed identities/port, launcher digest, test counts, in-guest cleanup result, whole-VM destruction result, and operator provisioning procedure. Never document secrets.
 
 - [ ] **Step 4: Run full regression matrix before changing status**
 
@@ -687,7 +684,7 @@ Authorized Mac x86 Docker host:
 - Phase 6C connector.
 
 Disposable Ubuntu 26.04 x86 E2E:
-- full local E2E exact branch head inside a fresh Lima guest;
+- full local E2E exact branch head inside a fresh no-network QEMU guest;
 - no host mounts/token/production secrets enter the guest;
 - in-guest cleanup and whole-guest destruction both pass;
 - existing delegated-cgroup proof is rerun only if its contract is touched.
@@ -773,7 +770,7 @@ Audit before deleting. Remove only merged/superseded Phase 7A worktrees/branches
 - root `main == origin/main`;
 - clean worktree;
 - no obsolete Phase 7A local/remote branches;
-- no persistent-host Lima instance named `ssh-over-mcp-e2e`;
+- no persistent-host QEMU guest named `ssh-over-mcp-e2e`;
 - no host-side temporary bare repository/bundle;
 - no obsolete E2E guest state;
 - the dedicated non-admin orchestrator account/runner remains only because it is intentional trusted infrastructure.

@@ -149,14 +149,15 @@ Level-3 E2E therefore uses a fresh disposable Linux virtual machine for every ru
 - the orchestrator executes only trusted-main workflow/orchestration code;
 - the target commit is fetched into a bare Git repository and transferred as a bundle; its worktree is never checked out or executed on the persistent host;
 - the guest exposes no host filesystem mount to the target code;
+- the guest has no virtual network device or other target-controlled path to the persistent host/LAN;
 - GitHub tokens, production credentials, and host secrets are not passed into the guest;
 - the target commit may exercise root/capability paths only inside the guest;
 - in-guest cleanup is still tested;
-- the entire guest is destroyed after every run and its absence is verified.
+- the entire guest plus overlay/media/result artifacts are destroyed after every run and their absence is verified.
 
-Unknown pre-existing guest state MUST fail closed rather than being silently reused or deleted.
+Unknown pre-existing provider state MUST fail closed rather than being silently reused or deleted.
 
-The reference Phase 7A provider is a dedicated native macOS x86 orchestrator using a pinned Lima/Ubuntu 26.04 guest. Equivalent future providers must preserve the same or stronger isolation contract.
+The reference Phase 7A provider is a dedicated native macOS x86 orchestrator using QEMU/HVF, a pinned Ubuntu 26.04 image, `-nic none`, no host sharing, read-only seed/payload media, and serial-only result collection. Equivalent future providers must preserve the same or stronger isolation contract.
 
 ## 8. Review discipline
 
