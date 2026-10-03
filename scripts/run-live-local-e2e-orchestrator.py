@@ -51,6 +51,7 @@ TRUSTED_HARNESS_FILES = (
 ROOT = Path(__file__).resolve().parents[1]
 PROVIDER_CONFIG = ROOT / "ops" / "live-e2e" / "qemu-ubuntu-26.04.json"
 TRUSTED_RUNTIME_LOCK = ROOT / "requirements" / "runtime.lock"
+BOOTSTRAP_LOCK = ROOT / "requirements" / "e2e-bootstrap.lock"
 CACHE_DIR = ORCHESTRATOR_HOME / "Library" / "Caches" / "ssh-over-mcp-e2e"
 BASE_IMAGE = CACHE_DIR / "ubuntu-26.04-server-cloudimg-amd64.img"
 PROVIDER_STATE = CACHE_DIR / "active-run.json"
@@ -174,6 +175,22 @@ def _wheel_download_command(lock: Path, wheelhouse: Path) -> list[str]:
     ]
 
 
+def _bootstrap_wheel_download_command(lock: Path, wheelhouse: Path) -> list[str]:
+    return [
+        sys.executable,
+        "-m",
+        "pip",
+        "download",
+        "--require-hashes",
+        "--only-binary=:all:",
+        "--no-deps",
+        "-r",
+        str(lock),
+        "-d",
+        str(wheelhouse),
+    ]
+
+
 def _overlay_command(base: Path, overlay: Path) -> list[str]:
     return [
         str(QEMU_IMG),
@@ -253,6 +270,7 @@ ARCHIVE_SHA='{payload_archive_digest}'
 EXTRACTED="/opt/ssh-over-mcp-e2e/payload"
 WORKSPACE='/opt/ssh-over-mcp-e2e/workspace'
 VENV='/opt/ssh-over-mcp-e2e/venv'
+PIP_WHEEL="$EXTRACTED/bootstrap-wheels/pip-26.2.1-py3-none-any.whl"
 RESULT='/dev/ttyS0'
 
 emit_result() {{
@@ -327,8 +345,20 @@ for relative, expected in sorted(manifest.items()):
         raise SystemExit(f"payload digest mismatch: {{relative}}")
 PYVERIFY
 
-python3 -m venv "$VENV"
-"$VENV/bin/pip" install --no-index --find-links="$EXTRACTED/wheels" --require-hashes -r "$EXTRACTED/runtime.lock"
+test -f "$PIP_WHEEL"
+python3 -m venv --without-pip "$VENV"
+PYTHONPATH="$PIP_WHEEL" "$VENV/bin/python" -m pip install \
+  --disable-pip-version-check \
+  --no-index \
+  --find-links="$EXTRACTED/bootstrap-wheels" \
+  --require-hashes \
+  -r "$EXTRACTED/e2e-bootstrap.lock"
+"$VENV/bin/python" -m pip install \
+  --disable-pip-version-check \
+  --no-index \
+  --find-links="$EXTRACTED/wheels" \
+  --require-hashes \
+  -r "$EXTRACTED/runtime.lock"
 
 mkdir -p /opt/ssh-over-mcp-e2e
 git clone "$EXTRACTED/target.bundle" "$WORKSPACE"
@@ -566,6 +596,8 @@ class _SystemLifecycle:
             raise OrchestratorError("trusted QEMU provider metadata mismatch")
         if not TRUSTED_RUNTIME_LOCK.is_file():
             raise OrchestratorError("trusted runtime lock is unavailable")
+        if not BOOTSTRAP_LOCK.is_file():
+            raise OrchestratorError("trusted bootstrap lock is unavailable")
         if not BASE_IMAGE.is_file():
             raise OrchestratorError("pinned Ubuntu base image is unavailable")
         if f"sha256:{_sha256(BASE_IMAGE)}" != IMAGE_DIGEST:
@@ -659,6 +691,19 @@ class _SystemLifecycle:
         if not wheels or any(path.suffix != ".whl" for path in wheelhouse.iterdir()):
             raise OrchestratorError("runtime wheelhouse is incomplete")
 
+        bootstrap_wheelhouse = root / "bootstrap-wheels"
+        bootstrap_wheelhouse.mkdir(mode=0o700)
+        _run(
+            _bootstrap_wheel_download_command(BOOTSTRAP_LOCK, bootstrap_wheelhouse),
+            env=self._provider_env,
+            timeout=120,
+        )
+        bootstrap_wheels = sorted(bootstrap_wheelhouse.glob("*.whl"))
+        if [path.name for path in bootstrap_wheels] != [
+            "pip-26.2.1-py3-none-any.whl"
+        ]:
+            raise OrchestratorError("bootstrap wheelhouse is not exact")
+
         payload_content = root / "payload-content"
         payload_iso = root / "payload-iso"
         seed_dir = root / "seed"
@@ -668,7 +713,9 @@ class _SystemLifecycle:
 
         shutil.copy2(bundle, payload_content / "target.bundle")
         shutil.copy2(TRUSTED_RUNTIME_LOCK, payload_content / "runtime.lock")
+        shutil.copy2(BOOTSTRAP_LOCK, payload_content / "e2e-bootstrap.lock")
         shutil.copytree(wheelhouse, payload_content / "wheels")
+        shutil.copytree(bootstrap_wheelhouse, payload_content / "bootstrap-wheels")
         harness_root = payload_content / "trusted-harness"
         trusted_root = ROOT.resolve(strict=True)
         for relative in TRUSTED_HARNESS_FILES:

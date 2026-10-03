@@ -180,6 +180,29 @@ def test_wheel_download_is_hash_locked_cp314_linux_x86() -> None:
     assert "--extra-index-url" not in command
 
 
+def test_bootstrap_pip_is_separately_hash_locked() -> None:
+    module = _load_script()
+
+    assert module.BOOTSTRAP_LOCK == ROOT / "requirements" / "e2e-bootstrap.lock"
+    lock = module.BOOTSTRAP_LOCK.read_text(encoding="utf-8")
+    expected = (
+        "pip==26.2.1 "
+        + chr(92)
+        + "\n    --hash=sha256:71138adf1f4ca900cdb7d289c21b7494329f2332b6d85f0e1c42108c0384ed3e\n"
+    )
+    assert lock == expected
+
+    wheelhouse = Path("/tmp/e2e/bootstrap-wheels")
+    command = module._bootstrap_wheel_download_command(module.BOOTSTRAP_LOCK, wheelhouse)
+    assert command[:3] == [sys.executable, "-m", "pip"]
+    for flag in ("--require-hashes", "--only-binary=:all:", "--no-deps"):
+        assert flag in command
+    assert command[command.index("-r") + 1] == str(module.BOOTSTRAP_LOCK)
+    assert command[command.index("-d") + 1] == str(wheelhouse)
+    assert "--index-url" not in command
+    assert "--extra-index-url" not in command
+
+
 def test_qemu_overlay_plan_uses_verified_base_only() -> None:
     module = _load_script()
     base = Path("/cache/base.img")
@@ -287,6 +310,9 @@ def test_prepare_guest_archives_long_name_content_before_iso() -> None:
     assert "payload-content" in source
     assert "payload-iso" in source
     assert "_write_manifest(payload_content)" in source
+    assert "_bootstrap_wheel_download_command(BOOTSTRAP_LOCK, bootstrap_wheelhouse)" in source
+    assert 'shutil.copytree(bootstrap_wheelhouse, payload_content / "bootstrap-wheels")' in source
+    assert 'shutil.copy2(BOOTSTRAP_LOCK, payload_content / "e2e-bootstrap.lock")' in source
     assert "_write_payload_archive(payload_content, payload_archive)" in source
     assert "_sha256(payload_archive)" in source
     assert "_bootstrap_script(target, payload_archive_digest)" in source
@@ -320,7 +346,11 @@ def test_trusted_bootstrap_is_offline_and_commit_bound() -> None:
     assert "--no-index" in script
     assert "--require-hashes" in script
     assert "/opt/ssh-over-mcp-e2e/venv" in script
-    assert "python3 -m venv" in script
+    assert 'python3 -m venv --without-pip "$VENV"' in script
+    assert 'PIP_WHEEL="$EXTRACTED/bootstrap-wheels/pip-26.2.1-py3-none-any.whl"' in script
+    assert 'PYTHONPATH="$PIP_WHEEL" "$VENV/bin/python" -m pip install' in script
+    assert '"$EXTRACTED/e2e-bootstrap.lock"' in script
+    assert "ensurepip" not in script
     assert 'ARCHIVE="$PAYLOAD/payload.tar"' in script
     assert "tarfile.open" in script
     assert 'EXTRACTED="/opt/ssh-over-mcp-e2e/payload"' in script
