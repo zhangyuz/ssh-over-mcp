@@ -157,7 +157,7 @@ Level-3 E2E therefore uses a fresh disposable Linux virtual machine for every ru
 
 Unknown pre-existing provider state MUST fail closed rather than being silently reused or deleted.
 
-The reference Phase 7A provider is a dedicated native macOS x86 orchestrator using QEMU/HVF, a pinned Ubuntu 26.04 image, `-nic none`, no host sharing, read-only seed/payload media, and serial-only result collection. Equivalent future providers must preserve the same or stronger isolation contract.
+The reference Phase 7A provider is a dedicated native macOS x86 orchestrator using QEMU/HVF, a pinned Ubuntu 26.04 image, `-nic none`, no host sharing, read-only seed/payload media, a trusted-main read-only root guest gate, and bounded serial-only result collection. The exact target commit supplies manager/probe/support/application code, but the trusted root gate/orchestrator which judges that target must already be merged to `main`. A target change MUST NOT define or modify the Level-3 authority used to certify itself. Equivalent future providers must preserve the same or stronger isolation and anti-self-attestation contract.
 
 ## 8. Review discipline
 

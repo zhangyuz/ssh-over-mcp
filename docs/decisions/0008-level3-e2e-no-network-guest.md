@@ -44,7 +44,7 @@ The QEMU command line must include:
 - no USB redirection;
 - no display;
 - no QEMU monitor;
-- serial output to a host-owned result log;
+- serial output to a host-owned bounded pipe with a 2 MiB hard limit;
 - a writable disposable overlay backed by the pinned read-only base image;
 - read-only cloud-init seed and payload media.
 
@@ -53,7 +53,7 @@ The guest receives all required inputs before boot through read-only media:
 1. exact target Git bundle created from a host-side temporary bare repository;
 2. trusted-main `requirements/runtime.lock`;
 3. a hash-verified Python 3.14 linux/amd64 wheelhouse generated from that trusted-main lock;
-4. trusted bootstrap metadata/scripts needed to clone the bundle, create the isolated Python environment, and invoke the target guest gate;
+4. trusted-main read-only root guest gate plus bootstrap metadata needed to clone the bundle and create the isolated Python environment; target manager/probe/support code remains in the exact target checkout and is executed only after the root gate has dropped to the fixed non-root identity;
 5. the exact expected target commit.
 
 The guest does not need apt, PyPI, GitHub, DNS, DHCP, or any other network service.
@@ -75,10 +75,12 @@ The persistent host orchestrator:
 - creates temporary bundle/wheelhouse/ISO/overlay artifacts with owner-only permissions;
 - starts QEMU only with the reviewed fixed argument plan;
 - waits for QEMU to terminate;
-- accepts success only from an exact, commit-bound serial result record plus successful process exit;
-- removes overlay, seed ISO, payload ISO, bare repository, bundle, wheelhouse, serial log, and other temporary state in a `finally` path.
+- accepts success only from the trusted-main harness producing an exact, commit-bound record over a host-bounded serial stream plus successful process exit;
+- removes overlay, seed ISO, payload ISO, bare repository, bundle, wheelhouse, and other temporary state in a `finally` path.
 
 The target checkout may obtain guest root-equivalent authority. The security boundary is the VM process plus the absence of any virtual network or host filesystem/device channel.
+
+The trusted-main root guest gate is a separate authority from the target checkout. The target commit may provide manager/probe/support/application code, but it MUST NOT supply or modify the root guest gate used to validate that same target. Gate/orchestrator changes become trusted only after a separate merge to `main`; later target commits are then evaluated by that already-trusted authority.
 
 ## Consequences
 
@@ -94,7 +96,7 @@ Cost:
 - the provider moves from Lima lifecycle convenience to explicit QEMU/cloud-init/media orchestration;
 - QEMU becomes operator-managed trusted infrastructure;
 - the host must construct a cloud-init seed, payload ISO, wheelhouse, and disposable disk overlay;
-- results are collected through serial output rather than interactive SSH;
+- results are collected through a 2 MiB-bounded serial stream rather than interactive SSH;
 - provider maintenance includes QEMU and cloud-image compatibility.
 
 Rejected:
@@ -109,7 +111,7 @@ The persistent orchestrator MUST fail closed if:
 - the pinned base image digest does not match;
 - the target commit is not exact 40-hex or bundle verification differs;
 - trusted-main runtime lock or downloaded wheels fail hash verification;
-- generated QEMU arguments contain any NIC/network backend, host filesystem sharing, socket/chardev not used for the fixed serial log, or mutable host path exposed to the guest;
+- generated QEMU arguments contain any NIC/network backend, host filesystem sharing, socket/chardev not used for the fixed bounded serial stream, or mutable host path exposed to the guest;
 - a stale QEMU process or fixed provider state from a previous run exists;
 - the serial result is absent, malformed, references another commit, or reports failure;
 - any temporary host artifact cannot be removed.
@@ -118,7 +120,7 @@ The guest MUST fail closed if:
 - the payload/seed identity is wrong;
 - checked-out HEAD differs from the expected commit;
 - offline dependency installation cannot satisfy the trusted lock;
-- the target gate fails;
+- the trusted-main guest gate fails or the target application fails its trusted assertions;
 - in-guest cleanup verification fails.
 
 This ADR refines ADR 0006. ADR 0006's disposable-VM principle remains in force; its Lima/VZ provider details are superseded by this no-network QEMU/HVF provider.
