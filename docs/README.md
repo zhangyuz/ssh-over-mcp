@@ -12,9 +12,10 @@ This directory is the canonical behavioral and security specification for `ssh-o
 6. **Remote enforcement** — [`ssh-host-agent.md`](ssh-host-agent.md)
 7. **Edge/auth deployment** — [`cloudflare-deployment.md`](cloudflare-deployment.md)
 8. **Approvals and audit** — [`audit-and-approvals.md`](audit-and-approvals.md)
-9. **Implementation sequencing** — [`development-plan.md`](development-plan.md)
-10. **Self-hosted Docker validation** — [`self-hosted-runner.md`](self-hosted-runner.md)
-11. **Normative design changes** — [`decisions/`](decisions/README.md)
+9. **Development methodology** — [`development-methodology.md`](development-methodology.md)
+10. **Implementation sequencing** — [`development-plan.md`](development-plan.md)
+11. **Self-hosted Docker validation** — [`self-hosted-runner.md`](self-hosted-runner.md)
+12. **Normative design changes** — [`decisions/`](decisions/README.md)
 
 ## Normative language
 

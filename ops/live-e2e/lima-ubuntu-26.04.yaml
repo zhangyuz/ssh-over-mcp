@@ -1,0 +1,22 @@
+minimumLimaVersion: 2.2.0
+vmType: vz
+arch: x86_64
+
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/resolute/release-20260720/ubuntu-26.04-server-cloudimg-amd64.img"
+    arch: x86_64
+    digest: "sha256:117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477"
+
+cpus: 4
+memory: "6GiB"
+disk: "30GiB"
+
+mounts: []
+containerd:
+  system: false
+  user: false
+propagateProxyEnv: false
+hostResolver:
+  enabled: false
+
+portForwards: []

@@ -1,0 +1,90 @@
+name: Live Local E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Exact 40-hex target commit to test inside a disposable guest
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-local-e2e
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    name: Disposable Ubuntu 26.04 local E2E
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, macOS, X64, ssh-over-mcp-e2e-orchestrator]
+    timeout-minutes: 45
+
+    steps:
+      - name: Verify trusted native macOS x86 orchestrator
+        shell: bash
+        env:
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+        run: |
+          set -euo pipefail
+
+          test "$(uname -s)" = "Darwin"
+          test "$(uname -m)" = "x86_64"
+          test "$(id -u)" -ne 0
+
+          if id -Gn | tr ' ' '\n' | grep -qx admin; then
+            echo "::error::E2E orchestrator account must not be a macOS admin"
+            exit 1
+          fi
+
+          test "$(limactl --version)" = "limactl version 2.2.0"
+          test "$(sysctl -n kern.hv_support)" = "1"
+
+          case "${COMMIT_SHA}" in
+            (*[!0-9a-fA-F]*|'') echo "::error::commit_sha must be exact 40-hex"; exit 1 ;;
+          esac
+          test "${#COMMIT_SHA}" -eq 40
+
+      - name: Checkout trusted-main orchestrator revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          clean: true
+          fetch-depth: 1
+
+      - name: Verify trusted-main checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Run exact target in disposable Lima guest
+        shell: bash
+        env:
+          SSH_OVER_MCP_E2E_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/run-live-local-e2e-orchestrator.py "${{ inputs.commit_sha }}"
+
+      - name: Verify disposable guest is absent
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if limactl list --json | python3 -c '
+          import json, sys
+          names = {
+              doc.get("name")
+              for raw in sys.stdin
+              if raw.strip()
+              for doc in [json.loads(raw)]
+          }
+          raise SystemExit(0 if "ssh-over-mcp-e2e" in names else 1)
+          '; then
+            echo "::error::Disposable E2E guest still exists"
+            exit 1
+          fi
