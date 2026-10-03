@@ -435,7 +435,7 @@ sha256:117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477
 
 The host creates a fresh qcow2 overlay and starts QEMU with HVF and `-nic none`. The guest receives no host filesystem share/mount, no QEMU monitor, no Docker socket, no production secret, and no target-controlled host socket/device. The target commit never becomes a host worktree.
 
-The orchestrator uses a private temporary bare repository to create the exact Git bundle. It also prepares a Python 3.14 linux/amd64 wheelhouse from trusted-main `requirements/runtime.lock` using hash enforcement, then packages the bundle, lock, wheelhouse, exact expected commit, and trusted offline bootstrap into read-only payload/seed media. Guest bootstrap performs no apt/PyPI/GitHub access.
+The orchestrator uses a private temporary bare repository to create the exact Git bundle. It also prepares a Python 3.14 linux/amd64 wheelhouse from trusted-main `requirements/runtime.lock` using hash enforcement, then packages the bundle, lock, wheelhouse, exact expected commit, trusted-main guest harness, and trusted offline bootstrap into read-only payload/seed media. Guest bootstrap performs no apt/PyPI/GitHub access.
 
 The trusted workflow is manual-only from `main` and receives one exact `commit_sha`. The workflow run `headSha` identifies the trusted-main workflow revision, not the tested commit.
 
@@ -452,8 +452,8 @@ commit_sha
 
 The GitHub read token remains host-only and is not present in seed/payload media or guest command environments.
 
-The guest returns bounded evidence only over a host-owned serial log. Success requires exactly one `SSH_OVER_MCP_E2E_RESULT=<commit>:PASS` record matching the requested commit and a clean QEMU exit.
+The guest returns evidence only over a host-bounded serial pipe capped at 2 MiB. Success requires the trusted-main guest harness to produce exactly one `SSH_OVER_MCP_E2E_RESULT=<commit>:PASS` record matching the requested commit and a clean QEMU exit.
 
-A stale QEMU/provider process/artifact before a run is a hard failure requiring operator inspection. After every attempted run the orchestrator terminates only the QEMU PID it created, waits for exit, and removes the overlay, seed ISO, payload ISO, serial log, temporary bare repository/bundle, and wheelhouse. Failure to remove run-owned state fails the workflow.
+A stale QEMU/provider process/artifact before a run is a hard failure requiring operator inspection. After every attempted run the orchestrator terminates only the QEMU PID it created, waits for exit, and removes the overlay, seed ISO, payload ISO, temporary bare repository/bundle, and wheelhouse. Failure to remove run-owned state fails the workflow.
 
 In-guest cleanup is still tested independently. Destroying the whole disposable guest state is an additional containment boundary, not a substitute for product cleanup assertions.

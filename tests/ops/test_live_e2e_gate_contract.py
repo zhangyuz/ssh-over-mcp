@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import inspect
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -156,3 +157,150 @@ def test_gate_never_contains_host_orchestrator_paths() -> None:
     assert "/Users/" not in source
     assert "gha-e2e-orchestrator" not in source
     assert "limactl" not in source
+
+
+def test_gate_constants_pin_real_ssh_containment_fixture() -> None:
+    module = _load_gate()
+
+    assert module.HOST_SOURCE_CGROUP == Path(
+        "/sys/fs/cgroup/ssh-over-mcp-e2e/host-agent-source"
+    )
+    assert module.MANAGER_ENDPOINT == Path(
+        "/opt/ssh-over-mcp-e2e/runtime/manager/containment.sock"
+    )
+    assert module.CLIENT_KEY == Path(
+        "/opt/ssh-over-mcp-e2e/runtime/client_ed25519"
+    )
+    assert module.HOST_KEY == Path(
+        "/opt/ssh-over-mcp-e2e/runtime/sshd_host_ed25519"
+    )
+    assert module.HOST_KEY_PUBLIC == Path(
+        "/opt/ssh-over-mcp-e2e/runtime/sshd_host_ed25519.pub"
+    )
+    assert module.AUTHORIZED_KEYS == Path(
+        "/opt/ssh-over-mcp-e2e/runtime/authorized_keys"
+    )
+    assert module.SSHD_CONFIG == Path(
+        "/opt/ssh-over-mcp-e2e/runtime/sshd_config"
+    )
+    assert module.SSHD_LOG == Path(
+        "/opt/ssh-over-mcp-e2e/runtime/sshd.log"
+    )
+    assert module.HOST_POLICY == Path("/etc/ssh-over-mcp/host-policy.yaml")
+    assert module.LAUNCHER_INSTALL == Path(
+        "/usr/local/libexec/ssh-over-mcp-host-agent-launcher.py"
+    )
+    assert module.SUDOERS_DROPIN == Path(
+        "/etc/sudoers.d/ssh-over-mcp-e2e-host-agent"
+    )
+    assert module.STATE_SCRIPT == Path(
+        "/opt/ssh-over-mcp-e2e/runtime/workload_state.py"
+    )
+
+
+def test_gate_source_pins_forcecommand_and_nonroot_children() -> None:
+    source = GATE.read_text(encoding="utf-8")
+
+    exact_launcher = (
+        "/usr/bin/python3 -I -S "
+        "/usr/local/libexec/ssh-over-mcp-host-agent-launcher.py"
+    )
+    assert exact_launcher in source
+    assert "NOPASSWD: ALL" not in source
+    assert "PermitTTY no" in source
+    assert "AllowTcpForwarding no" in source
+    assert "AllowAgentForwarding no" in source
+    assert "X11Forwarding no" in source
+    assert "PermitTunnel no" in source
+    assert "UsePAM no" in source
+    assert "PasswordAuthentication no" in source
+    assert "KbdInteractiveAuthentication no" in source
+    assert "ListenAddress 127.0.0.1" in source
+    assert "Port 22222" in source
+    assert "_spawn_nonroot_child" in source
+    assert "uid=MANAGER_UID" in source
+    assert "uid=PROBE_UID" in source
+
+
+def test_gate_source_prepares_delegated_host_source_not_sshd_master() -> None:
+    source = GATE.read_text(encoding="utf-8")
+
+    assert "HOST_SOURCE_CGROUP" in source
+    assert "host-agent-source" in source
+    assert "cgroup.subtree_control" in source
+    assert "cgroup.procs" in source
+    assert "sshd" not in source[source.find("def _prepare_cgroup"):source.find("def _prepare_cgroup") + 1800]
+
+
+def test_gate_source_never_runs_probe_as_root() -> None:
+    module = _load_gate()
+    body = inspect.getsource(module._SystemGuestOps.run_probe)
+
+    assert "_spawn_nonroot_child" in body
+    assert "PROBE_UID" in body
+    assert "PROBE_GID" in body
+    assert "subprocess.run(" not in body
+
+
+def test_guest_gate_trusts_only_root_gate_and_executes_target_helpers_after_drop() -> None:
+    module = _load_gate()
+    assert module.TRUSTED_HARNESS_ROOT == Path('/mnt/som-payload/trusted-harness')
+    assert module._TRUSTED_GATE == (
+        module.TRUSTED_HARNESS_ROOT
+        / 'ops/live-e2e/ssh-over-mcp-live-e2e-gate'
+    )
+    assert module._MANAGER_SCRIPT == module.WORKSPACE / 'scripts/run-live-local-e2e-manager.py'
+    assert module._PROBE == module.WORKSPACE / 'scripts/run-live-local-e2e-probe.py'
+    assert module._SUPPORT == module.WORKSPACE / 'tests/live/local_e2e_support.py'
+    assert module.LAUNCHER_SOURCE == module.WORKSPACE / 'ops/live-e2e/ssh-over-mcp-host-agent-launcher.py'
+
+    verify = inspect.getsource(module._SystemGuestOps.verify_root_and_workspace)
+    for name in ('LAUNCHER_SOURCE', '_MANAGER_SCRIPT', '_PROBE', '_SUPPORT'):
+        assert f'_require_target_regular({name})' in verify
+
+    manager = inspect.getsource(module._SystemGuestOps._start_manager)
+    assert '_spawn_nonroot_child' in manager
+    assert 'uid=MANAGER_UID' in manager
+    assert 'gid=MANAGER_GID' in manager
+
+    probe = inspect.getsource(module._SystemGuestOps.run_probe)
+    assert '_spawn_nonroot_child' in probe
+    assert 'uid=PROBE_UID' in probe
+    assert 'gid=PROBE_GID' in probe
+
+
+def test_workload_state_detects_any_inherited_socket_fd() -> None:
+    source = GATE.read_text(encoding='utf-8')
+    start = source.index('state_source = ')
+    end = source.index('STATE_SCRIPT.write_text', start)
+    state_source_builder = source[start:end]
+    assert 'stat.S_ISSOCK' in state_source_builder
+    assert 'os.fstat' in state_source_builder
+    assert 'os.readlink(entry)' not in state_source_builder
+
+
+def test_guest_gate_requires_target_launcher_regular_non_symlink() -> None:
+    module = _load_gate()
+    source = inspect.getsource(module._SystemGuestOps.verify_root_and_workspace)
+    assert '_require_target_regular(LAUNCHER_SOURCE)' in source
+    helper = inspect.getsource(module._require_target_regular)
+    assert 'lstat' in helper
+    assert 'stat.S_ISLNK' in helper
+    assert 'stat.S_ISREG' in helper
+    assert 'resolved' in helper
+
+
+def test_guest_gate_runtime_verifies_only_trusted_root_gate_payload() -> None:
+    module = _load_gate()
+    source = inspect.getsource(module._SystemGuestOps.verify_root_and_workspace)
+    assert '_require_trusted_harness()' in source
+    helper = inspect.getsource(module._require_trusted_harness)
+    assert 'os.statvfs' in helper
+    assert 'os.ST_RDONLY' in helper
+    assert 'lstat' in helper
+    assert 'stat.S_ISLNK' in helper
+    assert 'stat.S_ISREG' in helper
+    assert '_TRUSTED_GATE' in helper
+    assert '_MANAGER_SCRIPT' not in helper
+    assert '_PROBE' not in helper
+    assert '_SUPPORT' not in helper

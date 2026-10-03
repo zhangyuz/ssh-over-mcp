@@ -85,9 +85,9 @@ https://cloud-images.ubuntu.com/releases/resolute/release-20260720/ubuntu-26.04-
 sha256:117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477
 ```
 
-The QEMU guest is created with `-nic none`, no host filesystem share/mount, no monitor, no Docker socket, and no target-controlled host socket/device. The target commit never becomes a host worktree. The trusted-main orchestrator fetches the exact target into a private temporary bare Git repository, prepares a hash-verified Python 3.14 linux/amd64 wheelhouse from trusted-main `requirements/runtime.lock`, and packages the bundle/wheelhouse/expected-commit/trusted bootstrap into read-only payload/seed media.
+The QEMU guest is created with `-nic none`, no host filesystem share/mount, no monitor, no Docker socket, and no target-controlled host socket/device. The target commit never becomes a host worktree. The trusted-main orchestrator fetches the exact target into a private temporary bare Git repository, prepares a hash-verified Python 3.14 linux/amd64 wheelhouse from trusted-main `requirements/runtime.lock`, and packages the bundle/wheelhouse/expected-commit/trusted-main guest harness/trusted bootstrap into read-only payload/seed media.
 
-The host-only read token is used only by Git/askpass while creating the bundle. It is not copied into seed/payload media and is absent from guest command environments. The guest installs dependencies offline and returns only a commit-bound result over serial output.
+The host-only read token is used only by Git/askpass while creating the bundle. It is not copied into seed/payload media and is absent from guest command environments. The guest installs dependencies offline and returns only a trusted-harness commit-bound result over a host-bounded 2 MiB serial stream.
 
 ## Exact target identity
 
@@ -106,8 +106,8 @@ A mismatch fails closed before the guest gate runs.
 
 ## Guest lifecycle
 
-Before each run the orchestrator rejects stale QEMU/provider state rather than silently reusing it. Every run gets a fresh disposable qcow2 overlay plus fresh seed/payload media and serial log.
+Before each run the orchestrator rejects stale QEMU/provider state rather than silently reusing it. Every run gets a fresh disposable qcow2 overlay plus fresh seed/payload media. The overlay virtual size is capped at 8 GiB; orchestration requires at least 16 GiB host free space, caps the target bundle at 256 MiB, and caps captured serial output at 2 MiB.
 
-After every attempted run the orchestrator terminates only the QEMU process it created (if still alive), waits for exit, and removes the overlay, seed ISO, payload ISO, serial log, temporary bare repository/bundle, and wheelhouse. Failure to remove run-owned state fails the workflow.
+After every attempted run the orchestrator terminates only the QEMU process it created (if still alive), waits for exit, and removes the overlay, seed ISO, payload ISO, temporary bare repository/bundle, and wheelhouse. Failure to remove run-owned state fails the workflow.
 
 In-guest process/socket/cgroup/key/data cleanup remains part of the test. QEMU process termination plus deletion of the **whole disposable guest state** is the final outer containment boundary.

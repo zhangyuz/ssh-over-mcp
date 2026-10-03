@@ -35,7 +35,7 @@ The persistent orchestrator:
 - creates a Git bundle from that exact commit and copies the bundle into the disposable guest;
 - never passes GitHub tokens, production credentials, or unrelated host secrets into the guest.
 
-The disposable-VM principle in this ADR remains authoritative. The concrete Phase 7A provider is refined by ADR 0008 after review found that Lima/VZ still attaches a reachable user-mode network. The accepted provider is now QEMU/HVF with no virtual NIC (`-nic none`), no host filesystem sharing, read-only seed/payload media, and serial-only result collection.
+The disposable-VM principle in this ADR remains authoritative. The concrete Phase 7A provider is refined by ADR 0008 after review found that Lima/VZ still attaches a reachable user-mode network. The accepted provider is now QEMU/HVF with no virtual NIC (`-nic none`), no host filesystem sharing, read-only seed/payload media, and bounded serial-only result collection.
 
 The trusted Ubuntu 26.04 x86_64 base image and digest remain unchanged.
 
@@ -50,13 +50,15 @@ The target commit may obtain root-equivalent authority only inside the disposabl
 
 After every run, regardless of test result:
 - the orchestrator terminates the QEMU guest it created and waits for process exit;
-- removes the disposable disk overlay, seed/payload media, serial log, temporary bare repository/bundle, and wheelhouse;
+- removes the disposable disk overlay, seed/payload media, temporary bare repository/bundle, wheelhouse, and other run-owned state;
 - verifies no stale provider process/artifact remains;
 - fails the workflow if guest destruction or host-side cleanup fails.
 
 Unknown stale provider process/artifact state before a run causes fail-closed operator inspection rather than silent reuse.
 
 The trusted workflow is dispatched from `main` with an exact `commit_sha` input. The GitHub workflow run's own `headSha` identifies the trusted workflow revision, not the tested commit. Tested-commit identity is established by the workflow input, bare-repository fetch result, bundle content, guest checkout HEAD, and guest expected-commit value all matching the same SHA.
+
+The root guest gate and persistent-host orchestrator used as Level-3 authority MUST already be merged into trusted `main` before they can validate a later target commit. A target PR MUST NOT modify the root guest gate/orchestrator used to produce its own Level-3 PASS evidence. Changes to that trusted authority land first under ordinary exact-head CI/review; target manager/probe/support/application changes are validated in a subsequent PR against the previously merged gate. This prevents unmerged target code from self-attesting or forging its own success record.
 
 ## Consequences
 

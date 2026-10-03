@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import inspect
 import json
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -54,7 +56,7 @@ def test_provider_pins_qemu_hvf_no_network_guest() -> None:
         "image_digest": IMAGE_DIGEST,
         "cpus": 4,
         "memory_mib": 6144,
-        "disk_gib": 30,
+        "disk_gib": 8,
         "python_version": "3.14",
         "python_abi": "cp314",
         "network": False,
@@ -191,7 +193,7 @@ def test_qemu_overlay_plan_uses_verified_base_only() -> None:
         "-b",
         str(base),
         str(overlay),
-        "30G",
+        "8G",
     ]
 
 
@@ -200,8 +202,7 @@ def test_qemu_command_has_no_network_or_host_share_channel() -> None:
     overlay = Path("/tmp/e2e/overlay.qcow2")
     seed = Path("/tmp/e2e/seed.iso")
     payload = Path("/tmp/e2e/payload.iso")
-    serial = Path("/tmp/e2e/serial.log")
-    command = module._qemu_command(overlay, seed, payload, serial)
+    command = module._qemu_command(overlay, seed, payload)
     rendered = " ".join(command)
 
     assert command[0] == "/usr/local/bin/qemu-system-x86_64"
@@ -213,7 +214,9 @@ def test_qemu_command_has_no_network_or_host_share_channel() -> None:
     assert ["-monitor", "none"] == command[
         command.index("-monitor"): command.index("-monitor") + 2
     ]
-    assert f"file:{serial}" in command
+    assert ["-serial", "stdio"] == command[
+        command.index("-serial"): command.index("-serial") + 2
+    ]
     assert f"file={seed},format=raw,media=cdrom,readonly=on" in command
     assert f"file={payload},format=raw,media=cdrom,readonly=on" in command
 
@@ -250,6 +253,21 @@ def test_iso_command_is_fixed() -> None:
         "-joliet-volume-name",
         "SOM_E2E_PAYLOAD",
     ]
+
+
+def test_seed_masks_wait_online_before_no_network_final_stage() -> None:
+    module = _load_script()
+    user_data = module._seed_user_data()
+
+    assert user_data.startswith("#cloud-config\n")
+    assert "bootcmd:" in user_data
+    assert (
+        "[ systemctl, mask, --runtime, systemd-networkd-wait-online.service ]"
+        in user_data
+    )
+    assert user_data.index("bootcmd:") < user_data.index("runcmd:")
+    for forbidden in ("apt-get", "curl ", "wget ", "dhclient", "networkctl up"):
+        assert forbidden not in user_data
 
 
 def test_trusted_bootstrap_is_offline_and_commit_bound() -> None:
@@ -461,3 +479,104 @@ def test_provider_state_marker_precedes_target_fetch_and_is_removed_on_cleanup(
     assert state.is_file()
     lifecycle.cleanup_host()
     assert not state.exists()
+
+
+def test_serial_channel_is_host_bounded_not_unbounded_file_sink() -> None:
+    module = _load_script()
+    assert module.SERIAL_MAX_BYTES == 2 * 1024 * 1024
+    command = module._qemu_command(
+        Path('/tmp/e2e/overlay.qcow2'),
+        Path('/tmp/e2e/seed.iso'),
+        Path('/tmp/e2e/payload.iso'),
+    )
+    serial_index = command.index('-serial')
+    assert command[serial_index + 1] == 'stdio'
+    rendered = ' '.join(command)
+    assert 'file:/tmp/e2e/serial.log' not in rendered
+
+    source = inspect.getsource(module._SystemLifecycle.wait_guest)
+    assert 'SERIAL_MAX_BYTES' in source
+    assert 'serial output exceeded limit' in source
+
+
+def test_payload_trusts_only_the_root_guest_gate_from_main() -> None:
+    module = _load_script()
+    assert module.TRUSTED_HARNESS_FILES == (
+        'ops/live-e2e/ssh-over-mcp-live-e2e-gate',
+    )
+
+    bootstrap = module._bootstrap_script('a' * 40)
+    assert '$PAYLOAD/trusted-harness/ops/live-e2e/ssh-over-mcp-live-e2e-gate' in bootstrap
+    assert '$WORKSPACE/ops/live-e2e/ssh-over-mcp-live-e2e-gate' not in bootstrap
+
+    source = inspect.getsource(module._SystemLifecycle.prepare_guest)
+    assert 'TRUSTED_HARNESS_FILES' in source
+    assert 'trusted-harness' in source
+    for target_only in (
+        'scripts/run-live-local-e2e-manager.py',
+        'scripts/run-live-local-e2e-probe.py',
+        'tests/live/local_e2e_support.py',
+    ):
+        assert target_only not in module.TRUSTED_HARNESS_FILES
+
+
+def test_provider_bounds_guest_disk_and_requires_host_free_space(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_script()
+    assert module.GUEST_DISK_GIB == 8
+    assert module.HOST_MIN_FREE_BYTES == 16 * 1024**3
+    assert module._overlay_command(Path('/cache/base.img'), Path('/tmp/e2e/overlay.qcow2'))[-1] == '8G'
+
+    class Usage:
+        total = 100 * 1024**3
+        used = 90 * 1024**3
+        free = 10 * 1024**3
+
+    monkeypatch.setattr(module.shutil, 'disk_usage', lambda _path: Usage())
+    with pytest.raises(module.OrchestratorError, match='free space'):
+        module._require_host_free_space(Path('/tmp'))
+
+
+def test_target_bundle_size_is_hard_bounded(tmp_path: Path) -> None:
+    module = _load_script()
+    assert module.TARGET_BUNDLE_MAX_BYTES == 256 * 1024**2
+    bundle = tmp_path / 'target.bundle'
+    bundle.write_bytes(b'12345')
+    module._require_bounded_file(bundle, max_bytes=5, label='target bundle')
+    with pytest.raises(module.OrchestratorError, match='target bundle exceeds size limit'):
+        module._require_bounded_file(bundle, max_bytes=4, label='target bundle')
+    source = inspect.getsource(module._SystemLifecycle.create_bundle)
+    assert 'TARGET_BUNDLE_MAX_BYTES' in source
+
+
+def test_orchestrator_self_verifies_trusted_main_checkout() -> None:
+    module = _load_script()
+    source = inspect.getsource(module._SystemLifecycle.verify_host)
+    assert 'workflow_sha = _validated_workflow_context' in source
+    assert 'rev-parse' in source and 'HEAD' in source
+    assert 'status' in source and '--porcelain=v1' in source
+    assert 'trusted orchestrator checkout mismatch' in source
+    assert 'trusted orchestrator checkout is dirty' in source
+
+
+def test_wait_guest_rejects_serial_flood_behaviorally() -> None:
+    module = _load_script()
+    lifecycle = module._SystemLifecycle({})
+    payload_size = module.SERIAL_MAX_BYTES + 65536
+    writer_code = f"""
+import os
+data = b"x" * {payload_size}
+offset = 0
+while offset < len(data):
+    offset += os.write(1, data[offset:])
+"""
+    lifecycle._qemu = subprocess.Popen(
+        [sys.executable, "-c", writer_code],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        with pytest.raises(module.OrchestratorError, match='serial output exceeded limit'):
+            lifecycle.wait_guest()
+    finally:
+        lifecycle.cleanup_guest()

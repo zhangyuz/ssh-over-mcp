@@ -145,6 +145,7 @@ The launcher contract is:
 - the launcher rejects any argv;
 - before application import it validates the fixed SSH context (`SSH_ORIGINAL_COMMAND=mcp-v1`, no PTY);
 - it sanitizes/ignores caller-controlled Python/import environment before application import;
+- while still root, it moves only the current ForceCommand session into the fixed `host-agent-source` cgroup beneath the delegated root and verifies residency; the sshd master remains outside the delegated subtree;
 - it sets the exact host-agent supplementary group set;
 - it drops real/effective/saved GID and UID to the configured non-root host-agent identity;
 - it retains only `CAP_SETUID` and `CAP_SETGID` in effective/permitted sets;
@@ -162,6 +163,7 @@ The host agent:
 - begins application execution with exactly `CAP_SETUID` and `CAP_SETGID` in effective/permitted sets and no other capabilities;
 - uses the existing authenticated manager client;
 - does not own writable cgroup authority;
+- starts application execution inside the fixed `host-agent-source` cgroup so the non-root manager can lawfully migrate forked children into request scopes without owning the host/system cgroup hierarchy;
 - keeps the existing capability/identity constraints required for the verified child identity transition.
 
 ### 6.5 Containment manager
@@ -307,10 +309,10 @@ The trusted orchestrator must:
 4. fetch the target into a temporary bare Git repository without checking out its worktree on the host;
 5. create a Git bundle containing the exact target commit;
 6. build a hash-verified Python 3.14 linux/amd64 wheelhouse from the trusted-main `requirements/runtime.lock`;
-7. construct read-only cloud-init seed and payload media containing only trusted bootstrap data, exact target bundle, expected commit, runtime lock, and wheelhouse;
+7. construct read-only cloud-init seed and payload media containing trusted bootstrap data, trusted-main read-only guest harness, exact target bundle, expected commit, runtime lock, and wheelhouse;
 8. start a fresh pinned Ubuntu 26.04 x86_64 QEMU/HVF guest with `-nic none`, no host mounts/shares, no monitor, and serial-only result output;
 9. never pass GitHub tokens, production credentials, unrelated host secrets, host sockets, or host network devices into the guest;
-10. collect a bounded commit-bound serial result after QEMU exits;
+10. collect a commit-bound result through a host-bounded 2 MiB serial stream after QEMU exits;
 11. remove overlay/media/log/bare-repository/bundle/wheelhouse state in a `finally` path and verify no stale provider process/artifact remains.
 
 Unknown pre-existing provider state causes fail-closed startup rather than silent reuse or deletion.
@@ -398,7 +400,7 @@ The reference persistent orchestrator is:
 
 The trusted guest image is Ubuntu 26.04 x86_64 server cloud image dated 2026-07-20 with SHA-256 `117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477`.
 
-The guest has **no virtual network device** (`-nic none`), no host filesystem mount/share, no QEMU monitor, no Docker socket, and no production secret. The target commit is transferred only inside a read-only payload image as a Git bundle produced from a host-side bare repository. Runtime wheels are prepared on the host from the trusted-main hash-locked runtime requirements and installed offline inside the guest. The GitHub token used to fetch the bundle remains on the orchestrator and is never copied into the guest.
+The guest has **no virtual network device** (`-nic none`), no host filesystem mount/share, no QEMU monitor, no Docker socket, and no production secret. The target commit is transferred only inside a read-only payload image as a Git bundle produced from a host-side bare repository. The root gate, manager wrapper, probe, and assertions come from the trusted-main checkout on the same read-only payload; the target bundle supplies application/product code and the launcher under test, not its own attestation harness. Runtime wheels are prepared on the host from the trusted-main hash-locked runtime requirements and installed offline inside the guest. The GitHub token used to fetch the bundle remains on the orchestrator and is never copied into the guest. The target bundle is capped at 256 MiB, the guest virtual disk at 8 GiB, the serial stream at 2 MiB, and orchestration requires at least 16 GiB host free space.
 
 The capability-bearing target checkout may become root inside the disposable guest. That is explicitly accepted by ADR 0006/0008 because the VM has no target-controlled network or host-filesystem/device path and receives only test-scoped state. It may not gain authority over the persistent orchestrator.
 
@@ -416,6 +418,8 @@ sshd
 
 The capability launcher must still prove that `ssh_over_mcp` application code is not imported while the launcher itself is root; the disposable VM does not weaken the production-representative inner boundary.
 
+The root guest gate/orchestrator is trusted test authority and must already be merged to `main` before evaluating a later target commit. An unmerged target PR cannot modify the gate/orchestrator used to certify itself; trusted-authority changes and target-fixture changes are separate review/merge slices.
+
 The E2E request is bound to an exact target commit through all of:
 - trusted workflow `commit_sha` input;
 - bare-repository fetch result;
@@ -425,13 +429,18 @@ The E2E request is bound to an exact target commit through all of:
 
 The workflow run's GitHub `headSha` identifies the trusted-main workflow revision and is not the tested-commit identity.
 
-After every run QEMU must exit and the disposable overlay, seed/payload media, serial log, temporary bundle/repository, and wheelhouse must be removed. Stale provider state before a run requires operator inspection rather than silent reuse.
+After every run QEMU must exit and the disposable overlay, seed/payload media, temporary bundle/repository, and wheelhouse must be removed. Stale provider state before a run requires operator inspection rather than silent reuse.
 
 ## 13. Implementation slicing
 
 Phase 7A is split into four independently reviewable slices.
 
 ### 7A1 — E2E fixture foundation
+
+7A1 is intentionally split at the trust boundary:
+- **7A1-trusted-gate:** merge the host orchestrator/root guest gate/provider contracts first; this slice does not use its own unmerged gate as Level-3 evidence.
+- **7A1-target-fixture:** add the target manager/probe/support/launcher behavior and validate that exact PR head using the already-merged trusted-main gate.
+
 Build only:
 - trusted native-macOS QEMU/HVF orchestrator and pinned no-network guest definition;
 - exact-commit bare-Git → bundle transfer with no host target checkout;

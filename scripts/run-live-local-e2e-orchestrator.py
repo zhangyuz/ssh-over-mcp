@@ -8,10 +8,12 @@ import os
 import platform
 import pwd
 import re
+import selectors
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Protocol
@@ -36,7 +38,14 @@ IMAGE_DIGEST = (
 )
 PYTHON_VERSION = "3.14"
 PYTHON_ABI = "cp314"
+GUEST_DISK_GIB = 8
+HOST_MIN_FREE_BYTES = 16 * 1024**3
+TARGET_BUNDLE_MAX_BYTES = 256 * 1024**2
 RESULT_PREFIX = "SSH_OVER_MCP_E2E_RESULT="
+SERIAL_MAX_BYTES = 2 * 1024 * 1024
+TRUSTED_HARNESS_FILES = (
+    "ops/live-e2e/ssh-over-mcp-live-e2e-gate",
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 PROVIDER_CONFIG = ROOT / "ops" / "live-e2e" / "qemu-ubuntu-26.04.json"
@@ -175,7 +184,7 @@ def _overlay_command(base: Path, overlay: Path) -> list[str]:
         "-b",
         str(base),
         str(overlay),
-        "30G",
+        f"{GUEST_DISK_GIB}G",
     ]
 
 
@@ -199,7 +208,6 @@ def _qemu_command(
     overlay: Path,
     seed: Path,
     payload: Path,
-    serial: Path,
 ) -> list[str]:
     return [
         str(QEMU_SYSTEM),
@@ -218,7 +226,7 @@ def _qemu_command(
         "-monitor",
         "none",
         "-serial",
-        f"file:{serial}",
+        "stdio",
         "-nic",
         "none",
         "-no-reboot",
@@ -299,12 +307,14 @@ printf 'EXPECTED_COMMIT=%s\n' "$EXPECTED_COMMIT" > /etc/ssh-over-mcp/live-e2e-ga
 chmod 0600 /etc/ssh-over-mcp/live-e2e-gate.conf
 chown root:root /etc/ssh-over-mcp/live-e2e-gate.conf
 
-/usr/bin/python3 "$WORKSPACE/ops/live-e2e/ssh-over-mcp-live-e2e-gate"
+PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 "$PAYLOAD/trusted-harness/ops/live-e2e/ssh-over-mcp-live-e2e-gate"
 """
 
 
 def _seed_user_data() -> str:
     return """#cloud-config
+bootcmd:
+  - [ systemctl, mask, --runtime, systemd-networkd-wait-online.service ]
 runcmd:
   - [ mkdir, -p, /mnt/som-payload ]
   - [ mount, -o, ro, LABEL=SOM_E2E_PAYLOAD, /mnt/som-payload ]
@@ -345,6 +355,26 @@ def _run(
         check=True,
         timeout=timeout,
     )
+
+
+def _require_bounded_file(path: Path, *, max_bytes: int, label: str) -> None:
+    try:
+        info = path.stat()
+    except OSError as exc:
+        raise OrchestratorError(f"{label} is unavailable") from exc
+    if not path.is_file():
+        raise OrchestratorError(f"{label} is not a regular file")
+    if info.st_size > max_bytes:
+        raise OrchestratorError(f"{label} exceeds size limit")
+
+
+def _require_host_free_space(path: Path) -> None:
+    try:
+        free = shutil.disk_usage(path).free
+    except OSError as exc:
+        raise OrchestratorError("cannot determine host free space") from exc
+    if free < HOST_MIN_FREE_BYTES:
+        raise OrchestratorError("insufficient host free space for isolated E2E guest")
 
 
 def _sha256(path: Path) -> str:
@@ -415,16 +445,32 @@ class _SystemLifecycle:
         self._provider_env = _provider_environment(env)
         self._temp: tempfile.TemporaryDirectory[str] | None = None
         self._root: Path | None = None
-        self._serial: Path | None = None
-        self._qemu: subprocess.Popen[str] | None = None
+        self._serial_output: bytes | None = None
+        self._qemu: subprocess.Popen[bytes] | None = None
         self._state_created = False
 
     def verify_host(self) -> None:
-        _validated_workflow_context(self._host_env)
+        workflow_sha = _validated_workflow_context(self._host_env)
+        observed_head = _run(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+            env=self._provider_env,
+            timeout=10,
+        ).stdout.strip().lower()
+        if observed_head != workflow_sha:
+            raise OrchestratorError("trusted orchestrator checkout mismatch")
+        dirty = _run(
+            ["git", "-C", str(ROOT), "status", "--porcelain=v1"],
+            env=self._provider_env,
+            timeout=10,
+        ).stdout
+        if dirty:
+            raise OrchestratorError("trusted orchestrator checkout is dirty")
         if platform.system() != "Darwin" or platform.machine() != "x86_64":
             raise OrchestratorError("E2E orchestrator requires Intel macOS")
         if os.geteuid() == 0:
             raise OrchestratorError("E2E orchestrator must be non-root")
+        _require_host_free_space(ORCHESTRATOR_HOME)
+        _require_host_free_space(Path(tempfile.gettempdir()))
         try:
             account = pwd.getpwuid(os.geteuid())
         except KeyError as exc:
@@ -446,7 +492,7 @@ class _SystemLifecycle:
             "image_digest": IMAGE_DIGEST,
             "cpus": 4,
             "memory_mib": 6144,
-            "disk_gib": 30,
+            "disk_gib": GUEST_DISK_GIB,
             "python_version": PYTHON_VERSION,
             "python_abi": PYTHON_ABI,
             "network": False,
@@ -527,6 +573,11 @@ class _SystemLifecycle:
             _run(commands[4], env=git_env, timeout=60)
             if not bundle.is_file():
                 raise OrchestratorError("target bundle was not created")
+            _require_bounded_file(
+                bundle,
+                max_bytes=TARGET_BUNDLE_MAX_BYTES,
+                label="target bundle",
+            )
             return bundle
         finally:
             git_env.pop(HOST_TOKEN_ENV, None)
@@ -553,6 +604,20 @@ class _SystemLifecycle:
         shutil.copy2(bundle, payload / "target.bundle")
         shutil.copy2(TRUSTED_RUNTIME_LOCK, payload / "runtime.lock")
         shutil.copytree(wheelhouse, payload / "wheels")
+        harness_root = payload / "trusted-harness"
+        trusted_root = ROOT.resolve(strict=True)
+        for relative in TRUSTED_HARNESS_FILES:
+            candidate = ROOT / relative
+            if candidate.is_symlink() or not candidate.is_file():
+                raise OrchestratorError("trusted harness source is not a regular file")
+            source = candidate.resolve(strict=True)
+            try:
+                source.relative_to(trusted_root)
+            except ValueError as exc:
+                raise OrchestratorError("trusted harness path escapes repository") from exc
+            destination = harness_root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
         bootstrap = payload / "bootstrap.sh"
         bootstrap.write_text(_bootstrap_script(target), encoding="utf-8")
         bootstrap.chmod(0o700)
@@ -573,8 +638,6 @@ class _SystemLifecycle:
         seed_iso = root / "seed.iso"
         payload_iso = root / "payload.iso"
         overlay = root / "overlay.qcow2"
-        serial = root / "serial.log"
-
         _run(
             _iso_command(seed_dir, seed_iso, "cidata"),
             env=self._provider_env,
@@ -591,7 +654,7 @@ class _SystemLifecycle:
             timeout=60,
         )
 
-        self._serial = serial
+        self._serial_output = None
 
     def start_guest(self) -> None:
         root = self._ensure_temp()
@@ -599,30 +662,65 @@ class _SystemLifecycle:
             root / "overlay.qcow2",
             root / "seed.iso",
             root / "payload.iso",
-            root / "serial.log",
         )
         self._qemu = subprocess.Popen(
             command,
             env=self._provider_env,
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            text=True,
+            text=False,
+            bufsize=0,
         )
 
     def wait_guest(self) -> int:
-        if self._qemu is None:
+        if self._qemu is None or self._qemu.stdout is None:
             raise OrchestratorError("QEMU guest was not started")
+
+        stream = self._qemu.stdout
+        fd = stream.fileno()
+        os.set_blocking(fd, False)
+        selector = selectors.DefaultSelector()
+        selector.register(fd, selectors.EVENT_READ)
+        output = bytearray()
+        deadline = time.monotonic() + 1200.0
         try:
-            return int(self._qemu.wait(timeout=1200))
-        except subprocess.TimeoutExpired as exc:
-            raise OrchestratorError("QEMU guest timed out") from exc
+            while True:
+                status = self._qemu.poll()
+                for _key, _events in selector.select(timeout=0.1):
+                    while True:
+                        try:
+                            chunk = os.read(fd, 65536)
+                        except BlockingIOError:
+                            break
+                        if not chunk:
+                            break
+                        output.extend(chunk)
+                        if len(output) > SERIAL_MAX_BYTES:
+                            raise OrchestratorError("serial output exceeded limit")
+                if status is not None:
+                    while True:
+                        try:
+                            chunk = os.read(fd, 65536)
+                        except BlockingIOError:
+                            break
+                        if not chunk:
+                            break
+                        output.extend(chunk)
+                        if len(output) > SERIAL_MAX_BYTES:
+                            raise OrchestratorError("serial output exceeded limit")
+                    self._serial_output = bytes(output)
+                    return int(status)
+                if time.monotonic() >= deadline:
+                    raise OrchestratorError("QEMU guest timed out")
+        finally:
+            selector.close()
 
     def verify_result(self, target: str) -> None:
-        if self._serial is None or not self._serial.is_file():
-            raise OrchestratorError("guest serial result log is unavailable")
+        if self._serial_output is None:
+            raise OrchestratorError("guest serial result is unavailable")
         _parse_serial_result(
-            self._serial.read_text(encoding="utf-8", errors="replace"),
+            self._serial_output.decode("utf-8", errors="replace"),
             target,
         )
 
@@ -643,7 +741,7 @@ class _SystemLifecycle:
                 self._temp.cleanup()
                 self._temp = None
                 self._root = None
-                self._serial = None
+                self._serial_output = None
         except OSError as exc:
             cleanup_error = exc
 

@@ -6,7 +6,7 @@
   "image_digest": "sha256:117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477",
   "cpus": 4,
   "memory_mib": 6144,
-  "disk_gib": 30,
+  "disk_gib": 8,
   "python_version": "3.14",
   "python_abi": "cp314",
   "network": false,

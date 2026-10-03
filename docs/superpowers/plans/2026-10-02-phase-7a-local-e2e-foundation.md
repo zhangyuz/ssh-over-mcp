@@ -4,7 +4,7 @@
 
 **Goal:** Establish a production-representative local Linux E2E safety net from authenticated MCP ingress through real SSH/ForceCommand/containment to workload/filesystem/audit behavior without weakening ordinary CI.
 
-**Architecture:** A dedicated non-admin native macOS x86 orchestrator executes only trusted-main orchestration code. It fetches the exact target into a temporary bare Git repository, prepares a hash-verified Python 3.14 linux/amd64 wheelhouse from trusted-main `requirements/runtime.lock`, builds read-only cloud-init/payload media, and boots a fresh pinned Ubuntu 26.04 QEMU/HVF guest with `-nic none`. Capability-bearing target code runs only inside the VM. Guest bootstrap clones the exact bundle, installs runtime dependencies offline, and runs real sshd → ForceCommand → fixed launcher → host-agent → containment → workload. Results return only through a commit-bound serial record. In-guest cleanup is verified and the QEMU process/overlay/media/log/temp host state are destroyed after every run.
+**Architecture:** A dedicated non-admin native macOS x86 orchestrator executes only trusted-main orchestration code. It fetches the exact target into a temporary bare Git repository, prepares a hash-verified Python 3.14 linux/amd64 wheelhouse from trusted-main `requirements/runtime.lock`, builds read-only cloud-init/payload media, and boots a fresh pinned Ubuntu 26.04 QEMU/HVF guest with `-nic none`. Capability-bearing target code runs only inside the VM. Guest bootstrap clones the exact bundle, installs runtime dependencies offline, and runs real sshd → ForceCommand → fixed launcher → host-agent → containment → workload. Results return only through a trusted-main, commit-bound record on a 2 MiB-bounded host serial stream. In-guest cleanup is verified and the QEMU process/overlay/media/log/temp host state are destroyed after every run.
 
 **Tech Stack:** macOS x86_64, QEMU 11.1.2 with Hypervisor.framework (`hvf`), pinned Ubuntu 26.04 x86_64 cloud image, cloud-init seed/payload ISO media, Python 3.14 runtime wheelhouse plus ordinary Python 3.13/3.14 CI, OpenSSH, sudo, Linux capabilities via `prctl/capset`, cgroup v2, AsyncSSH, MCP Python SDK v2 Streamable HTTP, Security Ledger Unix sockets/SQLite, pytest, GitHub Actions self-hosted runners.
 
@@ -39,14 +39,16 @@
 
 ## PR / Slice Sequence
 
-1. **7A1-bootstrap PR — Tasks 1–2:** land launcher source, disposable-guest orchestrator/config, guest gate source, trusted-main manual workflow, and static/security tests. This PR does not claim target-commit live E2E success because its workflow definition is not trusted-main until merge.
-2. Operator provisions only the dedicated native macOS `gha-e2e-orchestrator` account/runner, QEMU 11.1.2, and the pinned Ubuntu base image; no root helper/sudo policy is installed on the persistent host.
-3. **7A1-live PR — Task 3:** prove real sshd → launcher → host-agent → manager → cgroup → workload inside a fresh disposable guest for the exact PR head using the already-trusted workflow from main.
-4. **7A2 PR — Tasks 4–5:** happy-path MCP/Ledger/SSH/filesystem/audit/multi-profile E2E in fresh guests.
-5. **7A3 PR — Tasks 6–7:** adversarial/fail-closed E2E in fresh guests.
-6. **7A4 PR — Tasks 8–9:** gate documentation, whole-phase review, exact-target/merge-main E2E closure, cleanup.
+1. **7A1-bootstrap PR — Tasks 1–2:** land the initial disposable-guest provider/workflow contracts. No target-commit live E2E claim.
+2. **7A1-trusted-gate PR — Task 3A:** complete and harden the trusted-main host orchestrator/root guest gate/provider contracts. This PR uses ordinary exact-head CI/review only; it MUST NOT count an E2E run produced by its own unmerged gate as Level-3 evidence.
+3. Merge 7A1-trusted-gate and require exact merge-main ordinary CI. Only then does that gate become E2E authority.
+4. Operator provisions the dedicated native macOS `gha-e2e-orchestrator` account/runner, QEMU 11.1.2, and the pinned Ubuntu base image; no root helper/sudo policy is installed on the persistent host.
+5. **7A1-target-fixture PR — Task 3B:** add/restore target manager/probe/support/launcher behavior and prove real sshd → launcher → host-agent → manager → cgroup → workload for the exact PR head using the already-merged trusted-main gate.
+6. **7A2 PR — Tasks 4–5:** happy-path MCP/Ledger/SSH/filesystem/audit/multi-profile E2E in fresh guests.
+7. **7A3 PR — Tasks 6–7:** adversarial/fail-closed E2E in fresh guests.
+8. **7A4 PR — Tasks 8–9:** gate documentation, whole-phase review, exact-target/merge-main E2E closure, cleanup.
 
-The bootstrap ordering is intentional: an unmerged PR cannot modify the host-side workflow/orchestrator used as its own privileged-test authority. Once the bootstrap PR is merged, the trusted-main orchestrator may transfer and execute later exact target commits only inside disposable guests.
+The ordering is a security invariant, not project-management preference: a target commit cannot define the root authority which certifies that same target. Trusted gate/orchestrator changes merge first; later exact target commits are evaluated only by the previously merged authority.
 
 ## Review Focus
 
@@ -175,15 +177,15 @@ git commit -m "Ops: add fixed host-agent capability launcher"
 - Orchestrator accepts exactly one target 40-hex commit and no target-controlled path/command input.
 - Fixed QEMU provider: `qemu-system-x86_64`/`qemu-img` version `11.1.2`, HVF acceleration, x86_64.
 - Fixed Ubuntu 26.04 server cloud image dated `2026-07-20`, digest `sha256:117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477`.
-- Provider args include `-nic none`, `-display none`, `-monitor none`, fixed serial file output, read-only seed/payload media, and one disposable qcow2 overlay. No 9p/virtiofs/share/socket passthrough is allowed.
+- Provider args include `-nic none`, `-display none`, `-monitor none`, fixed bounded serial stdio output, read-only seed/payload media, and one disposable qcow2 overlay. No 9p/virtiofs/share/socket passthrough is allowed.
 - Host target fetch occurs in a temporary bare Git repository; no target worktree is checked out on the host.
 - Host builds the guest Python 3.14 linux/amd64 wheelhouse using trusted-main `requirements/runtime.lock`, `pip download --require-hashes --only-binary=:all:` and fixed manylinux/cp314 selectors.
 - Guest receives only: exact target bundle, expected commit, trusted bootstrap, trusted-main runtime lock, hash-verified wheelhouse, and test-scoped metadata through read-only media.
 - GitHub token is host-only and excluded from media, serial, guest environment, and target code.
 - Guest workspace: `/opt/ssh-over-mcp-e2e/workspace`; expected-commit config: `/etc/ssh-over-mcp/live-e2e-gate.conf`.
 - Guest gate executes as root inside the disposable VM only and owns guest identities/sshd/sudo/cgroup/test lifecycle.
-- Host accepts success only after QEMU exits and serial contains exactly one valid `SSH_OVER_MCP_E2E_RESULT=<commit>:PASS` record for the requested target.
-- Host always removes overlay/seed/payload/serial/bare/bundle/wheelhouse temp state in `finally`; stale provider state before run is a hard failure.
+- Host accepts success only after QEMU exits and the bounded serial stream contains exactly one valid `SSH_OVER_MCP_E2E_RESULT=<commit>:PASS` record for the requested target.
+- Host always removes overlay/seed/payload/bare/bundle/wheelhouse temp state in `finally`; stale provider state before run is a hard failure.
 
 - [ ] **Step 1: Write RED no-network provider contract tests**
 
@@ -193,10 +195,10 @@ Require:
 - QEMU command includes `-accel hvf` and `-nic none`;
 - QEMU command contains no `-net`, `-netdev`, user/slirp/tap/socket network backend, 9p, virtiofs, filesystem share, monitor socket, VNC, USB redirection, or target-controlled argument;
 - guest disks/media are explicit argument-array entries: pinned base-backed disposable overlay plus read-only seed/payload media;
-- serial output is a host-owned temporary regular file and is the only result channel;
+- serial output is captured through a host-owned pipe with a 2 MiB hard limit and is the only result channel;
 - target repository is initialized/fetched as bare and never checked out/executed on host;
 - runtime wheel download uses trusted-main lock with `--require-hashes`, `--only-binary=:all:`, cp314/manylinux x86_64 selectors, and no target-controlled requirement path/index URL;
-- payload manifest contains only allowlisted files and their SHA-256 values;
+- payload manifest contains only allowlisted files and their SHA-256 values; only the trusted-main root guest gate is copied separately from the target bundle onto the read-only payload; target manager/probe/support files remain in the exact target workspace and are executed only after the root gate has dropped to the fixed non-root identity;
 - GitHub token/host secrets are absent from QEMU environment, seed, payload, and serial contract;
 - cloud-init bootstrap performs no apt/network operation and installs wheels with `--no-index` from payload;
 - exact guest checkout HEAD is verified before guest gate invocation;
@@ -245,7 +247,7 @@ Cloud-init/seed logic must:
 - install trusted runtime lock from local wheelhouse only (`--no-index --find-links ... --require-hashes`);
 - clone target bundle locally, detach checkout exact expected SHA, and verify it;
 - write root-owned `EXPECTED_COMMIT` config;
-- invoke target guest gate;
+- invoke the trusted-main guest gate from the read-only payload; the target checkout contributes application/product code and launcher behavior under test, not the attestation harness;
 - always run in-guest cleanup path;
 - emit exactly one serial PASS/FAIL result bound to expected SHA and power off.
 
@@ -263,7 +265,7 @@ The workflow run `headSha` still proves trusted-main orchestrator revision, not 
 
 - [ ] **Step 6: Update operator documentation / ADR consistency**
 
-Document QEMU 11.1.2 provisioning, pinned base-image cache/digest, no-NIC boundary, offline wheelhouse, read-only media, serial result semantics, and cleanup. Explicitly record that Lima/VZ is rejected for Level-3 E2E because its usernet remains reachable from guest root.
+Document QEMU 11.1.2 provisioning, pinned base-image cache/digest, no-NIC boundary, offline wheelhouse, trusted-main read-only guest harness, 2 MiB serial bound, 8 GiB guest disk bound, 16 GiB host free-space floor, 256 MiB target-bundle bound, serial result semantics, and cleanup. Explicitly record that Lima/VZ is rejected for Level-3 E2E because its usernet remains reachable from guest root.
 
 - [ ] **Step 7: Run focused + full ordinary verification and merge hotfix before live provisioning**
 
@@ -273,11 +275,22 @@ Run provider/launcher/gate/workflow contract tests, full ordinary pytest, Ruff, 
 
 ---
 
-### Task 3: Prove the real sshd/launcher/containment fixture end to end
+### Task 3: Complete trusted gate, then prove the target fixture end to end
 
-**Slice:** 7A1-live
+**Trust-sequencing refinement:** Task 3 is executed as two separate PRs.
+
+- **Task 3A / 7A1-trusted-gate:** complete the trusted-main root guest gate/orchestrator/provider contracts. It may reference fixed target paths and enforce non-root execution, but does not include the target manager/probe/support implementations and does not claim full target E2E. Merge it under ordinary exact-head CI/review first.
+- **Task 3B / 7A1-target-fixture:** from the new main, add the target manager/probe/support/launcher behavior and run exact-head Level-3 E2E using the already-merged root gate.
+
+A PR MUST NOT modify the root guest gate/orchestrator used as authority for its own Level-3 PASS result.
+
+**Slice:** 7A1-trusted-gate → 7A1-target-fixture
 
 **Files:**
+- Modify: `ops/live-e2e/ssh-over-mcp-live-e2e-gate`
+- Modify: `ops/live-e2e/ssh-over-mcp-host-agent-launcher.py`
+- Modify: `tests/ops/test_live_e2e_gate_contract.py`
+- Modify: `tests/ops/test_host_agent_capability_launcher_contract.py`
 - Create: `scripts/run-live-local-e2e-manager.py`
 - Create: `scripts/run-live-local-e2e-probe.py`
 - Create: `tests/live/local_e2e_support.py`
@@ -288,7 +301,7 @@ Run provider/launcher/gate/workflow contract tests, full ordinary pytest, Ruff, 
 **Interfaces:**
 - `LocalE2EFixture.from_env() -> LocalE2EFixture` parses only operator-provided fixed metadata and verifies paths/IDs/port.
 - Manager script consumes fixed env values from the disposable-guest gate and creates `CgroupV2Backend` + `ContainmentManagerDispatcher` + `ContainmentManagerService.serve_forever()`.
-- Probe script validates exact commit/clean checkout, emits one bounded JSON metadata record, then runs only `tests/live/test_local_e2e.py` with `SSH_OVER_MCP_RUN_LIVE_LOCAL_E2E=1`.
+- Probe script validates exact commit/clean checkout and probe identity, then invokes the pure-Python assertions in `tests/live/local_e2e_support.py` directly. The guest installs only trusted-main runtime dependencies; `tests/live/test_local_e2e.py` remains the pytest wrapper used in development/ordinary test environments.
 - Initial live test uses production `SSHConnectionManager` + `StructuredSSHTransport`, not raw shell SSH.
 
 - [ ] **Step 1: Write RED fixture/preflight tests**
@@ -297,6 +310,7 @@ Add tests for:
 - required fixture env and exact numeric IDs;
 - loopback host/port and canonical absolute paths;
 - exact private-key/host-key file ownership/mode expected from the guest gate;
+- fixed delegated `host-agent-source` cgroup exists and the launcher moves only its current ForceCommand PID there before UID/capability drop;
 - manager socket owner/group/mode;
 - direct structured SSH execution of the fixed workload-state command.
 
@@ -327,7 +341,8 @@ The probe:
 - verifies `SSH_OVER_MCP_LIVE_EXPECTED_COMMIT`, HEAD, and clean worktree;
 - verifies current process is the guest probe identity `2204:3204` with zero capabilities and no supplementary groups;
 - validates fixture metadata;
-- runs the fixed pytest file with bounded timeout;
+- imports only the fixed `tests.live.local_e2e_support` live entrypoint after adding the fixed workspace/source paths;
+- runs the fixed live assertions with a bounded timeout and no pytest dependency inside the guest;
 - accepts no CLI-selected path/identity/test expression.
 
 - [ ] **Step 4: Implement the real SSH fixture test**
