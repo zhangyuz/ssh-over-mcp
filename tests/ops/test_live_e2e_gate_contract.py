@@ -28,6 +28,16 @@ def _load_gate() -> ModuleType:
     finally:
         sys.modules.pop(name, None)
     return module
+def test_target_e2e_fixture_sources_exist_in_checkout() -> None:
+    required = (
+        ROOT / "scripts" / "run-live-local-e2e-manager.py",
+        ROOT / "scripts" / "run-live-local-e2e-probe.py",
+        ROOT / "tests" / "live" / "local_e2e_support.py",
+        ROOT / "tests" / "live" / "test_local_e2e.py",
+    )
+    assert all(path.is_file() for path in required)
+
+
 def test_gate_constants_pin_guest_only_authority() -> None:
     module = _load_gate()
 
