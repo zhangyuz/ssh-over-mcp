@@ -71,3 +71,47 @@ Phase 7A repository tests do not install users or sudoers on the persistent Mac 
 The disposable guest gate owns guest-local users, sudo policy, launcher installation, sshd state, delegated cgroups, and teardown. Whole-guest destruction is mandatory after the run.
 
 Production installation of the launcher/sudo rule remains an operator action and is not performed by repository tests.
+
+## Persistent macOS E2E orchestrator
+
+Full Level-3 E2E uses a dedicated native Intel-macOS account named `gha-e2e-orchestrator` with the self-hosted runner label `ssh-over-mcp-e2e-orchestrator`.
+
+The account is non-admin, non-root, has **no sudo**, and has an isolated home at `/Users/gha-e2e-orchestrator`. It is separate from the ordinary Docker-based validation runner.
+
+The trusted host provider is Lima 2.2.0 using Virtualization.framework (`vz`) on x86_64. The guest image is the dated Ubuntu 26.04 server cloud image:
+
+```text
+https://cloud-images.ubuntu.com/releases/resolute/release-20260720/ubuntu-26.04-server-cloudimg-amd64.img
+sha256:117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477
+```
+
+The guest is created with no host filesystem mounts, no product port forwards, containerd disabled, `propagateProxyEnv: false`, and the Lima host resolver disabled. The target commit never becomes a host worktree. The trusted-main orchestrator fetches the exact target into a private temporary bare Git repository and transfers only a Git bundle into the disposable guest.
+
+The host-only read token is used only by Git/askpass while creating the bundle. It is not copied into the guest and is absent from guest command environments.
+
+## Exact target identity
+
+The manual trusted-main workflow accepts exactly one `commit_sha`. The GitHub workflow run `headSha` identifies the trusted-main workflow/orchestrator revision; it is **not** the tested target identity.
+
+The tested commit is authoritative only when all of these are equal:
+
+```text
+workflow commit_sha
+= bare Git target ref object ID
+= guest checkout HEAD
+= root-owned guest EXPECTED_COMMIT
+```
+
+A mismatch fails closed before the guest gate runs.
+
+## Guest lifecycle
+
+The fixed Lima instance name is `ssh-over-mcp-e2e`. If it already exists before a run, orchestration stops for operator inspection and does not silently reuse or delete it.
+
+After every attempted run, the orchestrator executes the equivalent of:
+
+```text
+limactl delete --force ssh-over-mcp-e2e
+```
+
+and verifies the instance is absent. In-guest process/socket/cgroup/key/data cleanup remains part of the test, but destruction of the **whole disposable guest** is the final outer containment boundary.

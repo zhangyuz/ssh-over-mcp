@@ -403,3 +403,50 @@ production/resource/recursive-kill phase: 4 passed
 Post-run verification confirms `/sys/fs/cgroup/ssh-over-mcp-live` is absent and
 the `gha-live` sudo policy contains exactly one command:
 `/usr/local/libexec/ssh-over-mcp-live-cgroup-gate`.
+
+## Disposable full-E2E orchestrator
+
+Phase 7A full-product E2E does **not** run capability-bearing target code on a persistent Linux runner. ADR 0006 requires a disposable Linux VM for every Level-3 run.
+
+The persistent host role is a dedicated native Intel-macOS account:
+
+```text
+account: gha-e2e-orchestrator
+runner label: ssh-over-mcp-e2e-orchestrator
+home: /Users/gha-e2e-orchestrator
+```
+
+The account is non-admin, non-root, and has **no sudo**. It must not be reused for ordinary validation jobs.
+
+Host prerequisites:
+- Intel macOS x86_64 with Hypervisor support;
+- Lima 2.2.0;
+- trusted-main repository checkout only for the orchestrator source;
+- no Docker socket requirement;
+- no production SSH keys, Cloudflare credentials, Ledger secrets, or application credentials.
+
+The E2E provider is a fresh Lima `vz` Ubuntu 26.04 x86_64 guest using:
+
+```text
+https://cloud-images.ubuntu.com/releases/resolute/release-20260720/ubuntu-26.04-server-cloudimg-amd64.img
+sha256:117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477
+```
+
+The guest has no host filesystem mounts or product port-forward dependency; containerd is disabled, `propagateProxyEnv` is false, and the Lima host resolver is disabled. The target commit never becomes a host worktree. The orchestrator uses a private temporary bare repository and transfers the target only as a Git bundle.
+
+The trusted workflow is manual-only from `main` and receives one exact `commit_sha`. The workflow run `headSha` identifies the trusted-main workflow revision, not the tested commit.
+
+Target identity is established by equality of:
+
+```text
+commit_sha
+= bare target ref
+= guest checkout HEAD
+= guest EXPECTED_COMMIT
+```
+
+The GitHub read token remains host-only and is not present in guest command environments.
+
+The fixed instance name is `ssh-over-mcp-e2e`. A pre-existing instance is a hard failure requiring operator inspection. After a run, the host orchestrator performs `limactl delete --force ssh-over-mcp-e2e`, verifies the instance is absent, and removes the temporary bare repository/bundle.
+
+In-guest cleanup is still tested independently. Destroying the whole disposable guest is an additional containment boundary, not a substitute for product cleanup assertions.
