@@ -52,3 +52,15 @@ def test_probe_does_not_persist_git_safe_directory_configuration() -> None:
     assert "git config --global" not in source
     assert "git config --system" not in source
     assert "safe.directory=*" not in source
+
+
+def test_probe_runs_fixed_ssh_then_mcp_e2e_without_selector() -> None:
+    source = PROBE.read_text(encoding="utf-8")
+
+    ssh_call = "local_e2e_support.run_real_ssh_fixture()"
+    mcp_call = "local_e2e_support.run_real_mcp_fixture()"
+    assert ssh_call in source
+    assert mcp_call in source
+    assert source.index(ssh_call) < source.index(mcp_call)
+    assert "getattr(local_e2e_support" not in source
+    assert "pytest" not in source

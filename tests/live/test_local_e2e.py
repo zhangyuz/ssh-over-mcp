@@ -185,3 +185,38 @@ def test_remote_result_classifies_other_stderr_as_generic_without_echoing_secret
         module._require_successful_remote_result(result)
 
     assert "SUPERSECRET" not in str(exc.value)
+
+
+def test_local_mcp_harness_contract_is_explicit() -> None:
+    import inspect
+
+    module = _load_support()
+    harness = getattr(module, "LocalMCPHarness", None)
+    assert harness is not None, "Task 4 requires a real local MCP/Ledger harness"
+
+    client = getattr(harness, "client", None)
+    assert client is not None
+    parameters = inspect.signature(client).parameters
+    assert tuple(parameters) == ("self", "profile", "policy_variant")
+    assert parameters["profile"].default is inspect.Parameter.empty
+    assert parameters["policy_variant"].default == "normal"
+
+
+@pytest.mark.skipif(
+    not _RUN_LIVE or not sys.platform.startswith("linux"),
+    reason="dedicated no-network Linux guest only",
+)
+def test_real_mcp_origin_ledger_ssh_happy_path() -> None:
+    module = _load_support()
+    evidence = asyncio.run(module.run_real_mcp_fixture())
+
+    assert evidence["hosts"] == ["e2e-host"]
+    assert evidence["host_alias"] == "e2e-host"
+    assert evidence["request_id"].startswith("req_")
+    assert len(evidence["request_id"]) == 36
+    state = evidence["workload_state"]
+    assert state["uids"] == [2203, 2203, 2203]
+    assert state["gids"] == [3203, 3203, 3203]
+    assert state["groups"] == []
+    assert state["cap_effective"] == 0
+    assert state["no_new_privs"] == 1
