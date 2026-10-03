@@ -14,6 +14,8 @@ HOST_AGENT_GID = 3202
 MANAGER_CLIENT_GID = 3299
 EXPECTED_SUDO_USER = "ssh-over-mcp-e2e-host"
 EXPECTED_ORIGINAL_COMMAND = "mcp-v1"
+HOST_SOURCE_CGROUP = Path("/sys/fs/cgroup/ssh-over-mcp-e2e/host-agent-source")
+EXPECTED_CGROUP_MEMBERSHIP = "/ssh-over-mcp-e2e/host-agent-source"
 
 APPLICATION_SOURCE = Path(
     "/opt/ssh-over-mcp-e2e/workspace/src"
@@ -54,6 +56,8 @@ class _PrivilegeSnapshot:
 class _PrivilegeOps(Protocol):
     def effective_uid(self) -> int: ...
 
+    def enter_source_cgroup(self, path: Path, expected_membership: str) -> None: ...
+
     def set_keepcaps(self, enabled: bool) -> None: ...
 
     def set_groups(self, groups: tuple[int, ...]) -> None: ...
@@ -87,6 +91,19 @@ class _CapData(ctypes.Structure):
 def _raise_errno(label: str) -> None:
     error = ctypes.get_errno()
     raise LauncherError(f"{label} failed with errno {error}")
+
+
+def _parse_unified_cgroup_membership(raw: str) -> str:
+    lines = raw.splitlines()
+    if len(lines) != 1:
+        raise LauncherError("process cgroup membership is not a single unified entry")
+    fields = lines[0].split(":", 2)
+    if len(fields) != 3 or fields[0] != "0" or fields[1] != "":
+        raise LauncherError("process cgroup membership is not unified cgroup v2")
+    membership = fields[2]
+    if not membership.startswith("/"):
+        raise LauncherError("process cgroup membership is invalid")
+    return membership
 
 
 def _status_capabilities() -> tuple[int, int, int, int]:
@@ -124,6 +141,38 @@ class _LinuxPrivilegeOps:
 
     def effective_uid(self) -> int:
         return os.geteuid()
+
+    def enter_source_cgroup(self, path: Path, expected_membership: str) -> None:
+        if path != HOST_SOURCE_CGROUP or expected_membership != EXPECTED_CGROUP_MEMBERSHIP:
+            raise LauncherError("host-agent source cgroup contract is invalid")
+        try:
+            resolved = path.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise LauncherError("host-agent source cgroup is unavailable") from exc
+        if resolved != path or resolved.parent != HOST_SOURCE_CGROUP.parent:
+            raise LauncherError("host-agent source cgroup is not canonical")
+
+        procs = path / "cgroup.procs"
+        flags = os.O_WRONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            fd = os.open(procs, flags)
+            try:
+                data = f"{os.getpid()}\n".encode("ascii")
+                offset = 0
+                while offset < len(data):
+                    written = os.write(fd, data[offset:])
+                    if written <= 0:
+                        raise LauncherError("cannot enter host-agent source cgroup")
+                    offset += written
+            finally:
+                os.close(fd)
+            membership = _parse_unified_cgroup_membership(
+                Path("/proc/self/cgroup").read_text(encoding="ascii")
+            )
+        except (OSError, UnicodeError) as exc:
+            raise LauncherError("cannot enter host-agent source cgroup") from exc
+        if membership != expected_membership:
+            raise LauncherError("host-agent source cgroup verification failed")
 
     def set_keepcaps(self, enabled: bool) -> None:
         result = self._libc.prctl(
@@ -249,6 +298,7 @@ def _drop_and_verify(ops: _PrivilegeOps) -> None:
     if ops.effective_uid() != 0:
         raise LauncherError("launcher must begin with effective uid 0")
 
+    ops.enter_source_cgroup(HOST_SOURCE_CGROUP, EXPECTED_CGROUP_MEMBERSHIP)
     ops.set_keepcaps(True)
     ops.set_groups((MANAGER_CLIENT_GID,))
     ops.set_res_gid(HOST_AGENT_GID)

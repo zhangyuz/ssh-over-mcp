@@ -38,12 +38,13 @@ The launcher begins as root only for a bounded credential/capability transition.
 1. reject every command-line argument;
 2. validate the ForceCommand invocation context, including exact `SSH_ORIGINAL_COMMAND=mcp-v1` and no PTY;
 3. ignore/sanitize caller-controlled Python/import environment;
-4. establish the exact host-agent supplementary-group set, including only the configured manager-client group;
-5. set real/effective/saved GID and UID to the configured non-root host-agent identity;
-6. retain only `CAP_SETUID` and `CAP_SETGID` in effective/permitted sets;
-7. require zero inheritable and ambient capabilities;
-8. verify absence of `CAP_KILL`, `CAP_SYS_ADMIN`, and every other capability;
-9. read back and verify the complete resulting UID/GID/group/capability state.
+4. while still root, move only the current ForceCommand launcher process into the fixed `host-agent-source` cgroup beneath the delegated root and read back the exact unified cgroup-v2 membership; the sshd master remains outside the delegated subtree;
+5. establish the exact host-agent supplementary-group set, including only the configured manager-client group;
+6. set real/effective/saved GID and UID to the configured non-root host-agent identity;
+7. retain only `CAP_SETUID` and `CAP_SETGID` in effective/permitted sets;
+8. require zero inheritable and ambient capabilities;
+9. verify absence of `CAP_KILL`, `CAP_SYS_ADMIN`, and every other capability;
+10. read back and verify the complete resulting UID/GID/group/capability state.
 
 Only after that state is verified may the process enter the host-agent application code.
 
@@ -91,6 +92,7 @@ The managed-host preflight, and the in-guest E2E preflight where applicable, mus
 - launcher owner/mode/path/hash is wrong for the applicable deployment contract;
 - the sudo policy contains any additional authorized command;
 - the ForceCommand context is not exact;
+- the fixed `host-agent-source` cgroup is missing/non-canonical or launcher residency cannot be read back exactly before the identity drop;
 - the post-transition host-agent identity differs from the configured UID/GID/groups;
 - effective/permitted capabilities differ from exactly `CAP_SETUID|CAP_SETGID`;
 - inheritable or ambient capabilities are nonzero;

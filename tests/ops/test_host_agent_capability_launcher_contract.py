@@ -87,6 +87,12 @@ def test_launcher_constants_pin_identity_paths_and_capability_mask() -> None:
     assert module.HOST_AGENT_GID == 3202
     assert module.MANAGER_CLIENT_GID == 3299
     assert module.EXPECTED_SUDO_USER == "ssh-over-mcp-e2e-host"
+    assert module.HOST_SOURCE_CGROUP == Path(
+        "/sys/fs/cgroup/ssh-over-mcp-e2e/host-agent-source"
+    )
+    assert module.EXPECTED_CGROUP_MEMBERSHIP == (
+        "/ssh-over-mcp-e2e/host-agent-source"
+    )
     assert module.APPLICATION_SOURCE == Path(
         "/opt/ssh-over-mcp-e2e/workspace/src"
     )
@@ -160,6 +166,9 @@ class _FakeOps:
         self.calls.append("effective_uid")
         return 0
 
+    def enter_source_cgroup(self, path: Path, expected_membership: str) -> None:
+        self.calls.append(("source_cgroup", path, expected_membership))
+
     def set_keepcaps(self, enabled: bool) -> None:
         self.calls.append(("keepcaps", enabled))
 
@@ -204,6 +213,11 @@ def test_drop_and_verify_has_exact_security_order() -> None:
 
     assert ops.calls == [
         "effective_uid",
+        (
+            "source_cgroup",
+            Path("/sys/fs/cgroup/ssh-over-mcp-e2e/host-agent-source"),
+            "/ssh-over-mcp-e2e/host-agent-source",
+        ),
         ("keepcaps", True),
         ("groups", (3299,)),
         ("gid", 3202),
@@ -265,3 +279,20 @@ def test_main_sanitizes_environment_drops_privilege_then_enters_application(
         "drop_and_verify",
         "application",
     ]
+
+
+def test_parse_unified_cgroup_membership_requires_exact_single_v2_entry() -> None:
+    module = _load_launcher()
+
+    assert module._parse_unified_cgroup_membership(
+        "0::/ssh-over-mcp-e2e/host-agent-source\n"
+    ) == "/ssh-over-mcp-e2e/host-agent-source"
+
+    for raw in (
+        "",
+        "0::/wrong\n1:name=systemd:/legacy\n",
+        "1:name=systemd:/legacy\n",
+        "0::/one\n0::/two\n",
+    ):
+        with pytest.raises(module.LauncherError):
+            module._parse_unified_cgroup_membership(raw)
