@@ -81,7 +81,8 @@ _SSHD = "/usr/sbin/sshd"
 _VISUDO = "/usr/sbin/visudo"
 _PYTHON = "/usr/bin/python3"
 
-_FORCECOMMAND = "/usr/bin/python3 -I -S /usr/local/libexec/ssh-over-mcp-host-agent-launcher.py"
+_LAUNCHER_COMMAND = "/usr/bin/python3 -I -S /usr/local/libexec/ssh-over-mcp-host-agent-launcher.py"
+_FORCECOMMAND = f"/usr/bin/sudo -n {_LAUNCHER_COMMAND}"
 
 
 class GateError(RuntimeError):
@@ -512,7 +513,7 @@ class _SystemGuestOps:
 
         sudoers = (
             f'Defaults:{HOST_USER} env_keep += "SSH_ORIGINAL_COMMAND SSH_TTY"\n'
-            f"{HOST_USER} ALL=(root) NOPASSWD: {_FORCECOMMAND}\n"
+            f"{HOST_USER} ALL=(root) NOPASSWD: {_LAUNCHER_COMMAND}\n"
         )
         SUDOERS_DROPIN.write_text(sudoers, encoding="ascii")
         os.chown(SUDOERS_DROPIN, 0, 0)

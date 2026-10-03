@@ -227,13 +227,18 @@ def test_gate_constants_pin_real_ssh_containment_fixture() -> None:
 
 
 def test_gate_source_pins_forcecommand_and_nonroot_children() -> None:
+    module = _load_gate()
     source = GATE.read_text(encoding="utf-8")
 
     exact_launcher = (
         "/usr/bin/python3 -I -S "
         "/usr/local/libexec/ssh-over-mcp-host-agent-launcher.py"
     )
-    assert exact_launcher in source
+    assert module._LAUNCHER_COMMAND == exact_launcher
+    assert module._FORCECOMMAND == f"/usr/bin/sudo -n {exact_launcher}"
+    assert 'NOPASSWD: {_LAUNCHER_COMMAND}' in source
+    assert 'NOPASSWD: {_FORCECOMMAND}' not in source
+    assert "NOPASSWD: /usr/bin/sudo" not in source
     assert "NOPASSWD: ALL" not in source
     assert "PermitTTY no" in source
     assert "AllowTcpForwarding no" in source
