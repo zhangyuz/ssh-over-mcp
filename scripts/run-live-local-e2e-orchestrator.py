@@ -12,6 +12,7 @@ import selectors
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from collections.abc import Mapping, Sequence
@@ -239,12 +240,17 @@ def _qemu_command(
     ]
 
 
-def _bootstrap_script(target: str) -> str:
+def _bootstrap_script(target: str, payload_archive_digest: str) -> str:
     target = _validated_target_commit(target)
+    if re.fullmatch(r"[0-9a-f]{64}", payload_archive_digest) is None:
+        raise OrchestratorError("payload archive digest must be exact lowercase sha256")
     return f"""#!/bin/bash
 set -u
 EXPECTED_COMMIT='{target}'
 PAYLOAD='/mnt/som-payload'
+ARCHIVE="$PAYLOAD/payload.tar"
+ARCHIVE_SHA='{payload_archive_digest}'
+EXTRACTED="/opt/ssh-over-mcp-e2e/payload"
 WORKSPACE='/opt/ssh-over-mcp-e2e/workspace'
 VENV='/opt/ssh-over-mcp-e2e/venv'
 RESULT='/dev/ttyS0'
@@ -253,9 +259,9 @@ emit_result() {{
   status="$1"
   code="$2"
   if [ "$status" = PASS ]; then
-    printf 'SSH_OVER_MCP_E2E_RESULT=%s:PASS\n' "$EXPECTED_COMMIT" > "$RESULT"
+    printf 'SSH_OVER_MCP_E2E_RESULT=%s:PASS\\n' "$EXPECTED_COMMIT" > "$RESULT"
   else
-    printf 'SSH_OVER_MCP_E2E_RESULT=%s:FAIL:%s\n' "$EXPECTED_COMMIT" "$code" > "$RESULT"
+    printf 'SSH_OVER_MCP_E2E_RESULT=%s:FAIL:%s\\n' "$EXPECTED_COMMIT" "$code" > "$RESULT"
   fi
   sync
 }}
@@ -276,8 +282,37 @@ trap 'finish $?' EXIT
 set -e
 
 mountpoint -q "$PAYLOAD"
+test -f "$ARCHIVE"
+rm -rf "$VENV" "$WORKSPACE" "$EXTRACTED"
+mkdir -p "$EXTRACTED"
 
-python3 - "$PAYLOAD" <<'PYVERIFY'
+python3 - "$ARCHIVE" "$ARCHIVE_SHA" "$EXTRACTED" <<'PYARCHIVE'
+import hashlib
+import sys
+import tarfile
+from pathlib import Path, PurePosixPath
+
+archive = Path(sys.argv[1])
+expected = sys.argv[2]
+root = Path(sys.argv[3])
+digest = hashlib.sha256()
+with archive.open("rb") as stream:
+    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        digest.update(chunk)
+if digest.hexdigest() != expected:
+    raise SystemExit("payload archive digest mismatch")
+with tarfile.open(archive, mode="r:") as stream:
+    members = stream.getmembers()
+    for member in members:
+        relative = PurePosixPath(member.name)
+        if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+            raise SystemExit("payload archive path is unsafe")
+        if not (member.isfile() or member.isdir()):
+            raise SystemExit("payload archive member type is unsafe")
+    stream.extractall(root, members=members, filter="data")
+PYARCHIVE
+
+python3 - "$EXTRACTED" <<'PYVERIFY'
 import hashlib
 import json
 import sys
@@ -292,22 +327,21 @@ for relative, expected in sorted(manifest.items()):
         raise SystemExit(f"payload digest mismatch: {{relative}}")
 PYVERIFY
 
-rm -rf "$VENV" "$WORKSPACE"
 python3 -m venv "$VENV"
-"$VENV/bin/pip" install --no-index --find-links="$PAYLOAD/wheels" --require-hashes -r "$PAYLOAD/runtime.lock"
+"$VENV/bin/pip" install --no-index --find-links="$EXTRACTED/wheels" --require-hashes -r "$EXTRACTED/runtime.lock"
 
 mkdir -p /opt/ssh-over-mcp-e2e
-git clone /mnt/som-payload/target.bundle "$WORKSPACE"
+git clone "$EXTRACTED/target.bundle" "$WORKSPACE"
 git -C "$WORKSPACE" checkout --detach "$EXPECTED_COMMIT"
 test "$(git -C "$WORKSPACE" rev-parse HEAD)" = "$EXPECTED_COMMIT"
 test -z "$(git -C "$WORKSPACE" status --porcelain=v1)"
 
 mkdir -p /etc/ssh-over-mcp
-printf 'EXPECTED_COMMIT=%s\n' "$EXPECTED_COMMIT" > /etc/ssh-over-mcp/live-e2e-gate.conf
+printf 'EXPECTED_COMMIT=%s\\n' "$EXPECTED_COMMIT" > /etc/ssh-over-mcp/live-e2e-gate.conf
 chmod 0600 /etc/ssh-over-mcp/live-e2e-gate.conf
 chown root:root /etc/ssh-over-mcp/live-e2e-gate.conf
 
-PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 "$PAYLOAD/trusted-harness/ops/live-e2e/ssh-over-mcp-live-e2e-gate"
+PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 "$EXTRACTED/trusted-harness/ops/live-e2e/ssh-over-mcp-live-e2e-gate"
 """
 
 
@@ -415,6 +449,35 @@ def _write_askpass(path: Path) -> None:
         encoding="utf-8",
     )
     path.chmod(0o700)
+
+
+def _write_payload_archive(source: Path, archive: Path) -> None:
+    source_root = source.resolve(strict=True)
+    with tarfile.open(archive, mode="w") as stream:
+        for path in sorted(source.rglob("*"), key=lambda item: item.relative_to(source).as_posix()):
+            if path.is_symlink() or not (path.is_file() or path.is_dir()):
+                raise OrchestratorError("payload archive source contains unsafe entry")
+            resolved = path.resolve(strict=True)
+            try:
+                resolved.relative_to(source_root)
+            except ValueError as exc:
+                raise OrchestratorError("payload archive source escapes root") from exc
+
+            def normalize(info: tarfile.TarInfo) -> tarfile.TarInfo:
+                info.uid = 0
+                info.gid = 0
+                info.uname = ""
+                info.gname = ""
+                info.mtime = 0
+                info.mode = 0o755 if info.isdir() else 0o644
+                return info
+
+            stream.add(
+                path,
+                arcname=path.relative_to(source).as_posix(),
+                recursive=False,
+                filter=normalize,
+            )
 
 
 def _write_manifest(payload: Path) -> None:
@@ -596,15 +659,17 @@ class _SystemLifecycle:
         if not wheels or any(path.suffix != ".whl" for path in wheelhouse.iterdir()):
             raise OrchestratorError("runtime wheelhouse is incomplete")
 
-        payload = root / "payload"
+        payload_content = root / "payload-content"
+        payload_iso = root / "payload-iso"
         seed_dir = root / "seed"
-        payload.mkdir(mode=0o700)
+        payload_content.mkdir(mode=0o700)
+        payload_iso.mkdir(mode=0o700)
         seed_dir.mkdir(mode=0o700)
 
-        shutil.copy2(bundle, payload / "target.bundle")
-        shutil.copy2(TRUSTED_RUNTIME_LOCK, payload / "runtime.lock")
-        shutil.copytree(wheelhouse, payload / "wheels")
-        harness_root = payload / "trusted-harness"
+        shutil.copy2(bundle, payload_content / "target.bundle")
+        shutil.copy2(TRUSTED_RUNTIME_LOCK, payload_content / "runtime.lock")
+        shutil.copytree(wheelhouse, payload_content / "wheels")
+        harness_root = payload_content / "trusted-harness"
         trusted_root = ROOT.resolve(strict=True)
         for relative in TRUSTED_HARNESS_FILES:
             candidate = ROOT / relative
@@ -618,11 +683,21 @@ class _SystemLifecycle:
             destination = harness_root / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
-        bootstrap = payload / "bootstrap.sh"
-        bootstrap.write_text(_bootstrap_script(target), encoding="utf-8")
+        (payload_content / "expected_commit").write_text(
+            target + "\n",
+            encoding="ascii",
+        )
+        _write_manifest(payload_content)
+
+        payload_archive = payload_iso / "payload.tar"
+        _write_payload_archive(payload_content, payload_archive)
+        payload_archive_digest = _sha256(payload_archive)
+        bootstrap = payload_iso / "bootstrap.sh"
+        bootstrap.write_text(
+            _bootstrap_script(target, payload_archive_digest),
+            encoding="utf-8",
+        )
         bootstrap.chmod(0o700)
-        (payload / "expected_commit").write_text(target + "\n", encoding="ascii")
-        _write_manifest(payload)
 
         (seed_dir / "meta-data").write_text(
             f"instance-id: ssh-over-mcp-e2e-{target}\n"
@@ -636,7 +711,7 @@ class _SystemLifecycle:
         (seed_dir / "user-data").write_text(_seed_user_data(), encoding="utf-8")
 
         seed_iso = root / "seed.iso"
-        payload_iso = root / "payload.iso"
+        payload_iso_path = root / "payload.iso"
         overlay = root / "overlay.qcow2"
         _run(
             _iso_command(seed_dir, seed_iso, "cidata"),
@@ -644,7 +719,7 @@ class _SystemLifecycle:
             timeout=120,
         )
         _run(
-            _iso_command(payload, payload_iso, "SOM_E2E_PAYLOAD"),
+            _iso_command(payload_iso, payload_iso_path, "SOM_E2E_PAYLOAD"),
             env=self._provider_env,
             timeout=120,
         )

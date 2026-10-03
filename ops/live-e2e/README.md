@@ -89,6 +89,8 @@ The QEMU guest is created with `-nic none`, no host filesystem share/mount, no m
 
 The host-only read token is used only by Git/askpass while creating the bundle. It is not copied into seed/payload media and is absent from guest command environments. The guest installs dependencies offline and returns only a trusted-harness commit-bound result over a host-bounded 2 MiB serial stream.
 
+The payload ISO root intentionally contains only short fixed filenames (`bootstrap.sh` and `payload.tar`). The target bundle, runtime lock, full wheel filenames, and trusted harness live inside `payload.tar`. The bootstrap verifies the archive SHA-256, safely extracts only regular files/directories, then applies the existing per-file manifest and `pip --require-hashes` checks. This avoids Linux ISO9660/Joliet filename-view differences truncating wheel filenames while preserving both archive-level and file-level integrity checks.
+
 ## Exact target identity
 
 The manual trusted-main workflow accepts exactly one `commit_sha`. The GitHub workflow run `headSha` identifies the trusted-main workflow/orchestrator revision; it is **not** the tested target identity.

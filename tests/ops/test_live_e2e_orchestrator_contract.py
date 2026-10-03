@@ -6,6 +6,7 @@ import inspect
 import json
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 from types import ModuleType
 
@@ -255,6 +256,44 @@ def test_iso_command_is_fixed() -> None:
     ]
 
 
+def test_payload_archive_preserves_long_wheel_names(tmp_path: Path) -> None:
+    module = _load_script()
+    content = tmp_path / "payload-content"
+    wheels = content / "wheels"
+    wheels.mkdir(parents=True)
+    long_name = "annotated_types-0.8.0-py3-none-any.whl"
+    (wheels / long_name).write_bytes(b"wheel-bytes")
+    (content / "runtime.lock").write_text("locked\n", encoding="utf-8")
+    archive = tmp_path / "payload.tar"
+
+    module._write_payload_archive(content, archive)
+
+    with tarfile.open(archive, mode="r:") as stream:
+        names = stream.getnames()
+        assert f"wheels/{long_name}" in names
+        assert "runtime.lock" in names
+        for member in stream.getmembers():
+            assert member.isfile() or member.isdir()
+            assert member.uid == 0
+            assert member.gid == 0
+            assert member.uname == ""
+            assert member.gname == ""
+
+
+def test_prepare_guest_archives_long_name_content_before_iso() -> None:
+    module = _load_script()
+    source = inspect.getsource(module._SystemLifecycle.prepare_guest)
+
+    assert "payload-content" in source
+    assert "payload-iso" in source
+    assert "_write_manifest(payload_content)" in source
+    assert "_write_payload_archive(payload_content, payload_archive)" in source
+    assert "_sha256(payload_archive)" in source
+    assert "_bootstrap_script(target, payload_archive_digest)" in source
+    assert "_iso_command(payload_iso" in source
+    assert "shutil.copytree(wheelhouse, payload_content / \"wheels\")" in source
+
+
 def test_seed_masks_wait_online_before_no_network_final_stage() -> None:
     module = _load_script()
     user_data = module._seed_user_data()
@@ -273,19 +312,28 @@ def test_seed_masks_wait_online_before_no_network_final_stage() -> None:
 def test_trusted_bootstrap_is_offline_and_commit_bound() -> None:
     module = _load_script()
     target = "a" * 40
-    script = module._bootstrap_script(target)
+    archive_digest = "b" * 64
+    script = module._bootstrap_script(target, archive_digest)
 
     assert target in script
+    assert archive_digest in script
     assert "--no-index" in script
     assert "--require-hashes" in script
     assert "/opt/ssh-over-mcp-e2e/venv" in script
     assert "python3 -m venv" in script
-    assert "git clone /mnt/som-payload/target.bundle" in script
+    assert 'ARCHIVE="$PAYLOAD/payload.tar"' in script
+    assert "tarfile.open" in script
+    assert 'EXTRACTED="/opt/ssh-over-mcp-e2e/payload"' in script
+    assert 'git clone "$EXTRACTED/target.bundle"' in script
+    assert '"$EXTRACTED/wheels"' in script
+    assert '"$EXTRACTED/runtime.lock"' in script
+    assert 'root = Path(sys.argv[1])' in script
     assert "SSH_OVER_MCP_E2E_RESULT=" in script
     assert "/dev/ttyS0" in script
     assert "trap - EXIT" in script
     assert 'mountpoint -q "$PAYLOAD"' in script
     assert "mount -o" not in script
+    assert "/mnt/som-payload/wheels" not in script
     for forbidden in (
         "apt-get",
         "apt ",
@@ -505,8 +553,8 @@ def test_payload_trusts_only_the_root_guest_gate_from_main() -> None:
         'ops/live-e2e/ssh-over-mcp-live-e2e-gate',
     )
 
-    bootstrap = module._bootstrap_script('a' * 40)
-    assert '$PAYLOAD/trusted-harness/ops/live-e2e/ssh-over-mcp-live-e2e-gate' in bootstrap
+    bootstrap = module._bootstrap_script('a' * 40, 'b' * 64)
+    assert '$EXTRACTED/trusted-harness/ops/live-e2e/ssh-over-mcp-live-e2e-gate' in bootstrap
     assert '$WORKSPACE/ops/live-e2e/ssh-over-mcp-live-e2e-gate' not in bootstrap
 
     source = inspect.getsource(module._SystemLifecycle.prepare_guest)
