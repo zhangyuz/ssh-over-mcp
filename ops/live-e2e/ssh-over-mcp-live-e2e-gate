@@ -334,6 +334,26 @@ def _account_absent(*, name: str, numeric_id: int, user: bool) -> None:
     raise GateError(f"fixture numeric identity already exists: {numeric_id}")
 
 
+def _classify_sshd_stage(raw: str) -> str:
+    if "Starting session: forced-command" in raw:
+        return "FORCECOMMAND_STARTED"
+    if "Accepted publickey for " in raw:
+        return "AUTH_ACCEPTED"
+    if "Failed publickey for " in raw:
+        return "AUTH_REJECTED"
+    if "Connection from " in raw:
+        return "TCP_CONNECTED"
+    return "NO_SSH_ACTIVITY"
+
+
+def _read_sshd_stage() -> str:
+    try:
+        raw = SSHD_LOG.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "NO_SSH_ACTIVITY"
+    return _classify_sshd_stage(raw)
+
+
 def _fixed_child_env() -> dict[str, str]:
     return {
         "HOME": "/opt/ssh-over-mcp-e2e",
@@ -813,7 +833,10 @@ LogLevel VERBOSE
             groups=(),
             env=self._probe_env(),
         )
-        return _wait_pid(pid, timeout_seconds=300.0)
+        result = _wait_pid(pid, timeout_seconds=300.0)
+        if result != 0:
+            print(f"local E2E sshd stage: {_read_sshd_stage()}", file=sys.stderr)
+        return result
 
     def _cleanup_cgroup(self) -> None:
         if not CGROUP_ROOT.exists():

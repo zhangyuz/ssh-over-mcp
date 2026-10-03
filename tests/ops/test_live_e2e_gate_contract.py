@@ -403,3 +403,68 @@ def test_identity_cleanup_rejects_absent_name_with_reused_numeric_gid(
 
     with pytest.raises(module.GateError, match="numeric identity"):
         ops._remove_identities()
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("", "NO_SSH_ACTIVITY"),
+        ("Connection from 127.0.0.1 port 50000 on 127.0.0.1 port 22222\n", "TCP_CONNECTED"),
+        (
+            (
+                "Connection from 127.0.0.1 port 50000 on 127.0.0.1 port 22222\n"
+                "Failed publickey for ssh-over-mcp-e2e-host from 127.0.0.1 port 50000 ssh2\n"
+            ),
+            "AUTH_REJECTED",
+        ),
+        (
+            "Accepted publickey for ssh-over-mcp-e2e-host from 127.0.0.1 port 50000 ssh2: ED25519 SHA256:SECRET\n",
+            "AUTH_ACCEPTED",
+        ),
+        (
+            (
+                "Accepted publickey for ssh-over-mcp-e2e-host from 127.0.0.1 port 50000 ssh2: ED25519 SHA256:SECRET\n"
+                "Starting session: forced-command (config) for ssh-over-mcp-e2e-host from 127.0.0.1 port 50000 id 0\n"
+            ),
+            "FORCECOMMAND_STARTED",
+        ),
+    ],
+)
+def test_sshd_failure_stage_is_fixed_enum(raw: str, expected: str) -> None:
+    module = _load_gate()
+
+    observed = module._classify_sshd_stage(raw)
+
+    assert observed == expected
+    assert observed in {
+        "NO_SSH_ACTIVITY",
+        "TCP_CONNECTED",
+        "AUTH_REJECTED",
+        "AUTH_ACCEPTED",
+        "FORCECOMMAND_STARTED",
+    }
+    assert "SECRET" not in observed
+    assert "127.0.0.1" not in observed
+
+
+def test_failed_probe_emits_only_fixed_sshd_stage(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_gate()
+    ops = module._SystemGuestOps()
+    ops._expected_commit = "a" * 40
+    monkeypatch.setattr(ops, "_verify_privileged_fixture", lambda: None)
+    monkeypatch.setattr(
+        module,
+        "_spawn_nonroot_child",
+        lambda *args, **kwargs: 123,
+    )
+    monkeypatch.setattr(module, "_wait_pid", lambda *args, **kwargs: 70)
+    monkeypatch.setattr(module, "_read_sshd_stage", lambda: "AUTH_ACCEPTED")
+
+    assert ops.run_probe() == 70
+
+    captured = capsys.readouterr()
+    assert captured.err == "local E2E sshd stage: AUTH_ACCEPTED\n"
+    assert "SUPERSECRET" not in captured.err
