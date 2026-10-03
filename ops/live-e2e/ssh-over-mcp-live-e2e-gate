@@ -865,26 +865,29 @@ LogLevel VERBOSE
         self._created_groups.clear()
 
     def cleanup(self) -> None:
-        failures: list[BaseException] = []
+        failures: list[tuple[str, BaseException]] = []
 
-        for attr in ("_sshd_pid", "_manager_pid"):
+        for stage, attr in (("sshd", "_sshd_pid"), ("manager", "_manager_pid")):
             pid = getattr(self, attr)
             try:
                 _stop_pid(pid)
             except BaseException as exc:  # noqa: BLE001 - teardown must aggregate every failure
-                failures.append(exc)
+                failures.append((stage, exc))
             setattr(self, attr, None)
 
         try:
             self._cleanup_cgroup()
         except BaseException as exc:  # noqa: BLE001 - teardown must aggregate every failure
-            failures.append(exc)
+            failures.append(("cgroup", exc))
 
-        for path in (SUDOERS_DROPIN, LAUNCHER_INSTALL):
+        for stage, path in (
+            ("sudoers", SUDOERS_DROPIN),
+            ("launcher", LAUNCHER_INSTALL),
+        ):
             try:
                 self._remove_artifact(path)
             except BaseException as exc:  # noqa: BLE001 - teardown must aggregate every failure
-                failures.append(exc)
+                failures.append((stage, exc))
 
         try:
             if HOST_POLICY.exists():
@@ -893,23 +896,25 @@ LogLevel VERBOSE
                     raise GateError("host policy path changed before cleanup")
                 HOST_POLICY.unlink()
         except BaseException as exc:  # noqa: BLE001 - teardown must aggregate every failure
-            failures.append(exc)
+            failures.append(("host_policy", exc))
 
         try:
             self._remove_identities()
         except BaseException as exc:  # noqa: BLE001 - teardown must aggregate every failure
-            failures.append(exc)
+            failures.append(("identities", exc))
 
         try:
             if RUNTIME.exists():
                 shutil.rmtree(RUNTIME)
         except BaseException as exc:  # noqa: BLE001 - teardown must aggregate every failure
-            failures.append(exc)
+            failures.append(("runtime", exc))
 
         if failures:
             raise GateError(
                 "guest fixture cleanup failed: "
-                + "; ".join(type(exc).__name__ for exc in failures)
+                + "; ".join(
+                    f"{stage}:{type(exc).__name__}" for stage, exc in failures
+                )
             )
 
     def verify_clean(self) -> None:

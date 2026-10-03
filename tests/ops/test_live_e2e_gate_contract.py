@@ -137,6 +137,24 @@ class _FakeGuestOps:
         self.events.append("verify_clean")
 
 
+def test_guest_gate_cleanup_reports_only_fixed_stage_labels() -> None:
+    module = _load_gate()
+    source = inspect.getsource(module._SystemGuestOps.cleanup)
+
+    for stage in (
+        "sshd",
+        "manager",
+        "cgroup",
+        "sudoers",
+        "launcher",
+        "host_policy",
+        "identities",
+        "runtime",
+    ):
+        assert f'"{stage}"' in source
+    assert 'f"{stage}:{type(exc).__name__}"' in source
+
+
 def test_guest_gate_cleanup_runs_after_success() -> None:
     module = _load_gate()
     ops = _FakeGuestOps()

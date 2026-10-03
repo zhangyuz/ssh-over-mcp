@@ -40,19 +40,30 @@ def _verify_process() -> None:
         raise RuntimeError("probe does not have no_new_privs")
 
 
+def _git_command(*args: str) -> list[str]:
+    return [
+        "/usr/bin/git",
+        "-c",
+        f"safe.directory={_WORKSPACE}",
+        "-C",
+        str(_WORKSPACE),
+        *args,
+    ]
+
+
 def _verify_checkout() -> str:
     expected = os.environ.get("SSH_OVER_MCP_LIVE_EXPECTED_COMMIT", "").lower()
     if _COMMIT_RE.fullmatch(expected) is None:
         raise RuntimeError("expected commit is invalid")
     observed = subprocess.check_output(
-        ["/usr/bin/git", "-C", str(_WORKSPACE), "rev-parse", "HEAD"],
+        _git_command("rev-parse", "HEAD"),
         text=True,
         timeout=20,
     ).strip().lower()
     if observed != expected:
         raise RuntimeError("probe checkout commit mismatch")
     dirty = subprocess.check_output(
-        ["/usr/bin/git", "-C", str(_WORKSPACE), "status", "--porcelain=v1"],
+        _git_command("status", "--porcelain=v1"),
         text=True,
         timeout=20,
     )
