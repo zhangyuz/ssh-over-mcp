@@ -778,7 +778,34 @@ LogLevel VERBOSE
         )
         return env
 
+    def _verify_privileged_fixture(self) -> None:
+        for path in (CGROUP_ROOT, HOST_SOURCE_CGROUP):
+            try:
+                info = path.lstat()
+            except OSError as exc:
+                raise GateError(f"privileged fixture directory is unavailable: {path}") from exc
+            if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                raise GateError(f"privileged fixture path is not a directory: {path}")
+            if (info.st_uid, info.st_gid) != (MANAGER_UID, MANAGER_GID):
+                raise GateError(f"privileged fixture directory identity mismatch: {path}")
+            if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+                raise GateError(f"privileged fixture directory is broadly writable: {path}")
+
+        try:
+            info = MANAGER_ENDPOINT.lstat()
+        except OSError as exc:
+            raise GateError("manager endpoint is unavailable before probe") from exc
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISSOCK(info.st_mode):
+            raise GateError("manager endpoint is not a Unix socket before probe")
+        if (
+            info.st_uid != MANAGER_UID
+            or info.st_gid != MANAGER_CLIENT_GID
+            or stat.S_IMODE(info.st_mode) != 0o660
+        ):
+            raise GateError("manager endpoint identity/mode mismatch before probe")
+
     def run_probe(self) -> int:
+        self._verify_privileged_fixture()
         pid = _spawn_nonroot_child(
             [str(VENV_PYTHON), str(_PROBE)],
             uid=PROBE_UID,
@@ -858,10 +885,25 @@ LogLevel VERBOSE
             if result.returncode != 0:
                 raise GateError(f"cannot remove fixture user: {name}")
         self._created_users.clear()
+
+        group_ids = {
+            MANAGER_GROUP: MANAGER_GID,
+            HOST_GROUP: HOST_GID,
+            WORKLOAD_GROUP: WORKLOAD_GID,
+            PROBE_GROUP: PROBE_GID,
+            MANAGER_CLIENT_GROUP: MANAGER_CLIENT_GID,
+        }
         for name in reversed(self._created_groups):
+            gid = group_ids[name]
+            try:
+                grp.getgrnam(name)
+            except KeyError:
+                _account_absent(name=name, numeric_id=gid, user=False)
+                continue
             result = _run([_GROUPDEL, name], timeout=20, check=False)
             if result.returncode != 0:
                 raise GateError(f"cannot remove fixture group: {name}")
+            _account_absent(name=name, numeric_id=gid, user=False)
         self._created_groups.clear()
 
     def cleanup(self) -> None:

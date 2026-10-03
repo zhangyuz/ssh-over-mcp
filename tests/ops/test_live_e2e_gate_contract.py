@@ -333,3 +333,73 @@ def test_guest_gate_runtime_verifies_only_trusted_root_gate_payload() -> None:
     assert '_MANAGER_SCRIPT' not in helper
     assert '_PROBE' not in helper
     assert '_SUPPORT' not in helper
+
+
+def test_root_gate_verifies_privileged_fixture_before_probe_drop() -> None:
+    module = _load_gate()
+    run_probe = inspect.getsource(module._SystemGuestOps.run_probe)
+    helper = inspect.getsource(module._SystemGuestOps._verify_privileged_fixture)
+
+    assert run_probe.index("_verify_privileged_fixture()") < run_probe.index(
+        "_spawn_nonroot_child"
+    )
+    for required in (
+        "MANAGER_ENDPOINT",
+        "CGROUP_ROOT",
+        "HOST_SOURCE_CGROUP",
+        "MANAGER_UID",
+        "MANAGER_GID",
+        "MANAGER_CLIENT_GID",
+        "stat.S_ISSOCK",
+        "stat.S_ISDIR",
+        "0o660",
+    ):
+        assert required in helper
+
+
+def test_nonroot_probe_does_not_inspect_privileged_manager_surfaces() -> None:
+    support = (
+        ROOT / "tests" / "live" / "local_e2e_support.py"
+    ).read_text(encoding="utf-8")
+    start = support.index("    def verify_filesystem_contract")
+    end = support.index("\n    def host_key_line", start)
+    body = support[start:end]
+
+    assert "self.manager_endpoint.lstat()" not in body
+    assert "self.host_source_cgroup" not in body
+
+
+def test_identity_cleanup_accepts_primary_group_already_removed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_gate()
+    ops = module._SystemGuestOps()
+    ops._created_groups = [module.PROBE_GROUP]
+
+    def unexpected_run(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("groupdel must not run for an already-absent primary group")
+
+    monkeypatch.setattr(module, "_run", unexpected_run)
+
+    ops._remove_identities()
+
+    assert ops._created_groups == []
+
+
+def test_identity_cleanup_rejects_absent_name_with_reused_numeric_gid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_gate()
+    ops = module._SystemGuestOps()
+    ops._created_groups = [module.PROBE_GROUP]
+
+    monkeypatch.setattr(
+        module.grp,
+        "getgrnam",
+        lambda _name: (_ for _ in ()).throw(KeyError()),
+    )
+    monkeypatch.setattr(module.grp, "getgrgid", lambda _gid: object())
+
+    with pytest.raises(module.GateError, match="numeric identity"):
+        ops._remove_identities()

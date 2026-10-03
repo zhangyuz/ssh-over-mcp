@@ -186,20 +186,10 @@ class LocalE2EFixture:
         )
         self._require_dir(self.work_dir, uid=0, mode=0o755)
         self._require_dir(self.cgroup_root, uid=self.manager_uid)
-        self._require_dir(self.host_source_cgroup, uid=self.manager_uid)
-
-        try:
-            info = self.manager_endpoint.lstat()
-        except OSError as exc:
-            raise LocalE2EFixtureError("manager endpoint is absent") from exc
-        if not stat.S_ISSOCK(info.st_mode):
-            raise LocalE2EFixtureError("manager endpoint is not a Unix socket")
-        if (
-            info.st_uid != self.manager_uid
-            or info.st_gid != self.manager_client_gid
-            or stat.S_IMODE(info.st_mode) != 0o660
-        ):
-            raise LocalE2EFixtureError("manager endpoint identity/mode mismatch")
+        # The host-source cgroup and manager socket are intentionally not
+        # traversable by the zero-supplementary-group probe. The trusted root
+        # gate verifies those privileged surfaces immediately before dropping
+        # to the probe identity.
 
     def host_key_line(self) -> str:
         raw = self.host_key_public.read_text(encoding="ascii").strip()
