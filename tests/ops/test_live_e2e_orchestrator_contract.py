@@ -358,11 +358,19 @@ def test_trusted_bootstrap_is_offline_and_commit_bound() -> None:
     assert '"$EXTRACTED/wheels"' in script
     assert '"$EXTRACTED/runtime.lock"' in script
     assert 'root = Path(sys.argv[1])' in script
+    assert 'TRUSTED_HARNESS="/mnt/som-trusted-harness"' in script
+    assert 'mount -t tmpfs -o size=1m,mode=0755,nosuid,nodev,noexec tmpfs "$TRUSTED_HARNESS"' in script
+    assert 'install -D -o root -g root -m 0444' in script
+    assert '"$EXTRACTED/trusted-harness/ops/live-e2e/ssh-over-mcp-live-e2e-gate"' in script
+    assert '"$TRUSTED_HARNESS/ops/live-e2e/ssh-over-mcp-live-e2e-gate"' in script
+    assert 'mount -o remount,ro,nosuid,nodev,noexec "$TRUSTED_HARNESS"' in script
+    assert 'PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 "$TRUSTED_HARNESS/ops/live-e2e/ssh-over-mcp-live-e2e-gate"' in script
     assert "SSH_OVER_MCP_E2E_RESULT=" in script
     assert "/dev/ttyS0" in script
     assert "trap - EXIT" in script
     assert 'mountpoint -q "$PAYLOAD"' in script
-    assert "mount -o" not in script
+    assert "mount -o rw" not in script
+    assert "mount -o remount,rw" not in script
     assert "/mnt/som-payload/wheels" not in script
     for forbidden in (
         "apt-get",

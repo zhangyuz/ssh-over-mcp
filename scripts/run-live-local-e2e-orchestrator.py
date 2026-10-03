@@ -268,6 +268,7 @@ PAYLOAD='/mnt/som-payload'
 ARCHIVE="$PAYLOAD/payload.tar"
 ARCHIVE_SHA='{payload_archive_digest}'
 EXTRACTED="/opt/ssh-over-mcp-e2e/payload"
+TRUSTED_HARNESS="/mnt/som-trusted-harness"
 WORKSPACE='/opt/ssh-over-mcp-e2e/workspace'
 VENV='/opt/ssh-over-mcp-e2e/venv'
 PIP_WHEEL="$EXTRACTED/bootstrap-wheels/pip-26.2.1-py3-none-any.whl"
@@ -345,6 +346,15 @@ for relative, expected in sorted(manifest.items()):
         raise SystemExit(f"payload digest mismatch: {{relative}}")
 PYVERIFY
 
+mkdir -p "$TRUSTED_HARNESS"
+mount -t tmpfs -o size=1m,mode=0755,nosuid,nodev,noexec tmpfs "$TRUSTED_HARNESS"
+install -D -o root -g root -m 0444 \
+  "$EXTRACTED/trusted-harness/ops/live-e2e/ssh-over-mcp-live-e2e-gate" \
+  "$TRUSTED_HARNESS/ops/live-e2e/ssh-over-mcp-live-e2e-gate"
+chmod 0555 "$TRUSTED_HARNESS" "$TRUSTED_HARNESS/ops" "$TRUSTED_HARNESS/ops/live-e2e"
+mount -o remount,ro,nosuid,nodev,noexec "$TRUSTED_HARNESS"
+mountpoint -q "$TRUSTED_HARNESS"
+
 test -f "$PIP_WHEEL"
 python3 -m venv --without-pip "$VENV"
 PYTHONPATH="$PIP_WHEEL" "$VENV/bin/python" -m pip install \
@@ -371,7 +381,7 @@ printf 'EXPECTED_COMMIT=%s\\n' "$EXPECTED_COMMIT" > /etc/ssh-over-mcp/live-e2e-g
 chmod 0600 /etc/ssh-over-mcp/live-e2e-gate.conf
 chown root:root /etc/ssh-over-mcp/live-e2e-gate.conf
 
-PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 "$EXTRACTED/trusted-harness/ops/live-e2e/ssh-over-mcp-live-e2e-gate"
+PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 "$TRUSTED_HARNESS/ops/live-e2e/ssh-over-mcp-live-e2e-gate"
 """
 
 

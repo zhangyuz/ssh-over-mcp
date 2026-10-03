@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Protocol
 
 WORKSPACE = Path("/opt/ssh-over-mcp-e2e/workspace")
-TRUSTED_HARNESS_ROOT = Path("/mnt/som-payload/trusted-harness")
+TRUSTED_HARNESS_ROOT = Path("/mnt/som-trusted-harness")
 _TRUSTED_GATE = TRUSTED_HARNESS_ROOT / "ops" / "live-e2e" / "ssh-over-mcp-live-e2e-gate"
 VENV_PYTHON = Path("/opt/ssh-over-mcp-e2e/venv/bin/python")
 CONFIG = Path("/etc/ssh-over-mcp/live-e2e-gate.conf")

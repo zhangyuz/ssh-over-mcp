@@ -244,7 +244,7 @@ def test_gate_source_never_runs_probe_as_root() -> None:
 
 def test_guest_gate_trusts_only_root_gate_and_executes_target_helpers_after_drop() -> None:
     module = _load_gate()
-    assert module.TRUSTED_HARNESS_ROOT == Path('/mnt/som-payload/trusted-harness')
+    assert module.TRUSTED_HARNESS_ROOT == Path('/mnt/som-trusted-harness')
     assert module._TRUSTED_GATE == (
         module.TRUSTED_HARNESS_ROOT
         / 'ops/live-e2e/ssh-over-mcp-live-e2e-gate'
@@ -292,6 +292,7 @@ def test_guest_gate_requires_target_launcher_regular_non_symlink() -> None:
 
 def test_guest_gate_runtime_verifies_only_trusted_root_gate_payload() -> None:
     module = _load_gate()
+    assert module.TRUSTED_HARNESS_ROOT == Path("/mnt/som-trusted-harness")
     source = inspect.getsource(module._SystemGuestOps.verify_root_and_workspace)
     assert '_require_trusted_harness()' in source
     helper = inspect.getsource(module._require_trusted_harness)

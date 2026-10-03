@@ -91,6 +91,8 @@ The host-only read token is used only by Git/askpass while creating the bundle. 
 
 The payload ISO root intentionally contains only short fixed filenames (`bootstrap.sh` and `payload.tar`). The target bundle, runtime lock, full wheel filenames, and trusted harness live inside `payload.tar`. The bootstrap verifies the archive SHA-256, safely extracts only regular files/directories, then applies the existing per-file manifest and `pip --require-hashes` checks. This avoids Linux ISO9660/Joliet filename-view differences truncating wheel filenames while preserving both archive-level and file-level integrity checks.
 
+After extraction, the trusted guest gate itself is copied into a dedicated guest-local tmpfs at `/mnt/som-trusted-harness`. That tmpfs is remounted `ro,nosuid,nodev,noexec` before the gate is imported or executed. Target manager/probe/support code still comes from the exact target workspace, but the root lifecycle gate executes only from this independent read-only trust root; the capability-bearing host-agent does not receive `CAP_SYS_ADMIN` and cannot remount it writable.
+
 ## Exact target identity
 
 The manual trusted-main workflow accepts exactly one `commit_sha`. The GitHub workflow run `headSha` identifies the trusted-main workflow/orchestrator revision; it is **not** the tested target identity.
