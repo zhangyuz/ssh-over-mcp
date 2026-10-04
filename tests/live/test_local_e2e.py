@@ -93,6 +93,56 @@ def test_query_only_ledger_reader_sees_wal_and_rejects_writes(
         writer.close()
 
 
+
+
+
+def test_wait_for_audit_events_since_is_bounded_and_observes_delayed_rows() -> None:
+    module = _load_support()
+
+    class DelayedHarness:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def audit_rows(self) -> tuple[dict[str, object], ...]:
+            self.calls += 1
+            if self.calls < 3:
+                return ()
+            return (
+                {
+                    "rowid": 2,
+                    "event_type": "policy_denied",
+                    "request_id": "req_" + ("a" * 32),
+                    "tool": "ssh_exec",
+                },
+            )
+
+    harness = DelayedHarness()
+    rows = module._wait_for_audit_events_since(
+        harness,
+        1,
+        timeout_seconds=0.1,
+        poll_interval_seconds=0.001,
+    )
+    assert len(rows) == 1
+    assert rows[0]["event_type"] == "policy_denied"
+    assert harness.calls >= 3
+
+    class EmptyHarness:
+        def audit_rows(self) -> tuple[dict[str, object], ...]:
+            return ()
+
+    with pytest.raises(
+        module.LocalE2EFixtureError,
+        match="expected audit event did not become visible",
+    ):
+        module._wait_for_audit_events_since(
+            EmptyHarness(),
+            0,
+            timeout_seconds=0.01,
+            poll_interval_seconds=0.001,
+        )
+
+
 def test_fixture_metadata_contract_is_exact_and_server_owned() -> None:
     module = _load_support()
     fixture = module.LocalE2EFixture.from_mapping(_valid_metadata())
