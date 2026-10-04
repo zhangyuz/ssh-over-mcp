@@ -377,7 +377,10 @@ def test_trusted_bootstrap_is_offline_and_commit_bound() -> None:
     assert 'ARCHIVE="$PAYLOAD/payload.tar"' in script
     assert "tarfile.open" in script
     assert 'EXTRACTED="/opt/ssh-over-mcp-e2e/payload"' in script
-    assert 'git clone "$EXTRACTED/target.bundle"' in script
+    assert 'git -C "$WORKSPACE" init' in script
+    assert 'git -C "$WORKSPACE" fetch "$EXTRACTED/target.bundle" refs/e2e/target' in script
+    assert 'git -C "$WORKSPACE" checkout --detach FETCH_HEAD' in script
+    assert 'git clone "$EXTRACTED/target.bundle"' not in script
     assert '"$EXTRACTED/wheels"' in script
     assert '"$EXTRACTED/runtime.lock"' in script
     assert 'root = Path(sys.argv[1])' in script
