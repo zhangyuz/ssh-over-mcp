@@ -1394,7 +1394,7 @@ def _audit_events_since(
     )
 
 
-def _wait_for_audit_events_since(
+async def _wait_for_audit_events_since(
     harness: LocalMCPHarness,
     rowid: int,
     *,
@@ -1413,7 +1413,7 @@ def _wait_for_audit_events_since(
             raise LocalE2EFixtureError(
                 "expected audit event did not become visible"
             )
-        time.sleep(min(poll_interval_seconds, remaining))
+        await asyncio.sleep(min(poll_interval_seconds, remaining))
 
 
 def _single_request_event_types(
@@ -1499,7 +1499,7 @@ async def run_real_fail_closed_fixture() -> dict[str, object]:
             safe_blobs.append(denied_error)
             if b"request denied by central policy" not in denied_error:
                 raise LocalE2EFixtureError("central denial was not generic")
-            central_rows = _wait_for_audit_events_since(harness, audit_before)
+            central_rows = await _wait_for_audit_events_since(harness, audit_before)
             central_events = _single_request_event_types(
                 central_rows,
                 "central deny",
@@ -1546,7 +1546,7 @@ async def run_real_fail_closed_fixture() -> dict[str, object]:
             safe_blobs.append(remote_error)
             if b"ssh-over-mcp-host-agent: denied:" not in remote_error:
                 raise LocalE2EFixtureError("host-local denial was not generic")
-            remote_rows = _wait_for_audit_events_since(harness, audit_before)
+            remote_rows = await _wait_for_audit_events_since(harness, audit_before)
             remote_events = _single_request_event_types(
                 remote_rows,
                 "host-local deny",
@@ -1573,7 +1573,7 @@ async def run_real_fail_closed_fixture() -> dict[str, object]:
             safe_blobs.append(mismatch_error)
             if b"SSH host key verification failed" not in mismatch_error:
                 raise LocalE2EFixtureError("host-key failure was not generic")
-            host_key_rows = _wait_for_audit_events_since(harness, audit_before)
+            host_key_rows = await _wait_for_audit_events_since(harness, audit_before)
             host_key_events = _single_request_event_types(
                 host_key_rows,
                 "wrong host key",
@@ -1873,7 +1873,7 @@ async def run_real_approval_outage_containment_fixture() -> dict[str, object]:
             if b"containment.sock" in unavailable_blob or b"manager" in stderr.lower():
                 raise LocalE2EFixtureError("containment internals leaked through MCP")
 
-            rows = _wait_for_audit_events_since(harness, audit_before)
+            rows = await _wait_for_audit_events_since(harness, audit_before)
             request_ids = {
                 str(row["request_id"])
                 for row in rows
