@@ -54,15 +54,19 @@ def test_probe_does_not_persist_git_safe_directory_configuration() -> None:
     assert "safe.directory=*" not in source
 
 
-def test_probe_runs_fixed_ssh_mcp_and_filesystem_e2e_without_selector() -> None:
+def test_probe_runs_fixed_full_level3_matrix_without_selector() -> None:
     source = PROBE.read_text(encoding="utf-8")
 
-    ssh_call = "local_e2e_support.run_real_ssh_fixture()"
-    mcp_call = "local_e2e_support.run_real_mcp_fixture()"
-    filesystem_call = "local_e2e_support.run_real_filesystem_profile_fixture()"
-    assert ssh_call in source
-    assert mcp_call in source
-    assert filesystem_call in source
-    assert source.index(ssh_call) < source.index(mcp_call) < source.index(filesystem_call)
+    calls = [
+        "local_e2e_support.run_real_ssh_fixture()",
+        "local_e2e_support.run_real_mcp_fixture()",
+        "local_e2e_support.run_real_filesystem_profile_fixture()",
+        "local_e2e_support.run_real_fail_closed_fixture()",
+        "local_e2e_support.run_real_approval_outage_containment_fixture()",
+    ]
+    for call in calls:
+        assert call in source
+    positions = [source.index(call) for call in calls]
+    assert positions == sorted(positions)
     assert "getattr(local_e2e_support" not in source
     assert "pytest" not in source

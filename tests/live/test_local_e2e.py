@@ -341,3 +341,49 @@ def test_real_origin_policy_and_host_trust_fail_closed() -> None:
     assert evidence["wrong_host_key_before_forcecommand"] is True
     assert evidence["marker_unchanged"] is True
     assert evidence["safe_errors"] is True
+
+
+def test_task7_approval_outage_containment_contract_is_explicit() -> None:
+    import inspect
+
+    module = _load_support()
+    assert module.APPROVAL_MARKER == module.WORKLOAD_DATA_ROOT / "approval-marker"
+    assert module.APPROVAL_SCRIPT == Path(
+        "/opt/ssh-over-mcp-e2e/runtime/approval_marker.py"
+    )
+    assert module.CONTROL_FD_ENV == "SSH_OVER_MCP_LIVE_E2E_CONTROL_FD"
+
+    runner = getattr(module, "run_real_approval_outage_containment_fixture", None)
+    assert runner is not None, "Task 7 requires real approval/outage/containment E2E"
+    source = inspect.getsource(runner)
+    for required in (
+        "ssh-over-mcp-approvalctl",
+        "approval_status",
+        "/healthz",
+        "/readyz",
+        "STOP_MANAGER",
+        "secret",
+        "consumed",
+    ):
+        assert required in source
+    assert source.index("STOP_MANAGER") > source.index("/readyz")
+
+
+@pytest.mark.skipif(
+    not _RUN_LIVE or not sys.platform.startswith("linux"),
+    reason="dedicated no-network Linux guest only",
+)
+def test_real_approval_outage_containment_and_secret_retention() -> None:
+    module = _load_support()
+    evidence = asyncio.run(module.run_real_approval_outage_containment_fixture())
+
+    assert evidence["approval_required_before_ssh"] is True
+    assert evidence["approval_granted_via_cli"] is True
+    assert evidence["approval_consumed"] is True
+    assert evidence["approval_replay_denied"] is True
+    assert evidence["approval_binding_mismatch_denied"] is True
+    assert evidence["ledger_outage_not_ready"] is True
+    assert evidence["ledger_outage_no_side_effect"] is True
+    assert evidence["containment_unavailable_fail_closed"] is True
+    assert evidence["request_cgroup_clean"] is True
+    assert evidence["secret_retention_clean"] is True
