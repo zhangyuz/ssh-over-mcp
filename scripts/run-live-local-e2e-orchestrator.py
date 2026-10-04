@@ -508,6 +508,9 @@ def _git_environment(
     return {
         "GIT_ASKPASS": str(askpass),
         "GIT_TERMINAL_PROMPT": "0",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "credential.helper",
+        "GIT_CONFIG_VALUE_0": "",
         "HOME": str(ORCHESTRATOR_HOME),
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
