@@ -37,6 +37,12 @@ SSHD_LOG = RUNTIME / "sshd.log"
 SSHD_PID_FILE = RUNTIME / "sshd.pid"
 STATE_SCRIPT = RUNTIME / "workload_state.py"
 WORK_DIR = RUNTIME / "work"
+FS_DATA_ROOT = Path("/opt/ssh-over-mcp-e2e/fs-data")
+FS_SEED_FILE = FS_DATA_ROOT / "seed.txt"
+FS_CREATE_ROOT = FS_DATA_ROOT / "create"
+FS_MKDIR_TARGET = FS_CREATE_ROOT / "created-dir"
+FS_WRITE_TARGET = FS_CREATE_ROOT / "created.txt"
+FS_SEED_BYTES = b"ssh-over-mcp-e2e-seed\n"
 
 HOST_POLICY = Path("/etc/ssh-over-mcp/host-policy.yaml")
 LAUNCHER_SOURCE = WORKSPACE / "ops" / "live-e2e" / "ssh-over-mcp-host-agent-launcher.py"
@@ -416,7 +422,7 @@ class _SystemGuestOps:
 
     def require_clean_start(self) -> None:
         _require_clean_start(RUNTIME, CGROUP_ROOT)
-        for path in (HOST_POLICY, LAUNCHER_INSTALL, SUDOERS_DROPIN):
+        for path in (HOST_POLICY, LAUNCHER_INSTALL, SUDOERS_DROPIN, FS_DATA_ROOT):
             if path.exists() or path.is_symlink():
                 raise GateError(f"stale privileged fixture path detected: {path}")
         for name, value, user in (
@@ -550,6 +556,16 @@ class _SystemGuestOps:
         WORK_DIR.mkdir(mode=0o755)
         os.chown(WORK_DIR, 0, 0)
 
+        FS_DATA_ROOT.mkdir(mode=0o750, parents=False, exist_ok=False)
+        os.chown(FS_DATA_ROOT, HOST_UID, HOST_GID)
+        os.chmod(FS_DATA_ROOT, 0o750)
+        FS_CREATE_ROOT.mkdir(mode=0o700)
+        os.chown(FS_CREATE_ROOT, HOST_UID, HOST_GID)
+        os.chmod(FS_CREATE_ROOT, 0o700)
+        FS_SEED_FILE.write_bytes(FS_SEED_BYTES)
+        os.chown(FS_SEED_FILE, HOST_UID, HOST_GID)
+        os.chmod(FS_SEED_FILE, 0o600)
+
         state_source = '''#!/usr/bin/python3
 import json
 import os
@@ -604,7 +620,7 @@ print(json.dumps({
         resolved_python = Path("/usr/bin/python3").resolve(strict=True)
         policy = {
             "version": 4,
-            "allowed_profiles": ["developer"],
+            "allowed_profiles": ["developer", "readonly"],
             "child_limits": {
                 "cpu_seconds": 20,
                 "address_space_bytes": 268435456,
@@ -625,7 +641,21 @@ print(json.dumps({
                     "cpu_period_us": 100000,
                 },
             },
-            "filesystem": {},
+            "filesystem": {
+                "developer": {
+                    "stat_roots": [str(FS_DATA_ROOT)],
+                    "read_roots": [str(FS_DATA_ROOT)],
+                    "mkdir_roots": [str(FS_CREATE_ROOT)],
+                    "write_create_roots": [str(FS_CREATE_ROOT)],
+                    "max_read_bytes": 65536,
+                    "max_write_bytes": 65536,
+                },
+                "readonly": {
+                    "stat_roots": [str(FS_DATA_ROOT)],
+                    "read_roots": [str(FS_DATA_ROOT)],
+                    "max_read_bytes": 65536,
+                },
+            },
             "commands": {
                 "/usr/bin/python3": {
                     "resolved_path": str(resolved_python),
@@ -968,6 +998,12 @@ LogLevel VERBOSE
             failures.append(("host_policy", exc))
 
         try:
+            if FS_DATA_ROOT.exists():
+                shutil.rmtree(FS_DATA_ROOT)
+        except BaseException as exc:  # noqa: BLE001 - teardown must aggregate every failure
+            failures.append(("fs_data", exc))
+
+        try:
             self._remove_identities()
         except BaseException as exc:  # noqa: BLE001 - teardown must aggregate every failure
             failures.append(("identities", exc))
@@ -992,6 +1028,7 @@ LogLevel VERBOSE
             for path in (
                 RUNTIME,
                 CGROUP_ROOT,
+                FS_DATA_ROOT,
                 HOST_POLICY,
                 LAUNCHER_INSTALL,
                 SUDOERS_DROPIN,
