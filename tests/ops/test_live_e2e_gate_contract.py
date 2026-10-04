@@ -482,3 +482,20 @@ def test_authorized_keys_is_root_owned_user_readable_and_not_writable() -> None:
     assert "os.chown(AUTHORIZED_KEYS, 0, 0)" in source
     assert "os.chmod(AUTHORIZED_KEYS, 0o644)" in source
     assert "os.chmod(AUTHORIZED_KEYS, 0o600)" not in source
+
+
+def test_guest_policy_limits_match_production_executor_defaults() -> None:
+    module = _load_gate()
+    from ssh_over_mcp.ssh.executor import SSHExecutor
+
+    signature = inspect.signature(SSHExecutor.__init__)
+    assert module.EXECUTOR_DEFAULT_MAX_OUTPUT_BYTES == (
+        signature.parameters["default_max_output_bytes"].default
+    )
+    assert module.EXECUTOR_DEFAULT_MAX_STDIN_BYTES == (
+        signature.parameters["default_max_stdin_bytes"].default
+    )
+
+    source = inspect.getsource(module._SystemGuestOps._prepare_state_and_policy)
+    assert '"max_output_bytes": EXECUTOR_DEFAULT_MAX_OUTPUT_BYTES' in source
+    assert '"max_stdin_bytes": EXECUTOR_DEFAULT_MAX_STDIN_BYTES' in source
