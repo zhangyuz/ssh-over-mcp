@@ -11,7 +11,6 @@ import secrets
 import socket
 import sqlite3
 import stat
-import subprocess
 import sys
 import tempfile
 import threading
@@ -1599,6 +1598,36 @@ def _control_fd() -> int:
     return value
 
 
+async def _grant_approval_via_cli(
+    approvalctl: Path,
+    approval_id: str,
+    admin_env: Mapping[str, str],
+) -> tuple[bytes, bytes]:
+    process = await asyncio.create_subprocess_exec(
+        str(approvalctl),
+        "grant",
+        approval_id,
+        env=dict(admin_env),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=5)
+    except TimeoutError as exc:
+        process.kill()
+        await process.wait()
+        raise LocalE2EFixtureError("approvalctl grant timed out") from exc
+    if process.returncode != 0:
+        raise LocalE2EFixtureError("approvalctl grant failed")
+    try:
+        payload = json.loads(stdout.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise LocalE2EFixtureError("approvalctl output is invalid") from exc
+    if payload.get("state") != "granted":
+        raise LocalE2EFixtureError("approval CLI did not grant request")
+    return stdout, stderr
+
+
 async def run_real_approval_outage_containment_fixture() -> dict[str, object]:
     fixture = LocalE2EFixture.from_env()
     fixture.verify_filesystem_contract()
@@ -1669,23 +1698,12 @@ async def run_real_approval_outage_containment_fixture() -> dict[str, object]:
                 "SSH_OVER_MCP_LEDGER_SERVICE_UID": str(settings.service_uid),
                 "SSH_OVER_MCP_LEDGER_SERVICE_GID": str(settings.service_gid),
             }
-            granted_cli = subprocess.run(
-                [str(approvalctl), "grant", approval_id],
-                env=admin_env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=5,
-                check=False,
+            granted_stdout, granted_stderr = await _grant_approval_via_cli(
+                approvalctl,
+                approval_id,
+                admin_env,
             )
-            safe_blobs.extend((granted_cli.stdout, granted_cli.stderr))
-            if granted_cli.returncode != 0:
-                raise LocalE2EFixtureError("ssh-over-mcp-approvalctl grant failed")
-            try:
-                granted_payload = json.loads(granted_cli.stdout.decode("utf-8"))
-            except (UnicodeError, json.JSONDecodeError) as exc:
-                raise LocalE2EFixtureError("approvalctl output is invalid") from exc
-            if granted_payload.get("state") != "granted":
-                raise LocalE2EFixtureError("approval CLI did not grant request")
+            safe_blobs.extend((granted_stdout, granted_stderr))
 
             exact_retry = dict(approval_request)
             exact_retry["approval_id"] = approval_id
@@ -1712,17 +1730,12 @@ async def run_real_approval_outage_containment_fixture() -> dict[str, object]:
             if replacement_id == approval_id or APPROVAL_MARKER.read_bytes() != b"1":
                 raise LocalE2EFixtureError("approval replay was not single-use")
 
-            replay_grant = subprocess.run(
-                [str(approvalctl), "grant", replacement_id],
-                env=admin_env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=5,
-                check=False,
+            replay_stdout, replay_stderr = await _grant_approval_via_cli(
+                approvalctl,
+                replacement_id,
+                admin_env,
             )
-            safe_blobs.extend((replay_grant.stdout, replay_grant.stderr))
-            if replay_grant.returncode != 0:
-                raise LocalE2EFixtureError("replacement approval grant failed")
+            safe_blobs.extend((replay_stdout, replay_stderr))
 
             mutation = dict(approval_request)
             mutation["args"] = [
