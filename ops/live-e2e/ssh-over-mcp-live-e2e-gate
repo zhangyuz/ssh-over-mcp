@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Protocol
 
 WORKSPACE = Path("/opt/ssh-over-mcp-e2e/workspace")
-TRUSTED_HARNESS_ROOT = Path("/mnt/som-payload/trusted-harness")
+TRUSTED_HARNESS_ROOT = Path("/mnt/som-trusted-harness")
 _TRUSTED_GATE = TRUSTED_HARNESS_ROOT / "ops" / "live-e2e" / "ssh-over-mcp-live-e2e-gate"
 VENV_PYTHON = Path("/opt/ssh-over-mcp-e2e/venv/bin/python")
 CONFIG = Path("/etc/ssh-over-mcp/live-e2e-gate.conf")
@@ -54,6 +54,9 @@ PROBE_UID = 2204
 PROBE_GID = 3204
 MANAGER_CLIENT_GID = 3299
 
+EXECUTOR_DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024
+EXECUTOR_DEFAULT_MAX_STDIN_BYTES = 1024 * 1024
+
 MANAGER_USER = "ssh-over-mcp-e2e-manager"
 HOST_USER = "ssh-over-mcp-e2e-host"
 WORKLOAD_USER = "ssh-over-mcp-e2e-workload"
@@ -81,7 +84,8 @@ _SSHD = "/usr/sbin/sshd"
 _VISUDO = "/usr/sbin/visudo"
 _PYTHON = "/usr/bin/python3"
 
-_FORCECOMMAND = "/usr/bin/python3 -I -S /usr/local/libexec/ssh-over-mcp-host-agent-launcher.py"
+_LAUNCHER_COMMAND = "/usr/bin/python3 -I -S /usr/local/libexec/ssh-over-mcp-host-agent-launcher.py"
+_FORCECOMMAND = f"/usr/bin/sudo -n {_LAUNCHER_COMMAND}"
 
 
 class GateError(RuntimeError):
@@ -334,6 +338,26 @@ def _account_absent(*, name: str, numeric_id: int, user: bool) -> None:
     raise GateError(f"fixture numeric identity already exists: {numeric_id}")
 
 
+def _classify_sshd_stage(raw: str) -> str:
+    if "Starting session: forced-command" in raw:
+        return "FORCECOMMAND_STARTED"
+    if "Accepted publickey for " in raw:
+        return "AUTH_ACCEPTED"
+    if "Failed publickey for " in raw:
+        return "AUTH_REJECTED"
+    if "Connection from " in raw:
+        return "TCP_CONNECTED"
+    return "NO_SSH_ACTIVITY"
+
+
+def _read_sshd_stage() -> str:
+    try:
+        raw = SSHD_LOG.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "NO_SSH_ACTIVITY"
+    return _classify_sshd_stage(raw)
+
+
 def _fixed_child_env() -> dict[str, str]:
     return {
         "HOME": "/opt/ssh-over-mcp-e2e",
@@ -492,7 +516,7 @@ class _SystemGuestOps:
 
         sudoers = (
             f'Defaults:{HOST_USER} env_keep += "SSH_ORIGINAL_COMMAND SSH_TTY"\n'
-            f"{HOST_USER} ALL=(root) NOPASSWD: {_FORCECOMMAND}\n"
+            f"{HOST_USER} ALL=(root) NOPASSWD: {_LAUNCHER_COMMAND}\n"
         )
         SUDOERS_DROPIN.write_text(sudoers, encoding="ascii")
         os.chown(SUDOERS_DROPIN, 0, 0)
@@ -520,7 +544,7 @@ class _SystemGuestOps:
         public_key = Path(str(CLIENT_KEY) + ".pub").read_text(encoding="ascii").strip()
         AUTHORIZED_KEYS.write_text(f"restrict {public_key}\n", encoding="ascii")
         os.chown(AUTHORIZED_KEYS, 0, 0)
-        os.chmod(AUTHORIZED_KEYS, 0o600)
+        os.chmod(AUTHORIZED_KEYS, 0o644)
 
     def _prepare_state_and_policy(self) -> None:
         WORK_DIR.mkdir(mode=0o755)
@@ -621,8 +645,8 @@ print(json.dumps({
             },
             "env_allow": [],
             "max_timeout_seconds": 20,
-            "max_output_bytes": 65536,
-            "max_stdin_bytes": 0,
+            "max_output_bytes": EXECUTOR_DEFAULT_MAX_OUTPUT_BYTES,
+            "max_stdin_bytes": EXECUTOR_DEFAULT_MAX_STDIN_BYTES,
         }
         HOST_POLICY.write_text(
             json.dumps(policy, sort_keys=True, separators=(",", ":")) + "\n",
@@ -778,7 +802,34 @@ LogLevel VERBOSE
         )
         return env
 
+    def _verify_privileged_fixture(self) -> None:
+        for path in (CGROUP_ROOT, HOST_SOURCE_CGROUP):
+            try:
+                info = path.lstat()
+            except OSError as exc:
+                raise GateError(f"privileged fixture directory is unavailable: {path}") from exc
+            if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                raise GateError(f"privileged fixture path is not a directory: {path}")
+            if (info.st_uid, info.st_gid) != (MANAGER_UID, MANAGER_GID):
+                raise GateError(f"privileged fixture directory identity mismatch: {path}")
+            if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+                raise GateError(f"privileged fixture directory is broadly writable: {path}")
+
+        try:
+            info = MANAGER_ENDPOINT.lstat()
+        except OSError as exc:
+            raise GateError("manager endpoint is unavailable before probe") from exc
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISSOCK(info.st_mode):
+            raise GateError("manager endpoint is not a Unix socket before probe")
+        if (
+            info.st_uid != MANAGER_UID
+            or info.st_gid != MANAGER_CLIENT_GID
+            or stat.S_IMODE(info.st_mode) != 0o660
+        ):
+            raise GateError("manager endpoint identity/mode mismatch before probe")
+
     def run_probe(self) -> int:
+        self._verify_privileged_fixture()
         pid = _spawn_nonroot_child(
             [str(VENV_PYTHON), str(_PROBE)],
             uid=PROBE_UID,
@@ -786,7 +837,10 @@ LogLevel VERBOSE
             groups=(),
             env=self._probe_env(),
         )
-        return _wait_pid(pid, timeout_seconds=300.0)
+        result = _wait_pid(pid, timeout_seconds=300.0)
+        if result != 0:
+            print(f"local E2E sshd stage: {_read_sshd_stage()}", file=sys.stderr)
+        return result
 
     def _cleanup_cgroup(self) -> None:
         if not CGROUP_ROOT.exists():
@@ -858,33 +912,51 @@ LogLevel VERBOSE
             if result.returncode != 0:
                 raise GateError(f"cannot remove fixture user: {name}")
         self._created_users.clear()
+
+        group_ids = {
+            MANAGER_GROUP: MANAGER_GID,
+            HOST_GROUP: HOST_GID,
+            WORKLOAD_GROUP: WORKLOAD_GID,
+            PROBE_GROUP: PROBE_GID,
+            MANAGER_CLIENT_GROUP: MANAGER_CLIENT_GID,
+        }
         for name in reversed(self._created_groups):
+            gid = group_ids[name]
+            try:
+                grp.getgrnam(name)
+            except KeyError:
+                _account_absent(name=name, numeric_id=gid, user=False)
+                continue
             result = _run([_GROUPDEL, name], timeout=20, check=False)
             if result.returncode != 0:
                 raise GateError(f"cannot remove fixture group: {name}")
+            _account_absent(name=name, numeric_id=gid, user=False)
         self._created_groups.clear()
 
     def cleanup(self) -> None:
-        failures: list[BaseException] = []
+        failures: list[tuple[str, BaseException]] = []
 
-        for attr in ("_sshd_pid", "_manager_pid"):
+        for stage, attr in (("sshd", "_sshd_pid"), ("manager", "_manager_pid")):
             pid = getattr(self, attr)
             try:
                 _stop_pid(pid)
             except BaseException as exc:  # noqa: BLE001 - teardown must aggregate every failure
-                failures.append(exc)
+                failures.append((stage, exc))
             setattr(self, attr, None)
 
         try:
             self._cleanup_cgroup()
         except BaseException as exc:  # noqa: BLE001 - teardown must aggregate every failure
-            failures.append(exc)
+            failures.append(("cgroup", exc))
 
-        for path in (SUDOERS_DROPIN, LAUNCHER_INSTALL):
+        for stage, path in (
+            ("sudoers", SUDOERS_DROPIN),
+            ("launcher", LAUNCHER_INSTALL),
+        ):
             try:
                 self._remove_artifact(path)
             except BaseException as exc:  # noqa: BLE001 - teardown must aggregate every failure
-                failures.append(exc)
+                failures.append((stage, exc))
 
         try:
             if HOST_POLICY.exists():
@@ -893,23 +965,25 @@ LogLevel VERBOSE
                     raise GateError("host policy path changed before cleanup")
                 HOST_POLICY.unlink()
         except BaseException as exc:  # noqa: BLE001 - teardown must aggregate every failure
-            failures.append(exc)
+            failures.append(("host_policy", exc))
 
         try:
             self._remove_identities()
         except BaseException as exc:  # noqa: BLE001 - teardown must aggregate every failure
-            failures.append(exc)
+            failures.append(("identities", exc))
 
         try:
             if RUNTIME.exists():
                 shutil.rmtree(RUNTIME)
         except BaseException as exc:  # noqa: BLE001 - teardown must aggregate every failure
-            failures.append(exc)
+            failures.append(("runtime", exc))
 
         if failures:
             raise GateError(
                 "guest fixture cleanup failed: "
-                + "; ".join(type(exc).__name__ for exc in failures)
+                + "; ".join(
+                    f"{stage}:{type(exc).__name__}" for stage, exc in failures
+                )
             )
 
     def verify_clean(self) -> None:
