@@ -55,6 +55,87 @@ def test_gate_constants_pin_guest_only_authority() -> None:
     assert module.MANAGER_CLIENT_GID == 3299
 
 
+def test_task7_authority_prepares_fixed_approval_marker_and_exact_host_policy() -> None:
+    module = _load_gate()
+
+    assert module.APPROVAL_MARKER == module.WORKLOAD_DATA_ROOT / "approval-marker"
+    assert module.APPROVAL_SCRIPT == module.RUNTIME / "approval_marker.py"
+
+    source = inspect.getsource(module._SystemGuestOps._prepare_state_and_policy)
+    for required in (
+        'APPROVAL_MARKER.write_bytes(b"")',
+        "os.chown(APPROVAL_MARKER, WORKLOAD_UID, WORKLOAD_GID)",
+        "os.chmod(APPROVAL_MARKER, 0o644)",
+        'marker = Path("/opt/ssh-over-mcp-e2e/workload-data/approval-marker")',
+        'stream.write(b"1")',
+        "APPROVAL_SCRIPT.write_text",
+        "os.chown(APPROVAL_SCRIPT, 0, 0)",
+        "os.chmod(APPROVAL_SCRIPT, 0o555)",
+        '["-I", "-S", str(APPROVAL_SCRIPT)]',
+    ):
+        assert required in source
+
+
+def test_task7_manager_stop_control_is_one_fixed_non_parameterized_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_gate()
+    method = module._SystemGuestOps._handle_probe_control
+    signature = inspect.signature(method)
+    assert tuple(signature.parameters) == ("self", "message")
+
+    stopped: list[int] = []
+    monkeypatch.setattr(module, "_stop_pid", lambda pid: stopped.append(pid))
+
+    ops = module._SystemGuestOps()
+    ops._manager_pid = 4242
+    assert ops._handle_probe_control(b"STOP_MANAGER\n") == b"OK\n"
+    assert stopped == [4242]
+    assert ops._manager_pid is None
+
+    for invalid in (
+        b"",
+        b"STOP_MANAGER",
+        b"STOP_MANAGER\nSTOP_MANAGER\n",
+        b"STOP_MANAGER /tmp/socket\n",
+        b"STOP_MANAGER 2201\n",
+        b"RUN /bin/sh\n",
+    ):
+        candidate = module._SystemGuestOps()
+        candidate._manager_pid = 4242
+        with pytest.raises(module.GateError):
+            candidate._handle_probe_control(invalid)
+
+
+def test_task7_probe_control_fd_is_explicitly_inherited_not_a_generic_root_rpc() -> None:
+    module = _load_gate()
+
+    spawn_signature = inspect.signature(module._spawn_nonroot_child)
+    assert "pass_fds" in spawn_signature.parameters
+
+    env_signature = inspect.signature(module._SystemGuestOps._probe_env)
+    assert tuple(env_signature.parameters) == ("self", "control_fd")
+
+    env_source = inspect.getsource(module._SystemGuestOps._probe_env)
+    assert '"SSH_OVER_MCP_LIVE_E2E_CONTROL_FD": str(control_fd)' in env_source
+
+    run_probe = inspect.getsource(module._SystemGuestOps.run_probe)
+    for required in (
+        "socket.socketpair()",
+        "pass_fds=(child_control.fileno(),)",
+        "_wait_probe_with_control",
+    ):
+        assert required in run_probe
+
+    control = inspect.getsource(module._SystemGuestOps._handle_probe_control)
+    assert 'message != b"STOP_MANAGER\\n"' in control
+    assert "_stop_pid(self._manager_pid)" in control
+    assert "self._manager_pid = None" in control
+    assert 'return b"OK\\n"' in control
+    for forbidden in ("subprocess", "os.system", "execve", "eval(", "Path("):
+        assert forbidden not in control
+
+
 @pytest.mark.parametrize(
     "text",
     [
