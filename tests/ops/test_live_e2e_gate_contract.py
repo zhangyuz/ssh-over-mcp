@@ -135,6 +135,26 @@ def test_task7_probe_control_fd_is_explicitly_inherited_not_a_generic_root_rpc()
     for forbidden in ("subprocess", "os.system", "execve", "eval(", "Path("):
         assert forbidden not in control
 
+    wait_source = inspect.getsource(module._SystemGuestOps._wait_probe_with_control)
+    for required in (
+        "if handled:",
+        "probe sent more than one control request",
+        'len(request) > len(b"STOP_MANAGER\\n")',
+        "probe control request exceeded fixed protocol",
+        "_stop_pid(pid)",
+        "fixture child timed out",
+    ):
+        assert required in wait_source
+
+    spawn_source = inspect.getsource(module._spawn_nonroot_child)
+    for required in (
+        "len(pass_fds) > 1",
+        "os.fstat(fd)",
+        "stat.S_ISSOCK",
+        "os.set_inheritable(fd, True)",
+    ):
+        assert required in spawn_source
+
 
 @pytest.mark.parametrize(
     "text",
@@ -548,7 +568,11 @@ def test_failed_probe_emits_only_fixed_sshd_stage(
         "_spawn_nonroot_child",
         lambda *args, **kwargs: 123,
     )
-    monkeypatch.setattr(module, "_wait_pid", lambda *args, **kwargs: 70)
+    monkeypatch.setattr(
+        ops,
+        "_wait_probe_with_control",
+        lambda *args, **kwargs: 70,
+    )
     monkeypatch.setattr(module, "_read_sshd_stage", lambda: "AUTH_ACCEPTED")
 
     assert ops.run_probe() == 70

@@ -46,6 +46,8 @@ FS_SEED_BYTES = b"ssh-over-mcp-e2e-seed\n"
 WORKLOAD_DATA_ROOT = Path("/opt/ssh-over-mcp-e2e/workload-data")
 EXEC_MARKER = WORKLOAD_DATA_ROOT / "exec-marker"
 MARKER_SCRIPT = RUNTIME / "workload_marker.py"
+APPROVAL_MARKER = WORKLOAD_DATA_ROOT / "approval-marker"
+APPROVAL_SCRIPT = RUNTIME / "approval_marker.py"
 WRONG_HOST_KEY = RUNTIME / "wrong_host_ed25519"
 WRONG_HOST_KEY_PUBLIC = RUNTIME / "wrong_host_ed25519.pub"
 
@@ -260,9 +262,21 @@ def _spawn_nonroot_child(
     gid: int,
     groups: tuple[int, ...],
     env: Mapping[str, str],
+    pass_fds: tuple[int, ...] = (),
 ) -> int:
     if not command or not Path(command[0]).is_absolute():
         raise GateError("non-root child command must be fixed and absolute")
+    if len(pass_fds) > 1:
+        raise GateError("non-root child may inherit at most one control fd")
+    for fd in pass_fds:
+        if not isinstance(fd, int) or fd <= 2:
+            raise GateError("inherited control fd is invalid")
+        try:
+            info = os.fstat(fd)
+        except OSError as exc:
+            raise GateError("inherited control fd is unavailable") from exc
+        if not stat.S_ISSOCK(info.st_mode):
+            raise GateError("inherited control fd must be a socket")
 
     pid = os.fork()
     if pid == 0:
@@ -274,6 +288,8 @@ def _spawn_nonroot_child(
             if libc.prctl(_PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
                 os._exit(125)
             _require_zero_caps_nnp()
+            for fd in pass_fds:
+                os.set_inheritable(fd, True)
             os.execve(command[0], list(command), dict(env))
         except BaseException:  # noqa: BLE001 - fork child must never unwind into root gate
             os._exit(126)
@@ -585,6 +601,9 @@ class _SystemGuestOps:
         EXEC_MARKER.write_bytes(b"")
         os.chown(EXEC_MARKER, WORKLOAD_UID, WORKLOAD_GID)
         os.chmod(EXEC_MARKER, 0o644)
+        APPROVAL_MARKER.write_bytes(b"")
+        os.chown(APPROVAL_MARKER, WORKLOAD_UID, WORKLOAD_GID)
+        os.chmod(APPROVAL_MARKER, 0o644)
 
         marker_source = '''#!/usr/bin/python3
 import os
@@ -598,6 +617,19 @@ with marker.open("ab", buffering=0) as stream:
         MARKER_SCRIPT.write_text(marker_source, encoding="utf-8")
         os.chown(MARKER_SCRIPT, 0, 0)
         os.chmod(MARKER_SCRIPT, 0o555)
+
+        approval_source = '''#!/usr/bin/python3
+import os
+from pathlib import Path
+
+marker = Path("/opt/ssh-over-mcp-e2e/workload-data/approval-marker")
+with marker.open("ab", buffering=0) as stream:
+    stream.write(b"1")
+    os.fsync(stream.fileno())
+'''
+        APPROVAL_SCRIPT.write_text(approval_source, encoding="utf-8")
+        os.chown(APPROVAL_SCRIPT, 0, 0)
+        os.chmod(APPROVAL_SCRIPT, 0o555)
 
         state_source = '''#!/usr/bin/python3
 import json
@@ -700,6 +732,10 @@ print(json.dumps({
                         {
                             "mode": "exact",
                             "args": ["-I", "-S", str(MARKER_SCRIPT)],
+                        },
+                        {
+                            "mode": "exact",
+                            "args": ["-I", "-S", str(APPROVAL_SCRIPT)],
                         },
                     ],
                     "cwd_roots": [str(WORK_DIR)],
@@ -838,13 +874,16 @@ LogLevel VERBOSE
         self._start_manager()
         self._start_sshd()
 
-    def _probe_env(self) -> dict[str, str]:
+    def _probe_env(self, control_fd: int) -> dict[str, str]:
         if self._expected_commit is None:
             raise GateError("guest expected commit was not verified")
+        if not isinstance(control_fd, int) or control_fd <= 2:
+            raise GateError("probe control fd is invalid")
         env = _fixed_child_env()
         env.update(
             {
                 "SSH_OVER_MCP_LIVE_EXPECTED_COMMIT": self._expected_commit,
+                "SSH_OVER_MCP_LIVE_E2E_CONTROL_FD": str(control_fd),
                 "SSH_OVER_MCP_RUN_LIVE_LOCAL_E2E": "1",
                 "SSH_OVER_MCP_LIVE_E2E_HOST": "127.0.0.1",
                 "SSH_OVER_MCP_LIVE_E2E_PORT": str(SSHD_PORT),
@@ -868,6 +907,97 @@ LogLevel VERBOSE
             }
         )
         return env
+
+    def _handle_probe_control(self, message: bytes) -> bytes:
+        if message != b"STOP_MANAGER\n":
+            raise GateError("invalid probe control request")
+        if self._manager_pid is None:
+            raise GateError("containment manager is not running")
+        _stop_pid(self._manager_pid)
+        self._manager_pid = None
+        return b"OK\n"
+
+    def _wait_probe_with_control(
+        self,
+        pid: int,
+        control: socket.socket,
+        *,
+        timeout_seconds: float,
+    ) -> int:
+        deadline = time.monotonic() + timeout_seconds
+        request = bytearray()
+        handled = False
+        control_open = True
+        control.settimeout(0.05)
+
+        while True:
+            waited, status = os.waitpid(pid, os.WNOHANG)
+            if waited == pid:
+                if control_open:
+                    control.setblocking(False)
+                    try:
+                        trailing = control.recv(64)
+                    except BlockingIOError:
+                        trailing = b""
+                    except OSError:
+                        trailing = b""
+                    if trailing:
+                        raise GateError("probe control data remained after child exit")
+                if request:
+                    raise GateError("probe control request was incomplete")
+                if os.WIFEXITED(status):
+                    return os.WEXITSTATUS(status)
+                if os.WIFSIGNALED(status):
+                    return 128 + os.WTERMSIG(status)
+                return 125
+
+            if time.monotonic() >= deadline:
+                _stop_pid(pid)
+                raise GateError("fixture child timed out")
+
+            if not control_open:
+                time.sleep(0.05)
+                continue
+
+            try:
+                chunk = control.recv(64)
+            except TimeoutError:
+                continue
+            except OSError as exc:
+                _stop_pid(pid)
+                raise GateError("probe control channel failed") from exc
+
+            if not chunk:
+                if request:
+                    _stop_pid(pid)
+                    raise GateError("probe control request was incomplete")
+                control_open = False
+                continue
+
+            if handled:
+                _stop_pid(pid)
+                raise GateError("probe sent more than one control request")
+
+            request.extend(chunk)
+            if len(request) > len(b"STOP_MANAGER\n"):
+                _stop_pid(pid)
+                raise GateError("probe control request exceeded fixed protocol")
+
+            if b"\n" not in request:
+                continue
+
+            try:
+                response = self._handle_probe_control(bytes(request))
+            except BaseException:
+                _stop_pid(pid)
+                raise
+            try:
+                control.sendall(response)
+            except OSError as exc:
+                _stop_pid(pid)
+                raise GateError("probe control response failed") from exc
+            request.clear()
+            handled = True
 
     def _verify_privileged_fixture(self) -> None:
         for path in (CGROUP_ROOT, HOST_SOURCE_CGROUP):
@@ -897,14 +1027,25 @@ LogLevel VERBOSE
 
     def run_probe(self) -> int:
         self._verify_privileged_fixture()
-        pid = _spawn_nonroot_child(
-            [str(VENV_PYTHON), str(_PROBE)],
-            uid=PROBE_UID,
-            gid=PROBE_GID,
-            groups=(),
-            env=self._probe_env(),
-        )
-        result = _wait_pid(pid, timeout_seconds=300.0)
+        parent_control, child_control = socket.socketpair()
+        try:
+            pid = _spawn_nonroot_child(
+                [str(VENV_PYTHON), str(_PROBE)],
+                uid=PROBE_UID,
+                gid=PROBE_GID,
+                groups=(),
+                env=self._probe_env(child_control.fileno()),
+                pass_fds=(child_control.fileno(),),
+            )
+            child_control.close()
+            result = self._wait_probe_with_control(
+                pid,
+                parent_control,
+                timeout_seconds=300.0,
+            )
+        finally:
+            child_control.close()
+            parent_control.close()
         if result != 0:
             print(f"local E2E sshd stage: {_read_sshd_stage()}", file=sys.stderr)
         return result
