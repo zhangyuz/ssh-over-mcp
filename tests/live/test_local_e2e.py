@@ -81,6 +81,8 @@ def test_query_only_ledger_reader_sees_wal_and_rejects_writes(
 
         reader = module._open_query_only_ledger_reader(db_path)
         try:
+            query_only = reader.execute("PRAGMA query_only").fetchone()
+            assert query_only is not None and query_only[0] == 1
             row = reader.execute("SELECT value FROM audit_probe").fetchone()
             assert row is not None and row[0] == 1
             with pytest.raises(sqlite3.OperationalError):
