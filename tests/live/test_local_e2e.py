@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import os
+import sqlite3
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -65,6 +66,29 @@ def _valid_metadata() -> dict[str, str]:
         "SSH_OVER_MCP_LIVE_E2E_PROBE_GID": "3204",
         "SSH_OVER_MCP_LIVE_E2E_MANAGER_CLIENT_GID": "3299",
     }
+
+
+def test_query_only_ledger_reader_sees_wal_and_rejects_writes(
+    tmp_path: Path,
+) -> None:
+    module = _load_support()
+    db_path = tmp_path / "ledger.db"
+    writer = sqlite3.connect(db_path, isolation_level=None)
+    try:
+        writer.execute("PRAGMA journal_mode=WAL")
+        writer.execute("CREATE TABLE audit_probe(value INTEGER NOT NULL)")
+        writer.execute("INSERT INTO audit_probe(value) VALUES (1)")
+
+        reader = module._open_query_only_ledger_reader(db_path)
+        try:
+            row = reader.execute("SELECT value FROM audit_probe").fetchone()
+            assert row is not None and row[0] == 1
+            with pytest.raises(sqlite3.OperationalError):
+                reader.execute("INSERT INTO audit_probe(value) VALUES (2)")
+        finally:
+            reader.close()
+    finally:
+        writer.close()
 
 
 def test_fixture_metadata_contract_is_exact_and_server_owned() -> None:
