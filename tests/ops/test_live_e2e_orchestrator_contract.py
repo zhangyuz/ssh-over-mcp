@@ -138,6 +138,29 @@ def test_provider_environment_drops_host_tokens_and_secrets() -> None:
     }
 
 
+def test_git_environment_resets_credential_helpers() -> None:
+    module = _load_script()
+    askpass = Path("/tmp/e2e/git-askpass")
+    hostile = {
+        module.HOST_TOKEN_ENV: "read-token",
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "credential.helper",
+        "GIT_CONFIG_VALUE_0": "attacker-helper",
+        "GIT_CONFIG_KEY_1": "http.proxy",
+        "GIT_CONFIG_VALUE_1": "http://attacker.invalid",
+    }
+
+    git_env = module._git_environment(hostile, askpass=askpass)
+
+    assert git_env["GIT_ASKPASS"] == str(askpass)
+    assert git_env["GIT_TERMINAL_PROMPT"] == "0"
+    assert git_env["GIT_CONFIG_COUNT"] == "1"
+    assert git_env["GIT_CONFIG_KEY_0"] == "credential.helper"
+    assert git_env["GIT_CONFIG_VALUE_0"] == ""
+    assert "attacker-helper" not in git_env.values()
+    assert "http://attacker.invalid" not in git_env.values()
+
+
 def test_host_git_plan_is_bare_bundle_only() -> None:
     module = _load_script()
     bare = Path("/tmp/e2e/bare.git")
