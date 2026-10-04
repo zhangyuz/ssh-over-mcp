@@ -84,9 +84,11 @@ def main(argv: list[str] | None = None) -> int:
     import local_e2e_support
 
     state = asyncio.run(local_e2e_support.run_real_ssh_fixture())
+    mcp = asyncio.run(local_e2e_support.run_real_mcp_fixture())
     summary = {
         "commit": expected,
         "cgroup": state["cgroup"],
+        "mcp_request_id": mcp["request_id"],
         "no_new_privs": state["no_new_privs"],
         "uid": state["uids"][0],
     }

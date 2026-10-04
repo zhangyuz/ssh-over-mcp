@@ -150,6 +150,40 @@ def test_fixture_request_id_matches_control_plane_shape() -> None:
     assert re.fullmatch(r"req_[0-9a-f]{32}", support._REQUEST_ID)
 
 
+
+def test_workload_validator_binds_cgroup_to_exact_expected_request_id() -> None:
+    module = _load_support()
+    fixture = module.LocalE2EFixture.from_mapping(_valid_metadata())
+    request_id = "req_" + ("a" * 32)
+    state = {
+        "uids": [2203, 2203, 2203],
+        "gids": [3203, 3203, 3203],
+        "groups": [],
+        "cap_inheritable": 0,
+        "cap_permitted": 0,
+        "cap_effective": 0,
+        "cap_ambient": 0,
+        "no_new_privs": 1,
+        "manager_socket_fd_present": False,
+        "cgroup": f"/ssh-over-mcp-e2e/ssh-over-mcp-{request_id}",
+    }
+
+    observed = module._validate_workload_state(
+        state,
+        fixture,
+        expected_request_id=request_id,
+    )
+    assert observed["cgroup"] == state["cgroup"]
+
+    with pytest.raises(module.LocalE2EFixtureError, match="cgroup"):
+        module._validate_workload_state(
+            state,
+            fixture,
+            expected_request_id="req_" + ("b" * 32),
+        )
+
+
+
 def test_remote_result_classifies_fixed_launcher_failure_without_echoing_secret() -> None:
     module = _load_support()
     from ssh_over_mcp.ssh.transport import SSHExecutionResult
@@ -185,3 +219,38 @@ def test_remote_result_classifies_other_stderr_as_generic_without_echoing_secret
         module._require_successful_remote_result(result)
 
     assert "SUPERSECRET" not in str(exc.value)
+
+
+def test_local_mcp_harness_contract_is_explicit() -> None:
+    import inspect
+
+    module = _load_support()
+    harness = getattr(module, "LocalMCPHarness", None)
+    assert harness is not None, "Task 4 requires a real local MCP/Ledger harness"
+
+    client = getattr(harness, "client", None)
+    assert client is not None
+    parameters = inspect.signature(client).parameters
+    assert tuple(parameters) == ("self", "profile", "policy_variant")
+    assert parameters["profile"].default is inspect.Parameter.empty
+    assert parameters["policy_variant"].default == "normal"
+
+
+@pytest.mark.skipif(
+    not _RUN_LIVE or not sys.platform.startswith("linux"),
+    reason="dedicated no-network Linux guest only",
+)
+def test_real_mcp_origin_ledger_ssh_happy_path() -> None:
+    module = _load_support()
+    evidence = asyncio.run(module.run_real_mcp_fixture())
+
+    assert evidence["hosts"] == ["e2e-host"]
+    assert evidence["host_alias"] == "e2e-host"
+    assert evidence["request_id"].startswith("req_")
+    assert len(evidence["request_id"]) == 36
+    state = evidence["workload_state"]
+    assert state["uids"] == [2203, 2203, 2203]
+    assert state["gids"] == [3203, 3203, 3203]
+    assert state["groups"] == []
+    assert state["cap_effective"] == 0
+    assert state["no_new_privs"] == 1
