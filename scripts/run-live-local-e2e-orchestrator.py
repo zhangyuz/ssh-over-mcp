@@ -122,11 +122,7 @@ def _provider_environment(env: Mapping[str, str]) -> dict[str, str]:
     }
 
 
-def _host_git_commands(
-    bare: Path,
-    bundle: Path,
-    target: str,
-) -> list[list[str]]:
+def _target_fetch_commands(bare: Path, target: str) -> list[list[str]]:
     return [
         ["git", "init", "--bare", str(bare)],
         [
@@ -139,6 +135,16 @@ def _host_git_commands(
             REPOSITORY_URL,
             target,
         ],
+    ]
+
+
+def _host_git_commands(
+    bare: Path,
+    bundle: Path,
+    target: str,
+) -> list[list[str]]:
+    return [
+        *_target_fetch_commands(bare, target),
         ["git", "-C", str(bare), "update-ref", "refs/e2e/target", "FETCH_HEAD"],
         ["git", "-C", str(bare), "rev-parse", "refs/e2e/target^{commit}"],
         [
@@ -151,6 +157,26 @@ def _host_git_commands(
             "refs/e2e/target",
         ],
     ]
+
+
+def _fetch_target_into_bare(
+    bare: Path,
+    target: str,
+    env: Mapping[str, str],
+) -> None:
+    commands = _target_fetch_commands(bare, target)
+    for attempt in range(2):
+        if bare.exists():
+            shutil.rmtree(bare)
+        _run(commands[0], env=env, timeout=30)
+        try:
+            _run(commands[1], env=env, timeout=120)
+            return
+        except subprocess.TimeoutExpired as exc:
+            if attempt == 0:
+                continue
+            raise OrchestratorError("target fetch timed out after retry") from exc
+    raise AssertionError("unreachable")
 
 
 def _wheel_download_command(lock: Path, wheelhouse: Path) -> list[str]:
@@ -677,8 +703,7 @@ class _SystemLifecycle:
         git_env = _git_environment(self._host_env, askpass=askpass)
         commands = _host_git_commands(bare, bundle, target)
         try:
-            _run(commands[0], env=git_env, timeout=30)
-            _run(commands[1], env=git_env, timeout=120)
+            _fetch_target_into_bare(bare, target, git_env)
             _run(commands[2], env=git_env, timeout=30)
             observed = _run(
                 commands[3],
