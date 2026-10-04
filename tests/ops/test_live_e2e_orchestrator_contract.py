@@ -406,6 +406,26 @@ def test_serial_result_requires_exact_commit_and_single_pass_record() -> None:
             module._parse_serial_result(raw, target)
 
 
+def test_serial_failure_reports_only_fixed_diagnostics() -> None:
+    module = _load_script()
+    target = "a" * 40
+    raw = (
+        "SUPERSECRET bearer-token\n"
+        "local E2E sshd stage: NOT_A_REAL_STAGE\n"
+        "local E2E sshd stage: AUTH_ACCEPTED\n"
+        f"SSH_OVER_MCP_E2E_RESULT={target}:FAIL:70\n"
+    )
+
+    with pytest.raises(module.OrchestratorError) as caught:
+        module._parse_serial_result(raw, target)
+
+    assert str(caught.value) == (
+        "guest E2E reported failure: code=70 sshd_stage=AUTH_ACCEPTED"
+    )
+    assert "SUPERSECRET" not in str(caught.value)
+    assert "NOT_A_REAL_STAGE" not in str(caught.value)
+
+
 def test_orchestrator_source_never_uses_shell_true_or_os_system() -> None:
     source = SCRIPT.read_text(encoding="utf-8")
     tree = ast.parse(source)
