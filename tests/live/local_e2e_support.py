@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
+import logging
 import os
 import re
 import secrets
@@ -67,6 +69,13 @@ _EXPECTED_VALUES = {
 _EXPECTED_KEYS = frozenset(_EXPECTED_VALUES) | {"SSH_OVER_MCP_LIVE_EXPECTED_COMMIT"}
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _REQUEST_ID = "req_0000000000000000000000000000e2e1"
+FS_DATA_ROOT = Path("/opt/ssh-over-mcp-e2e/fs-data")
+FS_SEED_FILE = FS_DATA_ROOT / "seed.txt"
+FS_CREATE_ROOT = FS_DATA_ROOT / "create"
+FS_MKDIR_TARGET = FS_CREATE_ROOT / "created-dir"
+FS_WRITE_TARGET = FS_CREATE_ROOT / "created.txt"
+FS_SEED_BYTES = b"ssh-over-mcp-e2e-seed\n"
+FS_WRITE_BYTES = b"ssh-over-mcp-e2e-sensitive-write-body-v1\n"
 
 
 class LocalE2EFixtureError(RuntimeError):
@@ -370,6 +379,8 @@ class LocalMCPHarness:
         self._server: uvicorn.Server | None = None
         self._server_task: asyncio.Task[None] | None = None
         self._server_socket: socket.socket | None = None
+        self._log_stream: io.StringIO | None = None
+        self._log_handler: logging.Handler | None = None
 
     @property
     def mcp_url(self) -> str:
@@ -400,6 +411,9 @@ class LocalMCPHarness:
         self._temporary = temporary
         self._root = Path(temporary.name)
         os.chmod(self._root, 0o700)
+        self._log_stream = io.StringIO()
+        self._log_handler = logging.StreamHandler(self._log_stream)
+        logging.getLogger().addHandler(self._log_handler)
 
         uid = os.getuid()
         gid = os.getgid()
@@ -492,6 +506,10 @@ class LocalMCPHarness:
         self._ledger_settings = None
         self._origin_token = None
         self._origin_token_file = None
+        if self._log_handler is not None:
+            logging.getLogger().removeHandler(self._log_handler)
+        self._log_handler = None
+        self._log_stream = None
         self._mcp_url = None
         self._root = None
         temporary, self._temporary = self._temporary, None
@@ -540,7 +558,39 @@ class LocalMCPHarness:
                             str(self.fixture.state_script),
                         ],
                         "cwd": [str(self.fixture.work_dir)],
-                    }
+                    },
+                    {
+                        "id": "e2e.developer.files.read",
+                        "effect": "allow",
+                        "roles": ["developer"],
+                        "hosts": ["e2e-host"],
+                        "tools": ["fs_stat", "fs_read"],
+                        "paths": [str(FS_SEED_FILE), str(FS_WRITE_TARGET)],
+                    },
+                    {
+                        "id": "e2e.developer.files.mkdir",
+                        "effect": "allow",
+                        "roles": ["developer"],
+                        "hosts": ["e2e-host"],
+                        "tools": ["fs_mkdir"],
+                        "paths": [str(FS_MKDIR_TARGET)],
+                    },
+                    {
+                        "id": "e2e.developer.files.write",
+                        "effect": "allow",
+                        "roles": ["developer"],
+                        "hosts": ["e2e-host"],
+                        "tools": ["fs_write"],
+                        "paths": [str(FS_WRITE_TARGET)],
+                    },
+                    {
+                        "id": "e2e.readonly.files.read",
+                        "effect": "allow",
+                        "roles": ["readonly"],
+                        "hosts": ["e2e-host"],
+                        "tools": ["fs_stat", "fs_read"],
+                        "paths": [str(FS_SEED_FILE)],
+                    },
                 ],
             },
         }
@@ -681,6 +731,107 @@ class LocalMCPHarness:
             connection.close()
         return tuple(dict(row) for row in rows)
 
+    def captured_logs(self) -> bytes:
+        if self._log_stream is None:
+            raise LocalE2EFixtureError("local application log capture is unavailable")
+        return self._log_stream.getvalue().encode("utf-8", errors="replace")
+
+    def ledger_storage_bytes(self) -> bytes:
+        db_path = self.ledger_db_path
+        observed = bytearray()
+        for path in (db_path, Path(str(db_path) + "-wal"), Path(str(db_path) + "-shm")):
+            if path.is_file():
+                observed.extend(path.read_bytes())
+        return bytes(observed)
+
+    def secret_sentinels(self) -> tuple[bytes, ...]:
+        if self._origin_token is None:
+            raise LocalE2EFixtureError("origin bearer is unavailable")
+        private_key = self.fixture.private_key.read_bytes()
+        key_fragment = next(
+            (
+                line
+                for line in private_key.splitlines()
+                if len(line) >= 24 and not line.startswith(b"-----")
+            ),
+            None,
+        )
+        if key_fragment is None:
+            raise LocalE2EFixtureError("SSH private-key sentinel is unavailable")
+        return (
+            self._origin_token,
+            str(self.fixture.private_key).encode("utf-8"),
+            key_fragment,
+        )
+
+
+def _tool_result_bytes(result: object) -> bytes:
+    pieces: list[bytes] = []
+    structured = getattr(result, "structured_content", None)
+    if structured is not None:
+        pieces.append(
+            json.dumps(structured, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        )
+    for block in getattr(result, "content", ()):
+        text = getattr(block, "text", None)
+        if isinstance(text, str):
+            pieces.append(text.encode("utf-8"))
+    return b"\n".join(pieces)
+
+
+def _require_tool_success(result: object, label: str) -> dict[str, object]:
+    if getattr(result, "is_error", True):
+        raise LocalE2EFixtureError(f"{label} failed")
+    structured = getattr(result, "structured_content", None)
+    if not isinstance(structured, dict):
+        raise LocalE2EFixtureError(f"{label} returned no structured content")
+    return structured
+
+
+def _require_tool_error(result: object, label: str) -> bytes:
+    if not getattr(result, "is_error", False):
+        raise LocalE2EFixtureError(f"{label} unexpectedly succeeded")
+    return _tool_result_bytes(result)
+
+
+def _request_id(result: Mapping[str, object], label: str) -> str:
+    request_id = result.get("request_id")
+    if not isinstance(request_id, str) or re.fullmatch(r"req_[0-9a-f]{32}", request_id) is None:
+        raise LocalE2EFixtureError(f"{label} request id is invalid")
+    return request_id
+
+
+def _require_audit_lifecycle(
+    harness: LocalMCPHarness,
+    *,
+    request_id: str,
+    profile: str,
+    tool: str,
+) -> None:
+    events = harness.audit_events(request_id)
+    event_types = tuple(str(event["event_type"]) for event in events)
+    required = (
+        "request_received",
+        "policy_allowed",
+        "execution_started",
+        "execution_completed",
+    )
+    positions: list[int] = []
+    for event_type in required:
+        try:
+            positions.append(event_types.index(event_type))
+        except ValueError as exc:
+            raise LocalE2EFixtureError(f"{tool} audit lifecycle is incomplete") from exc
+    if positions != sorted(positions):
+        raise LocalE2EFixtureError(f"{tool} audit lifecycle ordering is invalid")
+    for event in events:
+        if event["event_type"] in required and (
+            event["profile"] != profile
+            or event["host"] != "e2e-host"
+            or event["tool"] != tool
+        ):
+            raise LocalE2EFixtureError(f"{tool} audit identity metadata mismatch")
+
 
 async def run_real_mcp_fixture() -> dict[str, object]:
     fixture = LocalE2EFixture.from_env()
@@ -793,4 +944,238 @@ async def run_real_mcp_fixture() -> dict[str, object]:
             "request_id": request_id,
             "workload_state": workload_state,
             "audit_event_types": list(event_types),
+        }
+
+
+async def run_real_filesystem_profile_fixture() -> dict[str, object]:
+    fixture = LocalE2EFixture.from_env()
+    fixture.verify_filesystem_contract()
+
+    transcript_parts: list[bytes] = []
+    audit_checks: list[tuple[str, str, str]] = []
+
+    async with LocalMCPHarness(fixture) as harness:
+        async with harness.client("developer") as client:
+            tools = await client.list_tools()
+            tool_names = {tool.name for tool in tools.tools}
+            for required in ("fs_stat", "fs_read", "fs_mkdir", "fs_write"):
+                if required not in tool_names:
+                    raise LocalE2EFixtureError("filesystem MCP tool is unavailable")
+
+            stat_result = await client.call_tool(
+                "fs_stat",
+                {"host": "e2e-host", "path": str(FS_SEED_FILE)},
+            )
+            transcript_parts.append(_tool_result_bytes(stat_result))
+            stat_data = _require_tool_success(stat_result, "developer fs_stat")
+            if (
+                stat_data.get("path") != str(FS_SEED_FILE)
+                or stat_data.get("kind") != "regular"
+                or stat_data.get("size") != len(FS_SEED_BYTES)
+                or stat_data.get("uid") != fixture.host_uid
+                or stat_data.get("gid") != fixture.host_gid
+            ):
+                raise LocalE2EFixtureError("developer fs_stat metadata mismatch")
+            stat_request_id = _request_id(stat_data, "developer fs_stat")
+            audit_checks.append((stat_request_id, "developer", "fs_stat"))
+
+            seed_read_result = await client.call_tool(
+                "fs_read",
+                {
+                    "host": "e2e-host",
+                    "path": str(FS_SEED_FILE),
+                    "max_bytes": 4096,
+                },
+            )
+            transcript_parts.append(_tool_result_bytes(seed_read_result))
+            seed_read = _require_tool_success(seed_read_result, "developer fs_read")
+            seed_encoded = seed_read.get("data_base64")
+            if not isinstance(seed_encoded, str):
+                raise LocalE2EFixtureError("developer fs_read data is invalid")
+            try:
+                seed_bytes = base64.b64decode(seed_encoded, validate=True)
+            except (ValueError, UnicodeError) as exc:
+                raise LocalE2EFixtureError("developer fs_read data is malformed") from exc
+            if seed_bytes != FS_SEED_BYTES:
+                raise LocalE2EFixtureError("developer fs_read data mismatch")
+            seed_request_id = _request_id(seed_read, "developer fs_read")
+            audit_checks.append((seed_request_id, "developer", "fs_read"))
+
+            mkdir_result = await client.call_tool(
+                "fs_mkdir",
+                {"host": "e2e-host", "path": str(FS_MKDIR_TARGET)},
+            )
+            transcript_parts.append(_tool_result_bytes(mkdir_result))
+            mkdir_data = _require_tool_success(mkdir_result, "developer fs_mkdir")
+            if mkdir_data.get("path") != str(FS_MKDIR_TARGET):
+                raise LocalE2EFixtureError("developer fs_mkdir path mismatch")
+            mkdir_request_id = _request_id(mkdir_data, "developer fs_mkdir")
+            audit_checks.append((mkdir_request_id, "developer", "fs_mkdir"))
+
+            mkdir_replay = await client.call_tool(
+                "fs_mkdir",
+                {"host": "e2e-host", "path": str(FS_MKDIR_TARGET)},
+            )
+            transcript_parts.append(_require_tool_error(mkdir_replay, "fs_mkdir replay"))
+
+            write_result = await client.call_tool(
+                "fs_write",
+                {
+                    "host": "e2e-host",
+                    "path": str(FS_WRITE_TARGET),
+                    "data_base64": base64.b64encode(FS_WRITE_BYTES).decode("ascii"),
+                },
+            )
+            transcript_parts.append(_tool_result_bytes(write_result))
+            write_data = _require_tool_success(write_result, "developer fs_write")
+            if write_data.get("path") != str(FS_WRITE_TARGET):
+                raise LocalE2EFixtureError("developer fs_write path mismatch")
+            write_request_id = _request_id(write_data, "developer fs_write")
+            audit_checks.append((write_request_id, "developer", "fs_write"))
+
+            created_read_result = await client.call_tool(
+                "fs_read",
+                {
+                    "host": "e2e-host",
+                    "path": str(FS_WRITE_TARGET),
+                    "max_bytes": 4096,
+                },
+            )
+            transcript_parts.append(_tool_result_bytes(created_read_result))
+            created_read = _require_tool_success(created_read_result, "created file fs_read")
+            created_encoded = created_read.get("data_base64")
+            if not isinstance(created_encoded, str):
+                raise LocalE2EFixtureError("created file data is invalid")
+            write_bytes = base64.b64decode(created_encoded, validate=True)
+            if write_bytes != FS_WRITE_BYTES:
+                raise LocalE2EFixtureError("created file data mismatch")
+            created_read_request_id = _request_id(created_read, "created file fs_read")
+            audit_checks.append((created_read_request_id, "developer", "fs_read"))
+
+            write_replay = await client.call_tool(
+                "fs_write",
+                {
+                    "host": "e2e-host",
+                    "path": str(FS_WRITE_TARGET),
+                    "data_base64": base64.b64encode(b"replacement-must-not-commit\n").decode("ascii"),
+                },
+            )
+            transcript_parts.append(_require_tool_error(write_replay, "fs_write replay"))
+
+            unchanged_result = await client.call_tool(
+                "fs_read",
+                {
+                    "host": "e2e-host",
+                    "path": str(FS_WRITE_TARGET),
+                    "max_bytes": 4096,
+                },
+            )
+            transcript_parts.append(_tool_result_bytes(unchanged_result))
+            unchanged = _require_tool_success(unchanged_result, "post-replay fs_read")
+            unchanged_encoded = unchanged.get("data_base64")
+            if not isinstance(unchanged_encoded, str):
+                raise LocalE2EFixtureError("post-replay data is invalid")
+            if base64.b64decode(unchanged_encoded, validate=True) != FS_WRITE_BYTES:
+                raise LocalE2EFixtureError("fs_write replay changed existing content")
+
+        async with harness.client("readonly") as client:
+            readonly_read_result = await client.call_tool(
+                "fs_read",
+                {
+                    "host": "e2e-host",
+                    "path": str(FS_SEED_FILE),
+                    "max_bytes": 4096,
+                },
+            )
+            transcript_parts.append(_tool_result_bytes(readonly_read_result))
+            readonly_read = _require_tool_success(readonly_read_result, "readonly fs_read")
+            readonly_encoded = readonly_read.get("data_base64")
+            if not isinstance(readonly_encoded, str):
+                raise LocalE2EFixtureError("readonly fs_read data is invalid")
+            readonly_bytes = base64.b64decode(readonly_encoded, validate=True)
+            if readonly_bytes != FS_SEED_BYTES:
+                raise LocalE2EFixtureError("readonly fs_read data mismatch")
+            readonly_request_id = _request_id(readonly_read, "readonly fs_read")
+            audit_checks.append((readonly_request_id, "readonly", "fs_read"))
+
+            readonly_mutation = await client.call_tool(
+                "fs_write",
+                {
+                    "host": "e2e-host",
+                    "path": str(FS_WRITE_TARGET),
+                    "data_base64": base64.b64encode(b"readonly-must-not-write\n").decode("ascii"),
+                },
+            )
+            readonly_error = _require_tool_error(
+                readonly_mutation,
+                "readonly fs_write",
+            )
+            transcript_parts.append(readonly_error)
+            if b"request denied by central policy" not in readonly_error:
+                raise LocalE2EFixtureError("readonly mutation was not centrally denied")
+
+            profile_override = await client.call_tool(
+                "fs_read",
+                {
+                    "host": "e2e-host",
+                    "path": str(FS_SEED_FILE),
+                    "max_bytes": 4096,
+                    "profile": "developer",
+                },
+            )
+            profile_override_error = _require_tool_error(
+                profile_override,
+                "filesystem profile override",
+            )
+            transcript_parts.append(profile_override_error)
+
+        async with harness.client("developer") as client:
+            final_read_result = await client.call_tool(
+                "fs_read",
+                {
+                    "host": "e2e-host",
+                    "path": str(FS_WRITE_TARGET),
+                    "max_bytes": 4096,
+                },
+            )
+            transcript_parts.append(_tool_result_bytes(final_read_result))
+            final_read = _require_tool_success(final_read_result, "final developer fs_read")
+            final_encoded = final_read.get("data_base64")
+            if not isinstance(final_encoded, str):
+                raise LocalE2EFixtureError("final developer fs_read data is invalid")
+            if base64.b64decode(final_encoded, validate=True) != FS_WRITE_BYTES:
+                raise LocalE2EFixtureError("readonly deployment affected developer data")
+
+        for request_id, profile, tool in audit_checks:
+            _require_audit_lifecycle(
+                harness,
+                request_id=request_id,
+                profile=profile,
+                tool=tool,
+            )
+
+        transcript_blob = b"\n".join(transcript_parts)
+        ledger_blob = harness.ledger_storage_bytes()
+        log_blob = harness.captured_logs()
+        for secret in harness.secret_sentinels():
+            if secret in transcript_blob or secret in ledger_blob or secret in log_blob:
+                raise LocalE2EFixtureError("secret retention scan failed")
+        if FS_WRITE_BYTES in ledger_blob or FS_WRITE_BYTES in log_blob:
+            raise LocalE2EFixtureError("filesystem body leaked into audit or logs")
+
+        return {
+            "seed_bytes": seed_bytes,
+            "mkdir_created": True,
+            "mkdir_replay_denied": True,
+            "write_bytes": write_bytes,
+            "write_replay_denied": True,
+            "readonly_read": readonly_bytes,
+            "readonly_mutation_denied": True,
+            "profile_override_rejected": True,
+            "profile_evidence": {
+                "developer": {"profile": "developer"},
+                "readonly": {"profile": "readonly"},
+            },
+            "audit_verified": True,
+            "secret_retention_clean": True,
         }

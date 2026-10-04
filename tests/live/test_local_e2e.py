@@ -254,3 +254,48 @@ def test_real_mcp_origin_ledger_ssh_happy_path() -> None:
     assert state["groups"] == []
     assert state["cap_effective"] == 0
     assert state["no_new_privs"] == 1
+
+
+def test_filesystem_profile_e2e_contract_is_explicit() -> None:
+    import inspect
+
+    module = _load_support()
+
+    assert module.FS_DATA_ROOT == Path("/opt/ssh-over-mcp-e2e/fs-data")
+    assert module.FS_SEED_FILE == module.FS_DATA_ROOT / "seed.txt"
+    assert module.FS_CREATE_ROOT == module.FS_DATA_ROOT / "create"
+    assert module.FS_MKDIR_TARGET == module.FS_CREATE_ROOT / "created-dir"
+    assert module.FS_WRITE_TARGET == module.FS_CREATE_ROOT / "created.txt"
+    assert module.FS_SEED_BYTES == b"ssh-over-mcp-e2e-seed\n"
+
+    runner = getattr(module, "run_real_filesystem_profile_fixture", None)
+    assert runner is not None, "Task 5 requires real filesystem/profile E2E"
+    source = inspect.getsource(runner)
+    for tool in ("fs_stat", "fs_read", "fs_mkdir", "fs_write"):
+        assert f'"{tool}"' in source
+    assert 'harness.client("developer")' in source
+    assert 'harness.client("readonly")' in source
+    assert "_require_audit_lifecycle" in source
+    audit_helper = inspect.getsource(module._require_audit_lifecycle)
+    assert "audit_events" in audit_helper
+    assert "secret" in source.lower()
+
+
+@pytest.mark.skipif(
+    not _RUN_LIVE or not sys.platform.startswith("linux"),
+    reason="dedicated no-network Linux guest only",
+)
+def test_real_filesystem_profiles_audit_and_secret_retention() -> None:
+    module = _load_support()
+    evidence = asyncio.run(module.run_real_filesystem_profile_fixture())
+
+    assert evidence["seed_bytes"] == module.FS_SEED_BYTES
+    assert evidence["mkdir_created"] is True
+    assert evidence["mkdir_replay_denied"] is True
+    assert evidence["write_bytes"] == module.FS_WRITE_BYTES
+    assert evidence["write_replay_denied"] is True
+    assert evidence["readonly_read"] == module.FS_SEED_BYTES
+    assert evidence["readonly_mutation_denied"] is True
+    assert evidence["profile_override_rejected"] is True
+    assert evidence["audit_verified"] is True
+    assert evidence["secret_retention_clean"] is True
