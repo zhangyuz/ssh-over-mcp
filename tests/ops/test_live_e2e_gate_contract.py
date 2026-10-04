@@ -534,3 +534,49 @@ def test_guest_gate_cleanup_owns_fixed_filesystem_fixture() -> None:
     source = inspect.getsource(module._SystemGuestOps.cleanup)
 
     assert "FS_DATA_ROOT" in source
+
+
+def test_guest_gate_prepares_fixed_fail_closed_marker_and_wrong_host_key() -> None:
+    module = _load_gate()
+    source = inspect.getsource(module._SystemGuestOps._prepare_state_and_policy)
+    keys = inspect.getsource(module._SystemGuestOps._prepare_keys)
+
+    assert module.WORKLOAD_DATA_ROOT == Path("/opt/ssh-over-mcp-e2e/workload-data")
+    assert module.EXEC_MARKER == module.WORKLOAD_DATA_ROOT / "exec-marker"
+    assert module.MARKER_SCRIPT == module.RUNTIME / "workload_marker.py"
+    assert module.WRONG_HOST_KEY == module.RUNTIME / "wrong_host_ed25519"
+    assert module.WRONG_HOST_KEY_PUBLIC == module.RUNTIME / "wrong_host_ed25519.pub"
+
+    for required in (
+        "WORKLOAD_DATA_ROOT.mkdir",
+        "EXEC_MARKER.write_bytes(b\"\")",
+        "MARKER_SCRIPT.write_text",
+        '"args": ["-I", "-S", str(MARKER_SCRIPT)]',
+    ):
+        assert required in source
+    assert "WRONG_HOST_KEY" in keys
+    assert "WRONG_HOST_KEY_PUBLIC" in keys
+
+
+def test_guest_gate_fail_closed_evidence_paths_are_probe_readable_not_writable() -> None:
+    module = _load_gate()
+    source = inspect.getsource(module._SystemGuestOps._prepare_state_and_policy)
+    sshd = inspect.getsource(module._SystemGuestOps._prepare_sshd_config)
+
+    assert "os.chown(WORKLOAD_DATA_ROOT, 0, 0)" in source
+    assert "os.chmod(WORKLOAD_DATA_ROOT, 0o755)" in source
+    assert "os.chown(EXEC_MARKER, WORKLOAD_UID, WORKLOAD_GID)" in source
+    assert "os.chmod(EXEC_MARKER, 0o644)" in source
+    assert "os.chown(MARKER_SCRIPT, 0, 0)" in source
+    assert "os.chmod(MARKER_SCRIPT, 0o555)" in source
+    assert "os.chown(SSHD_LOG, 0, PROBE_GID)" in sshd
+    assert "os.chmod(SSHD_LOG, 0o640)" in sshd
+
+
+def test_guest_gate_cleanup_owns_fail_closed_fixture() -> None:
+    module = _load_gate()
+    cleanup = inspect.getsource(module._SystemGuestOps.cleanup)
+    verify_clean = inspect.getsource(module._SystemGuestOps.verify_clean)
+
+    assert "WORKLOAD_DATA_ROOT" in cleanup
+    assert "WORKLOAD_DATA_ROOT" in verify_clean

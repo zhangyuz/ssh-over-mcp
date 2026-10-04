@@ -43,6 +43,11 @@ FS_CREATE_ROOT = FS_DATA_ROOT / "create"
 FS_MKDIR_TARGET = FS_CREATE_ROOT / "created-dir"
 FS_WRITE_TARGET = FS_CREATE_ROOT / "created.txt"
 FS_SEED_BYTES = b"ssh-over-mcp-e2e-seed\n"
+WORKLOAD_DATA_ROOT = Path("/opt/ssh-over-mcp-e2e/workload-data")
+EXEC_MARKER = WORKLOAD_DATA_ROOT / "exec-marker"
+MARKER_SCRIPT = RUNTIME / "workload_marker.py"
+WRONG_HOST_KEY = RUNTIME / "wrong_host_ed25519"
+WRONG_HOST_KEY_PUBLIC = RUNTIME / "wrong_host_ed25519.pub"
 
 HOST_POLICY = Path("/etc/ssh-over-mcp/host-policy.yaml")
 LAUNCHER_SOURCE = WORKSPACE / "ops" / "live-e2e" / "ssh-over-mcp-host-agent-launcher.py"
@@ -538,6 +543,10 @@ class _SystemGuestOps:
             [_SSH_KEYGEN, "-q", "-t", "ed25519", "-N", "", "-f", str(HOST_KEY)],
             timeout=20,
         )
+        _run(
+            [_SSH_KEYGEN, "-q", "-t", "ed25519", "-N", "", "-f", str(WRONG_HOST_KEY)],
+            timeout=20,
+        )
         os.chown(CLIENT_KEY, PROBE_UID, PROBE_GID)
         os.chmod(CLIENT_KEY, 0o600)
         os.chown(Path(str(CLIENT_KEY) + ".pub"), 0, 0)
@@ -546,6 +555,10 @@ class _SystemGuestOps:
         os.chmod(HOST_KEY, 0o600)
         os.chown(HOST_KEY_PUBLIC, 0, 0)
         os.chmod(HOST_KEY_PUBLIC, 0o644)
+        os.chown(WRONG_HOST_KEY, 0, 0)
+        os.chmod(WRONG_HOST_KEY, 0o600)
+        os.chown(WRONG_HOST_KEY_PUBLIC, 0, 0)
+        os.chmod(WRONG_HOST_KEY_PUBLIC, 0o644)
 
         public_key = Path(str(CLIENT_KEY) + ".pub").read_text(encoding="ascii").strip()
         AUTHORIZED_KEYS.write_text(f"restrict {public_key}\n", encoding="ascii")
@@ -565,6 +578,26 @@ class _SystemGuestOps:
         FS_SEED_FILE.write_bytes(FS_SEED_BYTES)
         os.chown(FS_SEED_FILE, HOST_UID, HOST_GID)
         os.chmod(FS_SEED_FILE, 0o600)
+
+        WORKLOAD_DATA_ROOT.mkdir(mode=0o755, parents=False, exist_ok=False)
+        os.chown(WORKLOAD_DATA_ROOT, 0, 0)
+        os.chmod(WORKLOAD_DATA_ROOT, 0o755)
+        EXEC_MARKER.write_bytes(b"")
+        os.chown(EXEC_MARKER, WORKLOAD_UID, WORKLOAD_GID)
+        os.chmod(EXEC_MARKER, 0o644)
+
+        marker_source = '''#!/usr/bin/python3
+import os
+from pathlib import Path
+
+marker = Path("/opt/ssh-over-mcp-e2e/workload-data/exec-marker")
+with marker.open("ab", buffering=0) as stream:
+    stream.write(b"1\\n")
+    os.fsync(stream.fileno())
+'''
+        MARKER_SCRIPT.write_text(marker_source, encoding="utf-8")
+        os.chown(MARKER_SCRIPT, 0, 0)
+        os.chmod(MARKER_SCRIPT, 0o555)
 
         state_source = '''#!/usr/bin/python3
 import json
@@ -663,7 +696,11 @@ print(json.dumps({
                         {
                             "mode": "exact",
                             "args": ["-I", "-S", str(STATE_SCRIPT)],
-                        }
+                        },
+                        {
+                            "mode": "exact",
+                            "args": ["-I", "-S", str(MARKER_SCRIPT)],
+                        },
                     ],
                     "cwd_roots": [str(WORK_DIR)],
                     "allow_no_cwd": False,
@@ -1004,6 +1041,12 @@ LogLevel VERBOSE
             failures.append(("fs_data", exc))
 
         try:
+            if WORKLOAD_DATA_ROOT.exists():
+                shutil.rmtree(WORKLOAD_DATA_ROOT)
+        except BaseException as exc:  # noqa: BLE001 - teardown must aggregate every failure
+            failures.append(("workload_data", exc))
+
+        try:
             self._remove_identities()
         except BaseException as exc:  # noqa: BLE001 - teardown must aggregate every failure
             failures.append(("identities", exc))
@@ -1029,6 +1072,7 @@ LogLevel VERBOSE
                 RUNTIME,
                 CGROUP_ROOT,
                 FS_DATA_ROOT,
+                WORKLOAD_DATA_ROOT,
                 HOST_POLICY,
                 LAUNCHER_INSTALL,
                 SUDOERS_DROPIN,
