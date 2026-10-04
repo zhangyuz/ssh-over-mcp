@@ -61,6 +61,10 @@ _COMMIT_RE = re.compile(r"[0-9a-fA-F]{40}\Z")
 _RESULT_RE = re.compile(
     r"^SSH_OVER_MCP_E2E_RESULT=([0-9a-f]{40}):(PASS|FAIL)(?::([0-9]+))?$"
 )
+_SSHD_STAGE_RE = re.compile(
+    r"^local E2E sshd stage: "
+    r"(NO_SSH_ACTIVITY|TCP_CONNECTED|AUTH_REJECTED|AUTH_ACCEPTED|FORCECOMMAND_STARTED)$"
+)
 
 
 class OrchestratorError(RuntimeError):
@@ -409,7 +413,15 @@ def _parse_serial_result(raw: str, target: str) -> bool:
     if commit != target:
         raise OrchestratorError("serial result commit mismatch")
     if status != "PASS" or code is not None:
-        raise OrchestratorError("guest E2E reported failure")
+        sshd_stage = "UNKNOWN"
+        for line in raw.splitlines():
+            stage_match = _SSHD_STAGE_RE.fullmatch(line.strip())
+            if stage_match is not None:
+                sshd_stage = stage_match.group(1)
+        raise OrchestratorError(
+            "guest E2E reported failure: "
+            f"code={code or 'none'} sshd_stage={sshd_stage}"
+        )
     return True
 
 
