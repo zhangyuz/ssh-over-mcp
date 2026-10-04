@@ -96,7 +96,8 @@ def test_query_only_ledger_reader_sees_wal_and_rejects_writes(
 
 
 
-def test_wait_for_audit_events_since_is_bounded_and_observes_delayed_rows() -> None:
+@pytest.mark.asyncio
+async def test_wait_for_audit_events_since_is_bounded_and_observes_delayed_rows() -> None:
     module = _load_support()
 
     class DelayedHarness:
@@ -117,7 +118,7 @@ def test_wait_for_audit_events_since_is_bounded_and_observes_delayed_rows() -> N
             )
 
     harness = DelayedHarness()
-    rows = module._wait_for_audit_events_since(
+    rows = await module._wait_for_audit_events_since(
         harness,
         1,
         timeout_seconds=0.1,
@@ -135,7 +136,7 @@ def test_wait_for_audit_events_since_is_bounded_and_observes_delayed_rows() -> N
         module.LocalE2EFixtureError,
         match="expected audit event did not become visible",
     ):
-        module._wait_for_audit_events_since(
+        await module._wait_for_audit_events_since(
             EmptyHarness(),
             0,
             timeout_seconds=0.01,
