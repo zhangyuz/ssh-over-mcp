@@ -251,6 +251,8 @@ class LocalE2EFixture:
 def _validate_workload_state(
     state: object,
     fixture: LocalE2EFixture,
+    *,
+    expected_request_id: str,
 ) -> dict[str, object]:
     if not isinstance(state, dict):
         raise LocalE2EFixtureError("workload state is not an object")
@@ -270,9 +272,11 @@ def _validate_workload_state(
         if state.get(key) != value:
             raise LocalE2EFixtureError(f"workload security state mismatch: {key}")
 
+    if re.fullmatch(r"req_[0-9a-f]{32}", expected_request_id) is None:
+        raise LocalE2EFixtureError("expected request id is invalid")
     cgroup = state.get("cgroup")
     expected_cgroup = (
-        f"/ssh-over-mcp-e2e/ssh-over-mcp-{_REQUEST_ID}"
+        f"/ssh-over-mcp-e2e/ssh-over-mcp-{expected_request_id}"
     )
     if cgroup != expected_cgroup:
         raise LocalE2EFixtureError("workload request cgroup mismatch")
@@ -342,7 +346,11 @@ async def run_real_ssh_fixture() -> dict[str, object]:
         state = json.loads(result.stdout.decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError) as exc:
         raise LocalE2EFixtureError("workload state output is invalid") from exc
-    return _validate_workload_state(state, fixture)
+    return _validate_workload_state(
+        state,
+        fixture,
+        expected_request_id=_REQUEST_ID,
+    )
 
 class LocalMCPHarness:
     """Test-local production-component harness for MCP, Ledger, and real SSH."""
@@ -743,7 +751,11 @@ async def run_real_mcp_fixture() -> dict[str, object]:
                 state = json.loads(base64.b64decode(stdout_base64, validate=True).decode("utf-8"))
             except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
                 raise LocalE2EFixtureError("MCP workload state output is invalid") from exc
-            workload_state = _validate_workload_state(state, fixture)
+            workload_state = _validate_workload_state(
+                state,
+                fixture,
+                expected_request_id=request_id,
+            )
 
         events = harness.audit_events(request_id)
         event_types = tuple(str(event["event_type"]) for event in events)

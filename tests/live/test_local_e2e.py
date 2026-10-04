@@ -150,6 +150,40 @@ def test_fixture_request_id_matches_control_plane_shape() -> None:
     assert re.fullmatch(r"req_[0-9a-f]{32}", support._REQUEST_ID)
 
 
+
+def test_workload_validator_binds_cgroup_to_exact_expected_request_id() -> None:
+    module = _load_support()
+    fixture = module.LocalE2EFixture.from_mapping(_valid_metadata())
+    request_id = "req_" + ("a" * 32)
+    state = {
+        "uids": [2203, 2203, 2203],
+        "gids": [3203, 3203, 3203],
+        "groups": [],
+        "cap_inheritable": 0,
+        "cap_permitted": 0,
+        "cap_effective": 0,
+        "cap_ambient": 0,
+        "no_new_privs": 1,
+        "manager_socket_fd_present": False,
+        "cgroup": f"/ssh-over-mcp-e2e/ssh-over-mcp-{request_id}",
+    }
+
+    observed = module._validate_workload_state(
+        state,
+        fixture,
+        expected_request_id=request_id,
+    )
+    assert observed["cgroup"] == state["cgroup"]
+
+    with pytest.raises(module.LocalE2EFixtureError, match="cgroup"):
+        module._validate_workload_state(
+            state,
+            fixture,
+            expected_request_id="req_" + ("b" * 32),
+        )
+
+
+
 def test_remote_result_classifies_fixed_launcher_failure_without_echoing_secret() -> None:
     module = _load_support()
     from ssh_over_mcp.ssh.transport import SSHExecutionResult
