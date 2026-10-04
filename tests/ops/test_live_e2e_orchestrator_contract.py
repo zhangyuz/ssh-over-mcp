@@ -562,6 +562,94 @@ def test_operator_docs_pin_no_network_qemu_boundary() -> None:
     assert "Lima/VZ" in combined
 
 
+def test_target_fetch_retries_once_from_fresh_bare_repo_on_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    bare = tmp_path / "target.git"
+    target = "a" * 40
+    events: list[str] = []
+    fetch_attempts = 0
+
+    def fake_run(command, *, env, timeout, check=True):
+        nonlocal fetch_attempts
+        del env, check
+        if command[:3] == ["git", "init", "--bare"]:
+            assert not bare.exists()
+            bare.mkdir()
+            events.append(f"init:{timeout}")
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if "fetch" in command:
+            fetch_attempts += 1
+            events.append(f"fetch:{timeout}")
+            if fetch_attempts == 1:
+                (bare / "partial").write_text("partial", encoding="ascii")
+                raise subprocess.TimeoutExpired(command, timeout)
+            assert not (bare / "partial").exists()
+            return subprocess.CompletedProcess(command, 0, "", "")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(module, "_run", fake_run)
+    module._fetch_target_into_bare(bare, target, {})
+
+    assert events == ["init:30", "fetch:120", "init:30", "fetch:120"]
+
+
+def test_target_fetch_does_not_retry_non_timeout_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    bare = tmp_path / "target.git"
+    target = "b" * 40
+    fetch_attempts = 0
+
+    def fake_run(command, *, env, timeout, check=True):
+        nonlocal fetch_attempts
+        del env, timeout, check
+        if command[:3] == ["git", "init", "--bare"]:
+            bare.mkdir()
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if "fetch" in command:
+            fetch_attempts += 1
+            raise subprocess.CalledProcessError(128, command)
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(module, "_run", fake_run)
+    with pytest.raises(subprocess.CalledProcessError):
+        module._fetch_target_into_bare(bare, target, {})
+
+    assert fetch_attempts == 1
+
+
+def test_target_fetch_fails_closed_after_second_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    bare = tmp_path / "target.git"
+    target = "c" * 40
+    fetch_attempts = 0
+
+    def fake_run(command, *, env, timeout, check=True):
+        nonlocal fetch_attempts
+        del env, check
+        if command[:3] == ["git", "init", "--bare"]:
+            bare.mkdir()
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if "fetch" in command:
+            fetch_attempts += 1
+            raise subprocess.TimeoutExpired(command, timeout)
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(module, "_run", fake_run)
+    with pytest.raises(module.OrchestratorError, match="target fetch timed out after retry"):
+        module._fetch_target_into_bare(bare, target, {})
+
+    assert fetch_attempts == 2
+
+
 def test_provider_state_marker_precedes_target_fetch_and_is_removed_on_cleanup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
