@@ -400,9 +400,10 @@ PYTHONPATH="$PIP_WHEEL" "$VENV/bin/python" -m pip install \
   --require-hashes \
   -r "$EXTRACTED/runtime.lock"
 
-mkdir -p /opt/ssh-over-mcp-e2e
-git clone "$EXTRACTED/target.bundle" "$WORKSPACE"
-git -C "$WORKSPACE" checkout --detach "$EXPECTED_COMMIT"
+mkdir -p /opt/ssh-over-mcp-e2e "$WORKSPACE"
+git -C "$WORKSPACE" init
+git -C "$WORKSPACE" fetch "$EXTRACTED/target.bundle" refs/e2e/target
+git -C "$WORKSPACE" checkout --detach FETCH_HEAD
 test "$(git -C "$WORKSPACE" rev-parse HEAD)" = "$EXPECTED_COMMIT"
 test -z "$(git -C "$WORKSPACE" status --porcelain=v1)"
 
