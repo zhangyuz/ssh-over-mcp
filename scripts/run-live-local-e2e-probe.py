@@ -85,9 +85,11 @@ def main(argv: list[str] | None = None) -> int:
 
     state = asyncio.run(local_e2e_support.run_real_ssh_fixture())
     mcp = asyncio.run(local_e2e_support.run_real_mcp_fixture())
+    filesystem = asyncio.run(local_e2e_support.run_real_filesystem_profile_fixture())
     summary = {
         "commit": expected,
         "cgroup": state["cgroup"],
+        "filesystem_audit_verified": filesystem["audit_verified"],
         "mcp_request_id": mcp["request_id"],
         "no_new_privs": state["no_new_privs"],
         "uid": state["uids"][0],
