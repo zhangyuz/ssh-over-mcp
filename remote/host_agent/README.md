@@ -45,7 +45,7 @@ Generic tests remain unprivileged.
 
 ## Phase 7A planned real-sshd capability handoff
 
-The complete local E2E adds the missing deployment bridge between real OpenSSH ForceCommand and the already-validated non-root host-agent capability state. ADR 0007 specifies one fixed root-owned no-argument launcher as the only sudo-authorized ForceCommand target. It drops to the exact host-agent UID/GID and supplementary manager-client group, retains only `CAP_SETUID`/`CAP_SETGID`, verifies that state, and only then enters host-agent application code.
+The complete local E2E adds the missing deployment bridge between real OpenSSH ForceCommand and the already-validated non-root host-agent capability state. ADR 0007 specifies one fixed root-owned no-argument launcher as the only sudo-authorized ForceCommand target. While still root it moves only the current ForceCommand session into the fixed `host-agent-source` cgroup and verifies that membership; it then drops to the exact host-agent UID/GID and supplementary manager-client group, retains only `CAP_SETUID`/`CAP_SETGID`, verifies that state, and only then enters host-agent application code.
 
 Repository/application modules must not run while the launcher still has root identity. The SSH account cannot select launcher arguments, identities, capabilities, policy paths, or manager endpoints. Production managed hosts keep the operator-installed launcher and sudo rule outside the writable application checkout. Phase 7A E2E instead installs the exact target launcher only inside a fresh disposable Linux VM and destroys that guest after evidence collection.
 

@@ -30,6 +30,16 @@ def _load_gate() -> ModuleType:
     return module
 
 
+def test_target_e2e_fixture_sources_exist_in_checkout() -> None:
+    required = (
+        ROOT / "scripts" / "run-live-local-e2e-manager.py",
+        ROOT / "scripts" / "run-live-local-e2e-probe.py",
+        ROOT / "tests" / "live" / "local_e2e_support.py",
+        ROOT / "tests" / "live" / "test_local_e2e.py",
+    )
+    assert all(path.is_file() for path in required)
+
+
 def test_gate_constants_pin_guest_only_authority() -> None:
     module = _load_gate()
 
@@ -352,6 +362,18 @@ def test_root_gate_verifies_privileged_fixture_before_probe_drop() -> None:
         "0o660",
     ):
         assert required in helper
+
+
+def test_nonroot_probe_does_not_inspect_privileged_manager_surfaces() -> None:
+    support = (
+        ROOT / "tests" / "live" / "local_e2e_support.py"
+    ).read_text(encoding="utf-8")
+    start = support.index("    def verify_filesystem_contract")
+    end = support.index("\n    def host_key_line", start)
+    body = support[start:end]
+
+    assert "self.manager_endpoint.lstat()" not in body
+    assert "self.host_source_cgroup" not in body
 
 
 def test_identity_cleanup_accepts_primary_group_already_removed(

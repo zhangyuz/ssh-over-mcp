@@ -35,10 +35,11 @@ ADR 0005 requires the production host agent to remain non-root while holding onl
 ADR 0007 defines the Phase 7A deployment bridge. A production managed host uses one fixed, operator-installed, root-owned, no-argument capability launcher as the exact ForceCommand sudo target. The Phase 7A E2E installs the exact target commit's launcher at that fixed path only inside the fresh disposable Linux guest defined by ADR 0006. In either case, the launcher may be root only during the bounded identity/capability transition. Before any `ssh_over_mcp` application module is imported or executed it must:
 
 1. validate exact `SSH_ORIGINAL_COMMAND=mcp-v1` and reject PTY use;
-2. establish the exact host-agent UID/GID and manager-client supplementary group;
-3. retain only `CAP_SETUID` and `CAP_SETGID` in effective/permitted sets;
-4. require zero inheritable/ambient capabilities and no other Linux capability;
-5. read back and verify the resulting state.
+2. while still root, move only the current ForceCommand launcher process into the fixed `host-agent-source` cgroup beneath the delegated root and verify the exact unified cgroup-v2 membership;
+3. establish the exact host-agent UID/GID and manager-client supplementary group;
+4. retain only `CAP_SETUID` and `CAP_SETGID` in effective/permitted sets;
+5. require zero inheritable/ambient capabilities and no other Linux capability;
+6. read back and verify the resulting state.
 
 Only after those checks may it enter `ssh_over_mcp.host_agent.cli`.
 
