@@ -146,6 +146,7 @@ def test_host_git_plan_is_bare_bundle_only() -> None:
 
     commands = module._host_git_commands(bare, bundle, target)
     assert commands[0] == ["git", "init", "--bare", str(bare)]
+    assert commands[1][:3] == ["git", "-c", "credential.helper="]
     assert commands[1][-1] == target
     assert commands[2] == [
         "git", "-C", str(bare), "update-ref", "refs/e2e/target", "FETCH_HEAD"

@@ -131,6 +131,8 @@ def _host_git_commands(
         ["git", "init", "--bare", str(bare)],
         [
             "git",
+            "-c",
+            "credential.helper=",
             "-C",
             str(bare),
             "fetch",
