@@ -11,6 +11,8 @@ import secrets
 import socket
 import sqlite3
 import stat
+import subprocess
+import sys
 import tempfile
 import threading
 from collections.abc import AsyncIterator, Mapping
@@ -80,6 +82,10 @@ SSHD_LOG = Path("/opt/ssh-over-mcp-e2e/runtime/sshd.log")
 WORKLOAD_DATA_ROOT = Path("/opt/ssh-over-mcp-e2e/workload-data")
 EXEC_MARKER = WORKLOAD_DATA_ROOT / "exec-marker"
 MARKER_SCRIPT = Path("/opt/ssh-over-mcp-e2e/runtime/workload_marker.py")
+APPROVAL_MARKER = WORKLOAD_DATA_ROOT / "approval-marker"
+APPROVAL_SCRIPT = Path("/opt/ssh-over-mcp-e2e/runtime/approval_marker.py")
+CONTROL_FD_ENV = "SSH_OVER_MCP_LIVE_E2E_CONTROL_FD"
+_APPROVAL_ID_RE = re.compile(rb"approval_id=(apr_[0-9a-f]{32})")
 WRONG_HOST_KEY_PUBLIC = Path(
     "/opt/ssh-over-mcp-e2e/runtime/wrong_host_ed25519.pub"
 )
@@ -263,6 +269,18 @@ class LocalE2EFixture:
         )
         self._require_file(
             MARKER_SCRIPT,
+            uid=0,
+            gid=0,
+            mode=0o555,
+        )
+        self._require_file(
+            APPROVAL_MARKER,
+            uid=self.workload_uid,
+            gid=self.workload_gid,
+            mode=0o644,
+        )
+        self._require_file(
+            APPROVAL_SCRIPT,
             uid=0,
             gid=0,
             mode=0o555,
@@ -510,6 +528,24 @@ class LocalMCPHarness:
         os.chmod(self._origin_token_file, 0o600)
         return self
 
+    def stop_ledger(self) -> None:
+        if (
+            self._ledger_stop is None
+            or self._ledger_thread is None
+            or self._ledger_service is None
+        ):
+            raise LocalE2EFixtureError("local Security Ledger is not active")
+        self._ledger_stop.set()
+        self._ledger_thread.join(timeout=3)
+        if self._ledger_thread.is_alive():
+            raise LocalE2EFixtureError("local Security Ledger thread did not stop")
+        self._ledger_service.close()
+        if self._ledger_errors:
+            raise LocalE2EFixtureError("local Security Ledger service failed")
+        self._ledger_service = None
+        self._ledger_stop = None
+        self._ledger_thread = None
+
     async def __aexit__(self, exc_type, exc, tb) -> None:
         cleanup_error: BaseException | None = None
         try:
@@ -562,6 +598,7 @@ class LocalMCPHarness:
             "central_deny",
             "remote_deny",
             "wrong_host_key",
+            "approval",
         }:
             raise LocalE2EFixtureError("unsupported local E2E policy variant")
         return {
@@ -586,8 +623,19 @@ class LocalMCPHarness:
                 "version": 1,
                 "default": "deny",
                 "roles": {
-                    "developer": {},
+                    "developer": (
+                        {"env_allow": ["E2E_SECRET"]}
+                        if policy_variant == "approval"
+                        else {}
+                    ),
                     "readonly": {},
+                },
+                "risk": {
+                    "approval_required": (
+                        ["medium", "high", "critical"]
+                        if policy_variant == "approval"
+                        else ["high", "critical"]
+                    )
                 },
                 "rules": [
                     *(
@@ -624,6 +672,26 @@ class LocalMCPHarness:
                         ],
                         "cwd": [str(self.fixture.work_dir)],
                     },
+                    *(
+                        [
+                            {
+                                "id": "e2e.developer.approval-marker",
+                                "effect": "allow",
+                                "roles": ["developer"],
+                                "hosts": ["e2e-host"],
+                                "tools": ["ssh_exec"],
+                                "executables": ["/usr/bin/python3"],
+                                "argv_prefix": [
+                                    "-I",
+                                    "-S",
+                                    str(APPROVAL_SCRIPT),
+                                ],
+                                "cwd": [str(self.fixture.work_dir)],
+                            }
+                        ]
+                        if policy_variant == "approval"
+                        else []
+                    ),
                     *(
                         [
                             {
@@ -875,10 +943,13 @@ class LocalMCPHarness:
         )
         if key_fragment is None:
             raise LocalE2EFixtureError("SSH private-key sentinel is unavailable")
+        hmac_key = self._require_ledger_settings().hmac_key_path.read_bytes()
         return (
             self._origin_token,
             str(self.fixture.private_key).encode("utf-8"),
+            private_key,
             key_fragment,
+            hmac_key,
         )
 
 
@@ -1508,3 +1579,299 @@ async def run_real_fail_closed_fixture() -> dict[str, object]:
             "marker_unchanged": True,
             "safe_errors": True,
         }
+
+
+def _approval_id_from_error(error: bytes, label: str) -> str:
+    match = _APPROVAL_ID_RE.search(error)
+    if match is None:
+        raise LocalE2EFixtureError(f"{label} approval id is missing")
+    return match.group(1).decode("ascii")
+
+
+def _control_fd() -> int:
+    raw = os.environ.get(CONTROL_FD_ENV, "")
+    try:
+        value = int(raw, 10)
+    except ValueError:
+        raise LocalE2EFixtureError("Task 7 control fd is invalid") from None
+    if value <= 2:
+        raise LocalE2EFixtureError("Task 7 control fd is invalid")
+    return value
+
+
+async def run_real_approval_outage_containment_fixture() -> dict[str, object]:
+    fixture = LocalE2EFixture.from_env()
+    fixture.verify_filesystem_contract()
+    if APPROVAL_MARKER.read_bytes() != b"":
+        raise LocalE2EFixtureError("approval marker is not empty")
+    if EXEC_MARKER.read_bytes() != b"":
+        raise LocalE2EFixtureError("execution marker is not empty")
+
+    approval_request = {
+        "host": "e2e-host",
+        "executable": "/usr/bin/python3",
+        "args": ["-I", "-S", str(APPROVAL_SCRIPT)],
+        "cwd": str(fixture.work_dir),
+        "env": {},
+        "stdin": "task7-stdin-sensitive-v1",
+        "timeout_seconds": 10.0,
+    }
+    state_request = {
+        "host": "e2e-host",
+        "executable": "/usr/bin/python3",
+        "args": ["-I", "-S", str(fixture.state_script)],
+        "cwd": str(fixture.work_dir),
+        "env": {},
+        "stdin": "",
+        "timeout_seconds": 10.0,
+    }
+    task7_secrets = (
+        b"task7-stdin-sensitive-v1",
+        b"task7-env-sensitive-v1",
+        b"task7-argv-sensitive-v1",
+    )
+    safe_blobs: list[bytes] = []
+
+    async with LocalMCPHarness(fixture) as harness:
+        async with harness.client("developer", "approval") as client:
+            tool_names = {tool.name for tool in (await client.list_tools()).tools}
+            if "approval_status" not in tool_names:
+                raise LocalE2EFixtureError("approval status tool is unavailable")
+            if tool_names.intersection(
+                {"approval_grant", "approval_deny", "grant", "deny"}
+            ):
+                raise LocalE2EFixtureError("MCP surface exposes approval mutation")
+
+            ssh_before = SSHD_LOG.stat().st_size
+            pending = await client.call_tool("ssh_exec", approval_request)
+            pending_error = _require_tool_error(pending, "approval pending")
+            safe_blobs.append(pending_error)
+            approval_id = _approval_id_from_error(pending_error, "approval pending")
+            if b"approval required" not in pending_error or b"state=pending" not in pending_error:
+                raise LocalE2EFixtureError("approval request did not become pending")
+            if APPROVAL_MARKER.read_bytes() != b"" or SSHD_LOG.stat().st_size != ssh_before:
+                raise LocalE2EFixtureError("pending approval reached SSH or workload")
+
+            pending_status = await client.call_tool(
+                "approval_status",
+                {"approval_id": approval_id},
+            )
+            pending_data = _require_tool_success(pending_status, "approval_status pending")
+            if pending_data.get("state") != "pending":
+                raise LocalE2EFixtureError("approval state is not pending")
+
+            settings = harness._require_ledger_settings()
+            approvalctl = Path(sys.executable).with_name("ssh-over-mcp-approvalctl")
+            admin_env = {
+                "SSH_OVER_MCP_LEDGER_ADMIN_SOCKET_PATH": str(
+                    settings.admin_socket_path
+                ),
+                "SSH_OVER_MCP_LEDGER_SERVICE_UID": str(settings.service_uid),
+                "SSH_OVER_MCP_LEDGER_SERVICE_GID": str(settings.service_gid),
+            }
+            granted_cli = subprocess.run(
+                [str(approvalctl), "grant", approval_id],
+                env=admin_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=5,
+                check=False,
+            )
+            safe_blobs.extend((granted_cli.stdout, granted_cli.stderr))
+            if granted_cli.returncode != 0:
+                raise LocalE2EFixtureError("ssh-over-mcp-approvalctl grant failed")
+            try:
+                granted_payload = json.loads(granted_cli.stdout.decode("utf-8"))
+            except (UnicodeError, json.JSONDecodeError) as exc:
+                raise LocalE2EFixtureError("approvalctl output is invalid") from exc
+            if granted_payload.get("state") != "granted":
+                raise LocalE2EFixtureError("approval CLI did not grant request")
+
+            exact_retry = dict(approval_request)
+            exact_retry["approval_id"] = approval_id
+            executed = await client.call_tool("ssh_exec", exact_retry)
+            safe_blobs.append(_tool_result_bytes(executed))
+            executed_data = _require_tool_success(executed, "approved execution")
+            if executed_data.get("exit_status") != 0:
+                raise LocalE2EFixtureError("approved execution did not succeed")
+            if APPROVAL_MARKER.read_bytes() != b"1":
+                raise LocalE2EFixtureError("approved marker side effect mismatch")
+
+            consumed = await client.call_tool(
+                "approval_status",
+                {"approval_id": approval_id},
+            )
+            consumed_data = _require_tool_success(consumed, "approval_status consumed")
+            if consumed_data.get("state") != "consumed":
+                raise LocalE2EFixtureError("approval was not consumed")
+
+            replay = await client.call_tool("ssh_exec", exact_retry)
+            replay_error = _require_tool_error(replay, "approval replay")
+            safe_blobs.append(replay_error)
+            replacement_id = _approval_id_from_error(replay_error, "approval replay")
+            if replacement_id == approval_id or APPROVAL_MARKER.read_bytes() != b"1":
+                raise LocalE2EFixtureError("approval replay was not single-use")
+
+            replay_grant = subprocess.run(
+                [str(approvalctl), "grant", replacement_id],
+                env=admin_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=5,
+                check=False,
+            )
+            safe_blobs.extend((replay_grant.stdout, replay_grant.stderr))
+            if replay_grant.returncode != 0:
+                raise LocalE2EFixtureError("replacement approval grant failed")
+
+            mutation = dict(approval_request)
+            mutation["args"] = [
+                "-I",
+                "-S",
+                str(APPROVAL_SCRIPT),
+                "task7-argv-sensitive-v1",
+            ]
+            mutation["env"] = {"E2E_SECRET": "task7-env-sensitive-v1"}
+            mutation["approval_id"] = replacement_id
+            mutation_ssh_before = SSHD_LOG.stat().st_size
+            mismatch = await client.call_tool("ssh_exec", mutation)
+            mismatch_error = _require_tool_error(mismatch, "approval binding mismatch")
+            safe_blobs.append(mismatch_error)
+            mismatch_id = _approval_id_from_error(
+                mismatch_error,
+                "approval binding mismatch",
+            )
+            if mismatch_id == replacement_id:
+                raise LocalE2EFixtureError("approval binding mismatch reused old approval")
+            if APPROVAL_MARKER.read_bytes() != b"1":
+                raise LocalE2EFixtureError("approval binding mismatch executed workload")
+            if SSHD_LOG.stat().st_size != mutation_ssh_before:
+                raise LocalE2EFixtureError("approval binding mismatch reached SSH")
+            old_status = await client.call_tool(
+                "approval_status",
+                {"approval_id": replacement_id},
+            )
+            old_status_data = _require_tool_success(
+                old_status,
+                "approval_status binding base",
+            )
+            if old_status_data.get("state") != "granted":
+                raise LocalE2EFixtureError("binding mismatch consumed old approval")
+
+        async with harness.client("developer") as client:
+            base_url = harness.mcp_url.removesuffix("/mcp")
+            ssh_before = SSHD_LOG.stat().st_size
+            approval_before = APPROVAL_MARKER.read_bytes()
+            exec_before = EXEC_MARKER.read_bytes()
+            harness.stop_ledger()
+            async with httpx2.AsyncClient(trust_env=False) as raw_client:
+                health = await raw_client.get(base_url + "/healthz")
+                ready = await raw_client.get(base_url + "/readyz")
+            safe_blobs.extend((health.content, ready.content))
+            if health.status_code != 200 or health.json() != {"status": "ok"}:
+                raise LocalE2EFixtureError("/healthz failed during Ledger outage")
+            if ready.status_code != 503 or ready.json() != {"status": "not_ready"}:
+                raise LocalE2EFixtureError("/readyz did not fail closed")
+            outage = await client.call_tool("ssh_exec", state_request)
+            outage_error = _require_tool_error(outage, "Ledger outage execution")
+            safe_blobs.append(outage_error)
+            if b"audit persistence failed" not in outage_error:
+                raise LocalE2EFixtureError("Ledger outage error was not generic")
+            if SSHD_LOG.stat().st_size != ssh_before:
+                raise LocalE2EFixtureError("Ledger outage reached SSH")
+            if (
+                APPROVAL_MARKER.read_bytes() != approval_before
+                or EXEC_MARKER.read_bytes() != exec_before
+            ):
+                raise LocalE2EFixtureError("Ledger outage mutated workload state")
+
+        safe_blobs.extend(
+            (
+                harness.ledger_storage_bytes(),
+                harness.captured_logs(),
+                SSHD_LOG.read_bytes(),
+            )
+        )
+        for secret in (*harness.secret_sentinels(), *task7_secrets):
+            if any(secret in blob for blob in safe_blobs):
+                raise LocalE2EFixtureError("Task 7 secret retention scan failed")
+
+    async with LocalMCPHarness(fixture) as harness:
+        async with harness.client("developer") as client:
+            # STOP_MANAGER is deliberately the final execution fault in the probe.
+            control_fd = _control_fd()
+            with socket.socket(fileno=os.dup(control_fd)) as control:
+                control.settimeout(3.0)
+                control.sendall(b"STOP_MANAGER\n")
+                response = control.recv(16)
+            if response != b"OK\n":
+                raise LocalE2EFixtureError("Task 7 manager-stop response is invalid")
+
+            marker_before = APPROVAL_MARKER.read_bytes()
+            exec_before = EXEC_MARKER.read_bytes()
+            audit_before = _last_audit_rowid(harness)
+            unavailable = await client.call_tool("ssh_exec", state_request)
+            unavailable_blob = _tool_result_bytes(unavailable)
+            safe_blobs = [unavailable_blob]
+            unavailable_data = _require_tool_success(
+                unavailable,
+                "containment unavailable execution",
+            )
+            if unavailable_data.get("exit_status") != 69:
+                raise LocalE2EFixtureError("containment failure status mismatch")
+            if unavailable_data.get("stdout_base64") not in {"", None}:
+                raise LocalE2EFixtureError("containment failure exposed stdout")
+            stderr_base64 = unavailable_data.get("stderr_base64")
+            if not isinstance(stderr_base64, str):
+                raise LocalE2EFixtureError("containment failure stderr is invalid")
+            try:
+                stderr = base64.b64decode(stderr_base64, validate=True)
+            except (ValueError, UnicodeError) as exc:
+                raise LocalE2EFixtureError("containment failure stderr is malformed") from exc
+            if stderr != b"ssh-over-mcp-host-agent: execution failed\n":
+                raise LocalE2EFixtureError("containment failure was not generic")
+            if b"containment.sock" in unavailable_blob or b"manager" in stderr.lower():
+                raise LocalE2EFixtureError("containment internals leaked through MCP")
+
+            rows = _audit_events_since(harness, audit_before)
+            request_ids = {
+                str(row["request_id"])
+                for row in rows
+                if row.get("tool") == "ssh_exec"
+                and isinstance(row.get("request_id"), str)
+            }
+            if len(request_ids) != 1:
+                raise LocalE2EFixtureError("containment failure request id is ambiguous")
+            request_id = next(iter(request_ids))
+            cgroup = fixture.cgroup_root / f"ssh-over-mcp-{request_id}"
+            if cgroup.exists():
+                raise LocalE2EFixtureError("containment failure leaked request cgroup")
+            if (
+                APPROVAL_MARKER.read_bytes() != marker_before
+                or EXEC_MARKER.read_bytes() != exec_before
+            ):
+                raise LocalE2EFixtureError("containment failure executed workload")
+
+        safe_blobs.extend(
+            (
+                harness.ledger_storage_bytes(),
+                harness.captured_logs(),
+                SSHD_LOG.read_bytes(),
+            )
+        )
+        for secret in (*harness.secret_sentinels(), *task7_secrets):
+            if any(secret in blob for blob in safe_blobs):
+                raise LocalE2EFixtureError("final Task 7 secret retention scan failed")
+
+    return {
+        "approval_required_before_ssh": True,
+        "approval_granted_via_cli": True,
+        "approval_consumed": True,
+        "approval_replay_denied": True,
+        "approval_binding_mismatch_denied": True,
+        "ledger_outage_not_ready": True,
+        "ledger_outage_no_side_effect": True,
+        "containment_unavailable_fail_closed": True,
+        "request_cgroup_clean": True,
+        "secret_retention_clean": True,
+    }
