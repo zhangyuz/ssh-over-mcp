@@ -414,6 +414,18 @@ async def run_real_ssh_fixture() -> dict[str, object]:
         expected_request_id=_REQUEST_ID,
     )
 
+
+def _open_query_only_ledger_reader(db_path: Path) -> sqlite3.Connection:
+    connection = sqlite3.connect(db_path, timeout=2.0)
+    try:
+        connection.execute("PRAGMA query_only=ON")
+        connection.row_factory = sqlite3.Row
+        return connection
+    except Exception:
+        connection.close()
+        raise
+
+
 class LocalMCPHarness:
     """Test-local production-component harness for MCP, Ledger, and real SSH."""
 
@@ -883,11 +895,7 @@ class LocalMCPHarness:
             await self._stop_server()
 
     def audit_events(self, request_id: str) -> tuple[dict[str, object], ...]:
-        connection = sqlite3.connect(
-            f"file:{self.ledger_db_path}?mode=ro",
-            uri=True,
-        )
-        connection.row_factory = sqlite3.Row
+        connection = _open_query_only_ledger_reader(self.ledger_db_path)
         try:
             rows = connection.execute(
                 "SELECT event_type,request_id,principal_id,profile,host,tool,"
@@ -900,11 +908,7 @@ class LocalMCPHarness:
         return tuple(dict(row) for row in rows)
 
     def audit_rows(self) -> tuple[dict[str, object], ...]:
-        connection = sqlite3.connect(
-            f"file:{self.ledger_db_path}?mode=ro",
-            uri=True,
-        )
-        connection.row_factory = sqlite3.Row
+        connection = _open_query_only_ledger_reader(self.ledger_db_path)
         try:
             rows = connection.execute(
                 "SELECT rowid,event_type,request_id,principal_id,profile,host,tool,"
