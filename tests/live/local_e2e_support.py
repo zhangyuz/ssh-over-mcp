@@ -416,13 +416,14 @@ async def run_real_ssh_fixture() -> dict[str, object]:
 
 
 def _open_query_only_ledger_reader(db_path: Path) -> sqlite3.Connection:
-    connection = sqlite3.connect(
-        f"file:{db_path}?mode=ro",
-        uri=True,
-        timeout=2.0,
-    )
-    connection.row_factory = sqlite3.Row
-    return connection
+    connection = sqlite3.connect(db_path, timeout=2.0)
+    try:
+        connection.execute("PRAGMA query_only=ON")
+        connection.row_factory = sqlite3.Row
+        return connection
+    except Exception:
+        connection.close()
+        raise
 
 
 class LocalMCPHarness:
