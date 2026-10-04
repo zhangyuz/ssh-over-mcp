@@ -299,3 +299,45 @@ def test_real_filesystem_profiles_audit_and_secret_retention() -> None:
     assert evidence["profile_override_rejected"] is True
     assert evidence["audit_verified"] is True
     assert evidence["secret_retention_clean"] is True
+
+
+def test_fail_closed_e2e_contract_is_explicit() -> None:
+    import inspect
+
+    module = _load_support()
+    assert module.SSHD_LOG == Path("/opt/ssh-over-mcp-e2e/runtime/sshd.log")
+    assert module.WORKLOAD_DATA_ROOT == Path("/opt/ssh-over-mcp-e2e/workload-data")
+    assert module.EXEC_MARKER == module.WORKLOAD_DATA_ROOT / "exec-marker"
+    assert module.MARKER_SCRIPT == Path(
+        "/opt/ssh-over-mcp-e2e/runtime/workload_marker.py"
+    )
+    assert module.WRONG_HOST_KEY_PUBLIC == Path(
+        "/opt/ssh-over-mcp-e2e/runtime/wrong_host_ed25519.pub"
+    )
+
+    runner = getattr(module, "run_real_fail_closed_fixture", None)
+    assert runner is not None, "Task 6 requires real fail-closed E2E"
+    source = inspect.getsource(runner)
+    for variant in ("central_deny", "remote_deny", "wrong_host_key"):
+        assert f'"{variant}"' in source
+    for event in ("policy_denied", "remote_policy_denied", "host_key_failure"):
+        assert event in source
+    assert "execution_started" in source
+    assert "SSHD_LOG" in source
+    assert "EXEC_MARKER" in source
+
+
+@pytest.mark.skipif(
+    not _RUN_LIVE or not sys.platform.startswith("linux"),
+    reason="dedicated no-network Linux guest only",
+)
+def test_real_origin_policy_and_host_trust_fail_closed() -> None:
+    module = _load_support()
+    evidence = asyncio.run(module.run_real_fail_closed_fixture())
+
+    assert evidence["origin_auth_rejected_early"] is True
+    assert evidence["central_deny_before_ssh"] is True
+    assert evidence["host_local_deny_after_ssh"] is True
+    assert evidence["wrong_host_key_before_forcecommand"] is True
+    assert evidence["marker_unchanged"] is True
+    assert evidence["safe_errors"] is True

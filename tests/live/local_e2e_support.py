@@ -76,6 +76,13 @@ FS_MKDIR_TARGET = FS_CREATE_ROOT / "created-dir"
 FS_WRITE_TARGET = FS_CREATE_ROOT / "created.txt"
 FS_SEED_BYTES = b"ssh-over-mcp-e2e-seed\n"
 FS_WRITE_BYTES = b"ssh-over-mcp-e2e-sensitive-write-body-v1\n"
+SSHD_LOG = Path("/opt/ssh-over-mcp-e2e/runtime/sshd.log")
+WORKLOAD_DATA_ROOT = Path("/opt/ssh-over-mcp-e2e/workload-data")
+EXEC_MARKER = WORKLOAD_DATA_ROOT / "exec-marker"
+MARKER_SCRIPT = Path("/opt/ssh-over-mcp-e2e/runtime/workload_marker.py")
+WRONG_HOST_KEY_PUBLIC = Path(
+    "/opt/ssh-over-mcp-e2e/runtime/wrong_host_ed25519.pub"
+)
 
 
 class LocalE2EFixtureError(RuntimeError):
@@ -242,7 +249,32 @@ class LocalE2EFixture:
             gid=0,
             mode=0o555,
         )
+        self._require_file(
+            SSHD_LOG,
+            uid=0,
+            gid=self.probe_gid,
+            mode=0o640,
+        )
+        self._require_file(
+            EXEC_MARKER,
+            uid=self.workload_uid,
+            gid=self.workload_gid,
+            mode=0o644,
+        )
+        self._require_file(
+            MARKER_SCRIPT,
+            uid=0,
+            gid=0,
+            mode=0o555,
+        )
+        self._require_file(
+            WRONG_HOST_KEY_PUBLIC,
+            uid=0,
+            gid=0,
+            mode=0o644,
+        )
         self._require_dir(self.work_dir, uid=0, mode=0o755)
+        self._require_dir(WORKLOAD_DATA_ROOT, uid=0, mode=0o755)
         self._require_dir(self.cgroup_root, uid=self.manager_uid)
         # The host-source cgroup and manager socket are intentionally not
         # traversable by the zero-supplementary-group probe. The trusted root
@@ -250,11 +282,15 @@ class LocalE2EFixture:
         # to the probe identity.
 
     def host_key_line(self) -> str:
-        raw = self.host_key_public.read_text(encoding="ascii").strip()
-        parts = raw.split()
-        if len(parts) < 2:
-            raise LocalE2EFixtureError("host public key is malformed")
-        return f"{parts[0]} {parts[1]}"
+        return _host_key_line(self.host_key_public)
+
+
+def _host_key_line(path: Path) -> str:
+    raw = path.read_text(encoding="ascii").strip()
+    parts = raw.split()
+    if len(parts) < 2:
+        raise LocalE2EFixtureError("host public key is malformed")
+    return f"{parts[0]} {parts[1]}"
 
 
 def _validate_workload_state(
@@ -521,7 +557,12 @@ class LocalMCPHarness:
     def _config_document(self, profile: str, policy_variant: str) -> dict[str, object]:
         if profile not in {"developer", "readonly"}:
             raise LocalE2EFixtureError("unsupported local E2E profile")
-        if policy_variant != "normal":
+        if policy_variant not in {
+            "normal",
+            "central_deny",
+            "remote_deny",
+            "wrong_host_key",
+        }:
             raise LocalE2EFixtureError("unsupported local E2E policy variant")
         return {
             "inventory": {
@@ -531,7 +572,11 @@ class LocalMCPHarness:
                         "port": self.fixture.port,
                         "ssh_user": self.fixture.ssh_user,
                         "credential_ref": "e2e-client",
-                        "host_key": self.fixture.host_key_line(),
+                        "host_key": (
+                            _host_key_line(WRONG_HOST_KEY_PUBLIC)
+                            if policy_variant == "wrong_host_key"
+                            else self.fixture.host_key_line()
+                        ),
                         "labels": ["e2e"],
                         "allowed_roles": ["developer", "readonly"],
                     }
@@ -545,6 +590,26 @@ class LocalMCPHarness:
                     "readonly": {},
                 },
                 "rules": [
+                    *(
+                        [
+                            {
+                                "id": "e2e.developer.marker.deny",
+                                "effect": "deny",
+                                "roles": ["developer"],
+                                "hosts": ["e2e-host"],
+                                "tools": ["ssh_exec"],
+                                "executables": ["/usr/bin/python3"],
+                                "argv_prefix": [
+                                    "-I",
+                                    "-S",
+                                    str(MARKER_SCRIPT),
+                                ],
+                                "cwd": [str(self.fixture.work_dir)],
+                            }
+                        ]
+                        if policy_variant == "central_deny"
+                        else []
+                    ),
                     {
                         "id": "e2e.developer.state",
                         "effect": "allow",
@@ -559,6 +624,42 @@ class LocalMCPHarness:
                         ],
                         "cwd": [str(self.fixture.work_dir)],
                     },
+                    *(
+                        [
+                            {
+                                "id": "e2e.developer.marker",
+                                "effect": "allow",
+                                "roles": ["developer"],
+                                "hosts": ["e2e-host"],
+                                "tools": ["ssh_exec"],
+                                "executables": ["/usr/bin/python3"],
+                                "argv_prefix": [
+                                    "-I",
+                                    "-S",
+                                    str(MARKER_SCRIPT),
+                                ],
+                                "cwd": [str(self.fixture.work_dir)],
+                            }
+                        ]
+                        if policy_variant in {"central_deny", "wrong_host_key"}
+                        else []
+                    ),
+                    *(
+                        [
+                            {
+                                "id": "e2e.developer.remote-deny",
+                                "effect": "allow",
+                                "roles": ["developer"],
+                                "hosts": ["e2e-host"],
+                                "tools": ["ssh_exec"],
+                                "executables": ["/usr/bin/false"],
+                                "argv_prefix": [],
+                                "cwd": [str(self.fixture.work_dir)],
+                            }
+                        ]
+                        if policy_variant == "remote_deny"
+                        else []
+                    ),
                     {
                         "id": "e2e.developer.files.read",
                         "effect": "allow",
@@ -726,6 +827,22 @@ class LocalMCPHarness:
                 "exit_status,duration_ms,stdout_bytes,stderr_bytes,timed_out,truncated "
                 "FROM audit_events WHERE request_id=? ORDER BY rowid",
                 (request_id,),
+            ).fetchall()
+        finally:
+            connection.close()
+        return tuple(dict(row) for row in rows)
+
+    def audit_rows(self) -> tuple[dict[str, object], ...]:
+        connection = sqlite3.connect(
+            f"file:{self.ledger_db_path}?mode=ro",
+            uri=True,
+        )
+        connection.row_factory = sqlite3.Row
+        try:
+            rows = connection.execute(
+                "SELECT rowid,event_type,request_id,principal_id,profile,host,tool,"
+                "exit_status,duration_ms,stdout_bytes,stderr_bytes,timed_out,truncated "
+                "FROM audit_events ORDER BY rowid"
             ).fetchall()
         finally:
             connection.close()
@@ -1178,4 +1295,216 @@ async def run_real_filesystem_profile_fixture() -> dict[str, object]:
             },
             "audit_verified": True,
             "secret_retention_clean": True,
+        }
+
+
+def _last_audit_rowid(harness: LocalMCPHarness) -> int:
+    rows = harness.audit_rows()
+    if not rows:
+        return 0
+    rowid = rows[-1].get("rowid")
+    if not isinstance(rowid, int):
+        raise LocalE2EFixtureError("audit row id is invalid")
+    return rowid
+
+
+def _audit_events_since(
+    harness: LocalMCPHarness,
+    rowid: int,
+) -> tuple[dict[str, object], ...]:
+    return tuple(
+        row
+        for row in harness.audit_rows()
+        if isinstance(row.get("rowid"), int) and int(row["rowid"]) > rowid
+    )
+
+
+def _single_request_event_types(
+    rows: tuple[dict[str, object], ...],
+    label: str,
+) -> tuple[str, ...]:
+    request_ids = {
+        str(row["request_id"])
+        for row in rows
+        if row.get("tool") == "ssh_exec" and isinstance(row.get("request_id"), str)
+    }
+    if len(request_ids) != 1:
+        raise LocalE2EFixtureError(f"{label} audit request identity is ambiguous")
+    request_id = next(iter(request_ids))
+    return tuple(
+        str(row["event_type"])
+        for row in rows
+        if row.get("request_id") == request_id
+    )
+
+
+async def run_real_fail_closed_fixture() -> dict[str, object]:
+    fixture = LocalE2EFixture.from_env()
+    fixture.verify_filesystem_contract()
+
+    marker_initial = EXEC_MARKER.read_bytes()
+    if marker_initial:
+        raise LocalE2EFixtureError("fail-closed execution marker is not empty")
+
+    safe_blobs: list[bytes] = []
+    async with LocalMCPHarness(fixture) as harness:
+        # Origin bearer rejection must happen before any execution path.
+        async with harness.client("developer") as client:
+            del client
+            ssh_before = SSHD_LOG.stat().st_size
+            marker_before = EXEC_MARKER.read_bytes()
+            audit_before = _last_audit_rowid(harness)
+            wrong_origin = b"e2e-origin-wrong-secret"
+            async with httpx2.AsyncClient(trust_env=False) as raw_client:
+                missing = await raw_client.post(harness.mcp_url, json={})
+                wrong = await raw_client.post(
+                    harness.mcp_url,
+                    json={},
+                    headers={
+                        "Authorization": "Bearer " + wrong_origin.decode("ascii")
+                    },
+                )
+            safe_blobs.extend((missing.content, wrong.content))
+            if missing.status_code != 401 or wrong.status_code != 401:
+                raise LocalE2EFixtureError("origin authentication did not reject early")
+            if wrong_origin in missing.content or wrong_origin in wrong.content:
+                raise LocalE2EFixtureError("origin rejection echoed bearer material")
+            if wrong_origin in harness.captured_logs():
+                raise LocalE2EFixtureError("origin rejection logged bearer material")
+            origin_rows = _audit_events_since(harness, audit_before)
+            if any(
+                row.get("event_type") == "execution_started"
+                for row in origin_rows
+            ):
+                raise LocalE2EFixtureError("origin rejection reached execution audit")
+            if SSHD_LOG.stat().st_size != ssh_before:
+                raise LocalE2EFixtureError("origin rejection reached SSH")
+            if EXEC_MARKER.read_bytes() != marker_before:
+                raise LocalE2EFixtureError("origin rejection mutated workload marker")
+
+        marker_args = {
+            "host": "e2e-host",
+            "executable": "/usr/bin/python3",
+            "args": ["-I", "-S", str(MARKER_SCRIPT)],
+            "cwd": str(fixture.work_dir),
+            "env": {},
+            "stdin": "",
+            "timeout_seconds": 10.0,
+        }
+
+        # Central deny must stop before SSH and before execution_started.
+        async with harness.client("developer", "central_deny") as client:
+            ssh_before = SSHD_LOG.stat().st_size
+            marker_before = EXEC_MARKER.read_bytes()
+            audit_before = _last_audit_rowid(harness)
+            denied = await client.call_tool("ssh_exec", marker_args)
+            denied_error = _require_tool_error(denied, "central deny")
+            safe_blobs.append(denied_error)
+            if b"request denied by central policy" not in denied_error:
+                raise LocalE2EFixtureError("central denial was not generic")
+            central_rows = _audit_events_since(harness, audit_before)
+            central_events = _single_request_event_types(
+                central_rows,
+                "central deny",
+            )
+            if "policy_denied" not in central_events:
+                raise LocalE2EFixtureError("central denial audit is missing")
+            if "execution_started" in central_events:
+                raise LocalE2EFixtureError("central denial started execution")
+            if SSHD_LOG.stat().st_size != ssh_before:
+                raise LocalE2EFixtureError("central denial reached SSH")
+            if EXEC_MARKER.read_bytes() != marker_before:
+                raise LocalE2EFixtureError("central denial mutated workload marker")
+
+        # Central policy allows /usr/bin/false, but host-local policy has no rule
+        # for it. The SSH session must occur and return the fixed remote deny.
+        async with harness.client("developer", "remote_deny") as client:
+            ssh_before = SSHD_LOG.stat().st_size
+            marker_before = EXEC_MARKER.read_bytes()
+            audit_before = _last_audit_rowid(harness)
+            remote = await client.call_tool(
+                "ssh_exec",
+                {
+                    "host": "e2e-host",
+                    "executable": "/usr/bin/false",
+                    "args": [],
+                    "cwd": str(fixture.work_dir),
+                    "env": {},
+                    "stdin": "",
+                    "timeout_seconds": 10.0,
+                },
+            )
+            remote_data = _require_tool_success(remote, "host-local deny")
+            if remote_data.get("exit_status") != 77:
+                raise LocalE2EFixtureError("host-local denial status mismatch")
+            remote_stderr = remote_data.get("stderr_base64")
+            if not isinstance(remote_stderr, str):
+                raise LocalE2EFixtureError("host-local denial stderr is invalid")
+            try:
+                remote_error = base64.b64decode(remote_stderr, validate=True)
+            except (ValueError, UnicodeError) as exc:
+                raise LocalE2EFixtureError(
+                    "host-local denial stderr is malformed"
+                ) from exc
+            safe_blobs.append(remote_error)
+            if b"ssh-over-mcp-host-agent: denied:" not in remote_error:
+                raise LocalE2EFixtureError("host-local denial was not generic")
+            remote_rows = _audit_events_since(harness, audit_before)
+            remote_events = _single_request_event_types(
+                remote_rows,
+                "host-local deny",
+            )
+            if "execution_started" not in remote_events:
+                raise LocalE2EFixtureError("host-local denial never reached SSH execution")
+            if "remote_policy_denied" not in remote_events:
+                raise LocalE2EFixtureError("host-local denial audit is missing")
+            if SSHD_LOG.stat().st_size <= ssh_before:
+                raise LocalE2EFixtureError("host-local denial did not reach SSH")
+            if EXEC_MARKER.read_bytes() != marker_before:
+                raise LocalE2EFixtureError("host-local denial mutated workload marker")
+
+        # A server-owned but wrong pinned key must fail before ForceCommand.
+        async with harness.client("developer", "wrong_host_key") as client:
+            ssh_before = SSHD_LOG.stat().st_size
+            marker_before = EXEC_MARKER.read_bytes()
+            audit_before = _last_audit_rowid(harness)
+            mismatch = await client.call_tool("ssh_exec", marker_args)
+            mismatch_error = _require_tool_error(
+                mismatch,
+                "wrong host key",
+            )
+            safe_blobs.append(mismatch_error)
+            if b"SSH host key verification failed" not in mismatch_error:
+                raise LocalE2EFixtureError("host-key failure was not generic")
+            host_key_rows = _audit_events_since(harness, audit_before)
+            host_key_events = _single_request_event_types(
+                host_key_rows,
+                "wrong host key",
+            )
+            if "execution_started" not in host_key_events:
+                raise LocalE2EFixtureError("host-key failure audit ordering is invalid")
+            if "host_key_failure" not in host_key_events:
+                raise LocalE2EFixtureError("host-key failure audit is missing")
+            ssh_delta = SSHD_LOG.read_bytes()[ssh_before:]
+            if b"Starting session: forced-command" in ssh_delta:
+                raise LocalE2EFixtureError("host-key mismatch reached ForceCommand")
+            if EXEC_MARKER.read_bytes() != marker_before:
+                raise LocalE2EFixtureError("host-key mismatch mutated workload marker")
+
+        true_key = fixture.host_key_line().encode("ascii")
+        wrong_key = _host_key_line(WRONG_HOST_KEY_PUBLIC).encode("ascii")
+        safe_blobs.append(harness.captured_logs())
+        for blob in safe_blobs:
+            if true_key in blob or wrong_key in blob:
+                raise LocalE2EFixtureError("raw host-key material leaked to client")
+        if EXEC_MARKER.read_bytes() != marker_initial:
+            raise LocalE2EFixtureError("fail-closed scenarios mutated workload marker")
+
+        return {
+            "origin_auth_rejected_early": True,
+            "central_deny_before_ssh": True,
+            "host_local_deny_after_ssh": True,
+            "wrong_host_key_before_forcecommand": True,
+            "marker_unchanged": True,
+            "safe_errors": True,
         }
