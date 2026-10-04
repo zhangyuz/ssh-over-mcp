@@ -28,6 +28,8 @@ def _load_gate() -> ModuleType:
     finally:
         sys.modules.pop(name, None)
     return module
+
+
 def test_target_e2e_fixture_sources_exist_in_checkout() -> None:
     required = (
         ROOT / "scripts" / "run-live-local-e2e-manager.py",
@@ -499,3 +501,36 @@ def test_guest_policy_limits_match_production_executor_defaults() -> None:
     source = inspect.getsource(module._SystemGuestOps._prepare_state_and_policy)
     assert '"max_output_bytes": EXECUTOR_DEFAULT_MAX_OUTPUT_BYTES' in source
     assert '"max_stdin_bytes": EXECUTOR_DEFAULT_MAX_STDIN_BYTES' in source
+
+
+def test_guest_gate_prepares_fixed_filesystem_fixture_and_profile_policy() -> None:
+    module = _load_gate()
+    source = inspect.getsource(module._SystemGuestOps._prepare_state_and_policy)
+
+    assert module.FS_DATA_ROOT == Path("/opt/ssh-over-mcp-e2e/fs-data")
+    assert module.FS_SEED_FILE == module.FS_DATA_ROOT / "seed.txt"
+    assert module.FS_CREATE_ROOT == module.FS_DATA_ROOT / "create"
+    assert module.FS_MKDIR_TARGET == module.FS_CREATE_ROOT / "created-dir"
+    assert module.FS_WRITE_TARGET == module.FS_CREATE_ROOT / "created.txt"
+    assert module.FS_SEED_BYTES == b"ssh-over-mcp-e2e-seed\n"
+
+    for required in (
+        "FS_DATA_ROOT.mkdir",
+        "FS_CREATE_ROOT.mkdir",
+        "FS_SEED_FILE.write_bytes",
+        '"allowed_profiles": ["developer", "readonly"]',
+        '"developer": {',
+        '"readonly": {',
+        '"stat_roots": [str(FS_DATA_ROOT)]',
+        '"read_roots": [str(FS_DATA_ROOT)]',
+        '"mkdir_roots": [str(FS_CREATE_ROOT)]',
+        '"write_create_roots": [str(FS_CREATE_ROOT)]',
+    ):
+        assert required in source
+
+
+def test_guest_gate_cleanup_owns_fixed_filesystem_fixture() -> None:
+    module = _load_gate()
+    source = inspect.getsource(module._SystemGuestOps.cleanup)
+
+    assert "FS_DATA_ROOT" in source
