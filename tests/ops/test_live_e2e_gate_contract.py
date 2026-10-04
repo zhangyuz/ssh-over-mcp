@@ -28,6 +28,8 @@ def _load_gate() -> ModuleType:
     finally:
         sys.modules.pop(name, None)
     return module
+
+
 def test_gate_constants_pin_guest_only_authority() -> None:
     module = _load_gate()
 
@@ -127,6 +129,24 @@ class _FakeGuestOps:
         self.events.append("verify_clean")
 
 
+def test_guest_gate_cleanup_reports_only_fixed_stage_labels() -> None:
+    module = _load_gate()
+    source = inspect.getsource(module._SystemGuestOps.cleanup)
+
+    for stage in (
+        "sshd",
+        "manager",
+        "cgroup",
+        "sudoers",
+        "launcher",
+        "host_policy",
+        "identities",
+        "runtime",
+    ):
+        assert f'"{stage}"' in source
+    assert 'f"{stage}:{type(exc).__name__}"' in source
+
+
 def test_guest_gate_cleanup_runs_after_success() -> None:
     module = _load_gate()
     ops = _FakeGuestOps()
@@ -199,13 +219,18 @@ def test_gate_constants_pin_real_ssh_containment_fixture() -> None:
 
 
 def test_gate_source_pins_forcecommand_and_nonroot_children() -> None:
+    module = _load_gate()
     source = GATE.read_text(encoding="utf-8")
 
     exact_launcher = (
         "/usr/bin/python3 -I -S "
         "/usr/local/libexec/ssh-over-mcp-host-agent-launcher.py"
     )
-    assert exact_launcher in source
+    assert module._LAUNCHER_COMMAND == exact_launcher
+    assert module._FORCECOMMAND == f"/usr/bin/sudo -n {exact_launcher}"
+    assert 'NOPASSWD: {_LAUNCHER_COMMAND}' in source
+    assert 'NOPASSWD: {_FORCECOMMAND}' not in source
+    assert "NOPASSWD: /usr/bin/sudo" not in source
     assert "NOPASSWD: ALL" not in source
     assert "PermitTTY no" in source
     assert "AllowTcpForwarding no" in source
@@ -244,7 +269,7 @@ def test_gate_source_never_runs_probe_as_root() -> None:
 
 def test_guest_gate_trusts_only_root_gate_and_executes_target_helpers_after_drop() -> None:
     module = _load_gate()
-    assert module.TRUSTED_HARNESS_ROOT == Path('/mnt/som-payload/trusted-harness')
+    assert module.TRUSTED_HARNESS_ROOT == Path('/mnt/som-trusted-harness')
     assert module._TRUSTED_GATE == (
         module.TRUSTED_HARNESS_ROOT
         / 'ops/live-e2e/ssh-over-mcp-live-e2e-gate'
@@ -292,6 +317,7 @@ def test_guest_gate_requires_target_launcher_regular_non_symlink() -> None:
 
 def test_guest_gate_runtime_verifies_only_trusted_root_gate_payload() -> None:
     module = _load_gate()
+    assert module.TRUSTED_HARNESS_ROOT == Path("/mnt/som-trusted-harness")
     source = inspect.getsource(module._SystemGuestOps.verify_root_and_workspace)
     assert '_require_trusted_harness()' in source
     helper = inspect.getsource(module._require_trusted_harness)
@@ -304,3 +330,185 @@ def test_guest_gate_runtime_verifies_only_trusted_root_gate_payload() -> None:
     assert '_MANAGER_SCRIPT' not in helper
     assert '_PROBE' not in helper
     assert '_SUPPORT' not in helper
+
+
+def test_root_gate_verifies_privileged_fixture_before_probe_drop() -> None:
+    module = _load_gate()
+    run_probe = inspect.getsource(module._SystemGuestOps.run_probe)
+    helper = inspect.getsource(module._SystemGuestOps._verify_privileged_fixture)
+
+    assert run_probe.index("_verify_privileged_fixture()") < run_probe.index(
+        "_spawn_nonroot_child"
+    )
+    for required in (
+        "MANAGER_ENDPOINT",
+        "CGROUP_ROOT",
+        "HOST_SOURCE_CGROUP",
+        "MANAGER_UID",
+        "MANAGER_GID",
+        "MANAGER_CLIENT_GID",
+        "stat.S_ISSOCK",
+        "stat.S_ISDIR",
+        "0o660",
+    ):
+        assert required in helper
+
+
+def test_identity_cleanup_accepts_primary_group_already_removed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_gate()
+    ops = module._SystemGuestOps()
+    ops._created_groups = [module.PROBE_GROUP]
+
+    def unexpected_run(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("groupdel must not run for an already-absent primary group")
+
+    monkeypatch.setattr(module, "_run", unexpected_run)
+
+    ops._remove_identities()
+
+    assert ops._created_groups == []
+
+
+def test_identity_cleanup_rejects_absent_name_with_reused_numeric_gid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_gate()
+    ops = module._SystemGuestOps()
+    ops._created_groups = [module.PROBE_GROUP]
+
+    monkeypatch.setattr(
+        module.grp,
+        "getgrnam",
+        lambda _name: (_ for _ in ()).throw(KeyError()),
+    )
+    monkeypatch.setattr(module.grp, "getgrgid", lambda _gid: object())
+
+    with pytest.raises(module.GateError, match="numeric identity"):
+        ops._remove_identities()
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("", "NO_SSH_ACTIVITY"),
+        ("Connection from 127.0.0.1 port 50000 on 127.0.0.1 port 22222\n", "TCP_CONNECTED"),
+        (
+            (
+                "Connection from 127.0.0.1 port 50000 on 127.0.0.1 port 22222\n"
+                "Failed publickey for ssh-over-mcp-e2e-host from 127.0.0.1 port 50000 ssh2\n"
+            ),
+            "AUTH_REJECTED",
+        ),
+        (
+            "Accepted publickey for ssh-over-mcp-e2e-host from 127.0.0.1 port 50000 ssh2: ED25519 SHA256:SECRET\n",
+            "AUTH_ACCEPTED",
+        ),
+        (
+            (
+                "Accepted publickey for ssh-over-mcp-e2e-host from 127.0.0.1 port 50000 ssh2: ED25519 SHA256:SECRET\n"
+                "Starting session: forced-command (config) for ssh-over-mcp-e2e-host from 127.0.0.1 port 50000 id 0\n"
+            ),
+            "FORCECOMMAND_STARTED",
+        ),
+    ],
+)
+def test_sshd_failure_stage_is_fixed_enum(raw: str, expected: str) -> None:
+    module = _load_gate()
+
+    observed = module._classify_sshd_stage(raw)
+
+    assert observed == expected
+    assert observed in {
+        "NO_SSH_ACTIVITY",
+        "TCP_CONNECTED",
+        "AUTH_REJECTED",
+        "AUTH_ACCEPTED",
+        "FORCECOMMAND_STARTED",
+    }
+    assert "SECRET" not in observed
+    assert "127.0.0.1" not in observed
+
+
+def test_failed_probe_emits_only_fixed_sshd_stage(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_gate()
+    ops = module._SystemGuestOps()
+    ops._expected_commit = "a" * 40
+    monkeypatch.setattr(ops, "_verify_privileged_fixture", lambda: None)
+    monkeypatch.setattr(
+        module,
+        "_spawn_nonroot_child",
+        lambda *args, **kwargs: 123,
+    )
+    monkeypatch.setattr(module, "_wait_pid", lambda *args, **kwargs: 70)
+    monkeypatch.setattr(module, "_read_sshd_stage", lambda: "AUTH_ACCEPTED")
+
+    assert ops.run_probe() == 70
+
+    captured = capsys.readouterr()
+    assert captured.err == "local E2E sshd stage: AUTH_ACCEPTED\n"
+    assert "SUPERSECRET" not in captured.err
+
+
+def test_authorized_keys_is_root_owned_user_readable_and_not_writable() -> None:
+    module = _load_gate()
+    source = inspect.getsource(module._SystemGuestOps._prepare_keys)
+
+    assert "os.chown(AUTHORIZED_KEYS, 0, 0)" in source
+    assert "os.chmod(AUTHORIZED_KEYS, 0o644)" in source
+    assert "os.chmod(AUTHORIZED_KEYS, 0o600)" not in source
+
+
+def test_guest_policy_limits_match_production_executor_defaults() -> None:
+    module = _load_gate()
+    from ssh_over_mcp.ssh.executor import SSHExecutor
+
+    signature = inspect.signature(SSHExecutor.__init__)
+    assert module.EXECUTOR_DEFAULT_MAX_OUTPUT_BYTES == (
+        signature.parameters["default_max_output_bytes"].default
+    )
+    assert module.EXECUTOR_DEFAULT_MAX_STDIN_BYTES == (
+        signature.parameters["default_max_stdin_bytes"].default
+    )
+
+    source = inspect.getsource(module._SystemGuestOps._prepare_state_and_policy)
+    assert '"max_output_bytes": EXECUTOR_DEFAULT_MAX_OUTPUT_BYTES' in source
+    assert '"max_stdin_bytes": EXECUTOR_DEFAULT_MAX_STDIN_BYTES' in source
+
+
+def test_guest_gate_prepares_fixed_filesystem_fixture_and_profile_policy() -> None:
+    module = _load_gate()
+    source = inspect.getsource(module._SystemGuestOps._prepare_state_and_policy)
+
+    assert module.FS_DATA_ROOT == Path("/opt/ssh-over-mcp-e2e/fs-data")
+    assert module.FS_SEED_FILE == module.FS_DATA_ROOT / "seed.txt"
+    assert module.FS_CREATE_ROOT == module.FS_DATA_ROOT / "create"
+    assert module.FS_MKDIR_TARGET == module.FS_CREATE_ROOT / "created-dir"
+    assert module.FS_WRITE_TARGET == module.FS_CREATE_ROOT / "created.txt"
+    assert module.FS_SEED_BYTES == b"ssh-over-mcp-e2e-seed\n"
+
+    for required in (
+        "FS_DATA_ROOT.mkdir",
+        "FS_CREATE_ROOT.mkdir",
+        "FS_SEED_FILE.write_bytes",
+        '"allowed_profiles": ["developer", "readonly"]',
+        '"developer": {',
+        '"readonly": {',
+        '"stat_roots": [str(FS_DATA_ROOT)]',
+        '"read_roots": [str(FS_DATA_ROOT)]',
+        '"mkdir_roots": [str(FS_CREATE_ROOT)]',
+        '"write_create_roots": [str(FS_CREATE_ROOT)]',
+    ):
+        assert required in source
+
+
+def test_guest_gate_cleanup_owns_fixed_filesystem_fixture() -> None:
+    module = _load_gate()
+    source = inspect.getsource(module._SystemGuestOps.cleanup)
+
+    assert "FS_DATA_ROOT" in source
