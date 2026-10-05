@@ -1884,7 +1884,6 @@ async def run_real_approval_outage_containment_fixture() -> dict[str, object]:
 
             marker_before = APPROVAL_MARKER.read_bytes()
             exec_before = EXEC_MARKER.read_bytes()
-            audit_before = _last_audit_rowid(harness)
             unavailable = await client.call_tool("ssh_exec", state_request)
             unavailable_blob = _tool_result_bytes(unavailable)
             safe_blobs = [unavailable_blob]
@@ -1908,24 +1907,25 @@ async def run_real_approval_outage_containment_fixture() -> dict[str, object]:
             if b"containment.sock" in unavailable_blob or b"manager" in stderr.lower():
                 raise LocalE2EFixtureError("containment internals leaked through MCP")
 
-            rows = await _wait_for_audit_events_since(harness, audit_before)
-            request_ids = {
-                str(row["request_id"])
-                for row in rows
-                if row.get("tool") == "ssh_exec"
-                and isinstance(row.get("request_id"), str)
-            }
-            if len(request_ids) != 1:
-                raise LocalE2EFixtureError("containment failure request id is ambiguous")
-            request_id = next(iter(request_ids))
-            cgroup = fixture.cgroup_root / f"ssh-over-mcp-{request_id}"
-            if cgroup.exists():
-                raise LocalE2EFixtureError("containment failure leaked request cgroup")
-            if (
-                APPROVAL_MARKER.read_bytes() != marker_before
-                or EXEC_MARKER.read_bytes() != exec_before
-            ):
-                raise LocalE2EFixtureError("containment failure executed workload")
+        harness.stop_ledger()
+        rows = _read_sealed_audit_rows(harness)
+        request_ids = {
+            str(row["request_id"])
+            for row in rows
+            if row.get("tool") == "ssh_exec"
+            and isinstance(row.get("request_id"), str)
+        }
+        if len(request_ids) != 1:
+            raise LocalE2EFixtureError("containment failure request id is ambiguous")
+        request_id = next(iter(request_ids))
+        cgroup = fixture.cgroup_root / f"ssh-over-mcp-{request_id}"
+        if cgroup.exists():
+            raise LocalE2EFixtureError("containment failure leaked request cgroup")
+        if (
+            APPROVAL_MARKER.read_bytes() != marker_before
+            or EXEC_MARKER.read_bytes() != exec_before
+        ):
+            raise LocalE2EFixtureError("containment failure executed workload")
 
         safe_blobs.extend(
             (
