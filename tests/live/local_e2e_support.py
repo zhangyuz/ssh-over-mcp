@@ -416,34 +416,18 @@ async def run_real_ssh_fixture() -> dict[str, object]:
     )
 
 
-_READ_ONLY_LEDGER_SQLITE_ACTIONS = {
-    sqlite3.SQLITE_SELECT,
-    sqlite3.SQLITE_READ,
-    sqlite3.SQLITE_FUNCTION,
-}
-
-
-def _read_only_ledger_authorizer(
-    action_code: int,
-    _arg1: str | None,
-    _arg2: str | None,
-    _database_name: str | None,
-    _trigger_name: str | None,
-) -> int:
-    if action_code in _READ_ONLY_LEDGER_SQLITE_ACTIONS:
-        return sqlite3.SQLITE_OK
-    return sqlite3.SQLITE_DENY
-
-
-def _open_read_only_ledger_reader(db_path: Path) -> sqlite3.Connection:
-    connection = sqlite3.connect(db_path, timeout=2.0)
+def _open_ledger_snapshot(db_path: Path) -> sqlite3.Connection:
+    source = sqlite3.connect(db_path, timeout=2.0)
+    snapshot = sqlite3.connect(":memory:")
     try:
-        connection.set_authorizer(_read_only_ledger_authorizer)
-        connection.row_factory = sqlite3.Row
-        return connection
+        source.backup(snapshot)
+        snapshot.row_factory = sqlite3.Row
+        return snapshot
     except Exception:
-        connection.close()
+        snapshot.close()
         raise
+    finally:
+        source.close()
 
 
 class LocalMCPHarness:
@@ -915,7 +899,7 @@ class LocalMCPHarness:
             await self._stop_server()
 
     def audit_events(self, request_id: str) -> tuple[dict[str, object], ...]:
-        connection = _open_read_only_ledger_reader(self.ledger_db_path)
+        connection = _open_ledger_snapshot(self.ledger_db_path)
         try:
             rows = connection.execute(
                 "SELECT event_type,request_id,principal_id,profile,host,tool,"
@@ -928,7 +912,7 @@ class LocalMCPHarness:
         return tuple(dict(row) for row in rows)
 
     def audit_rows(self) -> tuple[dict[str, object], ...]:
-        connection = _open_read_only_ledger_reader(self.ledger_db_path)
+        connection = _open_ledger_snapshot(self.ledger_db_path)
         try:
             rows = connection.execute(
                 "SELECT rowid,event_type,request_id,principal_id,profile,host,tool,"
