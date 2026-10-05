@@ -440,10 +440,6 @@ def test_fail_closed_e2e_contract_is_explicit() -> None:
     assert "EXEC_MARKER" in source
 
 
-@pytest.mark.skipif(
-    not _RUN_LIVE or not sys.platform.startswith("linux"),
-    reason="dedicated no-network Linux guest only",
-)
 def test_fail_closed_fixture_seals_ledger_before_audit_inspection() -> None:
     import inspect
 
@@ -456,6 +452,10 @@ def test_fail_closed_fixture_seals_ledger_before_audit_inspection() -> None:
     assert "_wait_for_audit_events_since" not in source
 
 
+@pytest.mark.skipif(
+    not _RUN_LIVE or not sys.platform.startswith("linux"),
+    reason="dedicated no-network Linux guest only",
+)
 def test_real_origin_policy_and_host_trust_fail_closed() -> None:
     module = _load_support()
     evidence = asyncio.run(module.run_real_fail_closed_fixture())
