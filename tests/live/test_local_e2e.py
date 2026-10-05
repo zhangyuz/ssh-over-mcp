@@ -68,7 +68,7 @@ def _valid_metadata() -> dict[str, str]:
     }
 
 
-def test_ledger_snapshot_sees_wal_and_isolates_mutation(
+def test_ledger_audit_reader_sees_wal_and_returns_detached_rows(
     tmp_path: Path,
 ) -> None:
     module = _load_support()
@@ -76,28 +76,60 @@ def test_ledger_snapshot_sees_wal_and_isolates_mutation(
     writer = sqlite3.connect(db_path, isolation_level=None)
     try:
         writer.execute("PRAGMA journal_mode=WAL")
-        writer.execute("CREATE TABLE audit_probe(value INTEGER NOT NULL)")
-        writer.execute("INSERT INTO audit_probe(value) VALUES (1)")
+        writer.execute(
+            "CREATE TABLE audit_events("
+            "event_type TEXT NOT NULL,"
+            "request_id TEXT NOT NULL,"
+            "principal_id TEXT,"
+            "profile TEXT,"
+            "host TEXT,"
+            "tool TEXT,"
+            "exit_status INTEGER,"
+            "duration_ms INTEGER,"
+            "stdout_bytes INTEGER,"
+            "stderr_bytes INTEGER,"
+            "timed_out INTEGER,"
+            "truncated INTEGER"
+            ")"
+        )
+        request_id = "req_" + ("a" * 32)
+        writer.execute(
+            "INSERT INTO audit_events("
+            "event_type,request_id,principal_id,profile,host,tool"
+            ") VALUES (?,?,?,?,?,?)",
+            (
+                "policy_denied",
+                request_id,
+                "developer",
+                "developer",
+                "e2e-host",
+                "ssh_exec",
+            ),
+        )
 
-        snapshot = module._open_ledger_snapshot(db_path)
-        try:
-            row = snapshot.execute("SELECT value FROM audit_probe").fetchone()
-            assert row is not None and row[0] == 1
-            snapshot.execute("INSERT INTO audit_probe(value) VALUES (2)")
-            snapshot.commit()
-            snapshot_count = snapshot.execute(
-                "SELECT COUNT(*) FROM audit_probe"
-            ).fetchone()
-            assert snapshot_count is not None and snapshot_count[0] == 2
-        finally:
-            snapshot.close()
+        rows = module._read_ledger_audit_rows(db_path)
+        assert len(rows) == 1
+        assert rows[0]["event_type"] == "policy_denied"
+        assert rows[0]["request_id"] == request_id
 
-        live_count = writer.execute("SELECT COUNT(*) FROM audit_probe").fetchone()
-        assert live_count is not None and live_count[0] == 1
+        filtered = module._read_ledger_audit_rows(
+            db_path,
+            request_id=request_id,
+        )
+        assert len(filtered) == 1
+        assert module._read_ledger_audit_rows(
+            db_path,
+            request_id="req_" + ("b" * 32),
+        ) == ()
+
+        rows[0]["event_type"] = "mutated-in-test"
+        live = writer.execute(
+            "SELECT event_type FROM audit_events WHERE request_id=?",
+            (request_id,),
+        ).fetchone()
+        assert live is not None and live[0] == "policy_denied"
     finally:
         writer.close()
-
-
 
 
 @pytest.mark.asyncio
