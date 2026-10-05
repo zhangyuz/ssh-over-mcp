@@ -416,18 +416,35 @@ async def run_real_ssh_fixture() -> dict[str, object]:
     )
 
 
-def _open_ledger_snapshot(db_path: Path) -> sqlite3.Connection:
-    source = sqlite3.connect(db_path, timeout=2.0)
-    snapshot = sqlite3.connect(":memory:")
+_LEDGER_AUDIT_COLUMNS = (
+    "event_type,request_id,principal_id,profile,host,tool,"
+    "exit_status,duration_ms,stdout_bytes,stderr_bytes,timed_out,truncated"
+)
+
+
+def _read_ledger_audit_rows(
+    db_path: Path,
+    *,
+    request_id: str | None = None,
+    include_rowid: bool = False,
+) -> tuple[dict[str, object], ...]:
+    connection = sqlite3.connect(db_path, timeout=2.0)
+    connection.row_factory = sqlite3.Row
     try:
-        source.backup(snapshot)
-        snapshot.row_factory = sqlite3.Row
-        return snapshot
-    except Exception:
-        snapshot.close()
-        raise
+        columns = ("rowid," if include_rowid else "") + _LEDGER_AUDIT_COLUMNS
+        if request_id is None:
+            rows = connection.execute(
+                f"SELECT {columns} FROM audit_events ORDER BY rowid"
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                f"SELECT {columns} FROM audit_events "
+                "WHERE request_id=? ORDER BY rowid",
+                (request_id,),
+            ).fetchall()
     finally:
-        source.close()
+        connection.close()
+    return tuple(dict(row) for row in rows)
 
 
 class LocalMCPHarness:
@@ -899,29 +916,16 @@ class LocalMCPHarness:
             await self._stop_server()
 
     def audit_events(self, request_id: str) -> tuple[dict[str, object], ...]:
-        connection = _open_ledger_snapshot(self.ledger_db_path)
-        try:
-            rows = connection.execute(
-                "SELECT event_type,request_id,principal_id,profile,host,tool,"
-                "exit_status,duration_ms,stdout_bytes,stderr_bytes,timed_out,truncated "
-                "FROM audit_events WHERE request_id=? ORDER BY rowid",
-                (request_id,),
-            ).fetchall()
-        finally:
-            connection.close()
-        return tuple(dict(row) for row in rows)
+        return _read_ledger_audit_rows(
+            self.ledger_db_path,
+            request_id=request_id,
+        )
 
     def audit_rows(self) -> tuple[dict[str, object], ...]:
-        connection = _open_ledger_snapshot(self.ledger_db_path)
-        try:
-            rows = connection.execute(
-                "SELECT rowid,event_type,request_id,principal_id,profile,host,tool,"
-                "exit_status,duration_ms,stdout_bytes,stderr_bytes,timed_out,truncated "
-                "FROM audit_events ORDER BY rowid"
-            ).fetchall()
-        finally:
-            connection.close()
-        return tuple(dict(row) for row in rows)
+        return _read_ledger_audit_rows(
+            self.ledger_db_path,
+            include_rowid=True,
+        )
 
     def captured_logs(self) -> bytes:
         if self._log_stream is None:
