@@ -68,7 +68,7 @@ def _valid_metadata() -> dict[str, str]:
     }
 
 
-def test_read_only_ledger_reader_sees_wal_and_rejects_mutation(
+def test_ledger_snapshot_sees_wal_and_isolates_mutation(
     tmp_path: Path,
 ) -> None:
     module = _load_support()
@@ -79,22 +79,23 @@ def test_read_only_ledger_reader_sees_wal_and_rejects_mutation(
         writer.execute("CREATE TABLE audit_probe(value INTEGER NOT NULL)")
         writer.execute("INSERT INTO audit_probe(value) VALUES (1)")
 
-        reader = module._open_read_only_ledger_reader(db_path)
+        snapshot = module._open_ledger_snapshot(db_path)
         try:
-            row = reader.execute("SELECT value FROM audit_probe").fetchone()
+            row = snapshot.execute("SELECT value FROM audit_probe").fetchone()
             assert row is not None and row[0] == 1
-            with pytest.raises(sqlite3.DatabaseError):
-                reader.execute("INSERT INTO audit_probe(value) VALUES (2)")
-            with pytest.raises(sqlite3.DatabaseError):
-                reader.execute("PRAGMA journal_mode=DELETE")
+            snapshot.execute("INSERT INTO audit_probe(value) VALUES (2)")
+            snapshot.commit()
+            snapshot_count = snapshot.execute(
+                "SELECT COUNT(*) FROM audit_probe"
+            ).fetchone()
+            assert snapshot_count is not None and snapshot_count[0] == 2
         finally:
-            reader.close()
+            snapshot.close()
 
-        count = writer.execute("SELECT COUNT(*) FROM audit_probe").fetchone()
-        assert count is not None and count[0] == 1
+        live_count = writer.execute("SELECT COUNT(*) FROM audit_probe").fetchone()
+        assert live_count is not None and live_count[0] == 1
     finally:
         writer.close()
-
 
 
 
