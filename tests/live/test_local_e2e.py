@@ -492,6 +492,8 @@ def test_task7_approval_outage_containment_contract_is_explicit() -> None:
     ):
         assert required in source
     assert source.index("STOP_MANAGER") > source.index("/readyz")
+    assert source.rindex("harness.stop_ledger()") > source.index("STOP_MANAGER")
+    assert "_wait_for_audit_events_since" not in source
 
 
 @pytest.mark.skipif(
