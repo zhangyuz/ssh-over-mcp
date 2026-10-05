@@ -68,7 +68,7 @@ def _valid_metadata() -> dict[str, str]:
     }
 
 
-def test_query_only_ledger_reader_sees_wal_and_rejects_writes(
+def test_read_only_ledger_reader_sees_wal_and_rejects_mutation(
     tmp_path: Path,
 ) -> None:
     module = _load_support()
@@ -79,16 +79,19 @@ def test_query_only_ledger_reader_sees_wal_and_rejects_writes(
         writer.execute("CREATE TABLE audit_probe(value INTEGER NOT NULL)")
         writer.execute("INSERT INTO audit_probe(value) VALUES (1)")
 
-        reader = module._open_query_only_ledger_reader(db_path)
+        reader = module._open_read_only_ledger_reader(db_path)
         try:
-            query_only = reader.execute("PRAGMA query_only").fetchone()
-            assert query_only is not None and query_only[0] == 1
             row = reader.execute("SELECT value FROM audit_probe").fetchone()
             assert row is not None and row[0] == 1
-            with pytest.raises(sqlite3.OperationalError):
+            with pytest.raises(sqlite3.DatabaseError):
                 reader.execute("INSERT INTO audit_probe(value) VALUES (2)")
+            with pytest.raises(sqlite3.DatabaseError):
+                reader.execute("PRAGMA journal_mode=DELETE")
         finally:
             reader.close()
+
+        count = writer.execute("SELECT COUNT(*) FROM audit_probe").fetchone()
+        assert count is not None and count[0] == 1
     finally:
         writer.close()
 
