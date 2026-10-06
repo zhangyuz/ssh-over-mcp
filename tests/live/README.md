@@ -397,3 +397,30 @@ marker or cancel a healthy run to replace it.
 
 The 25-criterion evidence matrix and exact run links live in the Phase 7A design
 spec. Phase 7A4 closure gates remain pending until explicitly recorded there.
+
+## Dormant staging metadata inventory
+
+`ops/live-e2e/staging_inventory.py` is a dormant stdlib helper with no CLI or
+workflow caller. Disposable real-filesystem tests exercise it; it is not invoked
+against the dedicated runner's incident state. It borrows an already-open root
+directory descriptor, requires the eleven standard staging entries, and records
+metadata only. It opens directories relative to pinned descriptors without
+following links, never opens regular files for data access, rejects foreign
+UID/device, regular-file hardlinks, special objects, writable entries and reused
+inodes, and refuses observed identity/metadata/layout drift.
+
+Bounds are 4096 records including the root, depth 12, 4096 filesystem bytes per
+relative path, 2 MiB canonical inventory JSON, and a 60-second monotonic deadline
+checked during traversal. Regular-file sizes are metadata, not read allocations.
+Records sort by filesystem-encoded path bytes; schema version 1 has only
+`entries` and `schema_version`, with escaped ASCII JSON, sorted keys, compact
+separators and no final newline. Root path is `.`; atime and workflow provenance
+are excluded. Borrowed descriptors remain open and owned descriptors are closed.
+
+The helper cannot prove how the caller opened the root or provide an atomic
+filesystem snapshot against a concurrent writer. Later activation must pin and
+bind the incident root through trusted paths, establish quiescence, authenticate
+the marker/process/authority/run context, and separately bound the complete
+inspection envelope. This helper grants no deletion or marker-clearance authority
+and no live-inspection, Level-3 or A1 closure credit. ADR 0011 defines those
+separate gates; unknown/unbound incident state remains excluded.
