@@ -161,3 +161,19 @@ It rejects noncanonical or escaping paths, duplicate entries, hardlinks, special
 files, set-ID bits, extended metadata, escaping/cyclic/excessive symlink chains,
 and entries exceeding the reviewed count/path/file/expanded-data bounds. Its
 fixed public error does not include archive-controlled content.
+
+## Manual orphan-provider marker recovery
+
+Cancellation can leave `active-run.json` when the orchestrator is stopped before
+its `finally` cleanup completes. Normal E2E stays fail-closed and never removes
+stale provider state automatically.
+
+`Live Local E2E Provider Recovery` is manual-only on trusted `main`, runs as the
+same non-admin orchestrator account and shares the `live-local-e2e` concurrency
+group. First use the exact stale target with owner PID `0`; this is inspect-only.
+It reports the marker PID and any fixed-prefix E2E temp directories. Recovery
+requires a second dispatch with that exact PID and is allowed only when the PID
+is dead, no runner-owned QEMU exists, the fixed marker identity/schema/mode are
+unchanged, and **no E2E temp directories remain**. The workflow only unlinks the
+fixed marker; it has no sudo, process-kill, recursive-delete, arbitrary-path or
+provider-restart authority. Any remaining temp state requires renewed review.
