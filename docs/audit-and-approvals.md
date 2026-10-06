@@ -24,7 +24,8 @@ own same-named primary group. The additional endpoint groups are
 the three non-root UIDs must be distinct. No UID/GID aliases or unexpected
 memberships are accepted. Each role primary GID belongs only to that role in
 the account database; no account may use an endpoint GID as its primary GID.
-Both primary memberships and supplementary memberships are checked. Ledger has both endpoint groups; each client has
+Both primary memberships and supplementary memberships are checked. Ledger has
+both endpoint groups; each client has
 only its own primary and corresponding endpoint group. Each endpoint group's
 explicit members are exactly Ledger and its corresponding client. Full workload
 identity and service sandbox acceptance remain later Phase 7B1 tasks.
