@@ -352,3 +352,48 @@ package-version or layer-count comparison.
 Ordinary pytest leaves `SSH_OVER_MCP_RUN_LIVE_REPRODUCIBLE_IMAGE` unset, so
 this Docker-dependent probe remains skipped on the hardened self-hosted CI
 runner, which intentionally has no Docker socket.
+
+
+## Full Phase 7A no-network guest matrix
+
+Run the already-trusted main workflow with the exact target commit:
+
+```bash
+gh workflow run live-local-e2e.yml --ref main -f commit_sha=<exact-40-hex-target>
+```
+
+Only the dedicated self-hosted native Intel macOS `gha-e2e-orchestrator`
+account/`ssh-over-mcp-e2e-orchestrator` label runs orchestration. QEMU 11.1.2/HVF
+boots the pinned Ubuntu 26.04 image with `-nic none`. See
+`docs/self-hosted-runner.md` for the image digest, commit binding, provisioning,
+and operator recovery rules. The guest installs the trusted hash-locked
+Python 3.14 wheelhouse offline; target code never executes on the host.
+
+The target probe accepts no selector and runs exactly:
+1. real SSH/kernel identity;
+2. real MCP/SSH/Ledger;
+3. filesystem/profile isolation;
+4. Task 6 origin/central/remote/host-key failure matrix;
+5. Task 7 approvals, Ledger outage, secret retention, and final manager stop.
+
+Task 6 and final containment audit assertions seal the Ledger before offline
+inspection. Approval grants run the production approvalctl module in a separate
+subprocess against the peer-authenticated admin endpoint. Fixed `STOP_MANAGER`
+is the final execution fault; no later fixture may depend on the manager.
+
+Guest identities are manager `2201:3201`, host `2202:3202`, workload
+`2203:3203`, probe `2204:3204`, and manager-client GID `3299`; sshd binds only
+loopback port `22222`. The launcher digest at verified PR119 merge is
+`36cc41be410f696377c6998aae0e946d9f7b596856d09c2da38c5869bbc27ba9`.
+The trusted gate verifies installed launcher bytes. Kernel evidence comes from
+real capability/identity syscalls and cgroup-v2 files, not mocked state; the
+bounded public result does not publish a numeric kernel release or raw logs.
+
+Require full guest success, in-guest cleanup, QEMU exit, provider-state absence,
+and checkout cleanup. Repeat ordinary CI and full E2E on the exact merge SHA
+before deleting branches/worktrees. Stale provider state requires operator
+inspection after verifying no active QEMU/orchestrator; never auto-delete its
+marker or cancel a healthy run to replace it.
+
+The 25-criterion evidence matrix and exact run links live in the Phase 7A design
+spec. Phase 7A4 closure gates remain pending until explicitly recorded there.

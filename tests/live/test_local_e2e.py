@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import importlib.util
+import json
 import os
 import shlex
 import sqlite3
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -542,3 +544,26 @@ async def test_approval_cli_runs_from_source_without_installed_console_script(
         await module._grant_approval_via_cli(python, "apr_" + "a" * 32, admin_env)
     # The real CLI must start and fail closed at its unavailable admin endpoint.
     assert stderr_path.read_bytes() == b"Security Ledger approval command failed\n"
+
+
+@pytest.mark.parametrize("field", ["stdout_base64", "stderr_base64", "data_base64"])
+@pytest.mark.parametrize("surface", ["structured", "text"])
+def test_tool_transcript_exposes_decoded_output_to_secret_scan(
+    field: str,
+    surface: str,
+) -> None:
+    module = _load_support()
+    secret = b"secret-sentinel-in-binary-output"
+    payload = {field: base64.b64encode(secret).decode("ascii")}
+    result = SimpleNamespace(
+        structured_content=payload if surface == "structured" else None,
+        content=[SimpleNamespace(text=json.dumps(payload))] if surface == "text" else [],
+    )
+    assert secret in module._tool_result_bytes(result)
+
+
+def test_tool_transcript_invalid_binary_encoding_fails_closed() -> None:
+    module = _load_support()
+    result = SimpleNamespace(structured_content={"stdout_base64": "not base64!"}, content=[])
+    with pytest.raises(module.LocalE2EFixtureError, match="tool output encoding is invalid"):
+        module._tool_result_bytes(result)

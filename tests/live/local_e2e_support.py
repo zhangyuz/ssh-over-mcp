@@ -964,6 +964,25 @@ class LocalMCPHarness:
         )
 
 
+def _decoded_tool_output_bytes(payload: object) -> list[bytes]:
+    decoded: list[bytes] = []
+    if isinstance(payload, dict):
+        for name, value in payload.items():
+            if name in {"stdout_base64", "stderr_base64", "data_base64"} and value is not None:
+                if not isinstance(value, str):
+                    raise LocalE2EFixtureError("tool output encoding is invalid")
+                try:
+                    decoded.append(base64.b64decode(value, validate=True))
+                except (ValueError, UnicodeError) as exc:
+                    raise LocalE2EFixtureError("tool output encoding is invalid") from exc
+            else:
+                decoded.extend(_decoded_tool_output_bytes(value))
+    elif isinstance(payload, list):
+        for value in payload:
+            decoded.extend(_decoded_tool_output_bytes(value))
+    return decoded
+
+
 def _tool_result_bytes(result: object) -> bytes:
     pieces: list[bytes] = []
     structured = getattr(result, "structured_content", None)
@@ -971,10 +990,16 @@ def _tool_result_bytes(result: object) -> bytes:
         pieces.append(
             json.dumps(structured, sort_keys=True, separators=(",", ":")).encode("utf-8")
         )
+        pieces.extend(_decoded_tool_output_bytes(structured))
     for block in getattr(result, "content", ()):
         text = getattr(block, "text", None)
         if isinstance(text, str):
             pieces.append(text.encode("utf-8"))
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            pieces.extend(_decoded_tool_output_bytes(payload))
     return b"\n".join(pieces)
 
 
