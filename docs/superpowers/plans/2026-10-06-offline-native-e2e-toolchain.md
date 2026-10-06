@@ -77,25 +77,31 @@ review does not require activating an E2E authority.
 
 ### G1: Establish the guest-only core guard before any target execution
 
-**Files:** Create ops/live-e2e/ledger_guest_preflight.py and
-tests/ops/test_ledger_guest_preflight.py; modify the trusted gate, orchestrator
-payload list, their contract tests and ops/live-e2e/README.md. This extracts the
-already-approved no-core part of parent Task 3; the profile remains separate.
+**Status:** Complete as the independently approved parent Task 3 slice, PR #127,
+merge `8bcdca85172a2b019b8163c39b047b3839574de5`. Exact-head CI
+37482879047 / legacy Level-3 37483096793 and exact merge-main CI 37483866613 /
+Level-3 37483909137 passed, including provider/guest/VM cleanup; fresh review
+found 0 Critical/Important/Minor. This is G1 evidence only; N1–N4 remain pending.
 
-**Interfaces:** GuestPreflightError; establish_guest_no_core() -> None;
+**Files:** Consume already-main ops/live-e2e/ledger_guest_preflight.py,
+tests/ops/test_ledger_guest_preflight.py and the trusted gate/orchestrator wiring.
+This completed the already-approved no-core part of parent Task 3; the systemd
+profile remains separate. Do not reimplement or rename the verified guard.
+
+**Interfaces:** Existing ProfileError; establish_guest_no_core() -> None;
 require_no_core() -> None. No dependency on ledger_systemd_contract.py.
 
-- [ ] Write RED for pipe/unreadable core pattern, failed write/readback, nonzero
+- [x] Write RED for pipe/unreadable core pattern, failed write/readback, nonzero
   hard/soft limits and first target exec preceding the guard. Check every
   existing manager/probe direct spawn, inheritance and an unprivileged
   descendant's inability to raise the hard limit; no root test on the Mac.
-- [ ] Run python -m pytest tests/ops/test_ledger_guest_preflight.py
+- [x] Run python -m pytest tests/ops/test_ledger_guest_preflight.py
   tests/ops/test_live_e2e_gate_contract.py
   tests/ops/test_live_e2e_orchestrator_contract.py -q; record intended RED.
-- [ ] Implement fixed fresh-guest-only establishment of pattern "core" and
+- [x] Implement fixed fresh-guest-only establishment of pattern "core" and
   limits (0, 0), before first target exec. Child-side verify-before-exec is
   mandatory. No caller path/value, production mutator or target imports.
-- [ ] Reach targeted GREEN; review startup failure/cleanup and compile/lint.
+- [x] Reach targeted GREEN; review startup failure/cleanup and compile/lint.
   Ship with common gates. Verify the new guard from trusted main in merge-main
   E2E before N2 can execute any compiler/helper.
 
@@ -248,8 +254,8 @@ invocation rejects legacy/candidate evidence and missing native proof.
   after repair require candidate and native-required exact merge-main PASS
   before any native-dependent target resumes. Legacy PASS never closes N4.
 - [ ] Retain exact receipts and verify cleanup; only now resume parent Task 3
-  with native-required head/merge gates. Consume G1 GuestPreflightError through
-  ProfileError without duplicating the guard. Later Task 7 still proves actual
+  with native-required head/merge gates. Re-export G1’s existing ProfileError from the systemd contract; do not
+  introduce a second exception, conversion or duplicate guard. Later Task 7 still proves actual
   syscall enforcement, and Task 8's mandatory Ledger mode cannot downgrade.
 
 ## Completion and deviations

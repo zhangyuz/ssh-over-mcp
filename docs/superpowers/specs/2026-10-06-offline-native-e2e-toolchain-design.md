@@ -154,11 +154,13 @@ Cleanup failure fails the run; whole VM destruction remains mandatory.
 
 ## 5. Fixed non-root feasibility and source/output binding
 
-First land the already-required guest no-core guard as a separate small slice.
-It uses its own `GuestPreflightError`, independent of the not-yet-created
-systemd profile module. Establish fixed non-pipe `kernel.core_pattern=core`
+The guest no-core guard has landed independently as PR #127 at verified main
+`8bcdca85172a2b019b8163c39b047b3839574de5`; exact head and merge-main CI/legacy
+Level-3 and cleanup passed. Consume its existing stdlib `ProfileError`,
+independent of the not-yet-created systemd profile module. That later module
+re-exports the same exception; do not rename, duplicate or convert the guard. Establish fixed non-pipe `kernel.core_pattern=core`
 and hard/soft RLIMIT_CORE `(0, 0)` after verified fresh-guest/root context,
-before any target execution. Every direct child verifies inherited zero limits
+before any target execution. Every direct target child and the trusted sshd fork verifies inherited zero limits
 before exec. This breaks a circular dependency on Task 3's later profile.
 
 The native helper uses existing fixed probe UID 2204 / GID 3204, no supplementary
