@@ -148,13 +148,25 @@ def _qemu_pids(uid: int) -> tuple[int, ...]:
     except (OSError, subprocess.SubprocessError) as exc:
         raise RecoveryError("provider process inventory is unavailable") from exc
     result: list[int] = []
+    saw_process = False
     for line in completed.stdout.splitlines():
+        if not line.strip():
+            continue
+        saw_process = True
         fields = line.strip().split(None, 1)
         if len(fields) != 2:
-            continue
+            raise RecoveryError("provider process inventory is malformed")
         pid_raw, command = fields
+        try:
+            pid = int(pid_raw, 10)
+        except ValueError:
+            raise RecoveryError("provider process inventory is malformed") from None
+        if pid <= 0:
+            raise RecoveryError("provider process inventory is malformed")
         if Path(command).name == QEMU_NAME:
-            result.append(int(pid_raw, 10))
+            result.append(pid)
+    if not saw_process:
+        raise RecoveryError("provider process inventory is unavailable")
     return tuple(result)
 
 
