@@ -1,6 +1,6 @@
 # Phase 7A Local E2E Foundation Design
 
-- Status: Design approved; implementation not started
+- Status: Tasks 1–7 implemented and verified; Phase 7A4 closure in progress
 - Date: 2026-10-02
 - Base: `a00c36f4260efa52d722222319ac78756f2b5562`
 
@@ -400,7 +400,7 @@ The reference persistent orchestrator is:
 
 The trusted guest image is Ubuntu 26.04 x86_64 server cloud image dated 2026-07-20 with SHA-256 `117816726abbdefc5ef3e38902e81a76f1c76c3610e709999d0885f9d5d9b477`.
 
-The guest has **no virtual network device** (`-nic none`), no host filesystem mount/share, no QEMU monitor, no Docker socket, and no production secret. The target commit is transferred only inside a read-only payload image as a Git bundle produced from a host-side bare repository. The root gate, manager wrapper, probe, and assertions come from the trusted-main checkout on the same read-only payload; the target bundle supplies application/product code and the launcher under test, not its own attestation harness. Runtime wheels are prepared on the host from the trusted-main hash-locked runtime requirements and installed offline inside the guest. The GitHub token used to fetch the bundle remains on the orchestrator and is never copied into the guest. The target bundle is capped at 256 MiB, the guest virtual disk at 8 GiB, the serial stream at 2 MiB, and orchestration requires at least 16 GiB host free space.
+The guest has **no virtual network device** (`-nic none`), no host filesystem mount/share, no QEMU monitor, no Docker socket, and no production secret. The target commit is transferred only inside a read-only payload image as a Git bundle produced from a host-side bare repository. The root gate and orchestrator come from the already-merged trusted-main checkout on the same read-only payload. As ADR 0008 specifies, target manager/probe/support/application code and the launcher under test come from the exact target checkout and run only inside the guest after the fixed non-root handoff. The target cannot supply or modify the root gate or orchestrator used to certify itself. Runtime wheels are prepared on the host from the trusted-main hash-locked runtime requirements and installed offline inside the guest. The GitHub token used to fetch the bundle remains on the orchestrator and is never copied into the guest. The target bundle is capped at 256 MiB, the guest virtual disk at 8 GiB, the serial stream at 2 MiB, and orchestration requires at least 16 GiB host free space.
 
 The capability-bearing target checkout may become root inside the disposable guest. That is explicitly accepted by ADR 0006/0008 because the VM has no target-controlled network or host-filesystem/device path and receives only test-scoped state. It may not gain authority over the persistent orchestrator.
 
@@ -544,3 +544,85 @@ After 7A:
 - 7D: property/fuzz testing, security checklist, and Phase 7 final review.
 
 Every later hardening slice regresses against the 7A E2E safety net.
+
+## 18. Phase 7A evidence matrix
+
+Level-3 E2E is required for changes affecting SSH, authorization,
+approvals/Ledger, credentials, host-agent, containment, filesystem mutation,
+audit, workload identity, OS hardening, egress, SSH CA, secret-manager
+integration, or the E2E fixture. Phase closure and release candidates always
+require full E2E. Ordinary CI stays unprivileged on its separate self-hosted
+Linux runner; it receives no Docker socket or privileged fixture access.
+
+The following evidence maps all 25 approved DoD criteria to executable checks.
+The current verified baseline is PR #119 merge `d373598e7d0b5371765354a9ba89bf93f822828f`.
+Phase 7A4 exact-head gates and cleanup remain pending; Phase 7A is not closed.
+
+| # | Criterion | Executable evidence | Current evidence |
+| --- | --- | --- | --- |
+| 1 | Real sshd/ForceCommand | `tests/live/local_e2e_support.py` | Five-fixture guest PASS |
+| 2 | Root launcher drops before application import | `tests/ops/test_host_agent_capability_launcher_contract.py` | Static/order checks plus real guest execution PASS |
+| 3 | Pinned host key | `tests/live/local_e2e_support.py` | Wrong-key Task 6 fails before ForceCommand |
+| 4 | Real Security Ledger | `tests/live/local_e2e_support.py` | Independent sealed audit DBs verify committed decisions |
+| 5 | Separate approval admin authority | `tests/live/test_local_e2e.py` | Real production CLI subprocess; no MCP mutation tool |
+| 6 | Authenticated containment manager | `tests/ops/test_live_e2e_gate_contract.py` | Fixed manager/host peer identities and real guest PASS |
+| 7 | Delegated cgroup-v2 | `tests/live/local_e2e_support.py` | Real request scope membership and absence checks PASS |
+| 8 | Kernel workload identity/capabilities | `tests/live/local_e2e_support.py` | UID/GID/groups/caps/NoNewPrivs and cgroup state PASS |
+| 9 | Allowed MCP execution | `scripts/run-live-local-e2e-probe.py` | Real MCP → Ledger → SSH → workload PASS |
+| 10 | Typed create-only filesystem behavior | `tests/live/local_e2e_support.py` | Write/mkdir/no-overwrite and profile separation PASS |
+| 11 | Central denial before execution | `tests/live/local_e2e_support.py` | Sealed policy_denied; no SSH/marker/execution_started |
+| 12 | Host-local denial before workload | `tests/live/local_e2e_support.py` | Real SSH; fixed exit 77; marker unchanged |
+| 13 | Approval replay denied | `tests/live/local_e2e_support.py` | CLI grant/consume; replay needs a new approval |
+| 14 | Host-key mismatch fail closed | `tests/live/local_e2e_support.py` | Pinned mismatch; generic error; no ForceCommand/marker |
+| 15 | Ledger outage fail closed | `tests/live/local_e2e_support.py` | Health 200/readiness 503; no SSH or side effect |
+| 16 | Containment outage prevents exec | `tests/live/local_e2e_support.py` | Final fixed STOP_MANAGER; generic exit 69; no request cgroup |
+| 17 | No secret retention | `tests/live/local_e2e_support.py` | Client/audit/log/storage scans include Task 7 sentinels |
+| 18 | In-guest cleanup | `tests/ops/test_live_e2e_gate_contract.py` | Trusted gate cleanup after target execution PASS |
+| 19 | Target code only in disposable VM | `tests/ops/test_live_e2e_orchestrator_contract.py` | Bare-fetch/bundle; no persistent-host target worktree |
+| 20 | No guest network/share/token/host channel | `tests/ops/test_live_e2e_orchestrator_contract.py` | Pinned QEMU -nic none, fixed devices/media, token exclusion |
+| 21 | Exact commit and whole-guest destruction | `scripts/run-live-local-e2e-orchestrator.py` | Exact head/merge E2E; provider-state absence PASS |
+| 22 | Ordinary runner posture unchanged | `tests/ops/test_live_e2e_orchestrator_contract.py` | Self-hosted unprivileged Linux; no Docker socket |
+| 23 | Normative methodology linked | `tests/ops/test_phase7a_closure_evidence.py` | Trigger guidance consistency; repository entrypoints link method |
+| 24 | Clean final review and ordinary CI | `tests/ops/test_phase7a_closure_evidence.py` | PR119 exact-head independent review and both CI runs PASS; 7A4 pending |
+| 25 | Branches/processes/artifacts cleaned | `tests/ops/test_live_e2e_orchestrator_contract.py` | PR119 cleanup PASS; Phase 7A4 final cleanup pending |
+
+### 18.1 Exact Task 7 acceptance evidence
+
+- PR head `da23e044442d2d922bea11afa4c5c49cd117259e`: ordinary Python 3.13/3.14 [CI 37396007211](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/37396007211) PASS; trusted-main [Level-3 37396022348](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/37396022348) PASS, including provider-state absence and checkout cleanup.
+- Exact merge `d373598e7d0b5371765354a9ba89bf93f822828f`: ordinary [CI 37396564506](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/37396564506) PASS; trusted-main [Level-3 37396581780](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/37396581780) PASS with cleanup.
+- Fresh independent review of the exact PR head found no Critical, Important, or actionable Minor finding.
+- After merge-main verification, 19 clean Phase 7A3 worktrees, 20 local branches, and 38 remote target/diagnostic branches were removed. Main matched origin at the exact merge SHA; no Phase 7A3 remote branches remained.
+
+Ruling: earlier Task 6 unit/contract evidence did not certify live execution because the probe omitted its fixture call. PR #119 permanently wires the fixed five-fixture order; only subsequent passing full-matrix runs count for Task 6 and Task 7 acceptance. Sealed Ledger audit inspection replaces unreliable concurrent harness reads without weakening audit assertions.
+
+Ruling: the guest installs trusted runtime dependencies offline and runs target source through a fixed source path. It does not install target console scripts. Task 7 therefore invokes the real `ssh-over-mcp-approvalctl` entry point as `python -m ssh_over_mcp.approvals.cli`, with the fixed target source path and bytecode disabled. Admin peer authentication and grant semantics are unchanged; approval mutation remains outside MCP.
+
+### 18.2 Carried authority and deployment regression
+
+Phase 7A4 regresses the existing suites under `tests/approvals/`, `tests/api/`, `tests/policy/`, `tests/ssh/`, and `tests/host_agent/` in full ordinary Linux CI. These cover single-use binding, principal isolation, durable audit, pre-network authorization, host identity, credential secrecy, privilege transition, attach-before-exec, and filesystem uncertainty/create-only semantics.
+
+Phase 6 deployment checks remain `tests/ops/test_container_reproducibility_contract.py`, `tests/ops/test_compose_contract.py`, `tests/ops/test_cloudflare_connector_contract.py`, and the live reproducible-image/container/Compose/connector probes. The connector uses only a fake token and does not provision a Cloudflare account. Fresh Phase 7A4 Mac x86 deployment reruns passed: two independent no-cache builds were bit-reproducible; 14 container/Compose/fake-token connector tests passed. The tested image ID was `sha256:725c672918a0635d44336b1792f465eb2382e2e79cfa83279d605130b4c02b0e`. No live account provisioning was performed. Whole-phase review identified lifecycle integrity gaps; separate authority PR #120 merged as `76fdd4fee08f28b85b97c151617988120a7ae855` after exact-head ordinary CI and clean independent review. Its post-merge CI/E2E gates remain pending before this target/evidence slice is certified. No closure claim is made here.
+
+
+### 18.3 Whole-phase review findings and sequencing
+
+Whole-phase review found missing markerless-QEMU detection and launcher copy
+integrity checking. Separate authority PR #120 addresses those documented
+invariants with RED/GREEN contracts and has merged at
+`76fdd4fee08f28b85b97c151617988120a7ae855`; the target/evidence PR does not modify
+its certifying gate. Exact-head [ordinary CI 37397679558](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/37397679558) and independent review passed before authority merge.
+Exact authority merge-main CI/E2E precede target certification.
+
+The trusted gate owns fixture lifecycle, exact commit binding, and cleanup.
+Reviewed target probe/support owns product assertions and the gate checks its
+exit status. Lifecycle success alone cannot prove product coverage: fixed
+five-fixture contracts and independent review remain required. Accepted
+guest-root-equivalent target authority means read-only guest harness storage
+is not a hardware tamperproof boundary. ADR 0008's independent outer boundary
+is the no-network/no-host-share VM and its destruction.
+
+The target transcript scan now decodes stdout/stderr/filesystem base64 fields
+on structured and JSON-text surfaces before comparing secret sentinels.
+Malformed binary encoding fails closed. Seven focused RED/GREEN regressions
+cover the formerly missed encoded-output surface; product secret handling is
+unchanged.

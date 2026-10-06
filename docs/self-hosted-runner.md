@@ -457,3 +457,29 @@ The guest returns evidence only over a host-bounded serial pipe capped at 2 MiB.
 A stale QEMU/provider process/artifact before a run is a hard failure requiring operator inspection. After every attempted run the orchestrator terminates only the QEMU PID it created, waits for exit, and removes the overlay, seed ISO, payload ISO, temporary bare repository/bundle, and wheelhouse. Failure to remove run-owned state fails the workflow.
 
 In-guest cleanup is still tested independently. Destroying the whole disposable guest state is an additional containment boundary, not a substitute for product cleanup assertions.
+
+### Required exact-head gates
+
+Level-3 E2E is required for changes affecting SSH, authorization,
+approvals/Ledger, credentials, host-agent, containment, filesystem mutation,
+audit, workload identity, OS hardening, egress, SSH CA, secret-manager
+integration, or the E2E fixture. Phase closure and release candidates always
+require full E2E. Ordinary CI stays unprivileged on its separate self-hosted
+Linux runner; it receives no Docker socket or privileged fixture access.
+
+Dispatch only the already-trusted workflow from main:
+
+```bash
+gh workflow run live-local-e2e.yml --ref main -f commit_sha=<exact-40-hex-target>
+```
+
+Require exact PR-head ordinary CI, independent final review, guest E2E,
+provider-state absence, and checkout cleanup before merge. Then repeat ordinary
+CI and trusted-main E2E for the exact merge SHA before branch/worktree cleanup.
+Do not cancel an active E2E merely to replace it. A stale provider marker is
+never auto-deleted: an operator first verifies no active QEMU/orchestrator
+process, inspects the recorded state, and only then performs recovery.
+
+The trusted root gate and orchestrator come from already-merged main. Target
+manager/probe/support/application code runs only inside the guest after the
+fixed non-root handoff. A target PR never supplies the authority certifying it.
