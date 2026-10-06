@@ -99,7 +99,7 @@ def test_inspect_rejects_bad_state_and_non_directory_temp(tmp_path: Path) -> Non
 def test_temp_diagnostic_escapes_control_characters(tmp_path: Path) -> None:
     module = _load_module()
     state = tmp_path / "active-run.json"
-    bad = tmp_path / "ssh-over-mcp-e2e-bad\\n::error::fake"
+    bad = tmp_path / "ssh-over-mcp-e2e-bad\n::error::fake"
     bad.write_bytes(b"x")
     _state(state)
 
