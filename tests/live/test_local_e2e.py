@@ -6,6 +6,7 @@ import os
 import shlex
 import sqlite3
 import sys
+import sysconfig
 from pathlib import Path
 from types import ModuleType
 
@@ -525,7 +526,9 @@ async def test_approval_cli_runs_from_source_without_installed_console_script(
     python = tmp_path / "python"
     stderr_path = tmp_path / "cli-stderr"
     python.write_text(
-        "#!/bin/sh\nexec " + shlex.quote(sys.executable)
+        "#!/bin/sh\nLD_LIBRARY_PATH="
+        + shlex.quote(str(sysconfig.get_config_var("LIBDIR") or ""))
+        + " exec " + shlex.quote(sys.executable)
         + ' "$@" 2>' + shlex.quote(str(stderr_path)) + "\n",
         encoding="utf-8",
     )
