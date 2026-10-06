@@ -46,6 +46,7 @@ RESULT_PREFIX = "SSH_OVER_MCP_E2E_RESULT="
 SERIAL_MAX_BYTES = 2 * 1024 * 1024
 TRUSTED_HARNESS_FILES = (
     "ops/live-e2e/ssh-over-mcp-live-e2e-gate",
+    "ops/live-e2e/ledger_guest_preflight.py",
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -381,6 +382,9 @@ mount -t tmpfs -o size=1m,mode=0755,nosuid,nodev,noexec tmpfs "$TRUSTED_HARNESS"
 install -D -o root -g root -m 0444 \
   "$EXTRACTED/trusted-harness/ops/live-e2e/ssh-over-mcp-live-e2e-gate" \
   "$TRUSTED_HARNESS/ops/live-e2e/ssh-over-mcp-live-e2e-gate"
+install -D -o root -g root -m 0444 \
+  "$EXTRACTED/trusted-harness/ops/live-e2e/ledger_guest_preflight.py" \
+  "$TRUSTED_HARNESS/ops/live-e2e/ledger_guest_preflight.py"
 chmod 0555 "$TRUSTED_HARNESS" "$TRUSTED_HARNESS/ops" "$TRUSTED_HARNESS/ops/live-e2e"
 mount -o remount,ro,nosuid,nodev,noexec "$TRUSTED_HARNESS"
 mountpoint -q "$TRUSTED_HARNESS"

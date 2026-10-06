@@ -87,3 +87,7 @@ Every execution path SHOULD support:
 ## Secret handling
 
 Secret material should be provided from a secret manager, mounted file, short-lived SSH certificate flow, or equivalent protected runtime source. Long-lived private keys SHOULD NOT be embedded in repository configuration.
+
+## Disposable E2E core retention
+
+The trusted disposable-guest gate establishes hard and soft `RLIMIT_CORE=0` and the fixed non-pipe kernel core pattern before fixture keys or target execution, then verifies effective policy in the parent and fork child before the manager/probe and trusted sshd exec paths. Setting/readback failures forbid target execution. The preflight source comes from already-merged trusted main on the guest's independent read-only harness; targets cannot choose its paths, values or source. This guest-only control does not modify persistent-host or production core policy. PID-1-managed services require their own verified limits. It reduces accidental crash retention within the approved guest authority model; guest-root-equivalent target code can still change guest kernel policy, so mandatory whole-VM destruction remains the outer boundary.

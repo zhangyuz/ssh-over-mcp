@@ -724,9 +724,12 @@ def test_payload_trusts_only_the_root_guest_gate_from_main() -> None:
     module = _load_script()
     assert module.TRUSTED_HARNESS_FILES == (
         'ops/live-e2e/ssh-over-mcp-live-e2e-gate',
+        'ops/live-e2e/ledger_guest_preflight.py',
     )
 
     bootstrap = module._bootstrap_script('a' * 40, 'b' * 64)
+    assert '"$EXTRACTED/trusted-harness/ops/live-e2e/ledger_guest_preflight.py"' in bootstrap
+    assert '"$TRUSTED_HARNESS/ops/live-e2e/ledger_guest_preflight.py"' in bootstrap
     assert '$EXTRACTED/trusted-harness/ops/live-e2e/ssh-over-mcp-live-e2e-gate' in bootstrap
     assert '$WORKSPACE/ops/live-e2e/ssh-over-mcp-live-e2e-gate' not in bootstrap
 

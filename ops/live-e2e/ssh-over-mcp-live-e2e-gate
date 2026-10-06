@@ -4,6 +4,7 @@ from __future__ import annotations
 import ctypes
 import grp
 import hashlib
+import importlib.util
 import json
 import os
 import pwd
@@ -16,12 +17,16 @@ import subprocess
 import sys
 import time
 from collections.abc import Mapping, Sequence
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
+from types import ModuleType
 from typing import Protocol
 
 WORKSPACE = Path("/opt/ssh-over-mcp-e2e/workspace")
 TRUSTED_HARNESS_ROOT = Path("/mnt/som-trusted-harness")
 _TRUSTED_GATE = TRUSTED_HARNESS_ROOT / "ops" / "live-e2e" / "ssh-over-mcp-live-e2e-gate"
+_TRUSTED_PREFLIGHT = TRUSTED_HARNESS_ROOT / "ops" / "live-e2e" / "ledger_guest_preflight.py"
+_preflight: ModuleType | None = None
 VENV_PYTHON = Path("/opt/ssh-over-mcp-e2e/venv/bin/python")
 CONFIG = Path("/etc/ssh-over-mcp/live-e2e-gate.conf")
 RUNTIME = Path("/opt/ssh-over-mcp-e2e/runtime")
@@ -202,6 +207,40 @@ def _require_target_regular(path: Path) -> None:
         raise GateError(f"required target source escapes workspace: {path}") from exc
 
 
+def _guest_preflight() -> ModuleType:
+    global _preflight
+    if _preflight is None:
+        _require_trusted_harness()
+        _verify_root_owned_regular(_TRUSTED_PREFLIGHT, mode=0o444)
+        if _TRUSTED_PREFLIGHT.resolve(strict=True) != _TRUSTED_PREFLIGHT:
+            raise GateError("trusted guest preflight source is not canonical")
+        name = "ssh_over_mcp_trusted_guest_preflight"
+        loader = SourceFileLoader(name, str(_TRUSTED_PREFLIGHT))
+        spec = importlib.util.spec_from_loader(name, loader)
+        if spec is None:
+            raise GateError("trusted guest preflight loader is unavailable")
+        module = importlib.util.module_from_spec(spec)
+        loader.exec_module(module)
+        _preflight = module
+    return _preflight
+
+
+def _establish_guest_no_core() -> None:
+    module = _guest_preflight()
+    try:
+        module.establish_guest_no_core()
+    except module.ProfileError as exc:
+        raise GateError("guest core policy could not be established") from exc
+
+
+def _require_no_core() -> None:
+    module = _guest_preflight()
+    try:
+        module.require_no_core()
+    except module.ProfileError as exc:
+        raise GateError("guest core policy verification failed") from exc
+
+
 def _verify_root_owned_regular(path: Path, *, mode: int) -> None:
     try:
         info = path.lstat()
@@ -279,6 +318,7 @@ def _spawn_nonroot_child(
         if not stat.S_ISSOCK(info.st_mode):
             raise GateError("inherited control fd must be a socket")
 
+    _require_no_core()
     pid = os.fork()
     if pid == 0:
         try:
@@ -289,6 +329,7 @@ def _spawn_nonroot_child(
             if libc.prctl(_PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
                 os._exit(125)
             _require_zero_caps_nnp()
+            _require_no_core()
             for fd in pass_fds:
                 os.set_inheritable(fd, True)
             os.execve(command[0], list(command), dict(env))
@@ -399,6 +440,8 @@ def _fixed_child_env() -> dict[str, str]:
 
 class _SystemGuestOps:
     def __init__(self) -> None:
+        self._workspace_verified = False
+        self._fresh_guest_verified = False
         self._expected_commit: str | None = None
         self._manager_pid: int | None = None
         self._sshd_pid: int | None = None
@@ -441,8 +484,11 @@ class _SystemGuestOps:
         _require_target_regular(_MANAGER_SCRIPT)
         _require_target_regular(_PROBE)
         _require_target_regular(_SUPPORT)
+        self._workspace_verified = True
 
     def require_clean_start(self) -> None:
+        if not self._workspace_verified:
+            raise GateError("guest workspace was not verified before fresh-state check")
         _require_clean_start(RUNTIME, CGROUP_ROOT)
         for path in (HOST_POLICY, LAUNCHER_INSTALL, SUDOERS_DROPIN, FS_DATA_ROOT):
             if path.exists() or path.is_symlink():
@@ -464,6 +510,7 @@ class _SystemGuestOps:
             probe.settimeout(0.2)
             if probe.connect_ex(("127.0.0.1", SSHD_PORT)) == 0:
                 raise GateError("fixed sshd port is already in use")
+        self._fresh_guest_verified = True
 
     def _prepare_identities(self) -> None:
         for name, gid in (
@@ -839,9 +886,11 @@ LogLevel VERBOSE
         raise GateError("containment manager endpoint did not become ready")
 
     def _start_sshd(self) -> None:
+        _require_no_core()
         pid = os.fork()
         if pid == 0:
             try:
+                _require_no_core()
                 os.execve(
                     _SSHD,
                     [_SSHD, "-D", "-f", str(SSHD_CONFIG), "-E", str(SSHD_LOG)],
@@ -865,6 +914,9 @@ LogLevel VERBOSE
         raise GateError("sshd did not become ready")
 
     def prepare(self) -> None:
+        if not self._workspace_verified or not self._fresh_guest_verified:
+            raise GateError("guest core setup requires verified workspace and fresh state")
+        _establish_guest_no_core()
         RUNTIME.mkdir(mode=0o755, parents=False, exist_ok=False)
         os.chown(RUNTIME, 0, 0)
         os.chmod(RUNTIME, 0o755)

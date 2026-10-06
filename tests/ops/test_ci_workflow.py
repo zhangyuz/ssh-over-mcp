@@ -38,3 +38,11 @@ def test_operator_provisioning_tools_are_linted_and_compiled(step_name: str) -> 
     step = next(item for item in workflow["jobs"]["validate"]["steps"] if item["name"] == step_name)
     command = shlex.split(step["run"])
     assert "ops/systemd" in command, "privileged operator tools must not escape validation"
+
+
+@pytest.mark.parametrize("step_name", ["Lint source and tests", "Compile on Python 3.13", "Compile on Python 3.14"])
+def test_trusted_guest_preflight_is_linted_and_compiled(step_name: str) -> None:
+    workflow = yaml.load(WORKFLOW.read_text(), Loader=yaml.BaseLoader)
+    step = next(item for item in workflow["jobs"]["validate"]["steps"] if item["name"] == step_name)
+    command = shlex.split(step["run"])
+    assert "ops/live-e2e/ledger_guest_preflight.py" in command
