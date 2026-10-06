@@ -95,7 +95,7 @@ After extraction, the trusted guest gate and its fixed stdlib `ledger_guest_pref
 
 ## Exact target identity
 
-The manual trusted-main workflow accepts exactly one `commit_sha`. The GitHub workflow run `headSha` identifies the trusted-main workflow/orchestrator revision; it is **not** the tested target identity.
+The ordinary `CI` workflow automatically calls this trusted reusable workflow only after validation succeeds for a push to `main`; `workflow_dispatch` remains available for an exact manual `commit_sha` rerun. Reusable-workflow calls inherit the caller push SHA/ref, keeping trusted-main workflow authority and the tested merge SHA commit-bound.
 
 The tested commit is authoritative only when all of these are equal:
 

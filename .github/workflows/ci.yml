@@ -128,3 +128,13 @@ jobs:
 
       - name: Test on Python 3.14
         run: python -m pytest -q
+
+  live-local-e2e:
+    name: Merge-main no-network Level-3
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    uses: ./.github/workflows/live-local-e2e.yml
+    with:
+      commit_sha: ${{ github.sha }}
+    permissions:
+      contents: read

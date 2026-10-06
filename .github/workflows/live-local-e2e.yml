@@ -1,6 +1,11 @@
 name: Live Local E2E
 
 on:
+  workflow_call:
+    inputs:
+      commit_sha:
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       commit_sha:
@@ -21,6 +26,8 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, macOS, X64, ssh-over-mcp-e2e-orchestrator]
     timeout-minutes: 45
+    env:
+      SSH_OVER_MCP_E2E_SOURCE_REPOSITORY: ${{ github.repository }}
 
     steps:
       - name: Verify trusted native macOS x86 orchestrator

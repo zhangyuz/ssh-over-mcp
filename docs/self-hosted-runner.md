@@ -437,7 +437,7 @@ The host creates a fresh qcow2 overlay and starts QEMU with HVF and `-nic none`.
 
 The orchestrator uses a private temporary bare repository to create the exact Git bundle. It also prepares a Python 3.14 linux/amd64 wheelhouse from trusted-main `requirements/runtime.lock` using hash enforcement, then packages the bundle, lock, wheelhouse, exact expected commit, trusted-main guest harness, and trusted offline bootstrap into read-only payload/seed media. Guest bootstrap performs no apt/PyPI/GitHub access.
 
-The trusted workflow is manual-only from `main` and receives one exact `commit_sha`. The workflow run `headSha` identifies the trusted-main workflow revision, not the tested commit.
+The ordinary `CI` workflow automatically calls the trusted reusable Live Local E2E workflow only after validation succeeds for a push to `main`; `workflow_dispatch` remains available for an exact manual `commit_sha` rerun. The called workflow inherits the caller push SHA/ref, so the trusted-main authority and tested merge SHA stay commit-bound.
 
 Target identity is established by equality of:
 

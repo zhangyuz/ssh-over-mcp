@@ -101,10 +101,12 @@ def _validated_target_commit(value: str) -> str:
 def _validated_workflow_context(env: Mapping[str, str]) -> str:
     if env.get("GITHUB_ACTIONS") != "true":
         raise OrchestratorError("E2E orchestrator requires GitHub Actions")
-    if env.get("GITHUB_EVENT_NAME") != "workflow_dispatch":
-        raise OrchestratorError("E2E orchestrator requires workflow_dispatch")
+    if env.get("GITHUB_EVENT_NAME") not in {"workflow_dispatch", "push"}:
+        raise OrchestratorError("unexpected E2E workflow trigger")
     if env.get("GITHUB_REPOSITORY") != EXPECTED_REPOSITORY:
         raise OrchestratorError("unexpected GitHub repository")
+    if env.get("SSH_OVER_MCP_E2E_SOURCE_REPOSITORY") != EXPECTED_REPOSITORY:
+        raise OrchestratorError("unexpected E2E source repository")
     if env.get("GITHUB_REF") != "refs/heads/main":
         raise OrchestratorError("E2E orchestrator requires trusted main")
     workflow_sha = env.get("GITHUB_SHA", "")
