@@ -22,6 +22,7 @@ TEMP_PREFIX = "ssh-over-mcp-e2e-"
 MAX_STATE_BYTES = 4_096
 MAX_TEMP_DIRS = 16
 MAX_TEMP_MATCHES = 64
+MAX_TEMP_CHILDREN = 32
 QEMU_NAME = "qemu-system-x86_64"
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 
@@ -199,6 +200,66 @@ def _temp_dirs(root: Path, uid: int) -> tuple[Path, ...]:
     return tuple(sorted(candidates))
 
 
+def _temp_diagnostics(paths: Sequence[Path], uid: int) -> tuple[str, ...]:
+    records: list[str] = []
+    if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
+        raise RecoveryError("safe temp directory inspection is unavailable")
+    for path in paths:
+        try:
+            descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        except OSError:
+            raise RecoveryError("E2E temp directory cannot be opened safely") from None
+        try:
+            root_info = os.fstat(descriptor)
+            if not stat.S_ISDIR(root_info.st_mode) or root_info.st_uid != uid:
+                raise RecoveryError("E2E temp directory identity changed")
+            entries: list[dict[str, object]] = []
+            try:
+                with os.scandir(descriptor) as stream:
+                    for entry in stream:
+                        if len(entries) >= MAX_TEMP_CHILDREN:
+                            raise RecoveryError("too many direct entries in E2E temp directory")
+                        info = entry.stat(follow_symlinks=False)
+                        if stat.S_ISDIR(info.st_mode):
+                            kind = "directory"
+                        elif stat.S_ISREG(info.st_mode):
+                            kind = "regular"
+                        elif stat.S_ISLNK(info.st_mode):
+                            kind = "symlink"
+                        else:
+                            kind = "special"
+                        entries.append(
+                            {
+                                "kind": kind,
+                                "mode": f"{stat.S_IMODE(info.st_mode):04o}",
+                                "name": entry.name,
+                                "size": info.st_size if kind == "regular" else None,
+                                "uid": info.st_uid,
+                            }
+                        )
+            except OSError:
+                raise RecoveryError("E2E temp directory inventory is unavailable") from None
+            entries.sort(key=lambda item: str(item["name"]))
+            records.append(
+                json.dumps(
+                    {
+                        "device": root_info.st_dev,
+                        "entries": entries,
+                        "inode": root_info.st_ino,
+                        "mode": f"{stat.S_IMODE(root_info.st_mode):04o}",
+                        "name": path.name,
+                        "uid": root_info.st_uid,
+                    },
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            )
+        finally:
+            os.close(descriptor)
+    return tuple(records)
+
+
 def inspect_recovery(
     expected_target: str,
     *,
@@ -275,6 +336,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"target={inspection.state.target} owner_pid={inspection.state.owner_pid} "
         f"temp_dirs={len(inspection.temp_dirs)} names={names}"
     )
+    for record in _temp_diagnostics(inspection.temp_dirs, os.geteuid()):
+        print(f"RECOVERY_TEMP {record}")
     if expected_pid == 0:
         print("RECOVERY_MODE=inspect-only")
         return 0
