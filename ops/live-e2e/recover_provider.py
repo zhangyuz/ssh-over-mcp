@@ -21,6 +21,7 @@ PROVIDER_STATE = ORCHESTRATOR_HOME / "Library/Caches/ssh-over-mcp-e2e/active-run
 TEMP_PREFIX = "ssh-over-mcp-e2e-"
 MAX_STATE_BYTES = 4_096
 MAX_TEMP_DIRS = 16
+MAX_TEMP_MATCHES = 64
 QEMU_NAME = "qemu-system-x86_64"
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 
@@ -172,12 +173,16 @@ def _qemu_pids(uid: int) -> tuple[int, ...]:
 
 def _temp_dirs(root: Path, uid: int) -> tuple[Path, ...]:
     candidates: list[Path] = []
+    match_count = 0
     for path in root.glob(f"{TEMP_PREFIX}*"):
+        match_count += 1
+        if match_count > MAX_TEMP_MATCHES:
+            raise RecoveryError("too many matching E2E temp paths")
         info = path.lstat()
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != uid:
-            if stat.S_ISDIR(info.st_mode):
-                kind = "directory"
-            elif stat.S_ISREG(info.st_mode):
+        if info.st_uid != uid:
+            continue
+        if not stat.S_ISDIR(info.st_mode):
+            if stat.S_ISREG(info.st_mode):
                 kind = "regular"
             elif stat.S_ISLNK(info.st_mode):
                 kind = "symlink"
