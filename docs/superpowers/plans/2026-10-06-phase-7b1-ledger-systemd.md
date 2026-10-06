@@ -10,7 +10,7 @@
 
 **Spec:** [Approved Phase 7B1 design](../specs/2026-10-05-phase-7b1-ledger-systemd-design.md), [ADR 0009](../../decisions/0009-ledger-systemd-sandbox.md). Read these and the repository's normative development/security/API/policy documents before implementation.
 
-**Status:** Plan approved 2026-10-06; Tasks 1–2 complete through exact merge-main gates (PRs 124/125). Task 3 inventory found no executable C compiler in the pinned guest; its native prerequisite is awaiting written review, not activated. See [proposed native design](../specs/2026-10-06-offline-native-e2e-toolchain-design.md) and [draft prerequisite plan](2026-10-06-offline-native-e2e-toolchain.md). No Phase 7B1 acceptance or closure is claimed. Baseline main: a37747291894ac7b01ae5483af83d0dd89821015. Written design approved 2026-10-06 at 34805e7729e09b78b3b8fb5b8e40d2455d80081f.
+**Status:** Plan approved 2026-10-06; Tasks 1–2 complete through exact merge-main gates (PRs 124/125). Task 3 inventory found no executable C compiler in the pinned guest; its native prerequisite design/plan are approved, not implemented or activated. G1 is complete through PR #127. See [approved native design](../specs/2026-10-06-offline-native-e2e-toolchain-design.md) and [approved prerequisite plan](2026-10-06-offline-native-e2e-toolchain.md). No Phase 7B1 acceptance or closure is claimed. Baseline main: a37747291894ac7b01ae5483af83d0dd89821015. Written design approved 2026-10-06 at 34805e7729e09b78b3b8fb5b8e40d2455d80081f.
 
 ## Global Constraints
 

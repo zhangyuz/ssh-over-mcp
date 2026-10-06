@@ -90,6 +90,6 @@ unsafe extraction, writable runtime, surviving writers or missing live proof
 fail closed. Provider markers are never auto-deleted.
 
 The [written design](../superpowers/specs/2026-10-06-offline-native-e2e-toolchain-design.md)
-defines mandatory contracts; its [draft plan](../superpowers/plans/2026-10-06-offline-native-e2e-toolchain.md)
+defines mandatory contracts; its [approved plan](../superpowers/plans/2026-10-06-offline-native-e2e-toolchain.md)
 defines independently gated slices. This ADR does not activate the proposed
 authority or certify Phase 7B1.

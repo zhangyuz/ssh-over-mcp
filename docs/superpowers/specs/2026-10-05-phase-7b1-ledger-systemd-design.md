@@ -359,15 +359,15 @@ authority bootstrap is explicitly legacy-only evidence; after activation the
 7B1 target acceptance run must require it, not conditionally skip it.
 
 The trusted host workflow/gate selects and records its fixed evidence profile.
-The proposed [native prerequisite](2026-10-06-offline-native-e2e-toolchain-design.md)
+The approved [native prerequisite](2026-10-06-offline-native-e2e-toolchain-design.md)
 reserves live-local-e2e.yml for scoped legacy-7a authority bootstrap/native
 repair, and separate fixed candidate/native-required paths for native feasibility
 and subsequent authority preparation. Task 8 creates main-only
 live-ledger-systemd-e2e.yml and its fixed host entrypoint, selecting only
 ledger-systemd-7b1, with exact commit_sha as the only workflow input. It retains
 mandatory native preflight and shares the dedicated provider concurrency group
-with cancel-in-progress false. This routing refinement awaits approval under
-proposed ADR 0010; it does not activate any workflow in this documentation PR.
+with cancel-in-progress false. This routing refinement is approved under
+accepted ADR 0010; it does not activate any workflow in this documentation PR.
 
 A target file's presence, contents, exit code or environment cannot choose or
 downgrade the trusted profile. Exact-head/merge-main 7B1 certification requires
