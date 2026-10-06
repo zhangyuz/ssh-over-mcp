@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -268,6 +269,76 @@ def test_expected_commit_binding_rejects_wrong_size(tmp_path: Path) -> None:
     (payload / "expected_commit").write_text(TARGET + "x\n", encoding="ascii")
 
     with pytest.raises(module.RecoveryError, match="ownership/type/size"):
+        module._temp_diagnostics((temp_dir,), os.geteuid())
+
+
+def test_expected_commit_fifo_is_rejected_without_waiting_for_a_writer(tmp_path: Path) -> None:
+    temp_dir = tmp_path / "ssh-over-mcp-e2e-one"
+    payload = temp_dir / "payload-content"
+    payload.mkdir(parents=True, mode=0o700)
+    os.mkfifo(payload / "expected_commit", mode=0o600)
+    script = """
+import os, runpy, sys
+from pathlib import Path
+module = runpy.run_path(sys.argv[1])
+try:
+    module['_temp_diagnostics']((Path(sys.argv[2]),), os.geteuid())
+except module['RecoveryError']:
+    pass
+else:
+    raise SystemExit('unsafe FIFO accepted')
+"""
+    try:
+        result = subprocess.run(
+            [sys.executable, "-I", "-c", script, str(MODULE), str(temp_dir)],
+            capture_output=True, text=True, timeout=3, check=False,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("expected_commit FIFO blocked inspection before type validation")
+    assert result.returncode == 0, result.stderr
+    assert (payload / "expected_commit").exists()
+
+
+def test_nonregular_expected_commit_is_rejected_before_data_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module()
+    temp_dir = tmp_path / "ssh-over-mcp-e2e-one"
+    payload = temp_dir / "payload-content"
+    payload.mkdir(parents=True, mode=0o700)
+    os.mkfifo(payload / "expected_commit", mode=0o600)
+    real_open = os.open
+
+    def safe_open(path, flags, *args, **kwargs):
+        if path == "expected_commit":
+            pytest.fail("nonregular expected_commit reached data-capable open")
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(module.os, "open", safe_open)
+    with pytest.raises(module.RecoveryError, match="ownership/type/size"):
+        module._temp_diagnostics((temp_dir,), os.geteuid())
+
+
+def test_expected_commit_replacement_between_stat_and_open_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module()
+    temp_dir = tmp_path / "ssh-over-mcp-e2e-one"
+    payload = temp_dir / "payload-content"
+    payload.mkdir(parents=True, mode=0o700)
+    expected = payload / "expected_commit"
+    expected.write_text(TARGET + "\n", encoding="ascii")
+    replacement = payload / "replacement"
+    replacement.write_text("b" * 40 + "\n", encoding="ascii")
+    real_open = os.open
+
+    def replacing_open(path, flags, *args, **kwargs):
+        if path == "expected_commit":
+            replacement.replace(expected)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(module.os, "open", replacing_open)
+    with pytest.raises(module.RecoveryError, match="identity"):
         module._temp_diagnostics((temp_dir,), os.geteuid())
 
 

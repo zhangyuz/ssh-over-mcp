@@ -177,3 +177,13 @@ is dead, no runner-owned QEMU exists, the fixed marker identity/schema/mode are
 unchanged, and **no E2E temp directories remain**. The workflow only unlinks the
 fixed marker; it has no sudo, process-kill, recursive-delete, arbitrary-path or
 provider-restart authority. Any remaining temp state requires renewed review.
+
+Temp diagnostics read only the fixed `payload-content/expected_commit` binding
+relative to pinned directory descriptors. Both components prohibit symlink
+following and require runner ownership; the leaf must be regular, exactly 41
+bytes, and canonical lowercase 40-hex plus newline. The leaf is opened
+only after no-follow metadata classification, then its descriptor identity and
+type are revalidated. Nonblocking opening also prevents a raced FIFO from
+waiting for a writer. Missing
+metadata reports an unbound directory; malformed or unsafe metadata refuses
+inspection. This read-only binding is not cleanup authorization.

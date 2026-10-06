@@ -213,7 +213,22 @@ def _read_expected_commit(directory_fd: int, uid: int) -> str | None:
         if not stat.S_ISDIR(payload_info.st_mode) or payload_info.st_uid != uid:
             raise RecoveryError("E2E expected commit directory ownership/type mismatch")
         try:
-            expected_fd = os.open("expected_commit", flags, dir_fd=payload_fd)
+            before = os.stat("expected_commit", dir_fd=payload_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+        except OSError:
+            raise RecoveryError("E2E expected commit cannot be inspected safely") from None
+        if stat.S_ISLNK(before.st_mode):
+            raise RecoveryError("E2E expected commit cannot be opened safely")
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != uid
+            or before.st_size != 41
+        ):
+            raise RecoveryError("E2E expected commit ownership/type/size mismatch")
+        try:
+            # Reject a FIFO at fstat without waiting for an untrusted writer.
+            expected_fd = os.open("expected_commit", flags | os.O_NONBLOCK, dir_fd=payload_fd)
         except FileNotFoundError:
             return None
         except OSError:
@@ -226,6 +241,8 @@ def _read_expected_commit(directory_fd: int, uid: int) -> str | None:
                 or expected_info.st_size != 41
             ):
                 raise RecoveryError("E2E expected commit ownership/type/size mismatch")
+            if (expected_info.st_dev, expected_info.st_ino) != (before.st_dev, before.st_ino):
+                raise RecoveryError("E2E expected commit identity changed")
             raw = os.read(expected_fd, 42)
         finally:
             os.close(expected_fd)
