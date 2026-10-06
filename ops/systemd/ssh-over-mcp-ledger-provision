@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+if [ "$#" -ne 0 ]; then
+    printf '%s\n' 'Ledger provisioning failed' >&2
+    exit 1
+fi
+exec /opt/ssh-over-mcp/venv/bin/python -I -S -B /opt/ssh-over-mcp/ops/systemd/ledger_provision.py
