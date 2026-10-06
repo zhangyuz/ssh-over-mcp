@@ -30,83 +30,187 @@ def _load_module() -> ModuleType:
 
 
 def _state(path: Path, *, target: str = TARGET, owner_pid: int = 4242) -> None:
-    path.parent.mkdir(exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"target": target, "owner_pid": owner_pid}) + "\n")
     path.chmod(0o600)
 
 
-def test_inspect_requires_exact_owned_fixed_state_and_never_mutates(tmp_path: Path) -> None:
+def _temp_root(tmp_path: Path) -> Path:
+    root = tmp_path / "temp"
+    root.mkdir()
+    return root
+
+
+def test_inspect_reports_zero_temp_state_without_mutation(tmp_path: Path) -> None:
     module = _load_module()
     state = tmp_path / "active-run.json"
+    temp_root = _temp_root(tmp_path)
     _state(state)
 
-    inspection = module.inspect_recovery(TARGET, state_path=state, uid=os.geteuid())
+    inspection = module.inspect_recovery(
+        TARGET,
+        state_path=state,
+        temp_root=temp_root,
+        uid=os.geteuid(),
+    )
 
     assert inspection.state == module.ProviderState(target=TARGET, owner_pid=4242)
+    assert inspection.temp_dirs == ()
     assert state.is_file()
 
 
-@pytest.mark.parametrize("target", ["", "a" * 39, "g" * 40, "A" * 40])
-def test_inspect_rejects_non_exact_or_noncanonical_target(tmp_path: Path, target: str) -> None:
+def test_inspect_reports_matching_temp_state_without_deleting_it(tmp_path: Path) -> None:
     module = _load_module()
     state = tmp_path / "active-run.json"
+    temp_root = _temp_root(tmp_path)
+    orphan = temp_root / "ssh-over-mcp-e2e-one"
+    orphan.mkdir()
+    _state(state)
+
+    inspection = module.inspect_recovery(
+        TARGET,
+        state_path=state,
+        temp_root=temp_root,
+        uid=os.geteuid(),
+    )
+
+    assert inspection.temp_dirs == (orphan,)
+    assert state.exists() and orphan.exists()
+
+
+@pytest.mark.parametrize("target", ["", "a" * 39, "g" * 40, "A" * 40])
+def test_inspect_rejects_noncanonical_target(tmp_path: Path, target: str) -> None:
+    module = _load_module()
+    state = tmp_path / "active-run.json"
+    temp_root = _temp_root(tmp_path)
     _state(state)
     with pytest.raises(module.RecoveryError):
-        module.inspect_recovery(target, state_path=state, uid=os.geteuid())
+        module.inspect_recovery(
+            target,
+            state_path=state,
+            temp_root=temp_root,
+            uid=os.geteuid(),
+        )
 
 
-def test_inspect_rejects_target_schema_mode_and_symlink(tmp_path: Path) -> None:
+def test_inspect_rejects_bad_state_symlink_and_non_directory_temp(tmp_path: Path) -> None:
     module = _load_module()
     state = tmp_path / "active-run.json"
+    temp_root = _temp_root(tmp_path)
     _state(state, target="b" * 40)
     with pytest.raises(module.RecoveryError, match="target"):
-        module.inspect_recovery(TARGET, state_path=state, uid=os.geteuid())
+        module.inspect_recovery(
+            TARGET,
+            state_path=state,
+            temp_root=temp_root,
+            uid=os.geteuid(),
+        )
 
     _state(state)
     state.chmod(0o644)
     with pytest.raises(module.RecoveryError, match="mode"):
-        module.inspect_recovery(TARGET, state_path=state, uid=os.geteuid())
+        module.inspect_recovery(
+            TARGET,
+            state_path=state,
+            temp_root=temp_root,
+            uid=os.geteuid(),
+        )
 
     state.chmod(0o600)
     state.write_text(json.dumps({"target": TARGET, "owner_pid": 4242, "extra": True}))
     with pytest.raises(module.RecoveryError, match="schema"):
-        module.inspect_recovery(TARGET, state_path=state, uid=os.geteuid())
+        module.inspect_recovery(
+            TARGET,
+            state_path=state,
+            temp_root=temp_root,
+            uid=os.geteuid(),
+        )
 
     state.unlink()
     real = tmp_path / "real-state.json"
     _state(real)
     state.symlink_to(real)
     with pytest.raises(module.RecoveryError):
-        module.inspect_recovery(TARGET, state_path=state, uid=os.geteuid())
+        module.inspect_recovery(
+            TARGET,
+            state_path=state,
+            temp_root=temp_root,
+            uid=os.geteuid(),
+        )
+
+    state.unlink()
+    _state(state)
+    bad = temp_root / "ssh-over-mcp-e2e-file"
+    bad.write_bytes(b"not a directory")
+    with pytest.raises(module.RecoveryError, match="ownership/type"):
+        module.inspect_recovery(
+            TARGET,
+            state_path=state,
+            temp_root=temp_root,
+            uid=os.geteuid(),
+        )
 
 
-def test_recover_requires_exact_dead_owner_and_no_qemu(tmp_path: Path, monkeypatch) -> None:
+def test_recover_refuses_live_owner_qemu_pid_mismatch_or_temp_state(
+    tmp_path: Path, monkeypatch
+) -> None:
     module = _load_module()
     state = tmp_path / "active-run.json"
+    temp_root = _temp_root(tmp_path)
     _state(state, owner_pid=4242)
 
     monkeypatch.setattr(module, "_process_exists", lambda pid: True)
     monkeypatch.setattr(module, "_qemu_pids", lambda uid: ())
     with pytest.raises(module.RecoveryError, match="still alive"):
-        module.recover(TARGET, 4242, state_path=state, uid=os.geteuid())
-    assert state.exists()
+        module.recover(
+            TARGET,
+            4242,
+            state_path=state,
+            temp_root=temp_root,
+            uid=os.geteuid(),
+        )
 
     monkeypatch.setattr(module, "_process_exists", lambda pid: False)
     monkeypatch.setattr(module, "_qemu_pids", lambda uid: (99,))
     with pytest.raises(module.RecoveryError, match="QEMU"):
-        module.recover(TARGET, 4242, state_path=state, uid=os.geteuid())
-    assert state.exists()
+        module.recover(
+            TARGET,
+            4242,
+            state_path=state,
+            temp_root=temp_root,
+            uid=os.geteuid(),
+        )
 
     monkeypatch.setattr(module, "_qemu_pids", lambda uid: ())
     with pytest.raises(module.RecoveryError, match="owner PID"):
-        module.recover(TARGET, 4243, state_path=state, uid=os.geteuid())
-    assert state.exists()
+        module.recover(
+            TARGET,
+            4243,
+            state_path=state,
+            temp_root=temp_root,
+            uid=os.geteuid(),
+        )
+
+    orphan = temp_root / "ssh-over-mcp-e2e-one"
+    orphan.mkdir()
+    with pytest.raises(module.RecoveryError, match="temp state remains"):
+        module.recover(
+            TARGET,
+            4242,
+            state_path=state,
+            temp_root=temp_root,
+            uid=os.geteuid(),
+        )
+    assert state.exists() and orphan.exists()
 
 
-def test_recover_unlinks_only_fixed_verified_marker(tmp_path: Path, monkeypatch) -> None:
+def test_recover_unlinks_only_fixed_marker_when_no_temp_state(
+    tmp_path: Path, monkeypatch
+) -> None:
     module = _load_module()
     state = tmp_path / "active-run.json"
-    unrelated = tmp_path / "ssh-over-mcp-e2e-unknown"
+    temp_root = _temp_root(tmp_path)
+    unrelated = temp_root / "unrelated"
     unrelated.mkdir()
     (unrelated / "payload").write_bytes(b"must remain")
     _state(state, owner_pid=4242)
@@ -114,11 +218,50 @@ def test_recover_unlinks_only_fixed_verified_marker(tmp_path: Path, monkeypatch)
     monkeypatch.setattr(module, "_process_exists", lambda pid: False)
     monkeypatch.setattr(module, "_qemu_pids", lambda uid: ())
 
-    recovered = module.recover(TARGET, 4242, state_path=state, uid=os.geteuid())
+    recovered = module.recover(
+        TARGET,
+        4242,
+        state_path=state,
+        temp_root=temp_root,
+        uid=os.geteuid(),
+    )
 
     assert recovered.state.owner_pid == 4242
     assert not state.exists()
     assert (unrelated / "payload").read_bytes() == b"must remain"
+
+
+def test_recover_rejects_marker_identity_change(tmp_path: Path, monkeypatch) -> None:
+    module = _load_module()
+    state = tmp_path / "active-run.json"
+    temp_root = _temp_root(tmp_path)
+    _state(state, owner_pid=4242)
+    first = module.inspect_recovery(
+        TARGET,
+        state_path=state,
+        temp_root=temp_root,
+        uid=os.geteuid(),
+    )
+    changed = module.RecoveryInspection(
+        state=first.state,
+        device=first.device,
+        inode=first.inode + 1,
+        temp_dirs=first.temp_dirs,
+    )
+    inspections = iter((first, changed))
+    monkeypatch.setattr(module, "inspect_recovery", lambda *args, **kwargs: next(inspections))
+    monkeypatch.setattr(module, "_process_exists", lambda pid: False)
+    monkeypatch.setattr(module, "_qemu_pids", lambda uid: ())
+
+    with pytest.raises(module.RecoveryError, match="changed"):
+        module.recover(
+            TARGET,
+            4242,
+            state_path=state,
+            temp_root=temp_root,
+            uid=os.geteuid(),
+        )
+    assert state.exists()
 
 
 def test_expected_pid_zero_is_inspect_only_sentinel() -> None:
@@ -127,26 +270,6 @@ def test_expected_pid_zero_is_inspect_only_sentinel() -> None:
     for value in ("", "-1", "+1", "01", "1.0"):
         with pytest.raises(module.RecoveryError):
             module._parse_expected_pid(value)
-
-
-def test_recover_rejects_marker_identity_change(tmp_path: Path, monkeypatch) -> None:
-    module = _load_module()
-    state = tmp_path / "active-run.json"
-    _state(state, owner_pid=4242)
-    first = module.inspect_recovery(TARGET, state_path=state, uid=os.geteuid())
-    changed = module.RecoveryInspection(
-        state=first.state,
-        device=first.device,
-        inode=first.inode + 1,
-    )
-    inspections = iter((first, changed))
-    monkeypatch.setattr(module, "inspect_recovery", lambda *args, **kwargs: next(inspections))
-    monkeypatch.setattr(module, "_process_exists", lambda pid: False)
-    monkeypatch.setattr(module, "_qemu_pids", lambda uid: ())
-
-    with pytest.raises(module.RecoveryError, match="changed"):
-        module.recover(TARGET, 4242, state_path=state, uid=os.geteuid())
-    assert state.exists()
 
 
 def test_context_is_manual_trusted_main_non_admin_orchestrator(monkeypatch) -> None:

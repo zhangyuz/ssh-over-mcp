@@ -9,6 +9,7 @@ import re
 import stat
 import subprocess
 import sys
+import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +20,8 @@ ORCHESTRATOR_HOME = Path("/Users/gha-e2e-orchestrator")
 CACHE_DIR = ORCHESTRATOR_HOME / "Library" / "Caches" / "ssh-over-mcp-e2e"
 PROVIDER_STATE = CACHE_DIR / "active-run.json"
 MAX_STATE_BYTES = 4_096
+MAX_TEMP_DIRS = 16
+TEMP_PREFIX = "ssh-over-mcp-e2e-"
 QEMU_NAME = "qemu-system-x86_64"
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 
@@ -38,6 +41,7 @@ class RecoveryInspection:
     state: ProviderState
     device: int
     inode: int
+    temp_dirs: tuple[Path, ...] = ()
 
 
 def _validate_context(env: Mapping[str, str]) -> None:
@@ -165,10 +169,23 @@ def _qemu_pids(uid: int) -> tuple[int, ...]:
     return tuple(result)
 
 
+def _temp_dirs(root: Path, uid: int) -> tuple[Path, ...]:
+    candidates: list[Path] = []
+    for path in root.glob(f"{TEMP_PREFIX}*"):
+        info = path.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != uid:
+            raise RecoveryError("unexpected E2E temp path ownership/type")
+        candidates.append(path)
+        if len(candidates) > MAX_TEMP_DIRS:
+            raise RecoveryError("too many E2E temp directories")
+    return tuple(sorted(candidates))
+
+
 def inspect_recovery(
     expected_target: str,
     *,
     state_path: Path = PROVIDER_STATE,
+    temp_root: Path | None = None,
     uid: int | None = None,
 ) -> RecoveryInspection:
     trusted_target = _parse_expected_target(expected_target)
@@ -176,7 +193,13 @@ def inspect_recovery(
     inspection = _load_state(state_path, effective_uid)
     if inspection.state.target != trusted_target:
         raise RecoveryError("stale provider target does not match operator input")
-    return inspection
+    root = Path(tempfile.gettempdir()) if temp_root is None else temp_root
+    return RecoveryInspection(
+        state=inspection.state,
+        device=inspection.device,
+        inode=inspection.inode,
+        temp_dirs=_temp_dirs(root, effective_uid),
+    )
 
 
 def recover(
@@ -184,20 +207,33 @@ def recover(
     expected_owner_pid: int,
     *,
     state_path: Path = PROVIDER_STATE,
+    temp_root: Path | None = None,
     uid: int | None = None,
 ) -> RecoveryInspection:
     if expected_owner_pid <= 1:
         raise RecoveryError("recovery requires exact non-sentinel owner PID")
     effective_uid = os.geteuid() if uid is None else uid
-    inspection = inspect_recovery(expected_target, state_path=state_path, uid=effective_uid)
+    inspection = inspect_recovery(
+        expected_target,
+        state_path=state_path,
+        temp_root=temp_root,
+        uid=effective_uid,
+    )
     if inspection.state.owner_pid != expected_owner_pid:
         raise RecoveryError("stale provider owner PID does not match operator input")
+    if inspection.temp_dirs:
+        raise RecoveryError("orphan E2E temp state remains; marker recovery refused")
     if _process_exists(expected_owner_pid):
         raise RecoveryError("stale provider owner process is still alive")
     if _qemu_pids(effective_uid):
         raise RecoveryError("QEMU process is still alive")
 
-    current = inspect_recovery(expected_target, state_path=state_path, uid=effective_uid)
+    current = inspect_recovery(
+        expected_target,
+        state_path=state_path,
+        temp_root=temp_root,
+        uid=effective_uid,
+    )
     if current != inspection:
         raise RecoveryError("provider state changed during recovery")
     if _process_exists(expected_owner_pid) or _qemu_pids(effective_uid):
@@ -222,9 +258,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     target = _parse_expected_target(args[0])
     expected_pid = _parse_expected_pid(args[1])
     inspection = inspect_recovery(target)
+    names = ",".join(path.name for path in inspection.temp_dirs) or "<none>"
     print(
         "RECOVERY_INSPECT "
-        f"target={inspection.state.target} owner_pid={inspection.state.owner_pid}"
+        f"target={inspection.state.target} owner_pid={inspection.state.owner_pid} "
+        f"temp_dirs={len(inspection.temp_dirs)} names={names}"
     )
     if expected_pid == 0:
         print("RECOVERY_MODE=inspect-only")
