@@ -176,6 +176,15 @@ def test_rejects_symlink_cycles_and_excessive_link_chains() -> None:
     with pytest.raises(module.NativeArchiveError):
         module.read_data_tar(io.BytesIO(cycle), limits=_limits(module))
 
+    component_cycle = _tar_bytes(
+        [
+            ("a", None, 0o777, tarfile.SYMTYPE, "dir/x"),
+            ("dir", None, 0o777, tarfile.SYMTYPE, "a"),
+        ]
+    )
+    with pytest.raises(module.NativeArchiveError):
+        module.read_data_tar(io.BytesIO(component_cycle), limits=_limits(module))
+
     chain = _tar_bytes(
         [
             ("usr/bin/a", None, 0o777, tarfile.SYMTYPE, "b"),
@@ -241,6 +250,19 @@ def test_truncated_or_non_tar_input_fails_with_fixed_public_error() -> None:
         assert "secret" not in str(error.value)
 
 
+def test_rejects_compressed_tar_input() -> None:
+    module = _load_module()
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode="w:gz") as archive:
+        info = tarfile.TarInfo("usr/bin/cc")
+        info.mode = 0o755
+        info.size = 1
+        archive.addfile(info, io.BytesIO(b"x"))
+
+    with pytest.raises(module.NativeArchiveError):
+        module.read_data_tar(io.BytesIO(output.getvalue()), limits=_limits(module))
+
+
 def test_defaults_match_reviewed_n1_package_data_limits() -> None:
     module = _load_module()
 
@@ -251,3 +273,12 @@ def test_defaults_match_reviewed_n1_package_data_limits() -> None:
         max_file_bytes=128 * 1024 * 1024,
         max_link_hops=40,
     )
+
+
+def test_n1a_reader_is_not_activated_by_current_live_e2e() -> None:
+    for relative in (
+        ".github/workflows/live-local-e2e.yml",
+        "scripts/run-live-local-e2e-orchestrator.py",
+        "ops/live-e2e/ssh-over-mcp-live-e2e-gate",
+    ):
+        assert "native_archive.py" not in (ROOT / relative).read_text(encoding="utf-8")
