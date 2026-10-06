@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import os
-import secrets
 import stat
 import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TextIO
 
+from .keyfile import KeyFileError, write_hmac_key
 from .runtime import SecurityLedgerRuntimeSettings
 from .storage import LedgerStorageError, load_ledger_hmac_key
 
@@ -51,15 +51,6 @@ def _prepare_directory(path: Path, *, uid: int, gid: int, mode: int) -> None:
     _require_directory(path, uid=uid, gid=gid, mode=mode)
 
 
-def _write_all(fd: int, payload: bytes) -> None:
-    view = memoryview(payload)
-    while view:
-        written = os.write(fd, view)
-        if written <= 0:
-            raise OSError("short write")
-        view = view[written:]
-
-
 def _create_hmac_key(path: Path, *, uid: int, gid: int) -> None:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     flags |= getattr(os, "O_CLOEXEC", 0)
@@ -72,11 +63,8 @@ def _create_hmac_key(path: Path, *, uid: int, gid: int) -> None:
         raise _bootstrap_error() from None
 
     try:
-        _write_all(fd, secrets.token_bytes(32))
-        os.fchmod(fd, 0o600)
-        os.fchown(fd, uid, gid)
-        os.fsync(fd)
-    except OSError:
+        write_hmac_key(fd, uid=uid, gid=gid, mode=0o600)
+    except KeyFileError:
         raise _bootstrap_error() from None
     finally:
         os.close(fd)

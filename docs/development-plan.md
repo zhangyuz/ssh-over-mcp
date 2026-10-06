@@ -881,7 +881,9 @@ approved 2026-10-06;
 [design](superpowers/specs/2026-10-05-phase-7b1-ledger-systemd-design.md) and
 [ADR 0009](decisions/0009-ledger-systemd-sandbox.md) accepted. The
 [small-slice implementation plan](superpowers/plans/2026-10-06-phase-7b1-ledger-systemd.md)
-is pending review. Implementation has not started. The slice preserves existing
+is approved 2026-10-06. Implementation is in progress, starting with Task 1's
+shared key-write prerequisite; no Phase 7B1 acceptance or closure is claimed.
+The slice preserves existing
 Ledger authority and first lands any necessary trusted guest setup separately before target
 certification. Other Phase 7B hardening remains deferred to separate slices.
 

@@ -131,6 +131,15 @@ RED/GREEN slice proving unchanged legacy behavior. Guest root uses only an
 already-merged trusted helper with fixed fixture paths/identities, never the
 same target's bootstrap/helper code imported as root.
 
+The shared stdlib-only `approvals/keyfile.py` writer takes a freshly and
+exclusively created descriptor, completes the 32-byte CSPRNG write, applies and
+validates regular-file type, exact length, UID/GID and mode, then fsyncs the file.
+The caller retains canonical-parent validation, exclusive secure creation,
+descriptor close and parent-directory durability responsibilities. Legacy
+bootstrap delegates with mode 0600, retains its same-parent layout and validates
+existing keys without replacement; key-write failures retain its generic public
+error. The separate split-layout provisioning operation is still pending.
+
 The root-owned environment file contains only the existing
 `SSH_OVER_MCP_LEDGER_*` settings. Numeric identities and paths must match the
 provisioned layout. The configured `EXEC_PEER_UID/GID` and `ADMIN_PEER_UID/GID`
