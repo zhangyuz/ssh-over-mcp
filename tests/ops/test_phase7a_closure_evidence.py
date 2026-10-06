@@ -36,11 +36,15 @@ def test_phase7a_matrix_has_25_resolvable_executable_evidence_rows() -> None:
             assert (ROOT / relative).is_file(), (number, relative)
 
 
-def test_phase7a_evidence_distinguishes_verified_task7_from_pending_closure() -> None:
+def test_phase7a_evidence_records_verified_implementation_closure() -> None:
     text = SPEC.read_text()
     assert "d373598e7d0b5371765354a9ba89bf93f822828f" in text
     for run in ("37396007211", "37396022348", "37396564506", "37396581780"):
         assert f"https://github.com/zhangyuz/ssh-over-mcp/actions/runs/{run}" in text
-    assert "Phase 7A4 exact-head gates and cleanup remain pending" in text
+    assert "71243f2ac4fd4e60e76cdf7cf648f78081dff483" in text
+    for run in ("37398372450", "37398500863", "37398919556", "37398928655"):
+        assert f"https://github.com/zhangyuz/ssh-over-mcp/actions/runs/{run}" in text
+    assert "Phase 7A is closed" in text
+    assert "Phase 7A4 exact-head gates and cleanup remain pending" not in text
     assert "target manager/probe/support" in text
     assert "not its own attestation harness" not in text
