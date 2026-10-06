@@ -200,6 +200,49 @@ def _temp_dirs(root: Path, uid: int) -> tuple[Path, ...]:
     return tuple(sorted(candidates))
 
 
+def _read_expected_commit(directory_fd: int, uid: int) -> str | None:
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    try:
+        payload_fd = os.open("payload-content", flags | os.O_DIRECTORY, dir_fd=directory_fd)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        raise RecoveryError("E2E expected commit directory cannot be opened safely") from None
+    try:
+        payload_info = os.fstat(payload_fd)
+        if not stat.S_ISDIR(payload_info.st_mode) or payload_info.st_uid != uid:
+            raise RecoveryError("E2E expected commit directory ownership/type mismatch")
+        try:
+            expected_fd = os.open("expected_commit", flags, dir_fd=payload_fd)
+        except FileNotFoundError:
+            return None
+        except OSError:
+            raise RecoveryError("E2E expected commit cannot be opened safely") from None
+        try:
+            expected_info = os.fstat(expected_fd)
+            if (
+                not stat.S_ISREG(expected_info.st_mode)
+                or expected_info.st_uid != uid
+                or expected_info.st_size != 41
+            ):
+                raise RecoveryError("E2E expected commit ownership/type/size mismatch")
+            raw = os.read(expected_fd, 42)
+        finally:
+            os.close(expected_fd)
+    finally:
+        os.close(payload_fd)
+
+    if len(raw) != 41 or raw[-1:] != b"\n":
+        raise RecoveryError("E2E expected commit payload is malformed")
+    try:
+        value = raw[:-1].decode("ascii")
+    except UnicodeError:
+        raise RecoveryError("E2E expected commit payload is malformed") from None
+    if _HEX40.fullmatch(value) is None:
+        raise RecoveryError("E2E expected commit payload is malformed")
+    return value
+
+
 def _temp_diagnostics(paths: Sequence[Path], uid: int) -> tuple[str, ...]:
     records: list[str] = []
     if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
@@ -245,6 +288,7 @@ def _temp_diagnostics(paths: Sequence[Path], uid: int) -> tuple[str, ...]:
                     {
                         "device": root_info.st_dev,
                         "entries": entries,
+                        "expected_commit": _read_expected_commit(descriptor, uid),
                         "inode": root_info.st_ino,
                         "mode": f"{stat.S_IMODE(root_info.st_mode):04o}",
                         "name": path.name,
