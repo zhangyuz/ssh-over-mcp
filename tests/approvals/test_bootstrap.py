@@ -170,13 +170,9 @@ def test_existing_non_regular_hmac_key_fails_without_replacement(
 ) -> None:
     _prepare_mount_roots(tmp_path)
     settings = _settings(tmp_path)
-    for child in (
-        settings.db_path.parent,
-        settings.execution_socket_path.parent,
-        settings.admin_socket_path.parent,
-    ):
-        child.mkdir(mode=0o700)
+    prepare_ledger_runtime(settings)
     key = settings.hmac_key_path
+    key.unlink()
     if kind == "symlink":
         target = tmp_path / "key-target"
         target.write_bytes(b"K" * 32)
