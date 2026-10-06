@@ -186,7 +186,7 @@ def _temp_dirs(root: Path, uid: int) -> tuple[Path, ...]:
             mode = stat.S_IMODE(info.st_mode)
             raise RecoveryError(
                 "unexpected E2E temp path ownership/type "
-                f"name={path.name} kind={kind} uid={info.st_uid} mode={mode:04o}"
+                f"name={path.name!r} kind={kind} uid={info.st_uid} mode={mode:04o}"
             )
         candidates.append(path)
         if len(candidates) > MAX_TEMP_DIRS:
