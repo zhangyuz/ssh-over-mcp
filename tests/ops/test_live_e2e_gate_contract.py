@@ -30,6 +30,128 @@ def _load_gate() -> ModuleType:
     return module
 
 
+def _sandbox_prepare(module, ops, tmp_path, monkeypatch):
+    monkeypatch.setattr(module, "RUNTIME", tmp_path / "runtime")
+    monkeypatch.setattr(module.os, "chown", lambda *_: None)
+    for method in (
+        "_prepare_identities", "_prepare_cgroup", "_prepare_launcher_and_sudo",
+        "_prepare_manager_endpoint_parent", "_prepare_keys", "_prepare_state_and_policy",
+        "_prepare_sshd_config", "_start_manager", "_start_sshd",
+    ):
+        monkeypatch.setattr(ops, method, lambda: None)
+
+
+def test_unverified_context_cannot_establish_guest_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_gate()
+    ops = module._SystemGuestOps()
+    _sandbox_prepare(module, ops, tmp_path, monkeypatch)
+    # No prepare action, including a sysctl write, is permitted before both checks.
+    with pytest.raises(module.GateError):
+        ops.prepare()
+
+
+def test_failed_core_guard_prevents_setup_and_first_target_exec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_gate()
+    ops = module._SystemGuestOps()
+    ops._workspace_verified = True
+    ops._fresh_guest_verified = True
+    _sandbox_prepare(module, ops, tmp_path, monkeypatch)
+
+    def deny():
+        raise module.GateError("core policy rejected")
+
+    monkeypatch.setattr(module, "_establish_guest_no_core", deny, raising=False)
+    with pytest.raises(module.GateError, match="core policy rejected"):
+        ops.prepare()
+
+
+def test_guard_established_before_fixture_keys_and_target_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_gate()
+    ops = module._SystemGuestOps()
+    ops._workspace_verified = True
+    ops._fresh_guest_verified = True
+    events = []
+    monkeypatch.setattr(module, "RUNTIME", tmp_path / "runtime")
+    monkeypatch.setattr(module.os, "chown", lambda *_: None)
+    monkeypatch.setattr(module, "_establish_guest_no_core", lambda: events.append("guard"), raising=False)
+    for method in (
+        "_prepare_identities", "_prepare_cgroup", "_prepare_launcher_and_sudo",
+        "_prepare_manager_endpoint_parent", "_prepare_keys", "_prepare_state_and_policy",
+        "_prepare_sshd_config", "_start_manager", "_start_sshd",
+    ):
+        monkeypatch.setattr(ops, method, lambda name=method: events.append(name))
+    ops.prepare()
+    assert events[0] == "guard"
+    assert events.index("guard") < events.index("_prepare_keys") < events.index("_start_manager")
+
+
+def test_parent_unsafe_core_policy_prevents_fork(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_gate()
+
+    def deny():
+        raise module.GateError("core policy rejected")
+
+    def unexpected_fork():
+        raise AssertionError("unsafe parent forked a target")
+
+    monkeypatch.setattr(module, "_require_no_core", deny, raising=False)
+    monkeypatch.setattr(module.os, "fork", unexpected_fork)
+    with pytest.raises(module.GateError, match="core policy rejected"):
+        module._spawn_nonroot_child(["/fixed/target"], uid=2204, gid=3204, groups=(), env={})
+    with pytest.raises(module.GateError, match="core policy rejected"):
+        module._SystemGuestOps()._start_sshd()
+
+
+@pytest.mark.parametrize("unsafe_child", [False, True])
+def test_nonroot_child_rechecks_core_after_identity_drop_before_exec(
+    monkeypatch: pytest.MonkeyPatch, unsafe_child: bool,
+) -> None:
+    module = _load_gate()
+    events = []
+
+    class ChildStopped(BaseException):
+        pass
+
+    class Libc:
+        def prctl(self, *_):
+            return 0
+
+    def guard():
+        events.append("guard")
+        if unsafe_child and events.count("guard") == 2:
+            raise module.GateError("core policy rejected")
+
+    def exec_target(*_):
+        events.append("exec")
+        raise ChildStopped
+
+    def exit_child(code):
+        events.append(("exit", code))
+        raise ChildStopped
+
+    monkeypatch.setattr(module, "_require_no_core", guard, raising=False)
+    monkeypatch.setattr(module.os, "fork", lambda: 0)
+    monkeypatch.setattr(module.os, "setgroups", lambda *_: None)
+    monkeypatch.setattr(module.os, "setresgid", lambda *_: None, raising=False)
+    monkeypatch.setattr(module.os, "setresuid", lambda *_: events.append("drop"), raising=False)
+    monkeypatch.setattr(module.ctypes, "CDLL", lambda *_args, **_kwargs: Libc())
+    monkeypatch.setattr(module, "_require_zero_caps_nnp", lambda: None)
+    monkeypatch.setattr(module.os, "execve", exec_target)
+    monkeypatch.setattr(module.os, "_exit", exit_child)
+    with pytest.raises(ChildStopped):
+        module._spawn_nonroot_child(["/fixed/target"], uid=2204, gid=3204, groups=(), env={})
+    if unsafe_child:
+        assert events == ["guard", "drop", "guard", ("exit", 126)]
+    else:
+        assert events == ["guard", "drop", "guard", "exec", ("exit", 126)]
+
+
 def test_target_e2e_fixture_sources_exist_in_checkout() -> None:
     required = (
         ROOT / "scripts" / "run-live-local-e2e-manager.py",
