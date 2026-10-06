@@ -177,6 +177,47 @@ def test_temp_scan_bounds_foreign_owned_prefix_matches(
         )
 
 
+def test_temp_diagnostics_are_bounded_nonrecursive_and_json_safe(tmp_path: Path) -> None:
+    module = _load_module()
+    temp_dir = tmp_path / "ssh-over-mcp-e2e-one"
+    temp_dir.mkdir(mode=0o700)
+    regular = temp_dir / "target\\nbundle"
+    regular.write_bytes(b"abc")
+    child_dir = temp_dir / "target.git"
+    child_dir.mkdir()
+    link = temp_dir / "overlay-link"
+    link.symlink_to(regular)
+
+    lines = module._temp_diagnostics((temp_dir,), os.geteuid())
+
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["name"] == temp_dir.name
+    assert record["uid"] == os.geteuid()
+    entries = {entry["name"]: entry for entry in record["entries"]}
+    assert entries["target\\nbundle"]["kind"] == "regular"
+    assert entries["target\\nbundle"]["size"] == 3
+    assert entries["target.git"]["kind"] == "directory"
+    assert entries["overlay-link"]["kind"] == "symlink"
+    assert "\\n" in lines[0]
+    assert "\n" not in lines[0]
+
+
+def test_temp_diagnostics_refuse_root_symlink_and_too_many_children(tmp_path: Path) -> None:
+    module = _load_module()
+    real = tmp_path / "ssh-over-mcp-e2e-real"
+    real.mkdir(mode=0o700)
+    link = tmp_path / "ssh-over-mcp-e2e-link"
+    link.symlink_to(real)
+    with pytest.raises(module.RecoveryError):
+        module._temp_diagnostics((link,), os.geteuid())
+
+    for index in range(module.MAX_TEMP_CHILDREN + 1):
+        (real / f"entry-{index:03d}").write_bytes(b"x")
+    with pytest.raises(module.RecoveryError, match="too many direct entries"):
+        module._temp_diagnostics((real,), os.geteuid())
+
+
 def test_process_inventory_fails_closed_on_empty_or_malformed_output(monkeypatch) -> None:
     module = _load_module()
 
