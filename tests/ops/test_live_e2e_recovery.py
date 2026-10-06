@@ -5,7 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import yaml
@@ -87,6 +87,26 @@ def test_inspect_rejects_bad_state_and_non_directory_temp(tmp_path: Path) -> Non
     bad.write_bytes(b"not a directory")
     with pytest.raises(module.RecoveryError, match="ownership/type"):
         module.inspect_recovery(TARGET, state_path=state, temp_root=tmp_path, uid=os.geteuid())
+
+
+def test_process_inventory_fails_closed_on_empty_or_malformed_output(monkeypatch) -> None:
+    module = _load_module()
+
+    for output in ("", "not-a-process-line\n", "badpid python3\n", "0 python3\n"):
+        monkeypatch.setattr(
+            module.subprocess,
+            "run",
+            lambda *args, _output=output, **kwargs: SimpleNamespace(stdout=_output),
+        )
+        with pytest.raises(module.RecoveryError):
+            module._qemu_pids(os.geteuid())
+
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(stdout="10 launchd\n11 python3\n"),
+    )
+    assert module._qemu_pids(os.geteuid()) == ()
 
 
 def test_recover_refuses_live_owner_qemu_pid_mismatch_or_temp_state(
