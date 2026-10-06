@@ -22,3 +22,4 @@ Current ADRs:
 - [0008 — Level-3 E2E guest has no virtual network device](0008-level3-e2e-no-network-guest.md)
 - [0009 — Security Ledger systemd sandbox](0009-ledger-systemd-sandbox.md)
 - [0010 — Authenticated offline native E2E toolchain](0010-offline-native-e2e-toolchain.md)
+- [0011 — Incident-bound E2E staging recovery (proposed)](0011-incident-bound-e2e-staging-recovery.md)
