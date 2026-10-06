@@ -89,11 +89,27 @@ def test_inspect_rejects_bad_state_and_non_directory_temp(tmp_path: Path) -> Non
     with pytest.raises(
         module.RecoveryError,
         match=(
-            rf"ownership/type name={bad.name} kind=regular "
+            rf"ownership/type name={bad.name!r} kind=regular "
             rf"uid={os.geteuid()} mode=0600"
         ),
     ):
         module.inspect_recovery(TARGET, state_path=state, temp_root=tmp_path, uid=os.geteuid())
+
+
+def test_temp_diagnostic_escapes_control_characters(tmp_path: Path) -> None:
+    module = _load_module()
+    state = tmp_path / "active-run.json"
+    bad = tmp_path / "ssh-over-mcp-e2e-bad\\n::error::fake"
+    bad.write_bytes(b"x")
+    _state(state)
+
+    with pytest.raises(module.RecoveryError) as error:
+        module.inspect_recovery(TARGET, state_path=state, temp_root=tmp_path, uid=os.geteuid())
+
+    message = str(error.value)
+    assert "\\n" in message
+    assert "\n" not in message
+    assert "::error::fake" in message
 
 
 def test_process_inventory_fails_closed_on_empty_or_malformed_output(monkeypatch) -> None:
