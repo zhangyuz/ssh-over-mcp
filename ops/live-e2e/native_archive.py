@@ -150,8 +150,8 @@ def _resolve_link_path(path: str, links: dict[str, str], *, max_hops: int) -> st
 
 
 def _validate_link_graph(links: dict[str, str], *, max_hops: int) -> None:
-    for target in links.values():
-        _resolve_link_path(target, links, max_hops=max_hops)
+    for source in links:
+        _resolve_link_path(source, links, max_hops=max_hops)
 
 
 def read_data_tar(
