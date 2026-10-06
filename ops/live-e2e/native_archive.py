@@ -60,7 +60,9 @@ def _validate_limits(limits: ArchiveLimits) -> None:
         raise _fail()
 
 
-def _canonical_member_path(raw: str, *, limit: int) -> str:
+def _canonical_member_path(
+    raw: str, *, limit: int, allow_trailing_slash: bool
+) -> str:
     if not isinstance(raw, str) or not raw or raw.startswith("/") or "\x00" in raw:
         raise _fail()
 
@@ -68,7 +70,9 @@ def _canonical_member_path(raw: str, *, limit: int) -> str:
     if candidate.startswith("./"):
         candidate = candidate[2:]
     if candidate.endswith("/"):
-        candidate = candidate.rstrip("/")
+        if not allow_trailing_slash or candidate.endswith("//"):
+            raise _fail()
+        candidate = candidate[:-1]
 
     if not candidate or candidate == ".":
         raise _fail()
@@ -177,7 +181,11 @@ def read_data_tar(
                 if member.pax_headers:
                     raise _fail()
 
-                path = _canonical_member_path(member.name, limit=limits.max_path_bytes)
+                path = _canonical_member_path(
+                    member.name,
+                    limit=limits.max_path_bytes,
+                    allow_trailing_slash=member.isdir(),
+                )
                 if path in paths:
                     raise _fail()
                 paths.add(path)

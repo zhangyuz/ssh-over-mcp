@@ -120,6 +120,27 @@ def test_rejects_duplicate_paths_after_leading_dot_normalization() -> None:
         module.read_data_tar(io.BytesIO(archive), limits=_limits(module))
 
 
+def test_rejects_regular_file_trailing_slash() -> None:
+    module = _load_module()
+    archive = _tar_bytes([("usr/bin/cc/", b"x", 0o755, tarfile.REGTYPE, "")])
+
+    with pytest.raises(module.NativeArchiveError):
+        module.read_data_tar(io.BytesIO(archive), limits=_limits(module))
+
+
+def test_rejects_duplicate_directory_after_tar_normalization() -> None:
+    module = _load_module()
+    archive = _tar_bytes(
+        [
+            ("usr///", None, 0o755, tarfile.DIRTYPE, ""),
+            ("usr/", None, 0o755, tarfile.DIRTYPE, ""),
+        ]
+    )
+
+    with pytest.raises(module.NativeArchiveError):
+        module.read_data_tar(io.BytesIO(archive), limits=_limits(module))
+
+
 @pytest.mark.parametrize(
     "kind",
     [tarfile.LNKTYPE, tarfile.FIFOTYPE, tarfile.CHRTYPE, tarfile.BLKTYPE],
