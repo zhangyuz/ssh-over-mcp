@@ -41,15 +41,24 @@ def _sandbox_prepare(module, ops, tmp_path, monkeypatch):
         monkeypatch.setattr(ops, method, lambda: None)
 
 
+@pytest.mark.parametrize("workspace,fresh", [(False, False), (False, True), (True, False)])
 def test_unverified_context_cannot_establish_guest_policy(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workspace: bool, fresh: bool,
 ) -> None:
     module = _load_gate()
     ops = module._SystemGuestOps()
+    ops._workspace_verified = workspace
+    ops._fresh_guest_verified = fresh
     _sandbox_prepare(module, ops, tmp_path, monkeypatch)
+
+    def unexpected_setup():
+        raise AssertionError("unverified context attempted to establish kernel policy")
+
+    monkeypatch.setattr(module, "_establish_guest_no_core", unexpected_setup)
     # No prepare action, including a sysctl write, is permitted before both checks.
-    with pytest.raises(module.GateError):
+    with pytest.raises(module.GateError, match="requires verified workspace and fresh state"):
         ops.prepare()
+    assert not (tmp_path / "runtime").exists()
 
 
 def test_failed_core_guard_prevents_setup_and_first_target_exec(
@@ -67,6 +76,7 @@ def test_failed_core_guard_prevents_setup_and_first_target_exec(
     monkeypatch.setattr(module, "_establish_guest_no_core", deny, raising=False)
     with pytest.raises(module.GateError, match="core policy rejected"):
         ops.prepare()
+    assert not (tmp_path / "runtime").exists()
 
 
 def test_guard_established_before_fixture_keys_and_target_execution(
