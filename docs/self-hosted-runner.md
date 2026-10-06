@@ -483,3 +483,14 @@ process, inspects the recorded state, and only then performs recovery.
 The trusted root gate and orchestrator come from already-merged main. Target
 manager/probe/support/application code runs only inside the guest after the
 fixed non-root handoff. A target PR never supplies the authority certifying it.
+
+### Cancelled Live Local E2E recovery
+
+Do not manually delete `active-run.json` and do not add automatic stale cleanup.
+Use the manual `Live Local E2E Provider Recovery` workflow on trusted `main`.
+Dispatch once with the exact stale target and PID `0` to inspect without mutation;
+review the reported owner PID and temp-state inventory, then dispatch again with
+the exact PID only if no temp directories remain. Recovery refuses a live owner,
+any runner-owned QEMU, changed marker identity, ownership/mode/schema mismatch,
+or remaining E2E temp state. It only unlinks the fixed runner-owned marker and
+never uses sudo, kills processes or recursively deletes unknown state.
