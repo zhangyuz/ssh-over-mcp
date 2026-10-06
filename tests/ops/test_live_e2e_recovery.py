@@ -85,7 +85,14 @@ def test_inspect_rejects_bad_state_and_non_directory_temp(tmp_path: Path) -> Non
     _state(state)
     bad = tmp_path / "ssh-over-mcp-e2e-file"
     bad.write_bytes(b"not a directory")
-    with pytest.raises(module.RecoveryError, match="ownership/type"):
+    bad.chmod(0o600)
+    with pytest.raises(
+        module.RecoveryError,
+        match=(
+            rf"ownership/type name={bad.name} kind=regular "
+            rf"uid={os.geteuid()} mode=0600"
+        ),
+    ):
         module.inspect_recovery(TARGET, state_path=state, temp_root=tmp_path, uid=os.geteuid())
 
 

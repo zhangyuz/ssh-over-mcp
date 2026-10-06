@@ -175,7 +175,19 @@ def _temp_dirs(root: Path, uid: int) -> tuple[Path, ...]:
     for path in root.glob(f"{TEMP_PREFIX}*"):
         info = path.lstat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != uid:
-            raise RecoveryError("unexpected E2E temp path ownership/type")
+            if stat.S_ISDIR(info.st_mode):
+                kind = "directory"
+            elif stat.S_ISREG(info.st_mode):
+                kind = "regular"
+            elif stat.S_ISLNK(info.st_mode):
+                kind = "symlink"
+            else:
+                kind = "special"
+            mode = stat.S_IMODE(info.st_mode)
+            raise RecoveryError(
+                "unexpected E2E temp path ownership/type "
+                f"name={path.name} kind={kind} uid={info.st_uid} mode={mode:04o}"
+            )
         candidates.append(path)
         if len(candidates) > MAX_TEMP_DIRS:
             raise RecoveryError("too many E2E temp directories")
