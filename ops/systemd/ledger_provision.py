@@ -141,6 +141,10 @@ def _accounts():
         _refuse()
     if any(not 0 < number < (1 << 32) - 1 for number in uids | gids):
         _refuse()
+    primary_owners = {user.pw_gid: name for name, user in users.items()}
+    for entry in pwd.getpwall():
+        if entry.pw_gid in gids and primary_owners.get(entry.pw_gid) != entry.pw_name:
+            _refuse()
     for name, user in users.items():
         if user.pw_name != name or user.pw_gid != groups[name].gr_gid:
             _refuse()

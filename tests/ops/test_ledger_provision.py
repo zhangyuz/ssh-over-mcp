@@ -390,6 +390,20 @@ def test_unsafe_account_or_active_service_refuses(provision, fault):
     assert not provision.kernel.created
 
 
+@pytest.mark.parametrize("gid", [3210, 3211, 3212, 3297, 3298])
+def test_unrelated_primary_gid_cannot_join_protected_groups(provision, gid):
+    provision = provision()
+    # Primary membership lives in passwd, not group.gr_mem or selected users' groups.
+    provision.users["unexpected"] = SimpleNamespace(
+        pw_name="unexpected", pw_uid=2400, pw_gid=gid
+    )
+    with pytest.raises(provision.module.ProvisionError, match="^Ledger provisioning failed$"):
+        provision.module.provision_reference()
+    assert provision.requests == []
+    assert not provision.kernel.created
+    assert not provision.kernel.fds
+
+
 def test_unrelated_process_name_does_not_change_uid_quiescence_check(provision):
     provision = provision()
     proc = provision.root / "proc/1000"
