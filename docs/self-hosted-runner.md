@@ -483,3 +483,18 @@ process, inspects the recorded state, and only then performs recovery.
 The trusted root gate and orchestrator come from already-merged main. Target
 manager/probe/support/application code runs only inside the guest after the
 fixed non-root handoff. A target PR never supplies the authority certifying it.
+
+### Recovering a cancelled Live Local E2E run
+
+Do not manually remove `~/Library/Caches/ssh-over-mcp-e2e/active-run.json` and do
+not add automatic stale-state deletion to the orchestrator. A cancelled run can
+leave that marker specifically so the next run fails closed.
+
+The manual `Live Local E2E Provider Recovery` workflow is the supported narrow
+recovery path. It runs on the same non-admin Intel-macOS orchestrator account and
+shares the `live-local-e2e` concurrency group. Dispatch once with the exact stale
+target and owner PID `0` to inspect only. Review the reported owner PID, then
+dispatch again with that exact PID. Recovery proceeds only if the PID no longer
+exists, no QEMU owned by the runner account exists, the marker schema/ownership/
+mode match the fixed contract, and all fixed-prefix temporary directories are
+owned by that account. The workflow does not use sudo or kill processes.

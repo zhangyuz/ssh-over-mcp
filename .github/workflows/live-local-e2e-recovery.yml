@@ -1,0 +1,53 @@
+name: Live Local E2E Provider Recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_target:
+        description: Exact stale target SHA shown by the cancelled Live Local E2E run
+        required: true
+        type: string
+      expected_owner_pid:
+        description: Use 0 for inspect-only; recovery requires the exact observed stale owner PID
+        required: true
+        default: "0"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-local-e2e
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Inspect or recover orphaned E2E provider state
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, macOS, X64, ssh-over-mcp-e2e-orchestrator]
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout trusted main recovery authority
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          clean: true
+          fetch-depth: 1
+
+      - name: Verify trusted recovery checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Inspect or recover fixed provider state
+        shell: bash
+        env:
+          EXPECTED_TARGET: ${{ inputs.expected_target }}
+          EXPECTED_OWNER_PID: ${{ inputs.expected_owner_pid }}
+        run: |
+          set -euo pipefail
+          python3 ops/live-e2e/recover_provider.py "$EXPECTED_TARGET" "$EXPECTED_OWNER_PID"
