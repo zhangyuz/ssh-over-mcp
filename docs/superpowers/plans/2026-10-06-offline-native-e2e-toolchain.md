@@ -261,9 +261,10 @@ invocation rejects legacy/candidate evidence and missing native proof.
   after repair require candidate and native-required exact merge-main PASS
   before any native-dependent target resumes. Legacy PASS never closes N4.
 - [ ] Retain exact receipts and verify cleanup; only now resume parent Task 3
-  with native-required head/merge gates. Re-export G1’s existing ProfileError from the systemd contract; do not
-  introduce a second exception, conversion or duplicate guard. Later Task 7 still proves actual
-  syscall enforcement, and Task 8's mandatory Ledger mode cannot downgrade.
+  with native-required head/merge gates. On resume, re-export G1’s existing
+  ProfileError from the systemd contract; do not introduce a second exception,
+  conversion or duplicate guard. Later Task 7 still proves actual syscall
+  enforcement, and Task 8's mandatory Ledger mode cannot downgrade.
 
 ## Completion and deviations
 

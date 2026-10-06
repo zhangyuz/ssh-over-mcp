@@ -10,7 +10,7 @@
 
 **Spec:** [Approved Phase 7B1 design](../specs/2026-10-05-phase-7b1-ledger-systemd-design.md), [ADR 0009](../../decisions/0009-ledger-systemd-sandbox.md). Read these and the repository's normative development/security/API/policy documents before implementation.
 
-**Status:** Plan approved 2026-10-06; Tasks 1–2 complete through exact merge-main gates (PRs 124/125). Task 3 inventory found no executable C compiler in the pinned guest; its native prerequisite design/plan are approved, not implemented or activated. G1 is complete through PR #127. See [approved native design](../specs/2026-10-06-offline-native-e2e-toolchain-design.md) and [approved prerequisite plan](2026-10-06-offline-native-e2e-toolchain.md). No Phase 7B1 acceptance or closure is claimed. Baseline main: a37747291894ac7b01ae5483af83d0dd89821015. Written design approved 2026-10-06 at 34805e7729e09b78b3b8fb5b8e40d2455d80081f.
+**Status:** Plan approved 2026-10-06; Tasks 1–2 complete through exact merge-main gates (PRs 124/125). Task 3 inventory found no executable C compiler in the pinned guest. Its native prerequisite design/plan are approved; G1 is complete through PR #127, while N1–N4 remain unimplemented and no native authority is activated. See [approved native design](../specs/2026-10-06-offline-native-e2e-toolchain-design.md) and [approved prerequisite plan](2026-10-06-offline-native-e2e-toolchain.md). No Phase 7B1 acceptance or closure is claimed. Baseline main: a37747291894ac7b01ae5483af83d0dd89821015. Written design approved 2026-10-06 at 34805e7729e09b78b3b8fb5b8e40d2455d80081f.
 
 ## Global Constraints
 
@@ -115,7 +115,7 @@ assert provision_fs.success_output == ""
 
 ### Task 3: Pin the trusted profile, identities and offline payload contract
 
-**Prerequisite discovered:** Fixed guest inventory run 37459216524 returned code 102 (no executable /usr/bin/cc). The approved ADR 0010/native plan must be completed first. Its G1 no-core guard is already complete independently as PR #127 at verified main8bcdca8; N3 candidate proof and N4 native-required/full-legacy merge-main gates must pass before the remaining profile/build work resumes. This is no acceptance downgrade.
+**Prerequisite discovered:** Fixed guest inventory run 37459216524 returned code 102 (no executable /usr/bin/cc). The approved ADR 0010/native plan must be completed first. Its G1 no-core guard is already complete independently as PR #127 at verified main `8bcdca8`; N3 candidate proof and N4 native-required/full-legacy merge-main gates must pass before the remaining profile/build work resumes. This is no acceptance downgrade.
 
 **Files:** Consume the already-main ops/live-e2e/ledger_guest_preflight.py; create ledger_systemd_contract.py and ledger-systemd.service; extend tests/ops/test_ledger_guest_preflight.py; create tests/ops/test_ledger_systemd_contract.py and test_ledger_build_inputs.py; modify orchestrator trusted payload list/preparation and tests/ops/test_live_e2e_orchestrator_contract.py; extend tests/ops/test_container_reproducibility_contract.py; consume existing requirements/build.in and requirements/build.lock without a dependency update; update ops/live-e2e/README.md.
 
