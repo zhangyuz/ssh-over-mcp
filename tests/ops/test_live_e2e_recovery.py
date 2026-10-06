@@ -238,6 +238,39 @@ def test_temp_diagnostics_report_absent_binding_and_reject_malformed_binding(
         module._temp_diagnostics((unknown,), os.geteuid())
 
 
+def test_expected_commit_binding_refuses_symlink_components(tmp_path: Path) -> None:
+    module = _load_module()
+    temp_dir = tmp_path / "ssh-over-mcp-e2e-one"
+    temp_dir.mkdir(mode=0o700)
+
+    real_payload = tmp_path / "real-payload"
+    real_payload.mkdir(mode=0o700)
+    (real_payload / "expected_commit").write_text(TARGET + "\n", encoding="ascii")
+    (temp_dir / "payload-content").symlink_to(real_payload, target_is_directory=True)
+    with pytest.raises(module.RecoveryError, match="cannot be opened safely"):
+        module._temp_diagnostics((temp_dir,), os.geteuid())
+
+    (temp_dir / "payload-content").unlink()
+    payload = temp_dir / "payload-content"
+    payload.mkdir(mode=0o700)
+    outside = tmp_path / "outside-expected"
+    outside.write_text(TARGET + "\n", encoding="ascii")
+    (payload / "expected_commit").symlink_to(outside)
+    with pytest.raises(module.RecoveryError, match="cannot be opened safely"):
+        module._temp_diagnostics((temp_dir,), os.geteuid())
+
+
+def test_expected_commit_binding_rejects_wrong_size(tmp_path: Path) -> None:
+    module = _load_module()
+    temp_dir = tmp_path / "ssh-over-mcp-e2e-one"
+    payload = temp_dir / "payload-content"
+    payload.mkdir(parents=True, mode=0o700)
+    (payload / "expected_commit").write_text(TARGET + "x\n", encoding="ascii")
+
+    with pytest.raises(module.RecoveryError, match="ownership/type/size"):
+        module._temp_diagnostics((temp_dir,), os.geteuid())
+
+
 def test_temp_diagnostics_refuse_root_symlink_and_too_many_children(tmp_path: Path) -> None:
     module = _load_module()
     real = tmp_path / "ssh-over-mcp-e2e-real"
