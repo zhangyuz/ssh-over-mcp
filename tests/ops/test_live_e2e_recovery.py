@@ -112,6 +112,71 @@ def test_temp_diagnostic_escapes_control_characters(tmp_path: Path) -> None:
     assert "::error::fake" in message
 
 
+def test_inspect_ignores_foreign_owned_matching_temp_paths_without_mutation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _load_module()
+    state = tmp_path / "active-run.json"
+    foreign_file = tmp_path / "ssh-over-mcp-e2e-smoke5-serial.log"
+    foreign_dir = tmp_path / "ssh-over-mcp-e2e-foreign"
+    foreign_file.write_bytes(b"foreign")
+    foreign_dir.mkdir()
+    _state(state)
+
+    original_lstat = Path.lstat
+    foreign_paths = {foreign_file, foreign_dir}
+
+    def fake_lstat(path: Path):
+        info = original_lstat(path)
+        if path in foreign_paths:
+            return SimpleNamespace(st_mode=info.st_mode, st_uid=os.geteuid() + 1)
+        return info
+
+    monkeypatch.setattr(Path, "lstat", fake_lstat)
+    inspection = module.inspect_recovery(
+        TARGET,
+        state_path=state,
+        temp_root=tmp_path,
+        uid=os.geteuid(),
+    )
+
+    assert inspection.temp_dirs == ()
+    assert foreign_file.read_bytes() == b"foreign"
+    assert foreign_dir.is_dir()
+
+
+def test_temp_scan_bounds_foreign_owned_prefix_matches(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _load_module()
+    state = tmp_path / "active-run.json"
+    _state(state)
+    matches = [
+        tmp_path / f"ssh-over-mcp-e2e-foreign-{index:03d}"
+        for index in range(module.MAX_TEMP_MATCHES + 1)
+    ]
+    for path in matches:
+        path.mkdir()
+
+    original_lstat = Path.lstat
+    match_set = set(matches)
+
+    def fake_lstat(path: Path):
+        info = original_lstat(path)
+        if path in match_set:
+            return SimpleNamespace(st_mode=info.st_mode, st_uid=os.geteuid() + 1)
+        return info
+
+    monkeypatch.setattr(Path, "lstat", fake_lstat)
+    with pytest.raises(module.RecoveryError, match="too many matching E2E temp paths"):
+        module.inspect_recovery(
+            TARGET,
+            state_path=state,
+            temp_root=tmp_path,
+            uid=os.geteuid(),
+        )
+
+
 def test_process_inventory_fails_closed_on_empty_or_malformed_output(monkeypatch) -> None:
     module = _load_module()
 
