@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import os
+import shlex
 import sqlite3
 import sys
 from pathlib import Path
@@ -482,7 +483,7 @@ def test_task7_approval_outage_containment_contract_is_explicit() -> None:
     assert runner is not None, "Task 7 requires real approval/outage/containment E2E"
     source = inspect.getsource(runner)
     for required in (
-        "ssh-over-mcp-approvalctl",
+        "_grant_approval_via_cli",
         "approval_status",
         "/healthz",
         "/readyz",
@@ -514,3 +515,28 @@ def test_real_approval_outage_containment_and_secret_retention() -> None:
     assert evidence["containment_unavailable_fail_closed"] is True
     assert evidence["request_cgroup_clean"] is True
     assert evidence["secret_retention_clean"] is True
+
+
+@pytest.mark.asyncio
+async def test_approval_cli_runs_from_source_without_installed_console_script(
+    tmp_path: Path,
+) -> None:
+    module = _load_support()
+    python = tmp_path / "python"
+    stderr_path = tmp_path / "cli-stderr"
+    python.write_text(
+        "#!/bin/sh\nexec " + shlex.quote(sys.executable)
+        + ' "$@" 2>' + shlex.quote(str(stderr_path)) + "\n",
+        encoding="utf-8",
+    )
+    python.chmod(0o700)
+    assert not python.with_name("ssh-over-mcp-approvalctl").exists()
+    admin_env = {
+        "SSH_OVER_MCP_LEDGER_ADMIN_SOCKET_PATH": str(tmp_path / "absent.sock"),
+        "SSH_OVER_MCP_LEDGER_SERVICE_UID": str(os.getuid()),
+        "SSH_OVER_MCP_LEDGER_SERVICE_GID": str(os.getgid()),
+    }
+    with pytest.raises(module.LocalE2EFixtureError, match="approvalctl grant failed"):
+        await module._grant_approval_via_cli(python, "apr_" + "a" * 32, admin_env)
+    # The real CLI must start and fail closed at its unavailable admin endpoint.
+    assert stderr_path.read_bytes() == b"Security Ledger approval command failed\n"

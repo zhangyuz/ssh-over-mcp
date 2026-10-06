@@ -1661,15 +1661,23 @@ def _control_fd() -> int:
 
 
 async def _grant_approval_via_cli(
-    approvalctl: Path,
+    python: Path,
     approval_id: str,
     admin_env: Mapping[str, str],
 ) -> tuple[bytes, bytes]:
+    # The no-network guest runs target source without installed console scripts.
+    # This module is the real ssh-over-mcp-approvalctl entry point.
     process = await asyncio.create_subprocess_exec(
-        str(approvalctl),
+        str(python),
+        "-m",
+        "ssh_over_mcp.approvals.cli",
         "grant",
         approval_id,
-        env=dict(admin_env),
+        env={
+            **admin_env,
+            "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src"),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -1752,7 +1760,7 @@ async def run_real_approval_outage_containment_fixture() -> dict[str, object]:
                 raise LocalE2EFixtureError("approval state is not pending")
 
             settings = harness._require_ledger_settings()
-            approvalctl = Path(sys.executable).with_name("ssh-over-mcp-approvalctl")
+            python = Path(sys.executable)
             admin_env = {
                 "SSH_OVER_MCP_LEDGER_ADMIN_SOCKET_PATH": str(
                     settings.admin_socket_path
@@ -1761,7 +1769,7 @@ async def run_real_approval_outage_containment_fixture() -> dict[str, object]:
                 "SSH_OVER_MCP_LEDGER_SERVICE_GID": str(settings.service_gid),
             }
             granted_stdout, granted_stderr = await _grant_approval_via_cli(
-                approvalctl,
+                python,
                 approval_id,
                 admin_env,
             )
@@ -1793,7 +1801,7 @@ async def run_real_approval_outage_containment_fixture() -> dict[str, object]:
                 raise LocalE2EFixtureError("approval replay was not single-use")
 
             replay_stdout, replay_stderr = await _grant_approval_via_cli(
-                approvalctl,
+                python,
                 replacement_id,
                 admin_env,
             )
