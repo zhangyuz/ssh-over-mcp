@@ -6,21 +6,18 @@ import os
 import platform
 import pwd
 import re
-import shutil
 import stat
 import subprocess
 import sys
-import tempfile
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Sequence
 
 EXPECTED_REPOSITORY = "zhangyuz/ssh-over-mcp"
 ORCHESTRATOR_USER = "gha-e2e-orchestrator"
 ORCHESTRATOR_HOME = Path("/Users/gha-e2e-orchestrator")
 CACHE_DIR = ORCHESTRATOR_HOME / "Library" / "Caches" / "ssh-over-mcp-e2e"
 PROVIDER_STATE = CACHE_DIR / "active-run.json"
-TEMP_PREFIX = "ssh-over-mcp-e2e-"
 MAX_STATE_BYTES = 4_096
 QEMU_NAME = "qemu-system-x86_64"
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
@@ -39,7 +36,6 @@ class ProviderState:
 @dataclass(frozen=True, slots=True)
 class RecoveryInspection:
     state: ProviderState
-    temp_dirs: tuple[Path, ...]
 
 
 def _validate_context(env: Mapping[str, str]) -> None:
@@ -134,33 +130,10 @@ def _qemu_pids(uid: int) -> tuple[int, ...]:
     return tuple(result)
 
 
-def _temp_dirs(root: Path, uid: int) -> tuple[Path, ...]:
-    candidates: list[Path] = []
-    for path in root.glob(f"{TEMP_PREFIX}*"):
-        info = path.lstat()
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != uid:
-            raise RecoveryError("unexpected E2E temp path ownership/type")
-        candidates.append(path)
-    return tuple(sorted(candidates))
-
-
-def _verify_tree_owned(root: Path, uid: int) -> None:
-    for directory, names, files in os.walk(root, topdown=False, followlinks=False):
-        base = Path(directory)
-        for name in (*names, *files):
-            path = base / name
-            info = path.lstat()
-            if info.st_uid != uid:
-                raise RecoveryError("E2E temp tree contains foreign ownership")
-        if base.lstat().st_uid != uid:
-            raise RecoveryError("E2E temp directory ownership changed")
-
-
 def inspect_recovery(
     expected_target: str,
     *,
     state_path: Path = PROVIDER_STATE,
-    temp_root: Path | None = None,
     uid: int | None = None,
 ) -> RecoveryInspection:
     trusted_target = _parse_expected_target(expected_target)
@@ -168,8 +141,7 @@ def inspect_recovery(
     state = _load_state(state_path, effective_uid)
     if state.target != trusted_target:
         raise RecoveryError("stale provider target does not match operator input")
-    root = Path(tempfile.gettempdir()) if temp_root is None else temp_root
-    return RecoveryInspection(state=state, temp_dirs=_temp_dirs(root, effective_uid))
+    return RecoveryInspection(state=state)
 
 
 def recover(
@@ -177,13 +149,11 @@ def recover(
     expected_owner_pid: int,
     *,
     state_path: Path = PROVIDER_STATE,
-    temp_root: Path | None = None,
     uid: int | None = None,
 ) -> RecoveryInspection:
     inspection = inspect_recovery(
         expected_target,
         state_path=state_path,
-        temp_root=temp_root,
         uid=uid,
     )
     if expected_owner_pid <= 1 or inspection.state.owner_pid != expected_owner_pid:
@@ -194,17 +164,10 @@ def recover(
     if _qemu_pids(effective_uid):
         raise RecoveryError("QEMU process is still alive")
 
-    for path in inspection.temp_dirs:
-        _verify_tree_owned(path, effective_uid)
-    for path in inspection.temp_dirs:
-        shutil.rmtree(path)
     state_path.unlink()
 
     if state_path.exists() or state_path.is_symlink():
         raise RecoveryError("provider state cleanup did not complete")
-    root = Path(tempfile.gettempdir()) if temp_root is None else temp_root
-    if _temp_dirs(root, effective_uid):
-        raise RecoveryError("E2E temp cleanup did not complete")
     return inspection
 
 
@@ -218,8 +181,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     inspection = inspect_recovery(target)
     print(
         "RECOVERY_INSPECT "
-        f"target={inspection.state.target} owner_pid={inspection.state.owner_pid} "
-        f"temp_dirs={len(inspection.temp_dirs)}"
+        f"target={inspection.state.target} owner_pid={inspection.state.owner_pid}"
     )
     if expected_pid == 0:
         print("RECOVERY_MODE=inspect-only")
