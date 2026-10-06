@@ -73,19 +73,21 @@ def test_first_initialization_creates_only_trusted_children_and_key(
     assert not settings.admin_socket_path.exists()
 
 
-def test_second_initialization_preserves_key_and_existing_database(
+def test_legacy_existing_key_is_validated_without_replacement(
     tmp_path: Path,
 ) -> None:
     _prepare_mount_roots(tmp_path)
     settings = _settings(tmp_path)
     prepare_ledger_runtime(settings)
     key_before = settings.hmac_key_path.read_bytes()
+    inode_before = settings.hmac_key_path.stat().st_ino
     settings.db_path.write_bytes(b"DATABASE_SENTINEL")
     os.chmod(settings.db_path, 0o600)
 
     prepare_ledger_runtime(settings)
 
     assert settings.hmac_key_path.read_bytes() == key_before
+    assert settings.hmac_key_path.stat().st_ino == inode_before
     assert settings.db_path.read_bytes() == b"DATABASE_SENTINEL"
 
 

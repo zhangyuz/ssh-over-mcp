@@ -10,7 +10,7 @@
 
 **Spec:** [Approved Phase 7B1 design](../specs/2026-10-05-phase-7b1-ledger-systemd-design.md), [ADR 0009](../../decisions/0009-ledger-systemd-sandbox.md). Read these and the repository's normative development/security/API/policy documents before implementation.
 
-**Status:** Plan prepared for review; implementation has not started. Baseline main: a37747291894ac7b01ae5483af83d0dd89821015. Written design approved 2026-10-06 at 34805e7729e09b78b3b8fb5b8e40d2455d80081f.
+**Status:** Plan approved 2026-10-06; implementation in progress from Task 1. No Phase 7B1 acceptance or closure is claimed. Baseline main: a37747291894ac7b01ae5483af83d0dd89821015. Written design approved 2026-10-06 at 34805e7729e09b78b3b8fb5b8e40d2455d80081f.
 
 ## Global Constraints
 
