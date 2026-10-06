@@ -203,6 +203,41 @@ def test_temp_diagnostics_are_bounded_nonrecursive_and_json_safe(tmp_path: Path)
     assert "\n" not in lines[0]
 
 
+def test_temp_diagnostics_bind_fixed_expected_commit_without_other_content_reads(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    temp_dir = tmp_path / "ssh-over-mcp-e2e-one"
+    payload = temp_dir / "payload-content"
+    payload.mkdir(parents=True, mode=0o700)
+    expected = payload / "expected_commit"
+    expected.write_text(TARGET + "\n", encoding="ascii")
+    unrelated = payload / "secret"
+    unrelated.write_bytes(b"must-not-be-read")
+
+    record = json.loads(module._temp_diagnostics((temp_dir,), os.geteuid())[0])
+
+    assert record["expected_commit"] == TARGET
+    assert unrelated.read_bytes() == b"must-not-be-read"
+
+
+def test_temp_diagnostics_report_absent_binding_and_reject_malformed_binding(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    unknown = tmp_path / "ssh-over-mcp-e2e-unknown"
+    unknown.mkdir(mode=0o700)
+    record = json.loads(module._temp_diagnostics((unknown,), os.geteuid())[0])
+    assert record["expected_commit"] is None
+
+    payload = unknown / "payload-content"
+    payload.mkdir(mode=0o700)
+    expected = payload / "expected_commit"
+    expected.write_text("bad\n", encoding="ascii")
+    with pytest.raises(module.RecoveryError, match="expected commit"):
+        module._temp_diagnostics((unknown,), os.geteuid())
+
+
 def test_temp_diagnostics_refuse_root_symlink_and_too_many_children(tmp_path: Path) -> None:
     module = _load_module()
     real = tmp_path / "ssh-over-mcp-e2e-real"
