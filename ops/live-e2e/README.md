@@ -176,9 +176,10 @@ marker's owner PID without mutation. Dispatch it a second time with that exact
 PID only after review of the inspection output.
 
 Recovery refuses unless the fixed marker is a runner-owned `0600` regular file
-with the exact expected target, the recorded owner PID is dead, and no runner-owned
-QEMU process exists. Only then may it unlink that one fixed marker. It deliberately
-does not delete temporary directories or any other unknown state because the
-current marker schema does not bind those paths. It has no sudo, root, arbitrary
-path, process-kill, recursive-delete, or provider restart authority. A mismatch
-remains operator-visible state and requires renewed review.
+with the exact expected target, the recorded owner PID is dead, no runner-owned
+QEMU process exists, the marker identity remains unchanged, and the bounded
+`ssh-over-mcp-e2e-*` temp-state inventory is empty. Inspect-only reports matching
+temp directories without mutation. Any remaining temp state blocks marker
+recovery and requires renewed review. With zero matching temp state, recovery
+unlinks only the fixed marker. It has no sudo, root, arbitrary path, process-kill,
+recursive-delete, or provider restart authority.
