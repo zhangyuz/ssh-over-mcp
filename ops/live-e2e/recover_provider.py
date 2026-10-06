@@ -162,6 +162,8 @@ def _qemu_pids(uid: int) -> tuple[int, ...]:
             pid = int(pid_raw, 10)
         except ValueError:
             raise RecoveryError("provider process inventory is malformed") from None
+        if pid <= 0:
+            raise RecoveryError("provider process inventory is malformed")
         if Path(command).name == QEMU_NAME:
             result.append(pid)
     if not saw_process:
