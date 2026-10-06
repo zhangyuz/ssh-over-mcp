@@ -32,6 +32,12 @@ The service neither removes unknown endpoints nor automatically restarts after
 failure. It exposes no MCP approval mutation, generic privileged helper, or new
 diagnostic protocol operation.
 
+The initial reference requires zero hard/soft core limits and an effective
+non-pipe kernel core pattern before service start. Pipe collectors require
+separate review because core limits alone do not prevent memory processing or
+temporary dump retention. Crash/denial canaries must verify this boundary; no
+generic production-host core-policy mutator is introduced.
+
 Any root/systemd guest fixture extension is a separate authority prerequisite
 merged and verified on main before the target profile/probe is certified. Root
 setup accepts only a canonical already-trusted profile, fixed paths, identities

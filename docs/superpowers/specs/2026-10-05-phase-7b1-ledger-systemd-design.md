@@ -74,6 +74,7 @@ privileged provisioning daemon or change the authorized Mac host.
 | Purpose | Reference path | Ownership and mode | Service access |
 | --- | --- | --- | --- |
 | Installed runtime | `/opt/ssh-over-mcp/venv` | Root-owned; not service/client writable | Read/execute |
+| Configuration parent | `/etc/ssh-over-mcp` | Root:root 0755; trusted ancestors | Traverse to private key directory |
 | Non-secret configuration | `/etc/ssh-over-mcp/ledger.env` | Root:root 0600; trusted parents | Read by systemd before identity drop |
 | HMAC key directory | `/etc/ssh-over-mcp/ledger-key` | Ledger:Ledger 0700; root-owned outer parent | Read-only in sandbox |
 | HMAC key | `/etc/ssh-over-mcp/ledger-key/hmac.key` | Ledger:Ledger 0400; exactly 32 bytes | Read-only; never environment/argv |
@@ -82,10 +83,20 @@ privileged provisioning daemon or change the authorized Mac host.
 | Admin socket directory | `/run/ssh-over-mcp-ledger-admin` | Ledger:admin-group 0750 | Writable for Ledger; admin traverse |
 | Two endpoint sockets | Each directory's `ledger.sock` | Ledger:corresponding-group 0660 | Filesystem permission plus exact SO_PEERCRED |
 
+This is a fresh-install reference. The existing `ssh-over-mcp-ledger-init`
+bootstrap requires key and database to share one parent directory and therefore
+cannot provision this split layout unchanged. The operator checklist must
+explicitly provision/check these paths and a new 32-byte key without printing
+key bytes or overwriting an existing key. Existing container/bootstrap behavior
+is unchanged; bootstrap redesign, moving an existing key/database, and key
+rotation remain separate work.
+
 The root-owned environment file contains only the existing
 `SSH_OVER_MCP_LEDGER_*` settings. Numeric identities and paths must match the
-provisioned layout. Secret key bytes, loader hooks, source paths, and client
-identity assertions are not environment-file contents. Fixed private paths
+provisioned layout. The configured `EXEC_PEER_UID/GID` and `ADMIN_PEER_UID/GID`
+are trusted server-side peer policies, not client-supplied identity assertions.
+Secret key bytes, loader hooks, source paths, and request-supplied identity
+assertions are not environment-file contents. Fixed private paths
 remain below the Linux AF_UNIX length ceiling.
 
 No `LoadCredential=` migration is included: the current key-parent ownership
@@ -113,12 +124,13 @@ The initial profile requires:
 | Boundary | Required configuration/evidence |
 | --- | --- |
 | Privilege | Non-root static identity; empty `CapabilityBoundingSet=` and `AmbientCapabilities=`; `NoNewPrivileges=yes` |
-| Filesystem | `ProtectSystem=strict`, `ProtectHome=yes`; writable exceptions exactly the database and two socket directories; key/runtime remain read-only |
+| Filesystem | `ProtectSystem=strict`, `ProtectHome=yes`; persistent/shared writable exceptions exactly the database and two socket directories; key/runtime remain read-only |
 | Device/kernel | `PrivateDevices=yes`, `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`, `ProtectKernelLogs=yes`, `ProtectControlGroups=yes` |
 | Network | `PrivateNetwork=yes`, `RestrictAddressFamilies=AF_UNIX`; no inherited network socket or socket unit |
 | Other namespaces | `RestrictNamespaces=yes`; no namespace creation or network namespace reassociation |
 | Execution | `SystemCallArchitectures=native`; `RestrictSUIDSGID=yes`, `LockPersonality=yes`, `RestrictRealtime=yes`; bytecode writes disabled |
-| Async syscall bypass | Explicitly deny `io_uring_setup`, `io_uring_enter`, and `io_uring_register` through `SystemCallFilter=` |
+| Async syscall bypass | `SystemCallFilter=~io_uring_setup io_uring_enter io_uring_register`; `SystemCallErrorNumber=kill` explicitly preserves SIGSYS denial |
+| Crash memory retention | `LimitCORE=0:0` plus verified non-pipe `kernel.core_pattern`; core policy checked before service or denial helpers start |
 | Lifecycle | `Type=exec`, `Restart=no`, `KillMode=control-group`, SIGTERM, `TimeoutStopSec=10s`, final SIGKILL enabled |
 | Private temporary files | `PrivateTmp=yes`; no credential or persistence authority in the private temporary directory |
 
@@ -149,6 +161,32 @@ properties, process state, allowed behavior, and denied operations determine
 acceptance. AppArmor/SELinux and additional syscall restrictions are deferred
 until this profile has real compatibility evidence.
 
+### Crash collection is a deployment precondition
+
+The first reference supports only an effective non-pipe `kernel.core_pattern`
+and hard/soft core limits of zero. Linux ignores RLIMIT_CORE for a pipe collector,
+so the unit setting alone is insufficient. A pipe collector, including apport
+or systemd-coredump, makes this initial deployment ineligible; an exception needs
+separate reviewed proof covering memory processing, temporary/unlinked writes,
+backtraces and journal retention. No collector exception is silently accepted.
+
+Preflight verifies the effective kernel setting and service limits before the
+Ledger can load its key and before any SIGSYS-producing helper. The operator
+must provision this host condition explicitly; this slice does not install a
+generic host-global policy mutator. The separate trusted authority may establish
+and verify a fixed non-pipe core policy inside its fresh disposable guest only,
+before starting target processes. It must not change the persistent Mac or an
+operator's production host. A changed condition requires deployment revalidation.
+
+Separate same-profile canary processes hold a memory-only secret sentinel and
+exercise SIGABRT/SIGSEGV as well as the SIGSYS denial path. Verify termination,
+effective no-core policy and absence of core bodies/backtraces/sentinel bytes
+in run-owned paths and applicable journal/crash locations. Scans supplement the
+effective-policy proof; absence after cleanup does not prove that a collector
+never processed or temporarily stored memory. Keep core limits zero for other
+target guest children too when establishing a guest-wide core-pattern policy.
+Forced/fault termination does not authorize automatic socket removal or restart.
+
 ## 6. Trusted E2E separation
 
 The current no-network QEMU provider and self-hosted runners remain unchanged.
@@ -177,7 +215,8 @@ maintenance convenience for a small, auditable root setup interface.
 File equality alone is insufficient: after daemon-reload and **before start**,
 trusted setup must check the effective loaded unit, including fragment path,
 drop-ins, aliases, all Exec command phases/prefixes, environment sources, identity,
-capabilities and sandbox properties. Unexpected merged configuration or an
+capabilities, core limits and sandbox properties, along with the no-core host
+precondition. Unexpected merged configuration or an
 already-running/pre-existing fixture unit fails closed. Guest entrypoint
 adaptation is the sole fixed allowed override and is part of that expected
 effective configuration. No target root command may execute before these checks.
@@ -199,6 +238,13 @@ unit, command, path, UID/GID, or directive. An absent target 7B1 probe during
 authority bootstrap is explicitly legacy-only evidence; after activation the
 7B1 target acceptance run must require it, not conditionally skip it.
 
+The trusted host workflow/gate selects and records `legacy-7a` versus
+`ledger-systemd-7b1` acceptance mode. A target file's presence, contents, exit
+code or environment cannot choose or downgrade that mode. Exact-head/merge-main
+7B1 certification explicitly requires the latter mode and its complete fixed
+matrix in the commit-bound result; a deleted, renamed, missing or failing probe
+must fail. Legacy bootstrap results cannot be presented as 7B1 acceptance.
+
 Read-only guest storage is not tamperproof against the accepted guest-root
 equivalent target authority. Review and contracts establish product coverage;
 trusted setup establishes lifecycle and commit binding. The independent outer
@@ -212,16 +258,18 @@ production secrets, followed by whole-VM destruction.
 | Exact non-root identity/groups/caps | Alter unit identity/group/capability fields; mismatch rejected | UID/GID/groups, zero capability sets, NoNewPrivs=1 |
 | Safe unit loading | Modified bytes, duplicate directives, root prefixes, symlinks, unexpected drop-ins/aliases/command phases rejected before start | Trusted snapshot/copy integrity plus effective loaded configuration verified before any start |
 | Allowed persistence | Existing Ledger storage/restart/concurrency tests unchanged | WAL/FULL audit + approval grant/consume survives clean restart |
+| Installed-package entrypoint | Exact-head non-root wheel build/install into a clean venv; editable/source-path dependency rejected | Packaging startup/ping/SIGTERM proof is a separate supported Linux gate; guest source adapter is explicitly distinguished |
 | Execution/admin separation | Wrong peer and cross-operation regressions | Separate real client/approvalctl identities; unauthorized grant/consume rejected |
 | Network restriction | Missing restriction or allowed INET/INET6 rejected | IPv4/IPv6 socket creation, raw socket, and namespace bypass attempts denied |
-| Syscall bypass restriction | Removing any io_uring denial or native-architecture restriction rejected | Explicit `io_uring_setup`, `io_uring_enter`, and `io_uring_register` attempts denied, with differential controls; kernel/process ABI attested as pinned x86_64/native |
-| Read-only runtime/key | Wider write exception rejected | Runtime/key write and outside-root write fail under same sandbox; allowed DB write succeeds |
-| Kernel/cgroup protection | Weakened protected paths rejected | Device/kernel/cgroup write attempts denied; zero capabilities |
+| Syscall bypass restriction | Removing any io_uring denial or native-architecture restriction rejected | One isolated helper per `io_uring_setup`, `io_uring_enter`, and `io_uring_register`: restricted SIGSYS versus documented kernel result in fixed differential control; kernel/process ABI attested as pinned x86_64/native |
+| Read-only runtime/key | Wider write exception rejected; sacrificial-file differential controls | Actual runtime/key read-only mount state; service-writable canary fails only under read-only boundary; allowed DB write succeeds; non-private-temp outside-root writes denied |
+| Kernel/cgroup protection | Weakened protected paths rejected; safe effective-state checks | Device exposure and kernel/cgroup mount restrictions attested, harmless denied operations and zero capabilities; DAC-only denial not mislabeled as per-layer proof |
 | Normal shutdown | Existing close/restart checks retained | SIGTERM with a paused partial frame closes within the stop deadline; no process/socket leak; clean restart works |
 | Forced-stop/stale state | No recovery deletion code or automatic restart; per-operation timeout distinguished from total deadline | Authorized slow-trickle frame causes bounded final SIGKILL; no remaining service processes, stale endpoints preserved and restart refused; replacement socket survives; only verified run-owned state cleaned |
 | Approval invariants and secrets | Exact binding, consume/replay, policy deny, retention regressions | Real CLI pending→grant→consume; replay/binding rejection; scans of transcript/journal/storage |
+| Crash secret retention | Hard/soft core limits and non-pipe host precondition mandatory; pipe collectors rejected before start | SIGABRT/SIGSEGV/SIGSYS same-profile memory canaries; no core body/backtrace/sentinel retention; effective-policy proof before crashes |
 | Existing Phase 7A | Fixed five-fixture order contracts unchanged | Full five-fixture PASS with STOP_MANAGER last |
-| Exact revision and cleanup | Trusted-main workflow/bundle contracts retained | Exact head/merge CI + E2E; provider absence, guest/VM destruction |
+| Exact revision and cleanup | Trusted-main workflow/bundle contracts retained; probe removal cannot downgrade acceptance mode | Exact head/merge CI + mandatory 7B1 E2E mode/matrix; provider absence, guest/VM destruction |
 
 Denial probes compare allowed and forbidden operations under the same effective
 profile. A failure caused by an unrelated file permission or missing syscall is
@@ -229,13 +277,48 @@ not evidence that the intended sandbox layer works. Client readiness checks are
 bounded and non-blocking; no arbitrary delay, skipped probe, relaxed assertion,
 or retry of approval consumption is permitted.
 
+Distinguish end-to-end denied operations from attribution to a particular layer.
+For read-only filesystem proof, trusted setup provides a harmless service-owned
+writeable canary in a protected mount and a fixed control changing only that
+read-only boundary. Confirm the real runtime/key mount state separately; never
+chmod, overwrite or weaken permissions on actual runtime/key material merely to
+obtain a positive control. For device/kernel/cgroup protection, attest effective
+device/mount state and use harmless established-return checks where possible.
+Do not mutate live kernel controls or give the production Ledger writable cgroup
+delegation to manufacture a test. If attribution cannot be proved, report that
+limit and block that criterion rather than substituting an unrelated denial.
+
+The unit deliberately has writable private `/tmp` and `/var/tmp` through
+`PrivateTmp=yes`. They are excluded from the persistent/shared write-exception
+count and outside-root write-denial criterion. Their isolation, non-persistence
+and lack of credential contents must be verified. They are not database/key or
+cross-service communication roots.
+
+Packaging acceptance requires a wheel built from the exact head **as non-root**,
+installed non-editably with the locked runtime dependencies into a fresh venv.
+Remove its temporary source/build staging, clear import/loader hooks, use an
+unrelated clean cwd and isolated interpreter, and verify application and
+installed third-party module origins reside inside that venv rather than the
+source checkout. Standard-library, built-in and frozen modules may use the
+trusted base interpreter's normal locations. Start the real installed
+`-I -B -m ssh_over_mcp.approvals.main` process with safe temporary state, prove
+authenticated ping and SIGTERM cleanup. Do not claim the whole ordinary runner
+checkout is inaccessible merely because it is absent from import paths. This
+proof checks installed-package loading; distinct-peer and sandbox proofs remain
+the real systemd guest matrix. No target build/install runs as root and no
+privileged access is added to ordinary CI.
+
 The io_uring probes must use the attested native syscall ABI and valid arguments
 or established kernel error controls, not unexplained magic syscall numbers.
-For each syscall, a fixed trusted comparison profile changes only the relevant
-filter boundary and establishes that the call reaches the kernel there. Compare
-the restricted result against that control and inspect effective seccomp state.
-Kernel-wide io_uring disablement, unavailable calls, invalid argument failures,
-or other sandbox layers do not count as proof of the explicit filter. If the
+For each syscall, an isolated helper uses a fixed trusted comparison profile
+which changes only that syscall's filter boundary and establishes kernel entry.
+Compare restricted SIGSYS against the documented kernel result and inspect
+effective seccomp state. The control need not create a working ring: an
+established kernel EPERM (including kernel-wide io_uring disablement), EINVAL or
+EBADF can discriminate against filter-produced SIGSYS. Missing syscall/ABI
+support, unexplained argument errors, a control killed by another filter, or
+identical results do not count as proof. Kernel-wide disablement alone is not
+filter evidence. No-core preflight precedes these helpers. If the
 pinned image cannot provide the required discriminating evidence, acceptance is
 blocked until a specific alternative proof is reviewed; no test is silently
 skipped and no production/guest kernel policy is relaxed to manufacture a pass.
@@ -260,7 +343,9 @@ target evidence: existing exact-head Level-3 must remain green before its merge;
 the merged authority is then verified and only later certifies the 7B1 target.
 No authority merge is counted as target sandbox proof. Phase 7B1 is not complete
 until the target's new mandatory matrix and existing five fixtures pass on exact
-head and merge-main, with no Critical/Important review finding or cleanup debt.
+head and merge-main, installed-wheel startup/cleanup proof passes for those same
+revisions on supported Linux, and no Critical/Important review finding or cleanup
+debt remains.
 
 Rollback disables the new reference service, verifies stop, and preserves the
 database/key. It does not switch to a less restricted service automatically or
