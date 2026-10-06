@@ -59,6 +59,11 @@ three researched releases omit Valid-Until. This deliberately historical
 snapshot uses explicit reviewed byte/date pins, not a claim of rolling freshness
 or a blanket disabling of expiry for future inputs. On a refresh, review signed
 Date/Valid-Until and current key status anew; an expired Valid-Until is rejected.
+Metadata limits: 512 KiB per InRelease, 32 MiB per compressed index, 256 MiB
+per decompressed index, 200,000 records per index and 64 KiB per record. Limit
+each resource transfer to 60 seconds and the acquisition stage to 15 minutes.
+Enforce these independently of package limits while streaming; oversize,
+compressed-expansion or timeout refuses before excessive allocation/use.
 No fallback to a newer/older snapshot on download failure. Package indexes and
 debs must match signed size/hash before parsing/use; retain the signed chain in
 the receipt and payload for independent guest hash verification.
@@ -75,8 +80,8 @@ Derive it from the authenticated indexes using Debian version semantics.
 Resolve the chosen roots `gcc-15-x86-64-linux-gnu`,
 `cpp-15-x86-64-linux-gnu`, `gcc-15-base` and `libgcc-15-dev` at
 `15.2.0-16ubuntu1`. Every transitive dependency must be either a verified exact
-base-image provider or an authenticated payload package. Record which; do not
-confuse published-image hints with measured image files. Alternatives,
+declared base-image provider or an authenticated payload package. Record which;
+do not confuse published-image hints with measured image files. Alternatives,
 virtual providers, multiarch and version relations require explicit selected
 providers and tests; unsupported syntax fails, never truncates a dependency.
 No automatic highest-version choice during a run. The verifier regenerates and
@@ -88,8 +93,10 @@ package SHA256s already authenticated in research are respectively
 `1649aa71c45b047feda5b9ca303c94799bdba5befa5c9de9735cbfc59c3ef93f`,
 `5a302d705d562fb7e150415b00651c00fed58b633faadff0b332eac1b73fadb3`,
 `32fa5bde1891f46fd4f422e466c863fb78e834b634e1aa08211c8eea68870af5`.
-Activation requires the full generated manifest, reviewed composition/layout
-and actual pinned-guest proof; these four hashes cannot substitute for them.
+Enabling the feasibility preflight requires the full generated manifest,
+reviewed declared composition/layout and supported-Linux controls. Authorizing
+subsequent security-canary use additionally requires actual pinned-guest proof;
+these four hashes cannot substitute for either gate.
 
 The manifest explicitly assigns driver, cc1, collect2/link helpers when used,
 assembler, linker, compiler/system headers, startup objects, linker scripts,
@@ -97,6 +104,24 @@ ELF interpreter and every shared library to exact payload or image files.
 Record transitive ELF dependencies and actual search paths. Root must not use
 ldd or execute binaries to discover them. Non-root controlled probes confirm
 the declared composition; unresolved files or shadowing forbid activation.
+N1 owns the bounded non-root host-side package-data parser used to generate
+this recipe. Its image input is DeclaredImageBindings: exact pinned image
+digest, published manifest bytes/digest, explicit component roles, canonical
+paths and expected package versions. This permits a complete **declared**
+composition without claiming that candidate file contents have been measured.
+Expected per-file hashes require an actual authenticated byte source; do not
+guess them from a version. An image role may instead rely on the already-
+authenticated full image digest with mandatory fresh-guest reconciliation.
+
+N1 is complete when signature/dependency derivation and every payload recipe
+entry are reproducible, every image role/path/provider is explicit, and review
+finds no undeclared component or implicit search fallback. It is not complete
+live composition evidence. At N3, before _start_manager() or any other target
+exec, trusted code measures the still-fresh image files, checks the declared
+versions/metadata/paths and complete ELF/search composition, and binds their
+actual hashes to the verified image and receipt. Unknown or mismatched image
+files/dependencies fail; they cannot expand the manifest at runtime. Native
+feasibility and later canary authorization remain blocked on reconciliation.
 No second Python build-tool authority or package replacement in the guest OS.
 
 ## 4. Bounded data materialization and read-only tree
@@ -136,12 +161,13 @@ and hard/soft RLIMIT_CORE `(0, 0)` after verified fresh-guest/root context,
 before any target execution. Every direct child verifies inherited zero limits
 before exec. This breaks a circular dependency on Task 3's later profile.
 
-The native helper uses existing fixed probe UID/GID 2204, no supplementary
+The native helper uses existing fixed probe UID 2204 / GID 3204, no supplementary
 groups, all capability sets zero, NoNewPrivs=1 and zero core limits. The trusted
 controller attaches it to a fixed run-owned cgroup **before exec**. It receives
-no sensitive descriptors. A private fixed environment excludes GCC_EXEC_PREFIX,
-COMPILER_PATH, LIBRARY_PATH, CPATH and loader hooks; any necessary tool search
-override is an exact trusted manifest constant, never inherited or target data.
+no sensitive descriptors. A private fixed environment rejects inherited GCC_EXEC_PREFIX, COMPILER_PATH,
+LIBRARY_PATH, CPATH and loader hooks. Any necessary search/loader path is an
+exact reviewed manifest constant, never inherited or target data; LD_PRELOAD
+and arbitrary loader/module injection remain forbidden.
 Commands, cwd and source/output paths are fixed. No caller flags, response
 files, specs/plugin selection, shell or generic compiler RPC.
 
@@ -149,8 +175,10 @@ files, specs/plugin selection, shell or generic compiler RPC.
 x86_64 Linux ABI guards, system headers and symbolic SYS_io_uring_* constants,
 compile/link/run with bounded exit output. It grants no seccomp or kernel-denial
 credit and contains no credential/canary secret. Actual compiler commands and
-composition are frozen only after inspection and a successful non-root probe;
-until then the manifest is unready, not executable authority.
+composition are frozen after inspection and successful supported-Linux
+non-root controls in N2, before enabling N3 feasibility. Those controls do not
+claim pinned-guest compatibility; only the N3 live result authorizes later
+security-canary use.
 
 Stop and inventory all writers/descendants before sealing the output. Reject
 escaped or surviving writers. Pin/measure the produced ELF and execute only
@@ -168,12 +196,16 @@ RED/GREEN, relevant full regression, fresh independent review, exact-head
 ordinary CI and full five-fixture legacy E2E, then exact merge-main CI/E2E and
 cleanup. The authority used for each head must already be on main. N3's old
 authority certifies regression only; after N3 merges, its new trusted-main
-native preflight must compile/link/run in the pinned guest and still run all
-five fixtures. Failure leaves the prerequisite open and blocks Task 3.
+native preflight must reconcile image composition, compile/link/run in the
+pinned guest and still run all five fixtures. Failure leaves the prerequisite open and blocks Task 3.
+
+Enabling this fail-closed preflight is distinct from authorizing later
+security-canary use. No later canary execution or prerequisite completion is
+authorized until native proof, the full legacy matrix and cleanup all pass.
 
 Native preflight is fixed trusted setup, not a target-selected acceptance mode
-or dynamic dispatcher. It executes before the existing fixed five-fixture
-probe; Task 6 stays wired and Task 7 STOP_MANAGER remains last. Once activated,
+or dynamic dispatcher. It executes before _start_manager() (which currently executes target code
+during prepare()), as well as before the fixed five-fixture probe; Task 6 stays wired and Task 7 STOP_MANAGER remains last. Once activated,
 missing native inputs/proof fails, never silently bypasses preflight.
 
 Native receipt fields: authority/target SHA, run/attempt, image/snapshot/signer,

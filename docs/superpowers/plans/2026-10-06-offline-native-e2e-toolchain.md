@@ -30,13 +30,16 @@ Execution method proposed: inline executing-plans, independent review per slice.
   resolute-updates and resolute-security main binary-amd64. No fallback.
 - Only already-main trusted inputs/code judge a target. No target code as root.
 - Existing Python build.in/build.lock/e2e-bootstrap.lock remain unchanged.
-- Compiler/native helper UID/GID 2204, no supplementary groups, zero
+- Compiler/native helper UID 2204 / GID 3204, no supplementary groups, zero
   capabilities, NoNewPrivs=1, core limits (0, 0), attach-before-exec.
 - Limits: 64 packages, 256 MiB compressed, 768 MiB expanded, 32,768 entries,
   4,096-byte paths, 128 MiB per file and 40 link hops.
 - No apt install, maintainer scripts, root compiler, target flags or generic RPC.
 - Keep fixed SSH → MCP → filesystem/profile → Task 6 → Task 7; STOP_MANAGER last.
 - No automatic stale-state deletion, casual E2E cancellation or blind recovery.
+- Metadata bounds/time limits are exactly design section 2, independent of
+  package-data limits.
+- Enabling fail-closed feasibility is distinct from authorizing later canary use.
 - Tool proof is not Phase 7B1 acceptance or closure.
 
 ## Review Focus
@@ -98,31 +101,41 @@ require_no_core() -> None. No dependency on ledger_systemd_contract.py.
 ### N1: Authenticate and derive the complete native input manifest
 
 **Files:** Create ops/live-e2e/native_inputs.py, native-toolchain-inputs.json,
-ubuntu-archive-2018.gpg and tests/ops/test_native_inputs.py; update
+ubuntu-archive-2018.gpg, native_archive.py, tests/ops/test_native_inputs.py and
+tests/ops/test_native_archive.py; update
 docs/self-hosted-runner.md and ops/live-e2e/README.md. Archive exact signed
 metadata and package receipts in operator-controlled evidence storage.
 
 **Interfaces:** NativeInputError; verify_native_inputs(root: Path) ->
 NativeInputs (immutable result); derive_native_manifest(metadata: VerifiedMetadata,
-image_inventory: VerifiedImageInventory) -> bytes. These are trusted internal
+image_bindings: DeclaredImageBindings,
+archives: Mapping[str, VerifiedArchive]) -> bytes. NativeInputs includes the
+verified recipe and declared image roles; it does not claim fresh-guest measurement. These are trusted internal
 interfaces; root paths are supplied by fixed orchestration constants.
 
 - [ ] RED: signer/keyring drift, malformed/expired/ambiguous signature, wrong
   date/suite/hash/size, redirect escape, truncated downloads, malformed package
   record, missing dependency/provider, bad Debian version relation, omitted
-  transitive edge and image-version mismatch. Distinguish signature validity
+  transitive edge, unsupported image binding and declared image-version mismatch.
+  Add oversize InRelease/index/record, compressed expansion and time-limit
+  controls, plus the package parser collision/link/type/expansion negatives
+  listed in design section 4; N1 owns this host-side parser. Distinguish signature validity
   from derivation consistency with a mutated manifest negative test.
-- [ ] Run python -m pytest tests/ops/test_native_inputs.py -q for intended RED.
+- [ ] Run python -m pytest tests/ops/test_native_inputs.py
+  tests/ops/test_native_archive.py -q for intended RED.
 - [ ] Implement bounded authenticated data parsing and explicit provider/version
   selection. Reject unsupported dependency syntax. Generate the complete roots/
-  transitive package and file-layout manifest from the frozen signed snapshot;
-  published image inventory is only a candidate until pinned guest measurement.
+  transitive package and file-layout manifest from the frozen signed snapshot,
+  parsing authenticated package data as non-root. Complete all declared image
+  roles/paths/providers under the pinned image binding; published inventory
+  remains a candidate until N3 fresh-guest reconciliation. Per-file expected
+  hashes need authenticated bytes, never version-based guesses.
 - [ ] Record verifier version/provisioning, public key digest and independent
   fingerprint source. Test clean isolated verifier operation with valid signed
   metadata plus corrupted controls. Do not execute package scripts/compilers.
 - [ ] Review the generated complete manifest and proposed command/layout recipe;
-  ordinary tests regenerate it and reject drift. An unclosed composition blocks
-  this deliverable. Ship with common legacy gates; no native activation yet.
+  ordinary tests regenerate it and reject drift. Any undeclared role/provider/search input blocks N1. Its complete declared
+  composition is not N3 live composition or authorization for security canaries. Ship with common legacy gates; no native activation yet.
 
 ### N2: Materialize a dormant read-only tree and fixed low-privilege helper
 
@@ -147,7 +160,8 @@ contains the exact receipt fields in design section 6, not a bare boolean.
   pinned-guest proof. Fixed C source has no secrets or enforcement claims.
 - [ ] Run python -m pytest tests/ops/test_native_materialize.py
   tests/ops/test_native_probe.py -q and record each intended RED.
-- [ ] Implement data-only extraction/materialization, full recipe/closure checks,
+- [ ] Implement guest data-only copying/materialization of the N1 parser result,
+  full recipe/declared-closure checks,
   writer quiescence, readonly bind verification, fixed child drop/core/cgroup
   checks and sealed output. Bound output/time; fail with safe codes. Never use
   root ldd or execute target/package/native code as root.
@@ -163,8 +177,8 @@ tests/ops/test_live_e2e_gate_contract.py,
 test_live_e2e_orchestrator_contract.py, ops/live-e2e/README.md and parent plan.
 All verifier/materializer/helper/source inputs must already be on main.
 
-**Interfaces:** Fixed native preflight runs before the existing five-fixture
-probe. The existing commit_sha dispatch remains; no target-controlled mode,
+**Interfaces:** Fixed native preflight runs before _start_manager() or any other target
+exec, as well as before the existing five-fixture probe. The existing commit_sha dispatch remains; no target-controlled mode,
 paths or source. Failure produces a bounded trusted error and cleanup.
 
 - [ ] RED: missing/mismatched native input, preflight after target exec, skipped
@@ -175,10 +189,12 @@ paths or source. Failure produces a bounded trusted error and cleanup.
 - [ ] Reach GREEN; ship using previously trusted main's complete legacy gates.
   Clearly record that pre-merge proof does not certify the new preflight.
 - [ ] After merge, require ordinary CI and trusted-main exact merge-SHA Level-3
-  with actual native compile/link/run, measured guest/image composition, bound
+  with actual native compile/link/run, pre-target fresh-image reconciliation
+  (including full ELF/search composition), measured guest/image facts, bound
   receipt and all five legacy fixtures. Missing evidence blocks completion;
   diagnose a real failure with RED/minimal fix, never sleeps/skips/OS repair.
-- [ ] Verify all cleanup, retain non-secret exact run/receipt evidence and remove
+- [ ] Only after these live/legacy gates pass, authorize later security-canary use.
+  Verify all cleanup, retain non-secret exact run/receipt evidence and remove
   only clean obsolete worktrees/branches. Resume remaining parent Task 3, which
   consumes GuestPreflightError via its ProfileError boundary rather than copying
   the guard. Later Task 7 still proves actual syscall enforcement separately.

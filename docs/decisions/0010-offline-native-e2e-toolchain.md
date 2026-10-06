@@ -44,7 +44,10 @@ its updates/security pockets, with GCC `15.2.0-16ubuntu1`. The design freezes
 historical metadata; it does not claim current patch status. Signature/hash
 authentication is already researched; dependency closure, extraction layout
 and pinned-guest compile/link/run are still unproved. The complete generated
-manifest must receive review before acquisition or guest activation uses it.
+manifest must receive review before workflow acquisition or enabling the
+guest feasibility preflight uses it. Research acquisition does not grant that
+authority. Later security-canary use additionally requires successful native
+guest proof, the complete legacy matrix and cleanup.
 
 Only already-trusted main prepares payload data, materializes its fixed
 read-only guest tree and runs the fixed feasibility helper. No package script,
