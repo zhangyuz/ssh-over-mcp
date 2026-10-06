@@ -111,7 +111,7 @@ assert provision_fs.success_output == ""
 - [ ] Run python -m pytest tests/ops/test_ledger_provision.py -q; require intended RED.
 - [ ] Implement provision_reference using pinned canonical directory descriptors and the reviewed primitive. Apply zero hard/soft core limits before generation and require non-pipe effective core pattern. Provision only fresh reference state with exact directory/group modes; reject unknown existing state, active Ledger use or inconsistent memberships. After a mutation/durability failure, leave uncertain run-owned state for explicit recovery rather than report success or auto-retry. Import the provisioned reviewed primitive only from an operator-trusted installation; no sys.path/environment hooks.
 - [ ] Run provisioning and all bootstrap/key/storage regressions to GREEN; verify captured stdout/stderr/logs contain no key bytes and expected modes/owners are checked before service use.
-- [ ] Commit “Add strict operator Ledger provisioning”; ship using the common native-required gate. No Mac/production provisioning occurs.
+- [ ] Commit “Add strict operator Ledger provisioning”; ship using the common legacy gate. No Mac/production provisioning occurs.
 
 ### Task 3: Pin the trusted profile, identities and offline payload contract
 
