@@ -1,6 +1,6 @@
 # Phase 7A Local E2E Foundation Design
 
-- Status: Tasks 1–7 implemented and verified; Phase 7A4 closure in progress
+- Status: Phase 7A is closed; verified implementation baseline `71243f2ac4fd4e60e76cdf7cf648f78081dff483`
 - Date: 2026-10-02
 - Base: `a00c36f4260efa52d722222319ac78756f2b5562`
 
@@ -555,8 +555,8 @@ require full E2E. Ordinary CI stays unprivileged on its separate self-hosted
 Linux runner; it receives no Docker socket or privileged fixture access.
 
 The following evidence maps all 25 approved DoD criteria to executable checks.
-The current verified baseline is PR #119 merge `d373598e7d0b5371765354a9ba89bf93f822828f`.
-Phase 7A4 exact-head gates and cleanup remain pending; Phase 7A is not closed.
+The verified implementation baseline is PR #121 merge `71243f2ac4fd4e60e76cdf7cf648f78081dff483`.
+Phase 7A is closed on that implementation evidence; this documentation record is separately subject to ordinary CI and exact-target Level-3 gates.
 
 | # | Criterion | Executable evidence | Current evidence |
 | --- | --- | --- | --- |
@@ -583,8 +583,8 @@ Phase 7A4 exact-head gates and cleanup remain pending; Phase 7A is not closed.
 | 21 | Exact commit and whole-guest destruction | `scripts/run-live-local-e2e-orchestrator.py` | Exact head/merge E2E; provider-state absence PASS |
 | 22 | Ordinary runner posture unchanged | `tests/ops/test_live_e2e_orchestrator_contract.py` | Self-hosted unprivileged Linux; no Docker socket |
 | 23 | Normative methodology linked | `tests/ops/test_phase7a_closure_evidence.py` | Trigger guidance consistency; repository entrypoints link method |
-| 24 | Clean final review and ordinary CI | `tests/ops/test_phase7a_closure_evidence.py` | PR119 exact-head independent review and both CI runs PASS; 7A4 pending |
-| 25 | Branches/processes/artifacts cleaned | `tests/ops/test_live_e2e_orchestrator_contract.py` | PR119 cleanup PASS; Phase 7A4 final cleanup pending |
+| 24 | Clean final review and ordinary CI | `tests/ops/test_phase7a_closure_evidence.py` | PR121 exact-head independent review and head/merge ordinary CI PASS |
+| 25 | Branches/processes/artifacts cleaned | `tests/ops/test_live_e2e_orchestrator_contract.py` | Provider/checkout cleanup PASS; superseded Phase 7A refs/worktrees removed; staged work preserved |
 
 ### 18.1 Exact Task 7 acceptance evidence
 
@@ -601,7 +601,7 @@ Ruling: the guest installs trusted runtime dependencies offline and runs target 
 
 Phase 7A4 regresses the existing suites under `tests/approvals/`, `tests/api/`, `tests/policy/`, `tests/ssh/`, and `tests/host_agent/` in full ordinary Linux CI. These cover single-use binding, principal isolation, durable audit, pre-network authorization, host identity, credential secrecy, privilege transition, attach-before-exec, and filesystem uncertainty/create-only semantics.
 
-Phase 6 deployment checks remain `tests/ops/test_container_reproducibility_contract.py`, `tests/ops/test_compose_contract.py`, `tests/ops/test_cloudflare_connector_contract.py`, and the live reproducible-image/container/Compose/connector probes. The connector uses only a fake token and does not provision a Cloudflare account. Fresh Phase 7A4 Mac x86 deployment reruns passed: two independent no-cache builds were bit-reproducible; 14 container/Compose/fake-token connector tests passed. The tested image ID was `sha256:725c672918a0635d44336b1792f465eb2382e2e79cfa83279d605130b4c02b0e`. No live account provisioning was performed. Whole-phase review identified lifecycle integrity gaps; separate authority PR #120 merged as `76fdd4fee08f28b85b97c151617988120a7ae855` after exact-head ordinary CI and clean independent review. Its exact merge-main [CI 37397940466](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/37397940466) and [Level-3 37397957958](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/37397957958) passed, including provider-state absence and checkout cleanup. This already-merged authority now certifies the separate target/evidence slice. No closure claim is made here.
+Phase 6 deployment checks remain `tests/ops/test_container_reproducibility_contract.py`, `tests/ops/test_compose_contract.py`, `tests/ops/test_cloudflare_connector_contract.py`, and the live reproducible-image/container/Compose/connector probes. The connector uses only a fake token and does not provision a Cloudflare account. Fresh Phase 7A4 Mac x86 deployment reruns passed: two independent no-cache builds were bit-reproducible; 14 container/Compose/fake-token connector tests passed. The tested image ID was `sha256:725c672918a0635d44336b1792f465eb2382e2e79cfa83279d605130b4c02b0e`. No live account provisioning was performed. Whole-phase review identified lifecycle integrity gaps; separate authority PR #120 merged as `76fdd4fee08f28b85b97c151617988120a7ae855` after exact-head ordinary CI and clean independent review. Its exact merge-main [CI 37397940466](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/37397940466) and [Level-3 37397957958](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/37397957958) passed, including provider-state absence and checkout cleanup. This already-merged authority now certifies the separate target/evidence slice. Implementation closure evidence is recorded in section 18.4.
 
 
 ### 18.3 Whole-phase review findings and sequencing
@@ -626,3 +626,13 @@ on structured and JSON-text surfaces before comparing secret sentinels.
 Malformed binary encoding fails closed. Seven focused RED/GREEN regressions
 cover the formerly missed encoded-output surface; product secret handling is
 unchanged.
+
+### 18.4 Phase 7A4 implementation closure
+
+- PR #121 exact head `983ae58e6183de05a63c1bfcb9ab0ce70dd92176`: self-hosted Python 3.13/3.14 [CI 37398372450](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/37398372450) and trusted-main no-network [Level-3 37398500863](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/37398500863) PASS. The workflow checked out previously merged authority `76fdd4fee08f28b85b97c151617988120a7ae855` and invoked the exact target SHA. Provider-state absence and post-checkout cleanup passed.
+- Exact implementation merge `71243f2ac4fd4e60e76cdf7cf648f78081dff483`: self-hosted Python 3.13/3.14 [CI 37398919556](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/37398919556) and trusted-main [Level-3 37398928655](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/37398928655) PASS, including provider-state absence and checkout cleanup.
+- Fresh independent whole-phase review and exact-head refresh found no Critical, Important, or actionable Minor finding. Markerless-QEMU and launcher-copy integrity findings were fixed and verified in separate authority PR #120 before target certification. Encoded secret-scan coverage was fixed in PR #121.
+- After merge-main verification, Phase 7A4 implementation and superseded Phase 7A1 local branches/worktrees were removed; no obsolete Phase 7A remote branch remained. The only new Phase 7A worktree is this closure record. Root main was clean and equal to origin/main at the implementation merge. Process inventory showed no QEMU/orchestrator process. Run-owned provider artifacts are covered by trusted successful cleanup; the private provider directory was not directly inspected from the development account.
+- Superseded Phase 7A1 staged edits were preserved outside the repository at `/Users/yuz/src/ssh-over-mcp-preserved/phase-7a1-20261006`: both branch histories in a Git bundle, staged/unstaged binary patches, and a restored checkout whose diffs and index/status were verified identical before removal.
+
+This record adds no capability and changes no certification authority. Its own exact-head and merge-main CI/Level-3 gates are required before final repository cleanup; implementation evidence above remains the closure basis without recursive self-certification.
