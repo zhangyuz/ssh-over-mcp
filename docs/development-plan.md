@@ -876,6 +876,13 @@ Hardening backlog:
 - fuzz/property testing of policy and host-agent protocol;
 - security review checklist.
 
+Next slice: **Phase 7B1 — Security Ledger systemd sandbox**, scope approved;
+[written design](superpowers/specs/2026-10-05-phase-7b1-ledger-systemd-design.md)
+and [ADR 0009](decisions/0009-ledger-systemd-sandbox.md) proposed for review.
+Implementation has not started. The slice preserves existing Ledger authority
+and first lands any necessary trusted guest setup separately before target
+certification. Other Phase 7B hardening remains deferred to separate slices.
+
 ## Definition of done for v1
 
 A v1 release must demonstrate:
