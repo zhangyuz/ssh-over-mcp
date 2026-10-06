@@ -109,6 +109,37 @@ def test_process_inventory_fails_closed_on_empty_or_malformed_output(monkeypatch
     assert module._qemu_pids(os.geteuid()) == ()
 
 
+def test_inspect_ignores_foreign_owned_matching_temp_path(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _load_module()
+    state = tmp_path / "active-run.json"
+    temp_root = tmp_path / "temp"
+    temp_root.mkdir()
+    foreign = temp_root / "ssh-over-mcp-e2e-foreign"
+    foreign.mkdir()
+    _state(state)
+
+    original_lstat = Path.lstat
+
+    def fake_lstat(path: Path):
+        info = original_lstat(path)
+        if path == foreign:
+            return SimpleNamespace(st_mode=info.st_mode, st_uid=os.geteuid() + 1)
+        return info
+
+    monkeypatch.setattr(Path, "lstat", fake_lstat)
+    inspection = module.inspect_recovery(
+        TARGET,
+        state_path=state,
+        temp_root=temp_root,
+        uid=os.geteuid(),
+    )
+
+    assert inspection.temp_dirs == ()
+    assert foreign.is_dir()
+
+
 def test_recover_refuses_live_owner_qemu_pid_mismatch_or_temp_state(
     tmp_path: Path, monkeypatch
 ) -> None:
