@@ -4,6 +4,7 @@ import ast
 import importlib.util
 import inspect
 import json
+import os
 import subprocess
 import sys
 import tarfile
@@ -800,3 +801,73 @@ while offset < len(data):
             lifecycle.wait_guest()
     finally:
         lifecycle.cleanup_guest()
+
+
+@pytest.mark.parametrize(
+    ("inventory", "expected"),
+    [
+        ("/bin/ps\n/usr/local/bin/qemu-system-x86_64\n", True),
+        ("/bin/ps\n/usr/local/bin/qemu-img\n", False),
+        ("/bin/ps\n/usr/local/bin/qemu-system-x86_64-helper\n", False),
+    ],
+)
+def test_provider_rejects_existing_qemu_without_marker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    inventory: str,
+    expected: bool,
+) -> None:
+    module = _load_script()
+    state = tmp_path / "absent.json"
+    monkeypatch.setattr(module, "PROVIDER_STATE", state)
+
+    def process_inventory(command, *, env, timeout):
+        assert command == ["/bin/ps", "-ww", "-U", str(os.getuid()), "-o", "comm="]
+        assert timeout == 10
+        return subprocess.CompletedProcess(command, 0, inventory, "")
+
+    monkeypatch.setattr(module, "_run", process_inventory)
+    lifecycle = module._SystemLifecycle({})
+    assert lifecycle.provider_state_exists() is expected
+    assert not state.exists()
+
+
+def test_provider_rejects_dangling_state_marker_without_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    state = tmp_path / "active-run.json"
+    state.symlink_to(tmp_path / "missing")
+    monkeypatch.setattr(module, "PROVIDER_STATE", state)
+    assert module._SystemLifecycle({}).provider_state_exists()
+    assert state.is_symlink()
+
+
+def test_provider_process_inventory_failure_remains_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    monkeypatch.setattr(module, "PROVIDER_STATE", tmp_path / "absent.json")
+
+    def unavailable(*args, **kwargs):
+        raise subprocess.TimeoutExpired("ps", 10)
+
+    monkeypatch.setattr(module, "_run", unavailable)
+    with pytest.raises(subprocess.TimeoutExpired):
+        module._SystemLifecycle({}).provider_state_exists()
+
+
+def test_provider_empty_inventory_is_not_treated_as_absence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    monkeypatch.setattr(module, "PROVIDER_STATE", tmp_path / "absent.json")
+    monkeypatch.setattr(
+        module, "_run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", ""),
+    )
+    with pytest.raises(module.OrchestratorError, match="process inventory is unavailable"):
+        module._SystemLifecycle({}).provider_state_exists()

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ctypes
 import grp
+import hashlib
 import json
 import os
 import pwd
@@ -536,10 +537,13 @@ class _SystemGuestOps:
 
     def _prepare_launcher_and_sudo(self) -> None:
         LAUNCHER_INSTALL.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+        expected_digest = hashlib.sha256(LAUNCHER_SOURCE.read_bytes()).digest()
         shutil.copyfile(LAUNCHER_SOURCE, LAUNCHER_INSTALL)
         os.chown(LAUNCHER_INSTALL, 0, 0)
         os.chmod(LAUNCHER_INSTALL, 0o555)
         _verify_root_owned_regular(LAUNCHER_INSTALL, mode=0o555)
+        if hashlib.sha256(LAUNCHER_INSTALL.read_bytes()).digest() != expected_digest:
+            raise GateError("launcher content mismatch")
 
         sudoers = (
             f'Defaults:{HOST_USER} env_keep += "SSH_ORIGINAL_COMMAND SSH_TTY"\n'

@@ -124,3 +124,24 @@ The guest MUST fail closed if:
 - in-guest cleanup verification fails.
 
 This ADR refines ADR 0006. ADR 0006's disposable-VM principle remains in force; its Lima/VZ provider details are superseded by this no-network QEMU/HVF provider.
+
+
+## Implementation checks and evidence scope
+
+Trusted orchestration checks both the fixed provider marker and executable-name
+inventory for the dedicated account before target fetch. Any existing QEMU
+process or marker fails closed; inventory errors are not converted to absence.
+Unknown state is never automatically recovered or removed.
+
+The guest gate verifies the installed target launcher digest against a snapshot
+of exact-checkout source before enabling its fixed sudo rule. This is copy
+integrity, not a substitute for target-code review.
+
+The trusted-main lifecycle gate owns setup/commit binding/cleanup, while target
+probe/support owns product assertions. The gate checks probe exit status.
+Ordinary contracts and independent review must establish that the exact target
+runs the full matrix; lifecycle PASS alone cannot establish product coverage.
+As already accepted above, target authority can be guest-root-equivalent.
+Read-only guest harness storage is not a hardware tamperproof boundary against
+that authority. The independent persistent-host boundary remains QEMU plus the
+absence of NIC/host shares/host secrets, and whole-guest destruction.

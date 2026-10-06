@@ -685,3 +685,34 @@ def test_guest_gate_cleanup_owns_fail_closed_fixture() -> None:
 
     assert "WORKLOAD_DATA_ROOT" in cleanup
     assert "WORKLOAD_DATA_ROOT" in verify_clean
+
+
+@pytest.mark.parametrize("corrupt_copy", [False, True])
+def test_launcher_install_rejects_corrupted_bytes_before_sudo_authorization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    corrupt_copy: bool,
+) -> None:
+    module = _load_gate()
+    source = tmp_path / "source.py"
+    installed = tmp_path / "libexec" / "launcher.py"
+    sudoers = tmp_path / "sudoers"
+    source.write_bytes(b"reviewed launcher bytes\n")
+    monkeypatch.setattr(module, "LAUNCHER_SOURCE", source)
+    monkeypatch.setattr(module, "LAUNCHER_INSTALL", installed)
+    monkeypatch.setattr(module, "SUDOERS_DROPIN", sudoers)
+    monkeypatch.setattr(module.os, "chown", lambda *args: None)
+    monkeypatch.setattr(module, "_verify_root_owned_regular", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "_run", lambda *args, **kwargs: None)
+    if corrupt_copy:
+        monkeypatch.setattr(
+            module.shutil, "copyfile",
+            lambda source, destination: destination.write_bytes(b"corrupted bytes\n"),
+        )
+        with pytest.raises(module.GateError, match="launcher content mismatch"):
+            module._SystemGuestOps()._prepare_launcher_and_sudo()
+        assert not sudoers.exists()
+    else:
+        module._SystemGuestOps()._prepare_launcher_and_sudo()
+        assert installed.read_bytes() == source.read_bytes()
+        assert sudoers.exists()

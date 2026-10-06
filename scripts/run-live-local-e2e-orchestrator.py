@@ -678,7 +678,17 @@ class _SystemLifecycle:
             raise OrchestratorError("macOS Hypervisor support is unavailable")
 
     def provider_state_exists(self) -> bool:
-        return PROVIDER_STATE.exists()
+        if PROVIDER_STATE.exists() or PROVIDER_STATE.is_symlink():
+            return True
+        inventory = _run(
+            ["/bin/ps", "-ww", "-U", str(os.getuid()), "-o", "comm="],
+            env=self._provider_env,
+            timeout=10,
+        ).stdout.splitlines()
+        commands = [line.strip() for line in inventory if line.strip()]
+        if not commands:
+            raise OrchestratorError("provider process inventory is unavailable")
+        return any(Path(command).name == QEMU_SYSTEM.name for command in commands)
 
     def _ensure_temp(self) -> Path:
         if self._temp is None:

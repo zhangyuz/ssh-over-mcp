@@ -91,7 +91,7 @@ The host-only read token is used only by Git/askpass while creating the bundle. 
 
 The payload ISO root intentionally contains only short fixed filenames (`bootstrap.sh` and `payload.tar`). The target bundle, runtime lock, full wheel filenames, and trusted harness live inside `payload.tar`. The bootstrap verifies the archive SHA-256, safely extracts only regular files/directories, then applies the existing per-file manifest and `pip --require-hashes` checks. This avoids Linux ISO9660/Joliet filename-view differences truncating wheel filenames while preserving both archive-level and file-level integrity checks.
 
-After extraction, the trusted guest gate itself is copied into a dedicated guest-local tmpfs at `/mnt/som-trusted-harness`. That tmpfs is remounted `ro,nosuid,nodev,noexec` before the gate is imported or executed. Target manager/probe/support code still comes from the exact target workspace, but the root lifecycle gate executes only from this independent read-only trust root; the capability-bearing host-agent does not receive `CAP_SYS_ADMIN` and cannot remount it writable.
+After extraction, the trusted guest gate itself is copied into a dedicated guest-local tmpfs at `/mnt/som-trusted-harness`. That tmpfs is remounted `ro,nosuid,nodev,noexec` before the gate is imported or executed. Target manager/probe/support code still comes from the exact target workspace, but the root lifecycle gate executes only from this independent read-only trust root; the initial host-agent capability set excludes `CAP_SYS_ADMIN`. ADR 0005/0006/0008 nevertheless accept guest-root-equivalent target authority: the read-only tmpfs separates the supplied lifecycle source and catches ordinary mutation, but it is not a tamperproof boundary against malicious guest-root target code. Persistent-host isolation comes from the disposable VM with no NIC, host share, or host secret.
 
 ## Exact target identity
 
@@ -115,3 +115,27 @@ Before each run the orchestrator rejects stale QEMU/provider state rather than s
 After every attempted run the orchestrator terminates only the QEMU process it created (if still alive), waits for exit, and removes the overlay, seed ISO, payload ISO, temporary bare repository/bundle, and wheelhouse. Failure to remove run-owned state fails the workflow.
 
 In-guest process/socket/cgroup/key/data cleanup remains part of the test. QEMU process termination plus deletion of the **whole disposable guest state** is the final outer containment boundary.
+
+
+## Lifecycle integrity and stale-state checks
+
+Before fetching a target, trusted orchestration rejects either an existing
+provider marker (including a dangling symlink) or any existing
+`qemu-system-x86_64` process owned by the dedicated orchestrator account.
+Process inventory uses a bounded `ps` query for executable names only; failure
+to obtain inventory fails closed. It never deletes a marker or kills an unknown
+process. Operator recovery still requires verifying no active provider.
+
+Inside the fresh guest, the gate snapshots the exact checkout launcher digest
+before copying it, verifies installed owner/type/mode, and compares installed
+bytes to that snapshot before writing the sudo authorization. Content mismatch
+fails before the launcher can be invoked. This proves installation integrity;
+it does not assert that unreviewed target launcher code is safe.
+
+The trusted-main gate independently owns bootstrap, fixed fixture setup,
+commit binding, and cleanup. Product assertions live in the reviewed exact
+target probe/support and the gate checks its exit status. Acceptance combines
+those target assertions, ordinary contracts, and independent review; a target
+probe that simply exits zero is not product coverage. The fixed full-matrix
+probe contract and review must detect omitted fixtures. No claim of hardware
+attestation or tamperproof product assertions against guest root is made.
