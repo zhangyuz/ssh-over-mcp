@@ -104,15 +104,20 @@ def test_orchestrator_requires_trusted_main_actions_context() -> None:
         "GITHUB_REPOSITORY": "zhangyuz/ssh-over-mcp",
         "GITHUB_REF": "refs/heads/main",
         "GITHUB_SHA": "a" * 40,
+        "SSH_OVER_MCP_E2E_SOURCE_REPOSITORY": "zhangyuz/ssh-over-mcp",
     }
-    assert module._validated_workflow_context(valid) == "a" * 40
+    for event in ("workflow_dispatch", "push", "pull_request_target"):
+        assert module._validated_workflow_context(
+            {**valid, "GITHUB_EVENT_NAME": event}
+        ) == "a" * 40
 
     for case in (
         {**valid, "GITHUB_ACTIONS": "false"},
-        {**valid, "GITHUB_EVENT_NAME": "pull_request_target"},
+        {**valid, "GITHUB_EVENT_NAME": "pull_request"},
         {**valid, "GITHUB_REPOSITORY": "someone/else"},
         {**valid, "GITHUB_REF": "refs/heads/feature"},
         {**valid, "GITHUB_SHA": "abc"},
+        {**valid, "SSH_OVER_MCP_E2E_SOURCE_REPOSITORY": "someone/else"},
     ):
         with pytest.raises(module.OrchestratorError):
             module._validated_workflow_context(case)
@@ -541,9 +546,17 @@ def test_orchestrator_refuses_stale_provider_state_without_deleting_it() -> None
     assert ops.events[-1] == "cleanup_host"
 
 
-def test_workflow_is_trusted_main_manual_qemu_orchestrator_only() -> None:
+def test_workflow_auto_runs_from_trusted_main_authority_only() -> None:
     workflow = yaml.load(WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
-    assert set(workflow["on"]) == {"workflow_dispatch"}
+    assert set(workflow["on"]) == {"push", "pull_request_target", "workflow_dispatch"}
+    assert workflow["on"]["push"]["branches"] == ["main"]
+    assert workflow["on"]["pull_request_target"]["branches"] == ["main"]
+    assert workflow["on"]["pull_request_target"]["types"] == [
+        "opened",
+        "synchronize",
+        "reopened",
+        "ready_for_review",
+    ]
     assert workflow["on"]["workflow_dispatch"]["inputs"]["commit_sha"]["required"] == "true"
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["concurrency"]["cancel-in-progress"] == "false"
@@ -551,12 +564,23 @@ def test_workflow_is_trusted_main_manual_qemu_orchestrator_only() -> None:
     assert job["runs-on"] == [
         "self-hosted", "macOS", "X64", "ssh-over-mcp-e2e-orchestrator"
     ]
+    assert "github.event.pull_request.head.repo.full_name == github.repository" in job["if"]
+    assert "github.event.pull_request.draft == false" in job["if"]
+    assert job["env"]["TARGET_SHA"] == (
+        "${{ github.event_name == 'workflow_dispatch' && inputs.commit_sha || "
+        "github.event_name == 'pull_request_target' && "
+        "github.event.pull_request.head.sha || github.sha }}"
+    )
+    assert job["env"]["SSH_OVER_MCP_E2E_SOURCE_REPOSITORY"] == (
+        "${{ github.event_name == 'pull_request_target' && "
+        "github.event.pull_request.head.repo.full_name || github.repository }}"
+    )
 
     rendered = WORKFLOW.read_text(encoding="utf-8")
     assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in rendered
+    assert "ref: ${{ github.sha }}" in rendered
     assert "persist-credentials: false" in rendered
-    assert "scripts/run-live-local-e2e-orchestrator.py" in rendered
-    assert "inputs.commit_sha" in rendered
+    assert "scripts/run-live-local-e2e-orchestrator.py \"$TARGET_SHA\"" in rendered
     assert "qemu-system-x86_64" in rendered
     assert "limactl" not in rendered
     assert "sudo " not in rendered

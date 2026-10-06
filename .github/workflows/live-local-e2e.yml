@@ -1,6 +1,11 @@
 name: Live Local E2E
 
 on:
+  push:
+    branches: [main]
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       commit_sha:
@@ -18,17 +23,24 @@ concurrency:
 jobs:
   e2e:
     name: No-network Ubuntu 26.04 local E2E
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name != 'pull_request_target' ||
+       (github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.draft == false))
     runs-on: [self-hosted, macOS, X64, ssh-over-mcp-e2e-orchestrator]
     timeout-minutes: 45
+    env:
+      TARGET_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.commit_sha || github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
+      SSH_OVER_MCP_E2E_SOURCE_REPOSITORY: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name || github.repository }}
 
     steps:
       - name: Verify trusted native macOS x86 orchestrator
         shell: bash
-        env:
-          COMMIT_SHA: ${{ inputs.commit_sha }}
         run: |
           set -euo pipefail
+
+          COMMIT_SHA="$TARGET_SHA"
 
           test "$(uname -s)" = "Darwin"
           test "$(uname -m)" = "x86_64"
@@ -69,7 +81,7 @@ jobs:
           SSH_OVER_MCP_E2E_GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python3 scripts/run-live-local-e2e-orchestrator.py "${{ inputs.commit_sha }}"
+          python3 scripts/run-live-local-e2e-orchestrator.py "$TARGET_SHA"
 
       - name: Verify provider state is absent
         if: always()
