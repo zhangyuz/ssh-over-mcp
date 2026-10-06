@@ -66,9 +66,7 @@ def _canonical_member_path(
     if not isinstance(raw, str) or not raw or raw.startswith("/") or "\x00" in raw:
         raise _fail()
 
-    candidate = raw
-    if candidate.startswith("./"):
-        candidate = candidate[2:]
+    candidate = raw.removeprefix("./")
     if candidate.endswith("/"):
         if not allow_trailing_slash or candidate.endswith("//"):
             raise _fail()
