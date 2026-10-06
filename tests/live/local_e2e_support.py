@@ -11,8 +11,10 @@ import secrets
 import socket
 import sqlite3
 import stat
+import sys
 import tempfile
 import threading
+import time
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -80,6 +82,10 @@ SSHD_LOG = Path("/opt/ssh-over-mcp-e2e/runtime/sshd.log")
 WORKLOAD_DATA_ROOT = Path("/opt/ssh-over-mcp-e2e/workload-data")
 EXEC_MARKER = WORKLOAD_DATA_ROOT / "exec-marker"
 MARKER_SCRIPT = Path("/opt/ssh-over-mcp-e2e/runtime/workload_marker.py")
+APPROVAL_MARKER = WORKLOAD_DATA_ROOT / "approval-marker"
+APPROVAL_SCRIPT = Path("/opt/ssh-over-mcp-e2e/runtime/approval_marker.py")
+CONTROL_FD_ENV = "SSH_OVER_MCP_LIVE_E2E_CONTROL_FD"
+_APPROVAL_ID_RE = re.compile(rb"approval_id=(apr_[0-9a-f]{32})")
 WRONG_HOST_KEY_PUBLIC = Path(
     "/opt/ssh-over-mcp-e2e/runtime/wrong_host_ed25519.pub"
 )
@@ -268,6 +274,18 @@ class LocalE2EFixture:
             mode=0o555,
         )
         self._require_file(
+            APPROVAL_MARKER,
+            uid=self.workload_uid,
+            gid=self.workload_gid,
+            mode=0o644,
+        )
+        self._require_file(
+            APPROVAL_SCRIPT,
+            uid=0,
+            gid=0,
+            mode=0o555,
+        )
+        self._require_file(
             WRONG_HOST_KEY_PUBLIC,
             uid=0,
             gid=0,
@@ -397,6 +415,38 @@ async def run_real_ssh_fixture() -> dict[str, object]:
         expected_request_id=_REQUEST_ID,
     )
 
+
+_LEDGER_AUDIT_COLUMNS = (
+    "event_type,request_id,principal_id,profile,host,tool,"
+    "exit_status,duration_ms,stdout_bytes,stderr_bytes,timed_out,truncated"
+)
+
+
+def _read_ledger_audit_rows(
+    db_path: Path,
+    *,
+    request_id: str | None = None,
+    include_rowid: bool = False,
+) -> tuple[dict[str, object], ...]:
+    connection = sqlite3.connect(db_path, timeout=2.0)
+    connection.row_factory = sqlite3.Row
+    try:
+        columns = ("rowid," if include_rowid else "") + _LEDGER_AUDIT_COLUMNS
+        if request_id is None:
+            rows = connection.execute(
+                f"SELECT {columns} FROM audit_events ORDER BY rowid"
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                f"SELECT {columns} FROM audit_events "
+                "WHERE request_id=? ORDER BY rowid",
+                (request_id,),
+            ).fetchall()
+    finally:
+        connection.close()
+    return tuple(dict(row) for row in rows)
+
+
 class LocalMCPHarness:
     """Test-local production-component harness for MCP, Ledger, and real SSH."""
 
@@ -510,6 +560,24 @@ class LocalMCPHarness:
         os.chmod(self._origin_token_file, 0o600)
         return self
 
+    def stop_ledger(self) -> None:
+        if (
+            self._ledger_stop is None
+            or self._ledger_thread is None
+            or self._ledger_service is None
+        ):
+            raise LocalE2EFixtureError("local Security Ledger is not active")
+        self._ledger_stop.set()
+        self._ledger_thread.join(timeout=3)
+        if self._ledger_thread.is_alive():
+            raise LocalE2EFixtureError("local Security Ledger thread did not stop")
+        self._ledger_service.close()
+        if self._ledger_errors:
+            raise LocalE2EFixtureError("local Security Ledger service failed")
+        self._ledger_service = None
+        self._ledger_stop = None
+        self._ledger_thread = None
+
     async def __aexit__(self, exc_type, exc, tb) -> None:
         cleanup_error: BaseException | None = None
         try:
@@ -562,6 +630,7 @@ class LocalMCPHarness:
             "central_deny",
             "remote_deny",
             "wrong_host_key",
+            "approval",
         }:
             raise LocalE2EFixtureError("unsupported local E2E policy variant")
         return {
@@ -586,8 +655,19 @@ class LocalMCPHarness:
                 "version": 1,
                 "default": "deny",
                 "roles": {
-                    "developer": {},
+                    "developer": (
+                        {"env_allow": ["E2E_SECRET"]}
+                        if policy_variant == "approval"
+                        else {}
+                    ),
                     "readonly": {},
+                },
+                "risk": {
+                    "approval_required": (
+                        ["medium", "high", "critical"]
+                        if policy_variant == "approval"
+                        else ["high", "critical"]
+                    )
                 },
                 "rules": [
                     *(
@@ -624,6 +704,26 @@ class LocalMCPHarness:
                         ],
                         "cwd": [str(self.fixture.work_dir)],
                     },
+                    *(
+                        [
+                            {
+                                "id": "e2e.developer.approval-marker",
+                                "effect": "allow",
+                                "roles": ["developer"],
+                                "hosts": ["e2e-host"],
+                                "tools": ["ssh_exec"],
+                                "executables": ["/usr/bin/python3"],
+                                "argv_prefix": [
+                                    "-I",
+                                    "-S",
+                                    str(APPROVAL_SCRIPT),
+                                ],
+                                "cwd": [str(self.fixture.work_dir)],
+                            }
+                        ]
+                        if policy_variant == "approval"
+                        else []
+                    ),
                     *(
                         [
                             {
@@ -816,37 +916,16 @@ class LocalMCPHarness:
             await self._stop_server()
 
     def audit_events(self, request_id: str) -> tuple[dict[str, object], ...]:
-        connection = sqlite3.connect(
-            f"file:{self.ledger_db_path}?mode=ro",
-            uri=True,
+        return _read_ledger_audit_rows(
+            self.ledger_db_path,
+            request_id=request_id,
         )
-        connection.row_factory = sqlite3.Row
-        try:
-            rows = connection.execute(
-                "SELECT event_type,request_id,principal_id,profile,host,tool,"
-                "exit_status,duration_ms,stdout_bytes,stderr_bytes,timed_out,truncated "
-                "FROM audit_events WHERE request_id=? ORDER BY rowid",
-                (request_id,),
-            ).fetchall()
-        finally:
-            connection.close()
-        return tuple(dict(row) for row in rows)
 
     def audit_rows(self) -> tuple[dict[str, object], ...]:
-        connection = sqlite3.connect(
-            f"file:{self.ledger_db_path}?mode=ro",
-            uri=True,
+        return _read_ledger_audit_rows(
+            self.ledger_db_path,
+            include_rowid=True,
         )
-        connection.row_factory = sqlite3.Row
-        try:
-            rows = connection.execute(
-                "SELECT rowid,event_type,request_id,principal_id,profile,host,tool,"
-                "exit_status,duration_ms,stdout_bytes,stderr_bytes,timed_out,truncated "
-                "FROM audit_events ORDER BY rowid"
-            ).fetchall()
-        finally:
-            connection.close()
-        return tuple(dict(row) for row in rows)
 
     def captured_logs(self) -> bytes:
         if self._log_stream is None:
@@ -875,10 +954,13 @@ class LocalMCPHarness:
         )
         if key_fragment is None:
             raise LocalE2EFixtureError("SSH private-key sentinel is unavailable")
+        hmac_key = self._require_ledger_settings().hmac_key_path.read_bytes()
         return (
             self._origin_token,
             str(self.fixture.private_key).encode("utf-8"),
+            private_key,
             key_fragment,
+            hmac_key,
         )
 
 
@@ -1319,6 +1401,46 @@ def _audit_events_since(
     )
 
 
+async def _wait_for_audit_events_since(
+    harness: LocalMCPHarness,
+    rowid: int,
+    *,
+    timeout_seconds: float = 2.0,
+    poll_interval_seconds: float = 0.05,
+) -> tuple[dict[str, object], ...]:
+    if timeout_seconds <= 0 or poll_interval_seconds <= 0:
+        raise ValueError("audit wait bounds must be positive")
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        rows = _audit_events_since(harness, rowid)
+        if rows:
+            return rows
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise LocalE2EFixtureError(
+                "expected audit event did not become visible"
+            )
+        await asyncio.sleep(min(poll_interval_seconds, remaining))
+
+
+def _read_sealed_audit_rows(
+    harness: LocalMCPHarness,
+) -> tuple[dict[str, object], ...]:
+    if harness._ledger_service is not None or harness._ledger_thread is not None:
+        raise LocalE2EFixtureError("Security Ledger must be stopped before sealed read")
+    connection = sqlite3.connect(harness.ledger_db_path, timeout=2.0)
+    connection.row_factory = sqlite3.Row
+    try:
+        rows = connection.execute(
+            "SELECT rowid,event_type,request_id,principal_id,profile,host,tool,"
+            "exit_status,duration_ms,stdout_bytes,stderr_bytes,timed_out,truncated "
+            "FROM audit_events ORDER BY rowid"
+        ).fetchall()
+    finally:
+        connection.close()
+    return tuple(dict(row) for row in rows)
+
+
 def _single_request_event_types(
     rows: tuple[dict[str, object], ...],
     label: str,
@@ -1346,14 +1468,23 @@ async def run_real_fail_closed_fixture() -> dict[str, object]:
     if marker_initial:
         raise LocalE2EFixtureError("fail-closed execution marker is not empty")
 
+    marker_args = {
+        "host": "e2e-host",
+        "executable": "/usr/bin/python3",
+        "args": ["-I", "-S", str(MARKER_SCRIPT)],
+        "cwd": str(fixture.work_dir),
+        "env": {},
+        "stdin": "",
+        "timeout_seconds": 10.0,
+    }
     safe_blobs: list[bytes] = []
+
+    # Origin bearer rejection must happen before any execution path.
     async with LocalMCPHarness(fixture) as harness:
-        # Origin bearer rejection must happen before any execution path.
         async with harness.client("developer") as client:
             del client
             ssh_before = SSHD_LOG.stat().st_size
             marker_before = EXEC_MARKER.read_bytes()
-            audit_before = _last_audit_rowid(harness)
             wrong_origin = b"e2e-origin-wrong-secret"
             async with httpx2.AsyncClient(trust_env=False) as raw_client:
                 missing = await raw_client.post(harness.mcp_url, json={})
@@ -1369,59 +1500,55 @@ async def run_real_fail_closed_fixture() -> dict[str, object]:
                 raise LocalE2EFixtureError("origin authentication did not reject early")
             if wrong_origin in missing.content or wrong_origin in wrong.content:
                 raise LocalE2EFixtureError("origin rejection echoed bearer material")
-            if wrong_origin in harness.captured_logs():
-                raise LocalE2EFixtureError("origin rejection logged bearer material")
-            origin_rows = _audit_events_since(harness, audit_before)
-            if any(
-                row.get("event_type") == "execution_started"
-                for row in origin_rows
-            ):
-                raise LocalE2EFixtureError("origin rejection reached execution audit")
-            if SSHD_LOG.stat().st_size != ssh_before:
-                raise LocalE2EFixtureError("origin rejection reached SSH")
-            if EXEC_MARKER.read_bytes() != marker_before:
-                raise LocalE2EFixtureError("origin rejection mutated workload marker")
 
-        marker_args = {
-            "host": "e2e-host",
-            "executable": "/usr/bin/python3",
-            "args": ["-I", "-S", str(MARKER_SCRIPT)],
-            "cwd": str(fixture.work_dir),
-            "env": {},
-            "stdin": "",
-            "timeout_seconds": 10.0,
-        }
+        safe_blobs.append(harness.captured_logs())
+        if wrong_origin in harness.captured_logs():
+            raise LocalE2EFixtureError("origin rejection logged bearer material")
+        harness.stop_ledger()
+        origin_rows = _read_sealed_audit_rows(harness)
+        if any(
+            row.get("event_type") == "execution_started"
+            for row in origin_rows
+        ):
+            raise LocalE2EFixtureError("origin rejection reached execution audit")
+        if SSHD_LOG.stat().st_size != ssh_before:
+            raise LocalE2EFixtureError("origin rejection reached SSH")
+        if EXEC_MARKER.read_bytes() != marker_before:
+            raise LocalE2EFixtureError("origin rejection mutated workload marker")
 
-        # Central deny must stop before SSH and before execution_started.
+    # Central deny must stop before SSH and before execution_started.
+    async with LocalMCPHarness(fixture) as harness:
         async with harness.client("developer", "central_deny") as client:
             ssh_before = SSHD_LOG.stat().st_size
             marker_before = EXEC_MARKER.read_bytes()
-            audit_before = _last_audit_rowid(harness)
             denied = await client.call_tool("ssh_exec", marker_args)
             denied_error = _require_tool_error(denied, "central deny")
             safe_blobs.append(denied_error)
             if b"request denied by central policy" not in denied_error:
                 raise LocalE2EFixtureError("central denial was not generic")
-            central_rows = _audit_events_since(harness, audit_before)
-            central_events = _single_request_event_types(
-                central_rows,
-                "central deny",
-            )
-            if "policy_denied" not in central_events:
-                raise LocalE2EFixtureError("central denial audit is missing")
-            if "execution_started" in central_events:
-                raise LocalE2EFixtureError("central denial started execution")
-            if SSHD_LOG.stat().st_size != ssh_before:
-                raise LocalE2EFixtureError("central denial reached SSH")
-            if EXEC_MARKER.read_bytes() != marker_before:
-                raise LocalE2EFixtureError("central denial mutated workload marker")
 
-        # Central policy allows /usr/bin/false, but host-local policy has no rule
-        # for it. The SSH session must occur and return the fixed remote deny.
+        safe_blobs.append(harness.captured_logs())
+        harness.stop_ledger()
+        central_rows = _read_sealed_audit_rows(harness)
+        central_events = _single_request_event_types(
+            central_rows,
+            "central deny",
+        )
+        if "policy_denied" not in central_events:
+            raise LocalE2EFixtureError("central denial audit is missing")
+        if "execution_started" in central_events:
+            raise LocalE2EFixtureError("central denial started execution")
+        if SSHD_LOG.stat().st_size != ssh_before:
+            raise LocalE2EFixtureError("central denial reached SSH")
+        if EXEC_MARKER.read_bytes() != marker_before:
+            raise LocalE2EFixtureError("central denial mutated workload marker")
+
+    # Central policy allows /usr/bin/false, but host-local policy has no rule
+    # for it. The SSH session must occur and return the fixed remote deny.
+    async with LocalMCPHarness(fixture) as harness:
         async with harness.client("developer", "remote_deny") as client:
             ssh_before = SSHD_LOG.stat().st_size
             marker_before = EXEC_MARKER.read_bytes()
-            audit_before = _last_audit_rowid(harness)
             remote = await client.call_tool(
                 "ssh_exec",
                 {
@@ -1449,25 +1576,28 @@ async def run_real_fail_closed_fixture() -> dict[str, object]:
             safe_blobs.append(remote_error)
             if b"ssh-over-mcp-host-agent: denied:" not in remote_error:
                 raise LocalE2EFixtureError("host-local denial was not generic")
-            remote_rows = _audit_events_since(harness, audit_before)
-            remote_events = _single_request_event_types(
-                remote_rows,
-                "host-local deny",
-            )
-            if "execution_started" not in remote_events:
-                raise LocalE2EFixtureError("host-local denial never reached SSH execution")
-            if "remote_policy_denied" not in remote_events:
-                raise LocalE2EFixtureError("host-local denial audit is missing")
-            if SSHD_LOG.stat().st_size <= ssh_before:
-                raise LocalE2EFixtureError("host-local denial did not reach SSH")
-            if EXEC_MARKER.read_bytes() != marker_before:
-                raise LocalE2EFixtureError("host-local denial mutated workload marker")
 
-        # A server-owned but wrong pinned key must fail before ForceCommand.
+        safe_blobs.append(harness.captured_logs())
+        harness.stop_ledger()
+        remote_rows = _read_sealed_audit_rows(harness)
+        remote_events = _single_request_event_types(
+            remote_rows,
+            "host-local deny",
+        )
+        if "execution_started" not in remote_events:
+            raise LocalE2EFixtureError("host-local denial never reached SSH execution")
+        if "remote_policy_denied" not in remote_events:
+            raise LocalE2EFixtureError("host-local denial audit is missing")
+        if SSHD_LOG.stat().st_size <= ssh_before:
+            raise LocalE2EFixtureError("host-local denial did not reach SSH")
+        if EXEC_MARKER.read_bytes() != marker_before:
+            raise LocalE2EFixtureError("host-local denial mutated workload marker")
+
+    # A server-owned but wrong pinned key must fail before ForceCommand.
+    async with LocalMCPHarness(fixture) as harness:
         async with harness.client("developer", "wrong_host_key") as client:
             ssh_before = SSHD_LOG.stat().st_size
             marker_before = EXEC_MARKER.read_bytes()
-            audit_before = _last_audit_rowid(harness)
             mismatch = await client.call_tool("ssh_exec", marker_args)
             mismatch_error = _require_tool_error(
                 mismatch,
@@ -1476,35 +1606,355 @@ async def run_real_fail_closed_fixture() -> dict[str, object]:
             safe_blobs.append(mismatch_error)
             if b"SSH host key verification failed" not in mismatch_error:
                 raise LocalE2EFixtureError("host-key failure was not generic")
-            host_key_rows = _audit_events_since(harness, audit_before)
-            host_key_events = _single_request_event_types(
-                host_key_rows,
-                "wrong host key",
-            )
-            if "execution_started" not in host_key_events:
-                raise LocalE2EFixtureError("host-key failure audit ordering is invalid")
-            if "host_key_failure" not in host_key_events:
-                raise LocalE2EFixtureError("host-key failure audit is missing")
-            ssh_delta = SSHD_LOG.read_bytes()[ssh_before:]
-            if b"Starting session: forced-command" in ssh_delta:
-                raise LocalE2EFixtureError("host-key mismatch reached ForceCommand")
-            if EXEC_MARKER.read_bytes() != marker_before:
-                raise LocalE2EFixtureError("host-key mismatch mutated workload marker")
 
-        true_key = fixture.host_key_line().encode("ascii")
-        wrong_key = _host_key_line(WRONG_HOST_KEY_PUBLIC).encode("ascii")
         safe_blobs.append(harness.captured_logs())
-        for blob in safe_blobs:
-            if true_key in blob or wrong_key in blob:
-                raise LocalE2EFixtureError("raw host-key material leaked to client")
-        if EXEC_MARKER.read_bytes() != marker_initial:
-            raise LocalE2EFixtureError("fail-closed scenarios mutated workload marker")
+        harness.stop_ledger()
+        host_key_rows = _read_sealed_audit_rows(harness)
+        host_key_events = _single_request_event_types(
+            host_key_rows,
+            "wrong host key",
+        )
+        if "execution_started" not in host_key_events:
+            raise LocalE2EFixtureError("host-key failure audit ordering is invalid")
+        if "host_key_failure" not in host_key_events:
+            raise LocalE2EFixtureError("host-key failure audit is missing")
+        ssh_delta = SSHD_LOG.read_bytes()[ssh_before:]
+        if b"Starting session: forced-command" in ssh_delta:
+            raise LocalE2EFixtureError("host-key mismatch reached ForceCommand")
+        if EXEC_MARKER.read_bytes() != marker_before:
+            raise LocalE2EFixtureError("host-key mismatch mutated workload marker")
 
-        return {
-            "origin_auth_rejected_early": True,
-            "central_deny_before_ssh": True,
-            "host_local_deny_after_ssh": True,
-            "wrong_host_key_before_forcecommand": True,
-            "marker_unchanged": True,
-            "safe_errors": True,
+    true_key = fixture.host_key_line().encode("ascii")
+    wrong_key = _host_key_line(WRONG_HOST_KEY_PUBLIC).encode("ascii")
+    for blob in safe_blobs:
+        if true_key in blob or wrong_key in blob:
+            raise LocalE2EFixtureError("raw host-key material leaked to client")
+    if EXEC_MARKER.read_bytes() != marker_initial:
+        raise LocalE2EFixtureError("fail-closed scenarios mutated workload marker")
+
+    return {
+        "origin_auth_rejected_early": True,
+        "central_deny_before_ssh": True,
+        "host_local_deny_after_ssh": True,
+        "wrong_host_key_before_forcecommand": True,
+        "marker_unchanged": True,
+        "safe_errors": True,
+    }
+
+
+def _approval_id_from_error(error: bytes, label: str) -> str:
+    match = _APPROVAL_ID_RE.search(error)
+    if match is None:
+        raise LocalE2EFixtureError(f"{label} approval id is missing")
+    return match.group(1).decode("ascii")
+
+
+def _control_fd() -> int:
+    raw = os.environ.get(CONTROL_FD_ENV, "")
+    try:
+        value = int(raw, 10)
+    except ValueError:
+        raise LocalE2EFixtureError("Task 7 control fd is invalid") from None
+    if value <= 2:
+        raise LocalE2EFixtureError("Task 7 control fd is invalid")
+    return value
+
+
+async def _grant_approval_via_cli(
+    python: Path,
+    approval_id: str,
+    admin_env: Mapping[str, str],
+) -> tuple[bytes, bytes]:
+    # The no-network guest runs target source without installed console scripts.
+    # This module is the real ssh-over-mcp-approvalctl entry point.
+    process = await asyncio.create_subprocess_exec(
+        str(python),
+        "-m",
+        "ssh_over_mcp.approvals.cli",
+        "grant",
+        approval_id,
+        env={
+            **admin_env,
+            "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src"),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=5)
+    except TimeoutError as exc:
+        process.kill()
+        await process.wait()
+        raise LocalE2EFixtureError("approvalctl grant timed out") from exc
+    if process.returncode != 0:
+        raise LocalE2EFixtureError("approvalctl grant failed")
+    try:
+        payload = json.loads(stdout.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise LocalE2EFixtureError("approvalctl output is invalid") from exc
+    if payload.get("state") != "granted":
+        raise LocalE2EFixtureError("approval CLI did not grant request")
+    return stdout, stderr
+
+
+async def run_real_approval_outage_containment_fixture() -> dict[str, object]:
+    fixture = LocalE2EFixture.from_env()
+    fixture.verify_filesystem_contract()
+    if APPROVAL_MARKER.read_bytes() != b"":
+        raise LocalE2EFixtureError("approval marker is not empty")
+    if EXEC_MARKER.read_bytes() != b"":
+        raise LocalE2EFixtureError("execution marker is not empty")
+
+    approval_request = {
+        "host": "e2e-host",
+        "executable": "/usr/bin/python3",
+        "args": ["-I", "-S", str(APPROVAL_SCRIPT)],
+        "cwd": str(fixture.work_dir),
+        "env": {},
+        "stdin": "task7-stdin-sensitive-v1",
+        "timeout_seconds": 10.0,
+    }
+    state_request = {
+        "host": "e2e-host",
+        "executable": "/usr/bin/python3",
+        "args": ["-I", "-S", str(fixture.state_script)],
+        "cwd": str(fixture.work_dir),
+        "env": {},
+        "stdin": "",
+        "timeout_seconds": 10.0,
+    }
+    task7_secrets = (
+        b"task7-stdin-sensitive-v1",
+        b"task7-env-sensitive-v1",
+        b"task7-argv-sensitive-v1",
+    )
+    safe_blobs: list[bytes] = []
+
+    async with LocalMCPHarness(fixture) as harness:
+        async with harness.client("developer", "approval") as client:
+            tool_names = {tool.name for tool in (await client.list_tools()).tools}
+            if "approval_status" not in tool_names:
+                raise LocalE2EFixtureError("approval status tool is unavailable")
+            if tool_names.intersection(
+                {"approval_grant", "approval_deny", "grant", "deny"}
+            ):
+                raise LocalE2EFixtureError("MCP surface exposes approval mutation")
+
+            ssh_before = SSHD_LOG.stat().st_size
+            pending = await client.call_tool("ssh_exec", approval_request)
+            pending_error = _require_tool_error(pending, "approval pending")
+            safe_blobs.append(pending_error)
+            approval_id = _approval_id_from_error(pending_error, "approval pending")
+            if b"approval required" not in pending_error or b"state=pending" not in pending_error:
+                raise LocalE2EFixtureError("approval request did not become pending")
+            if APPROVAL_MARKER.read_bytes() != b"" or SSHD_LOG.stat().st_size != ssh_before:
+                raise LocalE2EFixtureError("pending approval reached SSH or workload")
+
+            pending_status = await client.call_tool(
+                "approval_status",
+                {"approval_id": approval_id},
+            )
+            pending_data = _require_tool_success(pending_status, "approval_status pending")
+            if pending_data.get("state") != "pending":
+                raise LocalE2EFixtureError("approval state is not pending")
+
+            settings = harness._require_ledger_settings()
+            python = Path(sys.executable)
+            admin_env = {
+                "SSH_OVER_MCP_LEDGER_ADMIN_SOCKET_PATH": str(
+                    settings.admin_socket_path
+                ),
+                "SSH_OVER_MCP_LEDGER_SERVICE_UID": str(settings.service_uid),
+                "SSH_OVER_MCP_LEDGER_SERVICE_GID": str(settings.service_gid),
+            }
+            granted_stdout, granted_stderr = await _grant_approval_via_cli(
+                python,
+                approval_id,
+                admin_env,
+            )
+            safe_blobs.extend((granted_stdout, granted_stderr))
+
+            exact_retry = dict(approval_request)
+            exact_retry["approval_id"] = approval_id
+            executed = await client.call_tool("ssh_exec", exact_retry)
+            safe_blobs.append(_tool_result_bytes(executed))
+            executed_data = _require_tool_success(executed, "approved execution")
+            if executed_data.get("exit_status") != 0:
+                raise LocalE2EFixtureError("approved execution did not succeed")
+            if APPROVAL_MARKER.read_bytes() != b"1":
+                raise LocalE2EFixtureError("approved marker side effect mismatch")
+
+            consumed = await client.call_tool(
+                "approval_status",
+                {"approval_id": approval_id},
+            )
+            consumed_data = _require_tool_success(consumed, "approval_status consumed")
+            if consumed_data.get("state") != "consumed":
+                raise LocalE2EFixtureError("approval was not consumed")
+
+            replay = await client.call_tool("ssh_exec", exact_retry)
+            replay_error = _require_tool_error(replay, "approval replay")
+            safe_blobs.append(replay_error)
+            replacement_id = _approval_id_from_error(replay_error, "approval replay")
+            if replacement_id == approval_id or APPROVAL_MARKER.read_bytes() != b"1":
+                raise LocalE2EFixtureError("approval replay was not single-use")
+
+            replay_stdout, replay_stderr = await _grant_approval_via_cli(
+                python,
+                replacement_id,
+                admin_env,
+            )
+            safe_blobs.extend((replay_stdout, replay_stderr))
+
+            mutation = dict(approval_request)
+            mutation["args"] = [
+                "-I",
+                "-S",
+                str(APPROVAL_SCRIPT),
+                "task7-argv-sensitive-v1",
+            ]
+            mutation["env"] = {"E2E_SECRET": "task7-env-sensitive-v1"}
+            mutation["approval_id"] = replacement_id
+            mutation_ssh_before = SSHD_LOG.stat().st_size
+            mismatch = await client.call_tool("ssh_exec", mutation)
+            mismatch_error = _require_tool_error(mismatch, "approval binding mismatch")
+            safe_blobs.append(mismatch_error)
+            mismatch_id = _approval_id_from_error(
+                mismatch_error,
+                "approval binding mismatch",
+            )
+            if mismatch_id == replacement_id:
+                raise LocalE2EFixtureError("approval binding mismatch reused old approval")
+            if APPROVAL_MARKER.read_bytes() != b"1":
+                raise LocalE2EFixtureError("approval binding mismatch executed workload")
+            if SSHD_LOG.stat().st_size != mutation_ssh_before:
+                raise LocalE2EFixtureError("approval binding mismatch reached SSH")
+            old_status = await client.call_tool(
+                "approval_status",
+                {"approval_id": replacement_id},
+            )
+            old_status_data = _require_tool_success(
+                old_status,
+                "approval_status binding base",
+            )
+            if old_status_data.get("state") != "granted":
+                raise LocalE2EFixtureError("binding mismatch consumed old approval")
+
+        async with harness.client("developer") as client:
+            base_url = harness.mcp_url.removesuffix("/mcp")
+            ssh_before = SSHD_LOG.stat().st_size
+            approval_before = APPROVAL_MARKER.read_bytes()
+            exec_before = EXEC_MARKER.read_bytes()
+            harness.stop_ledger()
+            async with httpx2.AsyncClient(trust_env=False) as raw_client:
+                health = await raw_client.get(base_url + "/healthz")
+                ready = await raw_client.get(base_url + "/readyz")
+            safe_blobs.extend((health.content, ready.content))
+            if health.status_code != 200 or health.json() != {"status": "ok"}:
+                raise LocalE2EFixtureError("/healthz failed during Ledger outage")
+            if ready.status_code != 503 or ready.json() != {"status": "not_ready"}:
+                raise LocalE2EFixtureError("/readyz did not fail closed")
+            outage = await client.call_tool("ssh_exec", state_request)
+            outage_error = _require_tool_error(outage, "Ledger outage execution")
+            safe_blobs.append(outage_error)
+            if b"audit persistence failed" not in outage_error:
+                raise LocalE2EFixtureError("Ledger outage error was not generic")
+            if SSHD_LOG.stat().st_size != ssh_before:
+                raise LocalE2EFixtureError("Ledger outage reached SSH")
+            if (
+                APPROVAL_MARKER.read_bytes() != approval_before
+                or EXEC_MARKER.read_bytes() != exec_before
+            ):
+                raise LocalE2EFixtureError("Ledger outage mutated workload state")
+
+        safe_blobs.extend(
+            (
+                harness.ledger_storage_bytes(),
+                harness.captured_logs(),
+                SSHD_LOG.read_bytes(),
+            )
+        )
+        for secret in (*harness.secret_sentinels(), *task7_secrets):
+            if any(secret in blob for blob in safe_blobs):
+                raise LocalE2EFixtureError("Task 7 secret retention scan failed")
+
+    async with LocalMCPHarness(fixture) as harness:
+        async with harness.client("developer") as client:
+            # STOP_MANAGER is deliberately the final execution fault in the probe.
+            control_fd = _control_fd()
+            with socket.socket(fileno=os.dup(control_fd)) as control:
+                control.settimeout(3.0)
+                control.sendall(b"STOP_MANAGER\n")
+                response = control.recv(16)
+            if response != b"OK\n":
+                raise LocalE2EFixtureError("Task 7 manager-stop response is invalid")
+
+            marker_before = APPROVAL_MARKER.read_bytes()
+            exec_before = EXEC_MARKER.read_bytes()
+            unavailable = await client.call_tool("ssh_exec", state_request)
+            unavailable_blob = _tool_result_bytes(unavailable)
+            safe_blobs = [unavailable_blob]
+            unavailable_data = _require_tool_success(
+                unavailable,
+                "containment unavailable execution",
+            )
+            if unavailable_data.get("exit_status") != 69:
+                raise LocalE2EFixtureError("containment failure status mismatch")
+            if unavailable_data.get("stdout_base64") not in {"", None}:
+                raise LocalE2EFixtureError("containment failure exposed stdout")
+            stderr_base64 = unavailable_data.get("stderr_base64")
+            if not isinstance(stderr_base64, str):
+                raise LocalE2EFixtureError("containment failure stderr is invalid")
+            try:
+                stderr = base64.b64decode(stderr_base64, validate=True)
+            except (ValueError, UnicodeError) as exc:
+                raise LocalE2EFixtureError("containment failure stderr is malformed") from exc
+            if stderr != b"ssh-over-mcp-host-agent: execution failed\n":
+                raise LocalE2EFixtureError("containment failure was not generic")
+            if b"containment.sock" in unavailable_blob or b"manager" in stderr.lower():
+                raise LocalE2EFixtureError("containment internals leaked through MCP")
+
+        harness.stop_ledger()
+        rows = _read_sealed_audit_rows(harness)
+        request_ids = {
+            str(row["request_id"])
+            for row in rows
+            if row.get("tool") == "ssh_exec"
+            and isinstance(row.get("request_id"), str)
         }
+        if len(request_ids) != 1:
+            raise LocalE2EFixtureError("containment failure request id is ambiguous")
+        request_id = next(iter(request_ids))
+        cgroup = fixture.cgroup_root / f"ssh-over-mcp-{request_id}"
+        if cgroup.exists():
+            raise LocalE2EFixtureError("containment failure leaked request cgroup")
+        if (
+            APPROVAL_MARKER.read_bytes() != marker_before
+            or EXEC_MARKER.read_bytes() != exec_before
+        ):
+            raise LocalE2EFixtureError("containment failure executed workload")
+
+        safe_blobs.extend(
+            (
+                harness.ledger_storage_bytes(),
+                harness.captured_logs(),
+                SSHD_LOG.read_bytes(),
+            )
+        )
+        for secret in (*harness.secret_sentinels(), *task7_secrets):
+            if any(secret in blob for blob in safe_blobs):
+                raise LocalE2EFixtureError("final Task 7 secret retention scan failed")
+
+    return {
+        "approval_required_before_ssh": True,
+        "approval_granted_via_cli": True,
+        "approval_consumed": True,
+        "approval_replay_denied": True,
+        "approval_binding_mismatch_denied": True,
+        "ledger_outage_not_ready": True,
+        "ledger_outage_no_side_effect": True,
+        "containment_unavailable_fail_closed": True,
+        "request_cgroup_clean": True,
+        "secret_retention_clean": True,
+    }

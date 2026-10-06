@@ -86,9 +86,18 @@ def main(argv: list[str] | None = None) -> int:
     state = asyncio.run(local_e2e_support.run_real_ssh_fixture())
     mcp = asyncio.run(local_e2e_support.run_real_mcp_fixture())
     filesystem = asyncio.run(local_e2e_support.run_real_filesystem_profile_fixture())
+    fail_closed = asyncio.run(local_e2e_support.run_real_fail_closed_fixture())
+    task7 = asyncio.run(
+        local_e2e_support.run_real_approval_outage_containment_fixture()
+    )
     summary = {
+        "approval_lifecycle_verified": task7["approval_consumed"],
         "commit": expected,
+        "containment_failure_verified": task7[
+            "containment_unavailable_fail_closed"
+        ],
         "cgroup": state["cgroup"],
+        "fail_closed_verified": fail_closed["safe_errors"],
         "filesystem_audit_verified": filesystem["audit_verified"],
         "mcp_request_id": mcp["request_id"],
         "no_new_privs": state["no_new_privs"],
