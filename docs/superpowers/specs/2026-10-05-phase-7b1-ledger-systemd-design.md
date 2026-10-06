@@ -358,12 +358,26 @@ unit, command, path, UID/GID, or directive. An absent target 7B1 probe during
 authority bootstrap is explicitly legacy-only evidence; after activation the
 7B1 target acceptance run must require it, not conditionally skip it.
 
-The trusted host workflow/gate selects and records `legacy-7a` versus
-`ledger-systemd-7b1` acceptance mode. A target file's presence, contents, exit
-code or environment cannot choose or downgrade that mode. Exact-head/merge-main
-7B1 certification explicitly requires the latter mode and its complete fixed
-matrix in the commit-bound result; a deleted, renamed, missing or failing probe
-must fail. Legacy bootstrap results cannot be presented as 7B1 acceptance.
+The trusted host workflow/gate selects and records its fixed evidence profile.
+The approved [native prerequisite](2026-10-06-offline-native-e2e-toolchain-design.md)
+reserves live-local-e2e.yml for scoped legacy-7a authority bootstrap/native
+repair, and separate fixed candidate/native-required paths for native feasibility
+and subsequent authority preparation. Task 8 creates main-only
+live-ledger-systemd-e2e.yml and its fixed host entrypoint, selecting only
+ledger-systemd-7b1, with exact commit_sha as the only workflow input. It retains
+mandatory native preflight and shares the dedicated provider concurrency group
+with cancel-in-progress false. This routing refinement is approved under
+accepted ADR 0010; it does not activate any workflow in this documentation PR.
+
+A target file's presence, contents, exit code or environment cannot choose or
+downgrade the trusted profile. Exact-head/merge-main 7B1 certification requires
+ledger-systemd-7b1 and its complete fixed sixteen-criterion matrix plus all five
+legacy fixtures in the commit-bound result; a deleted, renamed, missing or
+failing probe must fail. Legacy, candidate and native-required preparation
+results cannot be presented as 7B1 acceptance. Ledger authority repairs are
+separate authority-only PRs using native-required preparation gates; full Ledger
+proof must pass afterward before product completion. A product fix cannot use
+preparation evidence. No automatic fallback on a failed native/Ledger run.
 
 Read-only guest storage is not tamperproof against the accepted guest-root
 equivalent target authority. Review and contracts establish product coverage;
