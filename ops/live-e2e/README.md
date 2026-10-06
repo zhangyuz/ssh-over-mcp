@@ -176,8 +176,9 @@ marker's owner PID without mutation. Dispatch it a second time with that exact
 PID only after review of the inspection output.
 
 Recovery refuses unless the fixed marker is a runner-owned `0600` regular file
-with the exact expected target, the recorded owner PID is dead, no runner-owned
-QEMU process exists, and every matching fixed-prefix temporary directory is
-runner-owned. Only then may it remove those orphan temporary directories and the
-marker. It has no sudo, root, arbitrary path, process-kill, or provider restart
-authority. A mismatch remains operator-visible state and requires renewed review.
+with the exact expected target, the recorded owner PID is dead, and no runner-owned
+QEMU process exists. Only then may it unlink that one fixed marker. It deliberately
+does not delete temporary directories or any other unknown state because the
+current marker schema does not bind those paths. It has no sudo, root, arbitrary
+path, process-kill, recursive-delete, or provider restart authority. A mismatch
+remains operator-visible state and requires renewed review.

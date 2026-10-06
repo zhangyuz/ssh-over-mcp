@@ -495,6 +495,8 @@ recovery path. It runs on the same non-admin Intel-macOS orchestrator account an
 shares the `live-local-e2e` concurrency group. Dispatch once with the exact stale
 target and owner PID `0` to inspect only. Review the reported owner PID, then
 dispatch again with that exact PID. Recovery proceeds only if the PID no longer
-exists, no QEMU owned by the runner account exists, the marker schema/ownership/
-mode match the fixed contract, and all fixed-prefix temporary directories are
-owned by that account. The workflow does not use sudo or kill processes.
+exists, no QEMU owned by the runner account exists, and the marker schema/
+ownership/mode match the fixed contract. It unlinks only the fixed marker;
+temporary directories and other unknown state are intentionally left untouched
+because the current marker does not bind them. The workflow does not use sudo,
+kill processes, or recursively delete paths.
