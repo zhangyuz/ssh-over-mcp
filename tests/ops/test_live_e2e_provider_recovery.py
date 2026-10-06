@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-import stat
 import sys
 from pathlib import Path
 from types import ModuleType
