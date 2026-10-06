@@ -64,10 +64,9 @@ def _validate_context(env: Mapping[str, str]) -> None:
 
 
 def _parse_expected_target(value: str) -> str:
-    normalized = value.lower()
-    if _HEX40.fullmatch(normalized) is None:
-        raise RecoveryError("expected target must be exact 40-hex")
-    return normalized
+    if _HEX40.fullmatch(value) is None:
+        raise RecoveryError("expected target must be canonical lowercase 40-hex")
+    return value
 
 
 def _parse_expected_pid(value: str) -> int:
