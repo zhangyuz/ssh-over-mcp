@@ -601,7 +601,7 @@ Ruling: the guest installs trusted runtime dependencies offline and runs target 
 
 Phase 7A4 regresses the existing suites under `tests/approvals/`, `tests/api/`, `tests/policy/`, `tests/ssh/`, and `tests/host_agent/` in full ordinary Linux CI. These cover single-use binding, principal isolation, durable audit, pre-network authorization, host identity, credential secrecy, privilege transition, attach-before-exec, and filesystem uncertainty/create-only semantics.
 
-Phase 6 deployment checks remain `tests/ops/test_container_reproducibility_contract.py`, `tests/ops/test_compose_contract.py`, `tests/ops/test_cloudflare_connector_contract.py`, and the live reproducible-image/container/Compose/connector probes. The connector uses only a fake token and does not provision a Cloudflare account. Fresh Phase 7A4 Mac x86 deployment reruns passed: two independent no-cache builds were bit-reproducible; 14 container/Compose/fake-token connector tests passed. The tested image ID was `sha256:725c672918a0635d44336b1792f465eb2382e2e79cfa83279d605130b4c02b0e`. No live account provisioning was performed. Whole-phase review identified lifecycle integrity gaps; separate authority PR #120 merged as `76fdd4fee08f28b85b97c151617988120a7ae855` after exact-head ordinary CI and clean independent review. Its post-merge CI/E2E gates remain pending before this target/evidence slice is certified. No closure claim is made here.
+Phase 6 deployment checks remain `tests/ops/test_container_reproducibility_contract.py`, `tests/ops/test_compose_contract.py`, `tests/ops/test_cloudflare_connector_contract.py`, and the live reproducible-image/container/Compose/connector probes. The connector uses only a fake token and does not provision a Cloudflare account. Fresh Phase 7A4 Mac x86 deployment reruns passed: two independent no-cache builds were bit-reproducible; 14 container/Compose/fake-token connector tests passed. The tested image ID was `sha256:725c672918a0635d44336b1792f465eb2382e2e79cfa83279d605130b4c02b0e`. No live account provisioning was performed. Whole-phase review identified lifecycle integrity gaps; separate authority PR #120 merged as `76fdd4fee08f28b85b97c151617988120a7ae855` after exact-head ordinary CI and clean independent review. Its exact merge-main [CI 37397940466](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/37397940466) and [Level-3 37397957958](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/37397957958) passed, including provider-state absence and checkout cleanup. This already-merged authority now certifies the separate target/evidence slice. No closure claim is made here.
 
 
 ### 18.3 Whole-phase review findings and sequencing
@@ -611,7 +611,7 @@ integrity checking. Separate authority PR #120 addresses those documented
 invariants with RED/GREEN contracts and has merged at
 `76fdd4fee08f28b85b97c151617988120a7ae855`; the target/evidence PR does not modify
 its certifying gate. Exact-head [ordinary CI 37397679558](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/37397679558) and independent review passed before authority merge.
-Exact authority merge-main CI/E2E precede target certification.
+Exact authority merge-main [CI 37397940466](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/37397940466) and [Level-3 37397957958](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/37397957958) passed before target certification.
 
 The trusted gate owns fixture lifecycle, exact commit binding, and cleanup.
 Reviewed target probe/support owns product assertions and the gate checks its
