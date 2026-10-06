@@ -76,17 +76,32 @@ workspace cannot inherit either standard root's binding.
    Apply's incident file/total-byte eligibility ceilings require the resulting
    complete evidence and review before its contract or code can be approved.
 6. Record each relative name, kind, device/inode, UID/GID, mode, link count,
-   size and change timestamps, with authority SHA, workflow run/attempt,
-   marker identity/target/PID and selected staging identity/target. Emit bounded
-   JSON and its canonical SHA-256. The operator reviews the complete manifest.
-   A digest alone is not review or cleanup authorization.
+   size and change timestamps in a canonical inventory payload, together with
+   marker identity/target/PID and selected staging identity/target. Bind that
+   payload and its SHA-256 in an immutable inspection envelope containing the
+   inspection authority SHA and workflow run/attempt. Emit bounded JSON and the
+   envelope's canonical SHA-256; the 2 MiB bound covers the complete envelope.
+   The operator reviews the complete envelope and inventory. A digest alone is
+   not review or cleanup authorization.
 
 ### Apply phase
 
 Only a separately dispatched operator-confirmed apply phase may mutate. Require
-the exact reviewed manifest digest plus its inspect run/attempt and authority
-binding. Re-inventory and compare the complete manifest and marker before any
-mutation; a matching target string alone is insufficient.
+the exact reviewed inventory and inspection-envelope digests plus the inspect
+run/attempt and authority binding. Retrieve and validate the original envelope
+from the successful trusted inspection run through the fixed evidence mechanism
+specified and reviewed in the apply contract; caller-supplied JSON or a digest
+and run tuple alone cannot substitute for that record. The apply authority MUST
+explicitly accept that exact inspection authority SHA in its already-main
+contract. Equal SHAs or an explicitly reviewed fixed compatibility mapping may
+be used; repository ancestry alone or caller-selected compatibility is
+insufficient. Unsupported or unavailable inspection evidence refuses mutation.
+
+Re-inventory and compare the entire canonical inventory payload, including the
+marker, before any mutation. Preserve the inspection envelope unchanged; record
+the apply authority SHA and run/attempt separately, bound to the reviewed
+envelope digest. Fresh apply provenance is not part of inventory equality. A
+matching target string alone is insufficient.
 
 Recheck process absence immediately before mutation. Keep all directory
 descriptors pinned; revalidate directory-entry identities before each bounded
@@ -99,10 +114,16 @@ unlink-by-inode. It cannot claim safety against a compromised runner account.
 Before the first mutation, create a fresh exclusive no-follow mode-0600 journal
 under a fixed runner-owned private recovery-evidence cache. Its lifecycle name
 comes only from validated trusted workflow run/attempt and manifest binding.
-No existing journal is overwritten, repaired or deleted. Bound projected
-journal bytes before mutation; the exact limit belongs to the reviewed apply
-contract. Write and fsync an intention record before each operation. After
-unlink/rmdir, sync the pinned parent directory, verify absence, and write/fsync
+No existing journal is overwritten, repaired or deleted. Require a securely
+provisioned and durably established cache directory; its provisioning and
+validation belong to the reviewed apply contract. Before any staging mutation,
+write and fsync the journal's initial lifecycle/binding record, then fsync its
+pinned cache directory to establish the new journal name. Unsupported or failed
+file/directory sync forbids staging mutation. Require actual macOS filesystem
+evidence for this ordering, including injected failures before the first unlink.
+Bound projected journal bytes before mutation; the exact limit belongs to the
+reviewed apply contract. Write and fsync an intention record before each
+operation. After unlink/rmdir, sync the pinned parent directory, verify absence, and write/fsync
 a confirmation. Any write/sync/reporting failure stops with a failed result.
 Successful sync calls are required; no stronger hardware power-loss guarantee
 is claimed without separate evidence.
