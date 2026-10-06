@@ -483,3 +483,19 @@ process, inspects the recorded state, and only then performs recovery.
 The trusted root gate and orchestrator come from already-merged main. Target
 manager/probe/support/application code runs only inside the guest after the
 fixed non-root handoff. A target PR never supplies the authority certifying it.
+
+### Manual stale-provider recovery
+
+An externally cancelled Live Local E2E run can be terminated after it creates
+`active-run.json` but before the orchestrator's `finally` cleanup executes.
+Normal E2E runs must continue to fail closed on that marker; they never delete
+stale provider state automatically.
+
+Use the manual **Recover Live Local E2E Provider** workflow from `main`. Run
+`inspect` first. It executes only as the dedicated non-admin x86 orchestrator,
+requires a regular owner-only `0600` marker, parses only the fixed target/owner
+PID record, and refuses recovery if the recorded PID still exists or any owned
+`qemu-system-x86_64` process is present. To clear, rerun with `clear` and copy
+back the exact reported target SHA and owner PID. The tool repeats process
+inventory and requires the same marker device/inode immediately before unlink.
+It does not delete temporary directories or any other unknown state.

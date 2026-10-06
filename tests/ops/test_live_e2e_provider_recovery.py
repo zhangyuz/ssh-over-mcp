@@ -158,7 +158,10 @@ def test_workflow_is_manual_only_on_dedicated_runner() -> None:
     workflow = yaml.load(WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
     assert set(workflow["on"]) == {"workflow_dispatch"}
     assert workflow["permissions"] == {"contents": "read"}
-    assert workflow["concurrency"]["cancel-in-progress"] == "false"
+    assert workflow["concurrency"] == {
+        "group": "live-local-e2e",
+        "cancel-in-progress": "false",
+    }
     job = workflow["jobs"]["recover"]
     assert job["if"] == "github.ref == 'refs/heads/main'"
     assert job["runs-on"] == [
