@@ -7,7 +7,6 @@ import shlex
 import stat
 import subprocess
 import sys
-import sysconfig
 import venv
 from pathlib import Path
 from types import SimpleNamespace
@@ -481,10 +480,10 @@ def test_launcher_flags_block_real_site_and_environment_hooks(tmp_path):
         f"from pathlib import Path; Path({str(env_marker)!r}).touch()\n"
     )
     env = {"PATH": os.defpath, "PYTHONPATH": str(foreign), "PYTHONHOME": str(foreign)}
-    # CI toolcache Python is dynamically linked. Use its own trusted library directory,
-    # not inherited loader paths, so the child reaches Python/site initialization.
+    # Toolcache Python is relocated: sysconfig LIBDIR retains its build-time path.
+    # Its actual base prefix supplies the trusted runtime libraries for this test.
     if sys.platform == "linux":
-        env["LD_LIBRARY_PATH"] = sysconfig.get_config_var("LIBDIR")
+        env["LD_LIBRARY_PATH"] = str(Path(sys.base_prefix) / "lib")
     interpreter = runtime / "bin/python"
     subprocess.run([str(interpreter), "-I", "-B", "-c", "pass"], check=True, env=env)
     assert site_marker.exists(), "differential control must actually execute the installed hook"
