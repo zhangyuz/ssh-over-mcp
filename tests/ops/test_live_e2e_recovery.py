@@ -30,32 +30,20 @@ def _load_module() -> ModuleType:
 
 
 def _state(path: Path, *, target: str = TARGET, owner_pid: int = 4242) -> None:
-    path.parent.mkdir()
+    path.parent.mkdir(exist_ok=True)
     path.write_text(json.dumps({"target": target, "owner_pid": owner_pid}) + "\n")
     path.chmod(0o600)
 
 
 def test_inspect_requires_exact_owned_fixed_state_and_never_mutates(tmp_path: Path) -> None:
     module = _load_module()
-    state = tmp_path / "cache" / "active-run.json"
-    temp_root = tmp_path / "temp"
-    temp_root.mkdir()
-    orphan = temp_root / "ssh-over-mcp-e2e-one"
-    orphan.mkdir()
-    (orphan / "payload").write_bytes(b"x")
+    state = tmp_path / "active-run.json"
     _state(state)
 
-    inspection = module.inspect_recovery(
-        TARGET,
-        state_path=state,
-        temp_root=temp_root,
-        uid=os.geteuid(),
-    )
+    inspection = module.inspect_recovery(TARGET, state_path=state, uid=os.geteuid())
 
     assert inspection.state == module.ProviderState(target=TARGET, owner_pid=4242)
-    assert inspection.temp_dirs == (orphan,)
     assert state.is_file()
-    assert orphan.is_dir()
 
 
 @pytest.mark.parametrize("target", ["", "a" * 39, "g" * 40, "A" * 40])
@@ -64,96 +52,81 @@ def test_inspect_rejects_non_exact_or_noncanonical_target(tmp_path: Path, target
     state = tmp_path / "active-run.json"
     _state(state)
     with pytest.raises(module.RecoveryError):
-        module.inspect_recovery(target, state_path=state, temp_root=tmp_path, uid=os.geteuid())
+        module.inspect_recovery(target, state_path=state, uid=os.geteuid())
 
 
-def test_inspect_rejects_target_schema_mode_and_foreign_temp_state(tmp_path: Path) -> None:
+def test_inspect_rejects_target_schema_mode_and_symlink(tmp_path: Path) -> None:
     module = _load_module()
     state = tmp_path / "active-run.json"
     _state(state, target="b" * 40)
     with pytest.raises(module.RecoveryError, match="target"):
-        module.inspect_recovery(
-            TARGET, state_path=state, temp_root=tmp_path, uid=os.geteuid()
-        )
+        module.inspect_recovery(TARGET, state_path=state, uid=os.geteuid())
 
     _state(state)
     state.chmod(0o644)
     with pytest.raises(module.RecoveryError, match="mode"):
-        module.inspect_recovery(
-            TARGET, state_path=state, temp_root=tmp_path, uid=os.geteuid()
-        )
+        module.inspect_recovery(TARGET, state_path=state, uid=os.geteuid())
 
     state.chmod(0o600)
     state.write_text(json.dumps({"target": TARGET, "owner_pid": 4242, "extra": True}))
     with pytest.raises(module.RecoveryError, match="schema"):
-        module.inspect_recovery(
-            TARGET, state_path=state, temp_root=tmp_path, uid=os.geteuid()
-        )
+        module.inspect_recovery(TARGET, state_path=state, uid=os.geteuid())
 
-    _state(state)
-    foreign = tmp_path / "ssh-over-mcp-e2e-file"
-    foreign.write_bytes(b"not a directory")
+    state.unlink()
+    real = tmp_path / "real-state.json"
+    _state(real)
+    state.symlink_to(real)
     with pytest.raises(module.RecoveryError, match="ownership/type"):
-        module.inspect_recovery(
-            TARGET, state_path=state, temp_root=tmp_path, uid=os.geteuid()
-        )
+        module.inspect_recovery(TARGET, state_path=state, uid=os.geteuid())
 
 
 def test_recover_requires_exact_dead_owner_and_no_qemu(tmp_path: Path, monkeypatch) -> None:
     module = _load_module()
     state = tmp_path / "active-run.json"
-    temp_root = tmp_path / "temp"
-    temp_root.mkdir()
-    orphan = temp_root / "ssh-over-mcp-e2e-one"
-    orphan.mkdir()
-    (orphan / "payload").write_bytes(b"x")
     _state(state, owner_pid=4242)
 
     monkeypatch.setattr(module, "_process_exists", lambda pid: True)
     monkeypatch.setattr(module, "_qemu_pids", lambda uid: ())
     with pytest.raises(module.RecoveryError, match="still alive"):
-        module.recover(TARGET, 4242, state_path=state, temp_root=temp_root, uid=os.geteuid())
-    assert state.exists() and orphan.exists()
+        module.recover(TARGET, 4242, state_path=state, uid=os.geteuid())
+    assert state.exists()
 
     monkeypatch.setattr(module, "_process_exists", lambda pid: False)
     monkeypatch.setattr(module, "_qemu_pids", lambda uid: (99,))
     with pytest.raises(module.RecoveryError, match="QEMU"):
-        module.recover(TARGET, 4242, state_path=state, temp_root=temp_root, uid=os.geteuid())
-    assert state.exists() and orphan.exists()
+        module.recover(TARGET, 4242, state_path=state, uid=os.geteuid())
+    assert state.exists()
 
     monkeypatch.setattr(module, "_qemu_pids", lambda uid: ())
     with pytest.raises(module.RecoveryError, match="owner PID"):
-        module.recover(TARGET, 4243, state_path=state, temp_root=temp_root, uid=os.geteuid())
-    assert state.exists() and orphan.exists()
+        module.recover(TARGET, 4243, state_path=state, uid=os.geteuid())
+    assert state.exists()
 
 
-def test_recover_removes_only_verified_orphan_state_after_all_checks(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_recover_unlinks_only_fixed_verified_marker(tmp_path: Path, monkeypatch) -> None:
     module = _load_module()
-    state = tmp_path / "cache" / "active-run.json"
-    temp_root = tmp_path / "temp"
-    temp_root.mkdir()
-    orphan = temp_root / "ssh-over-mcp-e2e-one"
-    nested = orphan / "nested"
-    nested.mkdir(parents=True)
-    (nested / "payload").write_bytes(b"x")
+    state = tmp_path / "active-run.json"
+    unrelated = tmp_path / "ssh-over-mcp-e2e-unknown"
+    unrelated.mkdir()
+    (unrelated / "payload").write_bytes(b"must remain")
     _state(state, owner_pid=4242)
 
     monkeypatch.setattr(module, "_process_exists", lambda pid: False)
     monkeypatch.setattr(module, "_qemu_pids", lambda uid: ())
 
-    recovered = module.recover(
-        TARGET,
-        4242,
-        state_path=state,
-        temp_root=temp_root,
-        uid=os.geteuid(),
-    )
+    recovered = module.recover(TARGET, 4242, state_path=state, uid=os.geteuid())
 
     assert recovered.state.owner_pid == 4242
     assert not state.exists()
-    assert not orphan.exists()
+    assert (unrelated / "payload").read_bytes() == b"must remain"
+
+
+def test_expected_pid_zero_is_inspect_only_sentinel() -> None:
+    module = _load_module()
+    assert module._parse_expected_pid("0") == 0
+    for value in ("", "-1", "+1", "01", "1.0"):
+        with pytest.raises(module.RecoveryError):
+            module._parse_expected_pid(value)
 
 
 def test_workflow_is_manual_main_only_and_serialized_with_live_e2e() -> None:
