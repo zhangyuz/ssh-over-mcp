@@ -30,7 +30,11 @@ attempts rather than treating a systemd security score as acceptance evidence.
 Provisioning and unknown-state recovery remain explicit operator responsibilities.
 The service neither removes unknown endpoints nor automatically restarts after
 failure. It exposes no MCP approval mutation, generic privileged helper, or new
-diagnostic protocol operation.
+diagnostic protocol operation. Pairwise-distinct primary/execution/admin GIDs
+and no client cross-membership preserve DAC separation independently of peer
+authentication. New-key provisioning retains CSPRNG, exclusive/no-follow create,
+exact secure metadata, complete writes and file/parent fsync without exposing
+key bytes or repairing unknown existing state.
 
 The initial reference requires zero hard/soft core limits and an effective
 non-pipe kernel core pattern before service start. Pipe collectors require
@@ -45,6 +49,16 @@ and lifecycle operations; target application imports happen after identity drop.
 The existing five-fixture probe and its final STOP_MANAGER control remain intact.
 ADR 0008's no-network outer VM boundary and cleanup requirements remain unchanged.
 
+Final acceptance must exercise the actual installed non-editable artifact with
+the production ExecStart inside the canonical systemd profile. Build/install
+runs as a separate non-root identity; trusted setup quiesces writers, attests
+and seals the fixed runtime without executing target artifacts as root. Source
+adapter and unsandboxed-wheel proofs alone cannot close the deployment slice.
+After forced-stop safety, fixed operator/test recovery must verify no owner and
+original run-owned endpoint identity before bounded removal, then prove restart
+with unchanged key and preserved audit/approval state. This is not automatic
+production recovery or target-selected privileged cleanup.
+
 This proposed ADR becomes accepted only after written-design approval. It does
 not authorize implementation, deployment, or a weakened fallback by itself.
 
@@ -55,8 +69,9 @@ authority, and supplies a small deployment model that later profiles can learn
 from without copying incompatible identity or cgroup assumptions.
 
 Cost: static provisioning and canonical trusted-profile duplication require
-careful maintenance. The production installed-package entrypoint and the
-source-only guest adapter need explicit separate evidence. Missing mandatory
+careful maintenance. Installed-runtime sealing and the exact package/systemd
+composition need live evidence; source-only diagnostics cannot replace it.
+Missing mandatory
 kernel/systemd support is a deployment failure, not a compatibility fallback.
 
 Deferred: other service profiles, AppArmor/SELinux, general egress, SSH CA,

@@ -46,8 +46,9 @@ Three approaches were considered:
   consumed approvals and mutation/audit uncertainty do not become safe retries.
 
 The proposed deployment MUST adapt to these contracts rather than change them
-to fit systemd defaults. Initial implementation changes are deployment,
-documentation, and tests; a demonstrated production defect needs its own RED
+to fit systemd defaults. Product scope is deployment, documentation and tests;
+any selected behavior-preserving provisioning-primitive extraction is a separate
+preparatory RED/GREEN slice. A demonstrated production defect needs its own RED
 and reviewed fix.
 
 ## 3. Deployment ownership and process identities
@@ -55,7 +56,12 @@ and reviewed fix.
 The reference uses static operator-provisioned Linux accounts. `User=` and
 `Group=` select the dedicated non-root Ledger identity; `SupplementaryGroups=`
 contains exactly the two endpoint groups, with the primary group excluded when
-checking the runtime identity. The account MUST have no other group memberships.
+checking the runtime identity. Ledger primary GID, execution endpoint GID and
+admin endpoint GID MUST be pairwise distinct, so the Ledger has exactly two
+supplementary groups. The execution client MUST NOT belong to the admin endpoint
+group, and the admin client MUST NOT belong to the execution endpoint group.
+None may have unexpected account memberships. Preflight checks configured IDs
+and account-database memberships; the exact runtime group check still applies.
 `DynamicUser=` is disabled because peer UID/GID and storage ownership must remain
 stable across restarts.
 
@@ -90,6 +96,40 @@ explicitly provision/check these paths and a new 32-byte key without printing
 key bytes or overwriting an existing key. Existing container/bootstrap behavior
 is unchanged; bootstrap redesign, moving an existing key/database, and key
 rotation remain separate work.
+
+### HMAC key provisioning contract
+
+The fresh-install key operation MUST:
+
+- Generate exactly 32 bytes with a CSPRNG equivalent to `secrets.token_bytes(32)`.
+- Before generation, apply zero hard/soft core limits and verify the no-core
+  host condition for every key-handling provisioning/helper process, not just
+  the later Ledger service; no helper may first generate a key and only then
+  disable crash-memory collection.
+- Validate canonical non-symlink trusted parent/ancestors, exact Ledger UID/GID
+  and private directory permissions before creation, with no active Ledger
+  instance using/changing that provisioning state.
+- Use `O_CREAT|O_EXCL`, `O_NOFOLLOW` and close-on-exec. Any existing path makes
+  new-key creation fail, even an apparently valid key; never repair or replace it.
+- Establish a private mode at creation, set/verify exact Ledger UID/GID and final
+  mode 0400 through the open descriptor, and reject unexpected type, inode/path
+  replacement, owner, mode or ancestor state.
+- Complete all 32 bytes despite short writes; fsync file and parent directory
+  before reporting success. Write/chown/chmod/fsync/validation failure is failure,
+  never ordinary success. A partially created run-owned file needs explicit
+  verified recovery; unknown existing state is never normalized or overwritten.
+- Keep key bytes out of argv, environment, stdout/stderr, logs, exception text,
+  review artifacts and temporary shell files. Verify secure metadata, exact
+  length and readability by Ledger before first service use.
+
+The implementation plan must first evaluate extracting/reusing the reviewed
+exclusive-create/complete-write primitive in `approvals/bootstrap.py` rather
+than introduce an independent shell recipe. Preserve current bootstrap's
+validated-existing-key behavior for its existing layout; strict new-key refusal
+is a separate operation. Any shared-primitive refactor is a small reviewed
+RED/GREEN slice proving unchanged legacy behavior. Guest root uses only an
+already-merged trusted helper with fixed fixture paths/identities, never the
+same target's bootstrap/helper code imported as root.
 
 The root-owned environment file contains only the existing
 `SSH_OVER_MCP_LEDGER_*` settings. Numeric identities and paths must match the
@@ -161,6 +201,39 @@ properties, process state, allowed behavior, and denied operations determine
 acceptance. AppArmor/SELinux and additional syscall restrictions are deferred
 until this profile has real compatibility evidence.
 
+### Verified recovery after forced stop
+
+Acceptance must prove this complete fixed sequence:
+
+1. Before the fault, trusted bookkeeping records run-owned endpoint
+   device/inode/type/ownership, key identity and committed audit/approval state.
+   An authorized slow-trickle client then forces final SIGKILL. Verify stopped
+   unit, empty service cgroup and no process of the dedicated Ledger identity;
+   preserve stale sockets.
+2. An explicit start attempt refuses the stale endpoints and leaves no service
+   process. `Restart=no` prevents an automatic restart/recovery loop.
+3. Trusted operator/test recovery independently proves no active socket owner
+   using bounded process/socket checks across relevant guest namespaces. Failed
+   or inconclusive ownership checks block recovery. Match the fixed path and
+   metadata to the pre-fault run-owned record and revalidate parent identity;
+   replaced inode/type/owner is preserved and reported, never silently deleted.
+4. Exclude concurrent starts and remove only the verified original stale
+   endpoint through a pinned trusted parent, rechecking identity at removal.
+   No glob, directory/database/key deletion or target-selected path is allowed.
+5. Restart the fixed unit and require authenticated ping, clean real database
+   open with unchanged HMAC key, preserved committed audit and approval states.
+   Natural Ledger-owned expiry may advance; recovery cannot extend TTL, resurrect
+   consumed grants or fabricate audit/approval state.
+6. Cleanly stop and verify listener/process cleanup. Negative recovery cases
+   with an active owner, replaced endpoint or inconclusive inventory must refuse
+   removal and preserve state.
+
+Recovery remains fixed, bounded, trusted test/operator action, never automatic
+production recovery, an `ExecStopPost=` deletion hook or a target-accessible
+privileged RPC. Unit failure alone does not authorize socket deletion. Production
+instructions require the same owner/provenance checks; database/key repair and
+unknown-state recovery are outside this procedure.
+
 ### Crash collection is a deployment precondition
 
 The first reference supports only an effective non-pipe `kernel.core_pattern`
@@ -217,17 +290,55 @@ trusted setup must check the effective loaded unit, including fragment path,
 drop-ins, aliases, all Exec command phases/prefixes, environment sources, identity,
 capabilities, core limits and sandbox properties, along with the no-core host
 precondition. Unexpected merged configuration or an
-already-running/pre-existing fixture unit fails closed. Guest entrypoint
-adaptation is the sole fixed allowed override and is part of that expected
-effective configuration. No target root command may execute before these checks.
+already-running/pre-existing fixture unit fails closed. Only an explicitly
+selected diagnostic phase may use the fixed trusted entrypoint adapter; its
+effective configuration is checked separately. Mandatory installed-runtime
+acceptance permits no entrypoint override. No target root command may execute
+before these checks.
 
-The production unit assumes a preinstalled application package. The source-only
-guest instead uses a fixed trusted ExecStart adapter that imports the exact
-checkout only after systemd has dropped to the Ledger identity. No target build
-backend, package installer, application module, or target helper executes as
-root. Only that fixed entrypoint adaptation differs; sandbox properties and
-candidate profile equality must be checked. A guest result does not claim to
-test production package installation, which retains separate packaging proof.
+The production unit assumes a preinstalled application package. A source-only
+adapter may provide intermediate diagnostics after identity drop, but cannot
+satisfy final reference-deployment acceptance. The mandatory 7B1 guest proof
+runs a real installed non-editable artifact at `/opt/ssh-over-mcp/venv` with the
+exact production command/profile, actual imports, identity/groups and immutable
+runtime permissions. Separate source-adapter and unsandboxed-wheel successes
+cannot substitute for this composition proof.
+
+Trusted guest setup provisions the fixed construction prefix and a distinct
+non-root builder identity. As that identity, build the exact target wheel and
+install it non-editably into a clean venv **at its final fixed prefix**, offline
+with already-trusted locked dependencies/build inputs. No target build backend,
+installer, application module or helper executes as root. No download, host
+mount or production secret enters the guest.
+Before any target backend/installer call, trusted setup applies the existing
+exact-identity/groups drop, zero effective/permitted/inheritable/ambient
+capabilities and NoNewPrivileges contract to the builder and descendants.
+The authority prerequisite must already contain the hash-locked build-tool
+inputs and offline payload preparation; the persistent orchestrator may fetch
+those trusted wheels but never executes the target build/backend itself.
+
+Before start, trusted setup quiesces the run-owned builder and descendants,
+verifies no writer remains, attests artifact/dependency manifests, interpreter
+lineage, venv configuration, module origins and absence of editable/source hooks,
+and seals the runtime root-owned/non-writable by builder, Ledger or clients.
+Dependency expectations come from already-trusted hash-locked wheelhouse inputs;
+a candidate-generated RECORD/manifest alone is not attestation. The target wheel
+and installed tree are bound to the exact target input/build provenance and
+trustedly measured content, without treating their code as root authority.
+Sealing is filesystem handling only, never root execution of an artifact or
+target validation script. Check regular files/directories and reject special
+files, hard-link aliases, unexpected setuid/setgid or file-capability metadata,
+unsafe symlinks and ancestor changes; retain only
+explicitly trusted interpreter/runtime links. A surviving writer, race or
+attestation mismatch fails closed instead of recursively repairing untrusted
+paths. Construction/runtime state is fixed, run-owned and disposable; no
+relocated-prefix compatibility assumption is allowed.
+
+Start the exact production ExecStart under the canonical profile with no
+entrypoint override. Require authenticated ping, normal stop, restart, sandbox
+enforcement and the complete forced-stop/recovery sequence. Module-origin checks
+run after identity drop and source paths cannot assist application imports.
+Source-adapter evidence is recorded separately, never as installed-runtime PASS.
 
 Trusted setup orchestrates start, client phases, stop, restart and cleanup with
 fixed unit/path names. A non-root target client probe receives no systemctl
@@ -258,14 +369,15 @@ production secrets, followed by whole-VM destruction.
 | Exact non-root identity/groups/caps | Alter unit identity/group/capability fields; mismatch rejected | UID/GID/groups, zero capability sets, NoNewPrivs=1 |
 | Safe unit loading | Modified bytes, duplicate directives, root prefixes, symlinks, unexpected drop-ins/aliases/command phases rejected before start | Trusted snapshot/copy integrity plus effective loaded configuration verified before any start |
 | Allowed persistence | Existing Ledger storage/restart/concurrency tests unchanged | WAL/FULL audit + approval grant/consume survives clean restart |
-| Installed-package entrypoint | Exact-head non-root wheel build/install into a clean venv; editable/source-path dependency rejected | Packaging startup/ping/SIGTERM proof is a separate supported Linux gate; guest source adapter is explicitly distinguished |
-| Execution/admin separation | Wrong peer and cross-operation regressions | Separate real client/approvalctl identities; unauthorized grant/consume rejected |
+| Installed-package/systemd composition | Exact-head non-root wheel build/install; editable hooks, mutable runtime or unsafe sealing rejected | Exact production command at fixed venv prefix under canonical profile; module origins, ping, stop/restart and sandbox matrix PASS |
+| HMAC provisioning | CSPRNG exclusive create; short-write/durability failures, existing paths, symlinks and metadata races rejected; legacy bootstrap preserved | Trusted fixed provisioning, exact private owner/mode/length, durable create and no key bytes in outputs |
+| Execution/admin separation | Pairwise-distinct GIDs, cross-membership and unexpected memberships rejected; wrong-peer/cross-operation regressions | Independent DAC denial in both cross-directions; real client/approvalctl identities; separate SO_PEERCRED rejection with controlled DAC reachability |
 | Network restriction | Missing restriction or allowed INET/INET6 rejected | IPv4/IPv6 socket creation, raw socket, and namespace bypass attempts denied |
 | Syscall bypass restriction | Removing any io_uring denial or native-architecture restriction rejected | One isolated helper per `io_uring_setup`, `io_uring_enter`, and `io_uring_register`: restricted SIGSYS versus documented kernel result in fixed differential control; kernel/process ABI attested as pinned x86_64/native |
 | Read-only runtime/key | Wider write exception rejected; sacrificial-file differential controls | Actual runtime/key read-only mount state; service-writable canary fails only under read-only boundary; allowed DB write succeeds; non-private-temp outside-root writes denied |
 | Kernel/cgroup protection | Weakened protected paths rejected; safe effective-state checks | Device exposure and kernel/cgroup mount restrictions attested, harmless denied operations and zero capabilities; DAC-only denial not mislabeled as per-layer proof |
 | Normal shutdown | Existing close/restart checks retained | SIGTERM with a paused partial frame closes within the stop deadline; no process/socket leak; clean restart works |
-| Forced-stop/stale state | No recovery deletion code or automatic restart; per-operation timeout distinguished from total deadline | Authorized slow-trickle frame causes bounded final SIGKILL; no remaining service processes, stale endpoints preserved and restart refused; replacement socket survives; only verified run-owned state cleaned |
+| Forced-stop and verified recovery | No automatic deletion/restart; active-owner/replaced-inode/inconclusive checks refuse recovery | Slow-trickle→SIGKILL→no process→stale start refused→trusted owner/provenance check→only original socket removed→restart/ping; key, committed audit and approval states preserved |
 | Approval invariants and secrets | Exact binding, consume/replay, policy deny, retention regressions | Real CLI pending→grant→consume; replay/binding rejection; scans of transcript/journal/storage |
 | Crash secret retention | Hard/soft core limits and non-pipe host precondition mandatory; pipe collectors rejected before start | SIGABRT/SIGSEGV/SIGSYS same-profile memory canaries; no core body/backtrace/sentinel retention; effective-policy proof before crashes |
 | Existing Phase 7A | Fixed five-fixture order contracts unchanged | Full five-fixture PASS with STOP_MANAGER last |
@@ -304,8 +416,9 @@ trusted base interpreter's normal locations. Start the real installed
 `-I -B -m ssh_over_mcp.approvals.main` process with safe temporary state, prove
 authenticated ping and SIGTERM cleanup. Do not claim the whole ordinary runner
 checkout is inaccessible merely because it is absent from import paths. This
-proof checks installed-package loading; distinct-peer and sandbox proofs remain
-the real systemd guest matrix. No target build/install runs as root and no
+proof is an early packaging regression and does not replace mandatory real
+installed-artifact-under-systemd proof. Distinct-peer and sandbox proofs remain
+the real guest matrix. No target build/install runs as root and no
 privileged access is added to ordinary CI.
 
 The io_uring probes must use the attested native syscall ABI and valid arguments
@@ -343,9 +456,11 @@ target evidence: existing exact-head Level-3 must remain green before its merge;
 the merged authority is then verified and only later certifies the 7B1 target.
 No authority merge is counted as target sandbox proof. Phase 7B1 is not complete
 until the target's new mandatory matrix and existing five fixtures pass on exact
-head and merge-main, installed-wheel startup/cleanup proof passes for those same
-revisions on supported Linux, and no Critical/Important review finding or cleanup
-debt remains.
+head and merge-main using the actual installed artifact and production ExecStart
+under the same systemd profile, including forced-stop/verified-recovery and
+unchanged-key/audit/approval state. The early installed-wheel regression also
+passes for those revisions on supported Linux. No Critical/Important review
+finding or cleanup debt may remain.
 
 Rollback disables the new reference service, verifies stop, and preserves the
 database/key. It does not switch to a less restricted service automatically or
@@ -359,6 +474,9 @@ not protection against root or a compromised Ledger itself.
 - Eight runtime/Phase-7A evidence tests pass locally with short
   `--basetemp=/tmp/som7b1-design-baseline`. The initial Mac default temporary path
   exceeded the Linux AF_UNIX limit; only the harness temporary path changed.
+- Review revisions also pass 31 existing runtime/bootstrap/storage/Phase-7A
+  evidence tests with `--basetemp=/tmp/som7b1-review`. This is baseline evidence,
+  not certification of the proposed systemd, provisioning or recovery matrix.
 - No runtime, systemd unit, production identity, guest authority, or secret has
   been changed by this design preparation.
 
