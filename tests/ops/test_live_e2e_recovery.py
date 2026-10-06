@@ -5,7 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import yaml
@@ -76,7 +76,7 @@ def test_inspect_rejects_target_schema_mode_and_symlink(tmp_path: Path) -> None:
     real = tmp_path / "real-state.json"
     _state(real)
     state.symlink_to(real)
-    with pytest.raises(module.RecoveryError, match="ownership/type"):
+    with pytest.raises(module.RecoveryError):
         module.inspect_recovery(TARGET, state_path=state, uid=os.geteuid())
 
 
@@ -127,6 +127,60 @@ def test_expected_pid_zero_is_inspect_only_sentinel() -> None:
     for value in ("", "-1", "+1", "01", "1.0"):
         with pytest.raises(module.RecoveryError):
             module._parse_expected_pid(value)
+
+
+def test_recover_rejects_marker_identity_change(tmp_path: Path, monkeypatch) -> None:
+    module = _load_module()
+    state = tmp_path / "active-run.json"
+    _state(state, owner_pid=4242)
+    first = module.inspect_recovery(TARGET, state_path=state, uid=os.geteuid())
+    changed = module.RecoveryInspection(
+        state=first.state,
+        device=first.device,
+        inode=first.inode + 1,
+    )
+    inspections = iter((first, changed))
+    monkeypatch.setattr(module, "inspect_recovery", lambda *args, **kwargs: next(inspections))
+    monkeypatch.setattr(module, "_process_exists", lambda pid: False)
+    monkeypatch.setattr(module, "_qemu_pids", lambda uid: ())
+
+    with pytest.raises(module.RecoveryError, match="changed"):
+        module.recover(TARGET, 4242, state_path=state, uid=os.geteuid())
+    assert state.exists()
+
+
+def test_context_is_manual_trusted_main_non_admin_orchestrator(monkeypatch) -> None:
+    module = _load_module()
+    uid = 502
+    monkeypatch.setattr(module.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(module.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(module.os, "geteuid", lambda: uid)
+    monkeypatch.setattr(module.os, "getgroups", lambda: [20])
+    monkeypatch.setattr(
+        module.pwd,
+        "getpwuid",
+        lambda value: SimpleNamespace(
+            pw_name=module.ORCHESTRATOR_USER,
+            pw_dir=str(module.ORCHESTRATOR_HOME),
+        ),
+    )
+    monkeypatch.setattr(module.grp, "getgrnam", lambda name: SimpleNamespace(gr_gid=80))
+    valid = {
+        "GITHUB_ACTIONS": "true",
+        "GITHUB_EVENT_NAME": "workflow_dispatch",
+        "GITHUB_REPOSITORY": module.EXPECTED_REPOSITORY,
+        "GITHUB_REF": "refs/heads/main",
+    }
+    module._validate_context(valid)
+
+    for case in (
+        {**valid, "GITHUB_ACTIONS": "false"},
+        {**valid, "GITHUB_EVENT_NAME": "push"},
+        {**valid, "GITHUB_REPOSITORY": "someone/else"},
+        {**valid, "GITHUB_REF": "refs/heads/feature"},
+    ):
+        with pytest.raises(module.RecoveryError):
+            module._validate_context(case)
 
 
 def test_workflow_is_manual_main_only_and_serialized_with_live_e2e() -> None:

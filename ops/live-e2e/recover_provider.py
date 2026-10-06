@@ -92,7 +92,12 @@ def _load_state(path: Path, uid: int) -> RecoveryInspection:
             raise RecoveryError("provider state ownership/type mismatch")
         if stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > MAX_STATE_BYTES:
             raise RecoveryError("provider state mode/size mismatch")
-        raw = os.read(fd, MAX_STATE_BYTES + 1)
+        raw = b""
+        while len(raw) <= MAX_STATE_BYTES:
+            chunk = os.read(fd, MAX_STATE_BYTES + 1 - len(raw))
+            if not chunk:
+                break
+            raw += chunk
         if len(raw) > MAX_STATE_BYTES:
             raise RecoveryError("provider state exceeds size bound")
     finally:
