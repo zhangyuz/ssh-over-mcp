@@ -122,32 +122,33 @@ def parse_release_payload(
             raise _fail()
 
         fields: dict[str, str] = {}
+        seen_fields: set[str] = set()
         sha_lines: list[str] = []
-        in_sha256 = False
+        current_field: str | None = None
         for line in text_lines:
-            if in_sha256:
-                if line.startswith((" ", "\t")):
+            if line.startswith((" ", "\t")):
+                if current_field is None:
+                    raise _fail()
+                if current_field == "SHA256":
                     sha_lines.append(line)
-                    continue
-                in_sha256 = False
-            if not line:
-                raise _fail()
-            if ":" not in line:
+                elif current_field in _REQUIRED_SCALARS or current_field == "Valid-Until":
+                    raise _fail()
+                continue
+            if not line or ":" not in line:
                 raise _fail()
             name, value = line.split(":", 1)
-            if not name or value.startswith(("\n", "\r")):
+            if not name or name in seen_fields:
                 raise _fail()
+            seen_fields.add(name)
+            current_field = name
             value = value.strip()
             if name == "SHA256":
-                if value or sha_lines:
+                if value:
                     raise _fail()
-                in_sha256 = True
                 continue
-            if name in fields:
-                raise _fail()
             fields[name] = value
 
-        if in_sha256 and not sha_lines:
+        if "SHA256" not in seen_fields or not sha_lines:
             raise _fail()
         if any(name not in fields for name in _REQUIRED_SCALARS):
             raise _fail()

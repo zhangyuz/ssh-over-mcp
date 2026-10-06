@@ -96,6 +96,29 @@ def test_parses_frozen_release_payload_without_claiming_signature_verification()
         metadata.suite = "attacker"
 
 
+def test_accepts_other_bounded_deb822_multiline_fields_around_sha256() -> None:
+    module = _load_module()
+    payload = _payload(
+        extra=(
+            "MD5Sum:",
+            " 11111111111111111111111111111111 512 main/binary-amd64/Packages.gz",
+            "SHA1:",
+            " 2222222222222222222222222222222222222222 768 main/binary-amd64/Packages.gz",
+        ),
+        sha256_lines=(
+            f" {INDEX_HASH} 1024 {INDEX_PATH}",
+            "SHA512:",
+            " " + "3" * 128 + " 1024 main/binary-amd64/Packages.xz",
+        ),
+    )
+
+    metadata = module.parse_release_payload(payload, contract=_contract(module), now=NOW)
+
+    assert metadata.sha256 == (
+        module.DigestRecord(path=INDEX_PATH, size=1024, sha256=INDEX_HASH),
+    )
+
+
 @pytest.mark.parametrize(
     "contract_change,payload_change",
     [
