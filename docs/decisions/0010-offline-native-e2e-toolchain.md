@@ -1,6 +1,6 @@
 # ADR 0010: Authenticated offline native E2E toolchain
 
-- Status: Proposed; written design approval required before implementation
+- Status: Accepted; written design and implementation plan approved 2026-10-06
 - Date: 2026-10-06
 
 ## Context
@@ -21,7 +21,7 @@ nor complete compiler composition. Updating the image would require a broader
 Phase 7A baseline revalidation; prebuilt canaries would introduce a separate
 producer/artifact authority.
 
-## Proposed decision
+## Decision
 
 Retain ADR 0008's exact image, QEMU/HVF provider and no-network boundary. Add one
 closed, derived Ubuntu archive input manifest for native E2E tools. This is an

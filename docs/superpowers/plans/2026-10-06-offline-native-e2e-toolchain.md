@@ -13,12 +13,13 @@ candidate path before mandatory certification, retaining a scoped repair route. 
 **Tech Stack:** Trusted stdlib Python, operator-provisioned GPG verifier, Ubuntu
 archive metadata/deb data, GCC 15, existing QEMU/HVF and self-hosted Python CI.
 
-**Spec:** [Written native toolchain proposal](../specs/2026-10-06-offline-native-e2e-toolchain-design.md),
-[proposed ADR 0010](../../decisions/0010-offline-native-e2e-toolchain.md).
+**Spec:** [Approved native toolchain design](../specs/2026-10-06-offline-native-e2e-toolchain-design.md),
+[ADR 0010](../../decisions/0010-offline-native-e2e-toolchain.md).
 
-**Status:** Draft for written review; no implementation authorized by this file.
-The user approved preparing design/planning artifacts, not activating authority.
-Execution method proposed: inline executing-plans, independent review per slice.
+**Status:** Written design and implementation plan approved 2026-10-06.
+G1 is complete; implement N1–N4 in order, with authority activation permitted
+only at each prescribed already-main gate. Execution is inline executing-plans
+with independent review per shipping slice.
 
 ## Global Constraints
 
@@ -106,6 +107,12 @@ require_no_core() -> None. No dependency on ledger_systemd_contract.py.
   E2E before N2 can execute any compiler/helper.
 
 ### N1: Authenticate and derive the complete native input manifest
+
+**Delivery:** Begin with a dormant bounded package-data reader (N1a), then
+complete authenticated metadata, dependency derivation and the manifest in
+subsequent small PRs. Every sub-slice uses the common exact-head/merge-main
+legacy gates and fresh review. N1 remains incomplete until all requirements
+below pass; a reader alone gives no signature, package-closure or native proof.
 
 **Files:** Create ops/live-e2e/native_inputs.py, native-toolchain-inputs.json,
 ubuntu-archive-2018.gpg, native_archive.py, tests/ops/test_native_inputs.py and

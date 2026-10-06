@@ -884,10 +884,12 @@ approved 2026-10-06;
 is approved 2026-10-06. Tasks 1–2 are complete through exact merge-main gates
 (PRs 124/125). Task 3 has reached its required missing-tool prerequisite:
 the pinned guest has no executable C compiler. The
-[proposed offline native design](superpowers/specs/2026-10-06-offline-native-e2e-toolchain-design.md),
+[approved offline native design](superpowers/specs/2026-10-06-offline-native-e2e-toolchain-design.md),
 [ADR 0010](decisions/0010-offline-native-e2e-toolchain.md) and
-[draft prerequisite plan](superpowers/plans/2026-10-06-offline-native-e2e-toolchain.md)
-await written approval; no native authority is activated. No Phase 7B1
+[approved prerequisite plan](superpowers/plans/2026-10-06-offline-native-e2e-toolchain.md)
+are approved 2026-10-06. G1 is complete through PR #127 and exact merge-main
+CI/Level-3 gates; N1 begins with a dormant bounded package-data reader.
+No native authority is activated. No Phase 7B1
 acceptance or closure is claimed.
 The slice preserves existing
 Ledger authority and first lands any necessary trusted guest setup separately before target

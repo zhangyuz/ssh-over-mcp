@@ -1,7 +1,7 @@
 # Offline native E2E toolchain design
 
-**Status:** Written proposal; direction approved 2026-10-06, written design and
-execution plan approval pending. No native authority activated.
+**Status:** Written design and execution plan approved 2026-10-06.
+G1 is complete; N1–N4 implementation is pending. No native authority activated.
 
 **Purpose:** Unblock Phase 7B1's native canaries without changing the pinned
 guest or weakening its trust boundary. [ADR 0010](../../decisions/0010-offline-native-e2e-toolchain.md)

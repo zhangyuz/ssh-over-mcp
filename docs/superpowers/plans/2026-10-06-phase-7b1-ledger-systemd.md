@@ -115,7 +115,7 @@ assert provision_fs.success_output == ""
 
 ### Task 3: Pin the trusted profile, identities and offline payload contract
 
-**Prerequisite discovered:** Fixed guest inventory run 37459216524 returned code 102 (no executable /usr/bin/cc). The proposed ADR 0010/native plan must be approved and completed first. Its G1 no-core guard is already complete independently as PR #127 at verified main8bcdca8; N3 candidate proof and N4 native-required/full-legacy merge-main gates must pass before the remaining profile/build work resumes. This is no acceptance downgrade.
+**Prerequisite discovered:** Fixed guest inventory run 37459216524 returned code 102 (no executable /usr/bin/cc). The approved ADR 0010/native plan must be completed first. Its G1 no-core guard is already complete independently as PR #127 at verified main8bcdca8; N3 candidate proof and N4 native-required/full-legacy merge-main gates must pass before the remaining profile/build work resumes. This is no acceptance downgrade.
 
 **Files:** Consume the already-main ops/live-e2e/ledger_guest_preflight.py; create ledger_systemd_contract.py and ledger-systemd.service; extend tests/ops/test_ledger_guest_preflight.py; create tests/ops/test_ledger_systemd_contract.py and test_ledger_build_inputs.py; modify orchestrator trusted payload list/preparation and tests/ops/test_live_e2e_orchestrator_contract.py; extend tests/ops/test_container_reproducibility_contract.py; consume existing requirements/build.in and requirements/build.lock without a dependency update; update ops/live-e2e/README.md.
 
