@@ -7,8 +7,8 @@ existing pinned guest, then resume Phase 7B1 Task 3.
 
 **Architecture:** Establish the guest no-core guard independently; derive one
 closed manifest from authenticated Ubuntu snapshot inputs; land dormant bounded
-materialization and fixed non-root feasibility; activate only already-main
-authority. Each slice ships separately and preserves all five legacy fixtures.
+materialization and fixed non-root feasibility; prove a bounded already-main
+candidate path before mandatory certification, retaining a scoped repair route. Each slice ships separately and preserves all five legacy fixtures.
 
 **Tech Stack:** Trusted stdlib Python, operator-provisioned GPG verifier, Ubuntu
 archive metadata/deb data, GCC 15, existing QEMU/HVF and self-hosted Python CI.
@@ -22,7 +22,7 @@ Execution method proposed: inline executing-plans, independent review per slice.
 
 ## Global Constraints
 
-- 小步快跑，持续迭代，关注质量、安全、一致性。 G1/N1/N2/N3 are separate PRs.
+- 小步快跑，持续迭代，关注质量、安全、一致性。 G1/N1/N2/N3/N4 are separate PRs.
 - Self-hosted runners only; ordinary CI and persistent Mac gain no privilege.
 - Keep QEMU 11.1.2/HVF, the exact ADR 0008 image, no NIC/shares/credentials.
 - Ubuntu archive fingerprint: F6ECB3762474EDA9D21B7022871920D1991BC93C.
@@ -69,9 +69,10 @@ new Python modules in normal lint/compile. Pin actual authority and target SHA;
 head changes invalidate evidence. Read trusted run output and provider/guest/
 whole-VM/media/bundle cleanup, not just the workflow conclusion.
 
-N3's pre-merge legacy result cannot establish new native behavior; its mandatory
-post-merge native preflight is the additional completion gate. No further slice
-starts while its merge-main gates remain failed/pending. Docs-only proposal
+N3's pre-merge legacy result cannot establish new native behavior; its post-merge
+candidate proof is the additional completion gate. N4 cannot start before it
+passes. Native-authority repair follows the scoped bootstrap cycle in design
+section 6; it is completion work on the failed slice, not the next capability. Docs-only proposal
 review does not require activating an E2E authority.
 
 ### G1: Establish the guest-only core guard before any target execution
@@ -147,7 +148,7 @@ reviewed inputs and document their dormant status. No automatic guest launch.
 **Interfaces:** materialize_native_tree(inputs: NativeInputs) -> NativeTree;
 run_native_feasibility(tree: NativeTree) -> NativeEvidence. Fixed paths/UID/
 commands belong to trusted constants and the reviewed manifest. NativeEvidence
-contains the exact receipt fields in design section 6, not a bare boolean.
+contains the exact receipt fields in design section 7, not a bare boolean.
 
 - [ ] RED: duplicate/colliding entries, directory metadata conflict, traversal,
   link escape/cycle, special/hardlinked/set-ID/capability entries, expansion
@@ -170,40 +171,93 @@ contains the exact receipt fields in design section 6, not a bare boolean.
   and review the manifest first; no silent fallback. Ship dormant with common
   gates. This proves implementation/regression, not pinned-guest feasibility.
 
-### N3: Activate already-main native preflight and prove pinned-guest behavior
+### N3: Add bounded candidate feasibility while retaining legacy repair
 
-**Files:** Modify trusted gate/orchestrator fixed payload and sequencing,
-tests/ops/test_live_e2e_gate_contract.py,
-test_live_e2e_orchestrator_contract.py, ops/live-e2e/README.md and parent plan.
-All verifier/materializer/helper/source inputs must already be on main.
+**Files:** Create .github/workflows/live-native-toolchain-candidate.yml and
+scripts/run-live-native-toolchain-candidate.py; modify trusted gate/orchestrator
+fixed payload/profile/receipt handling; test ops workflow/gate/orchestrator
+contracts; update ops/live-e2e/README.md and parent plan. Leave existing
+live-local-e2e.yml legacy execution independent of all native acquisition/modules.
+All materializer/helper/source inputs must already be on main.
 
-**Interfaces:** Fixed native preflight runs before _start_manager() or any other target
-exec, as well as before the existing five-fixture probe. The existing commit_sha dispatch remains; no target-controlled mode,
-paths or source. Failure produces a bounded trusted error and cleanup.
+**Interfaces:** Fixed profiles LEGACY_7A and NATIVE_CANDIDATE in trusted host
+code. The candidate entrypoint selects only NATIVE_CANDIDATE, taking exact
+commit_sha. The existing workflow selects only LEGACY_7A. Profile metadata is
+trusted payload data; target inputs cannot choose it. Produce
+require_native_repair_scope(changed_paths: tuple[str, ...]) -> None in trusted
+host code, rejecting paths outside an exact trusted-main path allowlist for design
+section-6 scope before every legacy bootstrap/repair invocation. Unknown/truncated diff or mixed product changes refuses.
 
-- [ ] RED: missing/mismatched native input, preflight after target exec, skipped
-  guard/fixture, compile/link/run failure reported as success, missing receipt
-  binding or guest/provider/whole-VM cleanup. Existing fixture order is intact.
-- [ ] Run gate/orchestrator contracts for intended RED. Wire only the N1/N2
-  already-main inputs and fixed helper; no new compiler algorithm in activation.
-- [ ] Reach GREEN; ship using previously trusted main's complete legacy gates.
-  Clearly record that pre-merge proof does not certify the new preflight.
-- [ ] After merge, require ordinary CI and trusted-main exact merge-SHA Level-3
-  with actual native compile/link/run, pre-target fresh-image reconciliation
-  (including full ELF/search composition), measured guest/image facts, bound
-  receipt and all five legacy fixtures. Missing evidence blocks completion;
-  diagnose a real failure with RED/minimal fix, never sleeps/skips/OS repair.
-- [ ] Only after these live/legacy gates pass, authorize later security-canary use.
-  Verify all cleanup, retain non-secret exact run/receipt evidence and remove
-  only clean obsolete worktrees/branches. Resume remaining parent Task 3, which
-  consumes GuestPreflightError via its ProfileError boundary rather than copying
-  the guard. Later Task 7 still proves actual syscall enforcement separately.
+- [ ] RED: failed/missing native acquisition or compiler in candidate profile
+  incorrectly prevents legacy bootstrap from reaching all five fixtures.
+  Candidate must still fail and clean up. Assert a repair target cannot replace
+  candidate authority from main, and its legacy PASS gives no native credit.
+- [ ] RED: target-selected profile/command, wrong workflow/SHA binding, missing
+  native input, preflight after _start_manager/target exec, overlapping provider
+  workflow, skipped fixture, failed compile/link/run reported as success, wrong
+  evidence class or missing receipt/cleanup. Scope tests reject production src,
+  target live probe/support changes and CI-policy changes in a legacy repair.
+- [ ] Run python -m pytest tests/ops/test_live_e2e_gate_contract.py
+  tests/ops/test_live_e2e_orchestrator_contract.py tests/ops/test_ci_workflow.py
+  -q; record intended RED. Add workflow contract coverage to owning ops tests.
+- [ ] Implement the fixed candidate entrypoint/workflow, isolated profile paths,
+  trusted receipt/scope checks and shared provider concurrency without generic
+  dispatch. All workflows use main, exact commit_sha and trusted-main helpers;
+  no target source runs on the host or as root. Use bounded diff inspection.
+- [ ] Ship using previously trusted main's full legacy gates. After merge, run
+  exact merge-main ordinary CI, full legacy E2E, then the fixed candidate
+  workflow. Require actual image reconciliation and native compile/link/run,
+  complete legacy fixtures and all cleanup. This is first pinned-guest proof.
+- [ ] If candidate fails, keep N3 open and use the documented native-only repair
+  loop: focused RED/minimal fix/fresh review, exact repair-head ordinary/legacy
+  PASS before merge, exact repair-merge ordinary/legacy PASS, then candidate
+  native proof with newly-main authority. No failure converted to PASS, no mixed
+  product merge and no automatic retry via legacy. N4 is blocked until GREEN.
+- [ ] Record successful candidate target/authority/run/attempt, runtime input/
+  helper/source digests and cleanup as N4's frozen baseline. Clean only obsolete
+  clean branches/worktrees. No later security-canary or Phase 7B1 credit yet.
+
+### N4: Require the already-proved native contract for native-dependent gates
+
+**Files:** Create .github/workflows/live-native-toolchain-e2e.yml and
+scripts/run-live-native-toolchain-e2e.py; modify trusted fixed profile/evidence
+policy and ops contracts; update docs/self-hosted-runner.md,
+ops/live-e2e/README.md and parent plan. No compiler/helper/source/input changes.
+
+**Interfaces:** Fixed NATIVE_REQUIRED profile and native-required receipt class.
+Retain LEGACY_7A/NATIVE_CANDIDATE only for their declared bootstrap/candidate
+purposes. The new workflow takes exact commit_sha and selects NATIVE_REQUIRED
+from trusted main; it shares the provider concurrency group. Every required
+invocation rejects legacy/candidate evidence and missing native proof.
+
+- [ ] RED: N4 selected before a successful N3 pinned-guest baseline; modified
+  runtime digests hidden in activation; legacy/candidate receipt accepted as
+  required proof; required failure falls back to legacy; mixed product repair
+  uses legacy only; missing Task 6 or Task 7 ordering/cleanup evidence.
+- [ ] Run focused workflow/gate/orchestrator/CI contracts to RED; implement only
+  fixed routing and evidence requirements. Verify N3 runtime digests unchanged;
+  any runtime change is its own prerequisite with fresh candidate proof.
+- [ ] Reach GREEN and fresh independent review. Require exact N4 PR-head
+  ordinary CI, full legacy E2E and candidate native/full-legacy E2E from trusted
+  main before merge. Prior N3 proof alone is insufficient for the new target.
+- [ ] After merge, require ordinary CI and the new native-required workflow for
+  exactly the merge SHA: native preflight before any target, measured image/
+  composition, compile/link/run, all five fixtures and complete cleanup.
+- [ ] If native-required fails, preserve failure and keep the prerequisite open.
+  Native-only authority repair may use trusted-main legacy scope-checked gates;
+  after repair require candidate and native-required exact merge-main PASS
+  before any native-dependent target resumes. Legacy PASS never closes N4.
+- [ ] Retain exact receipts and verify cleanup; only now resume parent Task 3
+  with native-required head/merge gates. Consume G1 GuestPreflightError through
+  ProfileError without duplicating the guard. Later Task 7 still proves actual
+  syscall enforcement, and Task 8's mandatory Ledger mode cannot downgrade.
 
 ## Completion and deviations
 
-Complete only after N3's exact merge-main gates prove native feasibility and
-legacy regression with full cleanup. Record this as a prerequisite, not Phase
-7B1 implementation complete or closed. No new security acceptance criterion.
-Any required image change, package repair, new endpoint, privileged interface
-or incompatible composition stops for renewed design review. Task 10's finite
+Complete only after N4's exact merge-main native-required proof and full legacy
+regression/cleanup. Record a prerequisite, not Phase 7B1 implementation complete
+or closed. Native-authority repairs are bounded exceptions to bootstrap evidence,
+not exceptions to native completion or product acceptance. No new criterion.
+Any required image change, package repair, endpoint, privileged interface or
+incompatible composition stops for renewed design review. Task 10's finite
 C/H/M plus external E closure boundary remains unchanged.

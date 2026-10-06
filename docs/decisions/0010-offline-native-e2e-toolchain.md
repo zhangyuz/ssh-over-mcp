@@ -57,8 +57,12 @@ groups, zero capabilities and NoNewPrivs before compiler execution. Record all
 compiler components, base-image dependencies, source and output bindings.
 
 New authority lands through small preparatory PRs certified by previously
-trusted main. Its first activated proof happens only after the relevant code
-is on main. Existing exact-head and merge-main five-fixture Level-3 gates and
+trusted main. Its first guest proof runs through a bounded already-main candidate path
+while the legacy authority-regression route remains usable. Mandatory native
+certification follows actual candidate PASS, never precedes first guest proof.
+A native-only repair PR may use scope-checked legacy bootstrap gates, then must
+prove the repaired candidate and required profiles after merge; legacy evidence
+cannot certify a native-dependent target or close the prerequisite. Existing exact-head and merge-main five-fixture Level-3 gates and
 cleanup remain mandatory. Tool feasibility earns no systemd/seccomp acceptance
 credit; the full Phase 7B1 matrix remains required later.
 

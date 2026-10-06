@@ -26,7 +26,7 @@
 - Type=exec, Restart=no, KillMode=control-group, SIGTERM, TimeoutStopSec=10s, final SIGKILL. Readiness means authenticated ping, not successful exec.
 - Preserve fixed SSH → MCP → filesystem/profile → Task 6 → Task 7 probe; STOP_MANAGER\n / OK\n stays unchanged and Task 7 stays last.
 - Never casually cancel E2E, auto-delete provider state, blindly unlink sockets or repair unknown key/database state. Cleanup failure fails the run.
-- Every behavior PR requires exact-head ordinary CI and Level-3, fresh independent review without Critical/Important findings, then exact merge-main CI and Level-3. Authority bootstrap uses legacy-7a only; it does not certify 7B1.
+- Every behavior PR requires exact-head ordinary CI and Level-3, fresh independent review without Critical/Important findings, then exact merge-main CI and Level-3. Initial authority bootstrap uses legacy-7a; after the native prerequisite, Tasks 3–8 additionally require native-required evidence containing all five legacy fixtures. Scoped native-authority repair follows the separately approved prerequisite protocol; it does not certify native/7B1 completion.
 - A new production defect, architectural deviation or unprovable mandatory criterion stops that slice for a focused RED/fix or renewed design review; no relaxed assertions, sleeps or skipped checks.
 
 ## Review Focus
@@ -70,7 +70,7 @@ For **each** task, the final “ship” step means all of the following, not mer
 4. Pin PR head SHA and trusted main authority SHA. Dispatch live-local-e2e.yml **from main**, passing exact commit_sha and the task's required mode. Verify head SHA has not changed, all bindings agree, fixture coverage and cleanup PASS; then fresh final review and merge.
 5. Record merge SHA, require ordinary push CI bound to that SHA, dispatch Level-3 for exactly that merge SHA using trusted main. Verify provider absence, guest cleanup, whole VM/media/bundle destruction. Only then remove clean merged/superseded branches/worktrees and proceed.
 
-Tasks 1–8 use the complete legacy-7a matrix; no unavailable 7B1 target evidence is claimed. Tasks 9–10 require ledger-systemd-7b1 and its installed composition matrix plus all five legacy fixtures. Gate failures keep the slice open. Local Mac tests are useful focused evidence, never Linux/systemd certification; use short AF_UNIX test paths without weakening endpoint checks.
+Tasks 1–2 and initial native-authority bootstrap use the complete legacy-7a matrix. After the prerequisite, remaining Tasks 3–8 use native-required with the same complete five-fixture regression; scoped native-authority repair alone may use legacy bootstrap pending fresh required proof. No unavailable 7B1 target evidence is claimed. Tasks 9–10 require ledger-systemd-7b1 and its installed composition matrix plus all five legacy fixtures. Gate failures keep the slice open. Local Mac tests are useful focused evidence, never Linux/systemd certification; use short AF_UNIX test paths without weakening endpoint checks.
 
 ### Task 1: Extract the reviewed key-write primitive without changing bootstrap behavior
 
@@ -115,7 +115,7 @@ assert provision_fs.success_output == ""
 
 ### Task 3: Pin the trusted profile, identities and offline payload contract
 
-**Prerequisite discovered:** Fixed guest inventory run 37459216524 returned code 102 (no executable /usr/bin/cc). The proposed ADR 0010/native plan must be approved and completed first. Its G1 extracts the no-core guard from this task; N3 must pass native and full legacy merge-main gates before the remaining profile/build work resumes. This is no acceptance downgrade.
+**Prerequisite discovered:** Fixed guest inventory run 37459216524 returned code 102 (no executable /usr/bin/cc). The proposed ADR 0010/native plan must be approved and completed first. Its G1 extracts the no-core guard from this task; N3 candidate proof and N4 native-required/full-legacy merge-main gates must pass before the remaining profile/build work resumes. This is no acceptance downgrade.
 
 **Files:** Consume the already-main ops/live-e2e/ledger_guest_preflight.py; create ledger_systemd_contract.py and ledger-systemd.service; extend tests/ops/test_ledger_guest_preflight.py; create tests/ops/test_ledger_systemd_contract.py and test_ledger_build_inputs.py; modify orchestrator trusted payload list/preparation and tests/ops/test_live_e2e_orchestrator_contract.py; extend tests/ops/test_container_reproducibility_contract.py; consume existing requirements/build.in and requirements/build.lock without a dependency update; update ops/live-e2e/README.md.
 

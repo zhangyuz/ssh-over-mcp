@@ -116,7 +116,7 @@ authenticated full image digest with mandatory fresh-guest reconciliation.
 N1 is complete when signature/dependency derivation and every payload recipe
 entry are reproducible, every image role/path/provider is explicit, and review
 finds no undeclared component or implicit search fallback. It is not complete
-live composition evidence. At N3, before _start_manager() or any other target
+live composition evidence. At N3 candidate proof, before _start_manager() or any other target
 exec, trusted code measures the still-fresh image files, checks the declared
 versions/metadata/paths and complete ELF/search composition, and binds their
 actual hashes to the verified image and receipt. Unknown or mismatched image
@@ -176,9 +176,9 @@ x86_64 Linux ABI guards, system headers and symbolic SYS_io_uring_* constants,
 compile/link/run with bounded exit output. It grants no seccomp or kernel-denial
 credit and contains no credential/canary secret. Actual compiler commands and
 composition are frozen after inspection and successful supported-Linux
-non-root controls in N2, before enabling N3 feasibility. Those controls do not
-claim pinned-guest compatibility; only the N3 live result authorizes later
-security-canary use.
+non-root controls in N2, before enabling N3 candidate feasibility. Those controls do not
+claim pinned-guest compatibility; the N3 result permits N4 routing only;
+N4 native-required gates authorize later security-canary use.
 
 Stop and inventory all writers/descendants before sealing the output. Reject
 escaped or surviving writers. Pin/measure the produced ELF and execute only
@@ -188,37 +188,118 @@ guest/kernel versions; do not infer ABI support from a package name. Later
 Task 7's security canaries use the same certified inputs plus their already-main
 source, fresh output binding, core and identity checks.
 
-## 6. Authority sequencing and evidence
+## 6. Candidate proof, mandatory use and authority repair
 
-Ship four slices: G1 no-core guard, N1 authenticated derivation, N2 dormant
-materializer/helper, N3 fixed native-preflight activation. Each requires focused
-RED/GREEN, relevant full regression, fresh independent review, exact-head
-ordinary CI and full five-fixture legacy E2E, then exact merge-main CI/E2E and
-cleanup. The authority used for each head must already be on main. N3's old
-authority certifies regression only; after N3 merges, its new trusted-main
-native preflight must reconcile image composition, compile/link/run in the
-pinned guest and still run all five fixtures. Failure leaves the prerequisite open and blocks Task 3.
+Separate first guest feasibility from mandatory native certification. The
+existing `live-local-e2e.yml` remains a fixed **legacy-7a** authority-regression
+route: all five fixtures and cleanup, with no native acquisition or preflight.
+It is available for preparatory authority changes and bounded native-authority
+repair; it cannot certify native compatibility or a native-dependent target.
+No failure automatically retries through this route. Once N3 lands, every
+legacy invocation applies the already-main bootstrap/repair scope check;
+merge-main self-target runs have an empty diff. Normal native-dependent targets
+use the required profile (which still includes all five legacy fixtures).
 
-Enabling this fail-closed preflight is distinct from authorizing later
-security-canary use. No later canary execution or prerequisite completion is
-authorized until native proof, the full legacy matrix and cleanup all pass.
+| Fixed main workflow | Evidence class | Permitted credit |
+| --- | --- | --- |
+| live-local-e2e.yml | legacy-7a | Scoped authority bootstrap/repair and five-fixture regression |
+| live-native-toolchain-candidate.yml | native-candidate | Native feasibility plus five fixtures; prerequisite preparation |
+| live-native-toolchain-e2e.yml | native-required | Native prerequisite certification plus five fixtures |
 
-Native preflight is fixed trusted setup, not a target-selected acceptance mode
-or dynamic dispatcher. It executes before _start_manager() (which currently executes target code
-during prepare()), as well as before the fixed five-fixture probe; Task 6 stays wired and Task 7 STOP_MANAGER remains last. Once activated,
-missing native inputs/proof fails, never silently bypasses preflight.
+Only the later ledger-systemd-7b1 path can certify full Phase 7B1. Trusted
+consumers require the specific expected class, not merely any successful run.
 
-Native receipt fields: authority/target SHA, run/attempt, image/snapshot/signer,
+N3 adds `live-native-toolchain-candidate.yml` and its fixed trusted-main host
+entrypoint `scripts/run-live-native-toolchain-candidate.py`. This path runs only
+already-main materializer/helper/source inputs, reconciles the fresh image,
+compiles/links/runs, then runs the complete legacy matrix. It shares the existing
+provider account and `live-local-e2e` concurrency group with cancel-in-progress
+false; it cannot overlap another QEMU run. It remains guest-only/no-network,
+main-only and accepts only exact commit_sha. The root gate receives its fixed
+profile from trusted host payload metadata, never target CLI/environment/data.
+Candidate selection is selection of a reviewed workflow, not a target-selected
+command, helper, unit, UID/GID, path or arbitrary acceptance mode.
+
+The candidate path becomes executable authority only after N3 merges. If its
+first or later native proof fails, legacy regression remains executable because
+that route neither fetches native inputs nor imports/runs native modules.
+Repair the native authority through a separate small PR using ordinary CI,
+full exact-head legacy E2E and independent review before merge. Then require
+exact merge-main ordinary/legacy gates and rerun candidate proof using the
+newly-main repaired inputs. A failing candidate remains failed; the repair PR's
+legacy PASS is only authority-bootstrap regression evidence. The prerequisite
+stays open, and N4/product certification stay blocked, until the actual native
+candidate proof and all cleanup pass. Correcting this open slice is allowed;
+starting another capability while its gates are pending is not.
+
+Legacy repair is restricted to native authority inputs/modules, their fixed
+workflow/orchestrator/gate wiring, corresponding ops contracts and documentation.
+N3 commits an exact path allowlist for these files; broad ops/ or docs/ prefixes
+are insufficient. Renamed/new paths require separate authority review before
+the repair target can use them.
+It must not include production src/, target live fixtures/probes/support or
+ordinary CI policy changes. Split any such changes into separately certified
+PRs. Trusted-main scope checks inspect the target diff as bounded data, never
+execute target code on the host, and reject mixed repair/product changes.
+Scope checks plus fresh review cannot be supplied or relaxed by the repair
+branch itself. A product PR cannot select this route to avoid native evidence.
+
+N4 adds `live-native-toolchain-e2e.yml` and fixed main entrypoint
+`scripts/run-live-native-toolchain-e2e.py`, using the same frozen runtime recipe
+as the successful N3 candidate. It requires native preflight and the five
+fixtures, before any target exec including _start_manager(). No native failure,
+missing input or malformed receipt permits fallback to legacy. N4's exact-head
+candidate proof must already PASS under trusted main before merge; its exact
+merge-main run must then PASS through the native-required workflow. N4 changes
+only fixed routing/evidence policy, not compiler algorithms, inputs or source.
+A changed native runtime contract is a separate prerequisite needing fresh
+candidate proof, not an untested addition hidden in activation.
+
+Keep the legacy authority-repair route after N4. If native-required main fails,
+the same bounded repair cycle remains usable. Later native-dependent Phase 7B1
+PRs normally require the native-required workflow; a repair bootstrap exception
+never declares native or product completion. After repair, repeat native-required
+merge-main proof before resuming those PRs. Candidate failures and missing proof
+remain fail closed for their own purpose; legacy execution is never a runtime
+fallback for a native-required invocation.
+
+## 7. Authority sequencing and evidence
+
+Ship five slices: G1 no-core guard, N1 authenticated derivation, N2 dormant
+materializer/helper, N3 bounded candidate authority/proof, N4 mandatory native
+certification. Each requires focused RED/GREEN, relevant full regression, fresh
+independent review, exact-head ordinary CI and full legacy E2E, then exact
+merge-main CI/E2E and cleanup. The authority used for each head must already be
+on main. N3 additionally requires actual candidate merge-main native proof.
+N4 additionally requires exact-head candidate proof before merge and exact
+merge-main native-required proof afterward. Legacy, candidate and required
+receipts have distinct evidence classes; none is interchangeable.
+
+Every native invocation uses fixed preflight before _start_manager() (which
+currently executes target code during prepare()) or any other target execution,
+as well as before the five-fixture probe. Task 6 stays wired and Task 7
+STOP_MANAGER remains last. No later security-canary use or prerequisite
+completion is authorized until N4's actual native proof, legacy matrix and
+cleanup all pass. Later Task 8's ledger-systemd-7b1 mode must include mandatory
+native preflight; neither legacy nor candidate nor native-required alone earns
+full Ledger/systemd acceptance. Keep all sixteen criteria unchanged.
+
+Native receipt fields: authority/target SHA, run/attempt, fixed workflow/profile,
+evidence class (native-candidate or native-required), image/snapshot/signer,
 signed metadata and manifest digests, package closure, image file bindings,
 materialized tree/mount identity, source digest, identity/core/cgroup facts,
 fixed command plan, actual component/kernel versions, sealed ELF digest,
 compile/link/run conclusions and all cleanup results. Reconcile with trusted
 run output, not target self-report. Guest serial remains bounded by ADR 0008.
+A required consumer rejects candidate/legacy receipts even if they say PASS.
+Scope check errors or unknown workflow/profile/evidence classes fail closed.
 
-This prerequisite is complete only after N3's exact merge-main native proof,
-ordinary CI, unchanged full legacy matrix and provider/guest/whole-VM cleanup.
-It does not close Phase 7B1, replace installed-package-under-systemd proof,
-count as io_uring enforcement, or remove any of the sixteen acceptance criteria.
-Resume the remainder of parent Task 3 only then. If a complete compatible tree
-cannot be established within these constraints, stop for renewed design;
-no networking, skipped criterion, apt repair or silent image refresh.
+This prerequisite is complete only after N4's exact merge-main native-required
+proof, ordinary CI, unchanged full legacy matrix and provider/guest/whole-VM
+cleanup. It does not close Phase 7B1, replace installed-package-under-systemd
+proof, count as io_uring enforcement, or remove any acceptance criterion.
+Resume the remainder of parent Task 3 only then, using native-required head and
+merge-main gates for native-dependent preparations. If a compatible tree cannot
+be established within these constraints, stop for renewed design; no networking,
+skipped criterion, apt repair or silent image refresh. The tested repair cycle
+above resolves native authority defects without self-certification or bypass.
