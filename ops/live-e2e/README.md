@@ -95,12 +95,12 @@ After extraction, the trusted guest gate and its fixed stdlib `ledger_guest_pref
 
 ## Exact target identity
 
-The trusted-main workflow runs automatically only after a successful ordinary `CI` push run on `main`; `workflow_dispatch` remains available for an exact manual `commit_sha` rerun. The GitHub workflow run `headSha` identifies the trusted-main workflow/orchestrator revision; it is **not** necessarily the tested target identity.
+The ordinary `CI` workflow automatically calls this trusted reusable workflow only after validation succeeds for a push to `main`; `workflow_dispatch` remains available for an exact manual `commit_sha` rerun. Reusable-workflow calls inherit the caller push SHA/ref, keeping trusted-main workflow authority and the tested merge SHA commit-bound.
 
 The tested commit is authoritative only when all of these are equal:
 
 ```text
-resolved target SHA
+workflow commit_sha
 = bare Git target ref object ID
 = guest checkout HEAD
 = root-owned guest EXPECTED_COMMIT

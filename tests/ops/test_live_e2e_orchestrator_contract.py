@@ -106,7 +106,7 @@ def test_orchestrator_requires_trusted_main_actions_context() -> None:
         "GITHUB_SHA": "a" * 40,
         "SSH_OVER_MCP_E2E_SOURCE_REPOSITORY": "zhangyuz/ssh-over-mcp",
     }
-    for event in ("workflow_dispatch", "workflow_run"):
+    for event in ("workflow_dispatch", "push"):
         assert module._validated_workflow_context(
             {**valid, "GITHUB_EVENT_NAME": event}
         ) == "a" * 40
@@ -114,6 +114,7 @@ def test_orchestrator_requires_trusted_main_actions_context() -> None:
     for case in (
         {**valid, "GITHUB_ACTIONS": "false"},
         {**valid, "GITHUB_EVENT_NAME": "pull_request_target"},
+        {**valid, "GITHUB_EVENT_NAME": "workflow_run"},
         {**valid, "GITHUB_REPOSITORY": "someone/else"},
         {**valid, "GITHUB_REF": "refs/heads/feature"},
         {**valid, "GITHUB_SHA": "abc"},
@@ -546,49 +547,45 @@ def test_orchestrator_refuses_stale_provider_state_without_deleting_it() -> None
     assert ops.events[-1] == "cleanup_host"
 
 
-def test_workflow_auto_runs_only_after_successful_main_push_ci() -> None:
+def test_workflow_is_reusable_from_trusted_main_and_keeps_manual_fallback() -> None:
     workflow = yaml.load(WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
-    assert set(workflow["on"]) == {"workflow_run", "workflow_dispatch"}
-    assert workflow["on"]["workflow_run"] == {
-        "workflows": ["CI"],
-        "types": ["completed"],
-        "branches": ["main"],
+    assert set(workflow["on"]) == {"workflow_call", "workflow_dispatch"}
+    assert workflow["on"]["workflow_call"]["inputs"]["commit_sha"] == {
+        "required": "true",
+        "type": "string",
     }
     assert workflow["on"]["workflow_dispatch"]["inputs"]["commit_sha"]["required"] == "true"
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["concurrency"]["cancel-in-progress"] == "false"
-
     job = workflow["jobs"]["e2e"]
     assert job["runs-on"] == [
         "self-hosted", "macOS", "X64", "ssh-over-mcp-e2e-orchestrator"
     ]
-    for required in (
-        "github.event.workflow_run.conclusion == 'success'",
-        "github.event.workflow_run.event == 'push'",
-        "github.event.workflow_run.head_branch == 'main'",
-        "github.event.workflow_run.head_repository.full_name == github.repository",
-    ):
-        assert required in job["if"]
-    assert job["env"]["TARGET_SHA"] == (
-        "${{ github.event_name == 'workflow_run' && "
-        "github.event.workflow_run.head_sha || inputs.commit_sha }}"
-    )
-    assert job["env"]["SSH_OVER_MCP_E2E_SOURCE_REPOSITORY"] == (
-        "${{ github.event_name == 'workflow_run' && "
-        "github.event.workflow_run.head_repository.full_name || github.repository }}"
-    )
+    assert job["env"]["SSH_OVER_MCP_E2E_SOURCE_REPOSITORY"] == "${{ github.repository }}"
 
     rendered = WORKFLOW.read_text(encoding="utf-8")
-    assert "pull_request_target:" not in rendered
     assert "\n  push:" not in rendered
+    assert "pull_request_target:" not in rendered
+    assert "workflow_run:" not in rendered
     assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in rendered
     assert "ref: ${{ github.sha }}" in rendered
     assert "persist-credentials: false" in rendered
-    assert "scripts/run-live-local-e2e-orchestrator.py \"$TARGET_SHA\"" in rendered
+    assert "scripts/run-live-local-e2e-orchestrator.py" in rendered
+    assert "inputs.commit_sha" in rendered
     assert "qemu-system-x86_64" in rendered
     assert "limactl" not in rendered
     assert "sudo " not in rendered
     assert "/var/run/docker.sock" not in rendered
+
+
+def test_ci_calls_live_local_e2e_only_after_successful_main_validation() -> None:
+    workflow = yaml.load(CI_WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    job = workflow["jobs"]["live-local-e2e"]
+    assert job["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    assert job["needs"] == "validate"
+    assert job["uses"] == "./.github/workflows/live-local-e2e.yml"
+    assert job["with"] == {"commit_sha": "${{ github.sha }}"}
+    assert job["permissions"] == {"contents": "read"}
 
 
 def test_ordinary_ci_runner_contract_is_unchanged() -> None:
