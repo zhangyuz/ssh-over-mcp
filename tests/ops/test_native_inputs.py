@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 
@@ -10,7 +10,6 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE = ROOT / "ops/live-e2e/native_inputs.py"
-UTC = timezone.utc
 SIGNED = datetime(2026, 10, 4, 13, 26, 37, tzinfo=UTC)
 NOW = datetime(2026, 10, 6, 12, 0, 0, tzinfo=UTC)
 INDEX_HASH = "a" * 64
