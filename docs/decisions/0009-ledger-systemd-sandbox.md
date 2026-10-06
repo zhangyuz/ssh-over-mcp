@@ -1,6 +1,6 @@
 # ADR 0009: Harden the Security Ledger through a separate systemd service profile
 
-- Status: Proposed; written design awaits approval
+- Status: Accepted 2026-10-06; implementation plan pending review
 - Date: 2026-10-05
 - Design: [Phase 7B1](../superpowers/specs/2026-10-05-phase-7b1-ledger-systemd-design.md)
 
@@ -18,7 +18,7 @@ and automatic runtime-directory removal can hide replaced or stale endpoints.
 The source-only guest also must not execute a target package build or application
 setup as root merely to make a reference unit run.
 
-## Proposed decision
+## Decision
 
 Start with one reference systemd profile for the Ledger. Preserve its protocol,
 authorization, audit, storage and peer-identity behavior. Use a static non-root
@@ -59,8 +59,9 @@ original run-owned endpoint identity before bounded removal, then prove restart
 with unchanged key and preserved audit/approval state. This is not automatic
 production recovery or target-selected privileged cleanup.
 
-This proposed ADR becomes accepted only after written-design approval. It does
-not authorize implementation, deployment, or a weakened fallback by itself.
+The user approved this written design on 2026-10-06. Implementation follows
+the separately reviewed small-slice plan; this decision does not authorize
+production deployment or a weakened fallback.
 
 ## Consequences
 

@@ -1,6 +1,6 @@
 # Phase 7B1: Security Ledger systemd sandbox
 
-- Status: Proposed written design; scope approved, implementation not yet approved
+- Status: Written design approved 2026-10-06; implementation plan pending review
 - Date: 2026-10-05
 - Baseline: `a37747291894ac7b01ae5483af83d0dd89821015` (Phase 7A closed)
 - Related decision: [ADR 0009](../../decisions/0009-ledger-systemd-sandbox.md)

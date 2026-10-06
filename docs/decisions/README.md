@@ -20,4 +20,4 @@ Current ADRs:
 - [0006 — Full local E2E runs capability-bearing code only in a disposable Linux guest](0006-full-e2e-trust-model.md)
 - [0007 — ForceCommand host-agent capability handoff uses a fixed launcher](0007-host-agent-capability-launcher.md)
 - [0008 — Level-3 E2E guest has no virtual network device](0008-level3-e2e-no-network-guest.md)
-- [0009 — Security Ledger systemd sandbox (proposed)](0009-ledger-systemd-sandbox.md)
+- [0009 — Security Ledger systemd sandbox](0009-ledger-systemd-sandbox.md)
