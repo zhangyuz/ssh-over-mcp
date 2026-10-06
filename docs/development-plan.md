@@ -881,8 +881,14 @@ approved 2026-10-06;
 [design](superpowers/specs/2026-10-05-phase-7b1-ledger-systemd-design.md) and
 [ADR 0009](decisions/0009-ledger-systemd-sandbox.md) accepted. The
 [small-slice implementation plan](superpowers/plans/2026-10-06-phase-7b1-ledger-systemd.md)
-is approved 2026-10-06. Implementation is in progress, starting with Task 1's
-shared key-write prerequisite; no Phase 7B1 acceptance or closure is claimed.
+is approved 2026-10-06. Tasks 1–2 are complete through exact merge-main gates
+(PRs 124/125). Task 3 has reached its required missing-tool prerequisite:
+the pinned guest has no executable C compiler. The
+[proposed offline native design](superpowers/specs/2026-10-06-offline-native-e2e-toolchain-design.md),
+[ADR 0010](decisions/0010-offline-native-e2e-toolchain.md) and
+[draft prerequisite plan](superpowers/plans/2026-10-06-offline-native-e2e-toolchain.md)
+await written approval; no native authority is activated. No Phase 7B1
+acceptance or closure is claimed.
 The slice preserves existing
 Ledger authority and first lands any necessary trusted guest setup separately before target
 certification. Other Phase 7B hardening remains deferred to separate slices.
