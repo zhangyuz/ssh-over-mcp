@@ -92,7 +92,7 @@ jobs:
           python -m pip install -e '.[dev]'
 
       - name: Lint source and tests
-        run: python -m ruff check src tests ops/systemd ops/live-e2e/ledger_guest_preflight.py
+        run: python -m ruff check src tests ops/systemd ops/live-e2e/ledger_guest_preflight.py ops/live-e2e/native_archive.py
 
       - name: Verify project cgroup-v2 read-only probe
         shell: bash
@@ -107,7 +107,7 @@ jobs:
           PY
 
       - name: Compile on Python 3.13
-        run: python -m compileall -q src tests ops/systemd ops/live-e2e/ledger_guest_preflight.py
+        run: python -m compileall -q src tests ops/systemd ops/live-e2e/ledger_guest_preflight.py ops/live-e2e/native_archive.py
 
       - name: Test on Python 3.13
         run: python -m pytest -q
@@ -124,7 +124,7 @@ jobs:
           python -m pip install -e '.[dev]'
 
       - name: Compile on Python 3.14
-        run: python -m compileall -q src tests ops/systemd ops/live-e2e/ledger_guest_preflight.py
+        run: python -m compileall -q src tests ops/systemd ops/live-e2e/ledger_guest_preflight.py ops/live-e2e/native_archive.py
 
       - name: Test on Python 3.14
         run: python -m pytest -q

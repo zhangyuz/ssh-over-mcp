@@ -147,3 +147,17 @@ After verifying root, the exact clean target workspace, the independent read-onl
 The stdlib preflight leaf is packaged from the checked-out trusted-main authority, hash-verified with the payload, installed root-owned `0444` in the same read-only guest tmpfs and loaded by its fixed canonical path. Each direct manager/probe spawn and the trusted sshd spawn verifies the parent guard and rechecks it in the fork child before exec; non-root descendants inherit hard zero and cannot raise it without privilege. Future systemd services need separate effective `LimitCORE=0:0` verification because PID 1 does not inherit controller limits.
 
 This is guest authority preparation under ADR 0009. Exact-head legacy E2E still uses the previously merged authority; the exact merge-main run is the first live exercise of the new guard. It does not certify installed Ledger/systemd composition or native canaries. The existing disposable-VM trust model accepts guest-root-equivalent target code: this guard is not protection against malicious guest-root code changing kernel policy. VM destruction remains mandatory.
+
+## Dormant native package-data reader
+
+Phase 7B1 native prerequisite N1a adds `native_archive.py` as a stdlib-only,
+metadata-only reader for already-decompressed package data tar streams. It does
+not authenticate a package, parse a `.deb` envelope, resolve dependencies,
+materialize files, execute package content, or participate in any live workflow.
+Those authorities remain blocked on later N1/N2/N3/N4 slices.
+
+The reader records only immutable path/type/mode/owner/size/digest/link metadata.
+It rejects noncanonical or escaping paths, duplicate entries, hardlinks, special
+files, set-ID bits, extended metadata, escaping/cyclic/excessive symlink chains,
+and entries exceeding the reviewed count/path/file/expanded-data bounds. Its
+fixed public error does not include archive-controlled content.
