@@ -424,3 +424,46 @@ the marker/process/authority/run context, and separately bound the complete
 inspection envelope. This helper grants no deletion or marker-clearance authority
 and no live-inspection, Level-3 or A1 closure credit. ADR 0011 defines those
 separate gates; unknown/unbound incident state remains excluded.
+
+## Dormant canonical staging envelope and receipt
+
+`ops/live-e2e/staging_envelope.py`, `staging_wire.py` and `staging_receipt.py`
+implement the approved inspection wire contract as pure stdlib helpers. They have
+no CLI or workflow caller and perform no file access, environment lookup, process
+inventory/signalling, network operation, evidence-file write or output emission.
+The collector-only JSON format above remains unchanged. The separate envelope
+schema includes the two fixed incident catalog bindings, detached metadata and
+explicitly supplied inspection authority/run/attempt declarations.
+
+Validation checks exact scalar/container types, canonical sorted ASCII JSON,
+topology and catalog consistency, the inventory digest, and the complete 2097152
+byte envelope bound. Local balanced decimal conversion accepts budget-valid
+metadata integers beyond CPython's default digit guard without changing that
+process-wide guard. A fixed-schema scan checks object keys, token bounds,
+depth 5, seven ancestors and at most 4096 entries before materializing a decoded
+tree. There is no general JSON or caller-selected schema interface.
+
+Receipt encoding returns immutable framed lines; it does not print them. Each
+1024-byte raw chunk is independently encoded with standard padded canonical
+base64. Reconstruction requires complete ordered chunks, exact length/count,
+canonical JSON/base64 and both envelope/inventory consistency checks. It returns
+no partial bytes after a rejected or truncated receipt. The receipt is a data
+consistency record, **not authenticated workflow evidence or cleanup permission**.
+
+The checked-in synthetic golden fixture has 13 metadata records, 3023 canonical
+inventory bytes, 3253 envelope bytes and four chunks. Ruby JSON/Digest/Base64 and
+system OpenSSL independently verified its literal bytes/hashes before codec
+implementation. The envelope/receipt suites contain 316 tests, covering every
+scalar's wrong types, guard-independent integers, before-materialization
+refusals, complete 2 MiB equality/overflow, metadata bindings, exact framing,
+independent padding and secret-safe errors. Supported full Python 3.13/3.14
+self-hosted CI remains required for the exact reviewed revision.
+
+No helper proves that supplied metadata/provenance was freshly observed or
+trusted. Later preflight/integration must establish that through already-main
+authority before receipt emission. Signal-capable preflight still requires its
+separate approved, reviewed, already-main ADR0011 amendment with exact authority
+binding. Workflow activation, authenticated original-receipt retrieval, bounded
+apply/journal durability and disposal of unknown `recover.cc8Del` state remain
+separate gates. No live-inspection, Level-3, A1 or Phase7B1 closure credit is
+granted by these codec tests.
