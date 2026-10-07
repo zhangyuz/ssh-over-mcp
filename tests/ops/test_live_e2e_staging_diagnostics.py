@@ -5,12 +5,14 @@ import fcntl
 import hashlib
 import importlib.util
 import os
+import select
 import shutil
 import signal
 import stat
 import subprocess
 import sys
 import tempfile
+from collections import deque
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -357,3 +359,336 @@ def test_fd_verification_other_error_refuses_preserving_borrowed_fd(
         assert stat.S_ISREG(real_fstat(fd).st_mode)
     finally:
         os.close(fd)
+
+
+class _Backend:
+    """OS-boundary simulator; real authority reads and launch resources stay real."""
+
+    def __init__(self, module, monkeypatch):
+        self.module, self.monkeypatch = module, monkeypatch
+        self.now = 100.0
+        self.pid = 900001  # Never used with the real OS wait/kill implementations.
+        self.stdout, self.stderr = b"bounded\n", b""
+        self.reader = {}
+        self.pipes = []
+        self.read_budget_records = []
+        self.delivered = 0
+        self.registered = set()
+        self.spawns, self.waits, self.kill_calls, self.read_sizes, self.timeouts = [], [], [], [], []
+        self.wait_errors = deque()
+        self.wait_mode = "exit"
+        self.exit_status = 0
+        self.reaped = False
+        self.killed = False
+        self.kill_at = None
+        self.keep_running = False
+        self.retained = False
+        self.stalled = False
+        self.spawn_error = self.queue_error = self.registration_error = self.kill_error = None
+        self.spawn_result = self.pid
+        self.advance_to_deadline = False
+        self.changed_sigchld = False
+        self.proc_registered = False
+        real_read, real_pipe = os.read, os.pipe
+
+        def pipe():
+            pair = real_pipe()
+            self.pipes.append(pair)
+            return pair
+
+        def read(fd, size):
+            if fd not in self.reader:
+                return real_read(fd, size)
+            self.read_sizes.append(size)
+            stream = self.reader[fd]
+            self.read_budget_records.append((size, self.delivered))
+            data = getattr(self, stream)
+            if self.stalled or (not data and self.retained):
+                raise BlockingIOError(errno.EAGAIN, "fixture not ready")
+            result = data[:size]
+            self.delivered += len(result)
+            setattr(self, stream, data[size:])
+            return result
+
+        monkeypatch.setattr(module, "_require_identity", lambda: None)
+        monkeypatch.setattr(module.sys, "platform", "darwin")
+        monkeypatch.setattr(module.platform, "machine", lambda: "x86_64")
+        monkeypatch.setattr(module.threading, "active_count", lambda: 1)
+        monkeypatch.setattr(module.signal, "getsignal", lambda _: signal.SIG_DFL)
+        monkeypatch.setattr(module, "monotonic", lambda: self.now)
+        monkeypatch.setattr(module, "select", select, raising=False)
+        for name, value in {"KQ_FILTER_READ": -1, "KQ_FILTER_PROC": -5, "KQ_EV_ADD": 1,
+                            "KQ_EV_ENABLE": 4, "KQ_EV_ONESHOT": 16, "KQ_EV_DELETE": 2,
+                            "KQ_EV_ERROR": 0x4000, "KQ_NOTE_EXIT": 0x80000000}.items():
+            monkeypatch.setattr(select, name, value, raising=False)
+        monkeypatch.setattr(select, "kevent", lambda ident, filter, flags=0, fflags=0:
+                            SimpleNamespace(ident=ident, filter=filter, flags=flags,
+                                            fflags=fflags, data=0), raising=False)
+        monkeypatch.setattr(select, "kqueue", self.queue, raising=False)
+        monkeypatch.setattr(module.os, "posix_spawn", self.spawn)
+        monkeypatch.setattr(module.os, "waitpid", self.wait)
+        monkeypatch.setattr(module.os, "kill", self.kill)
+        monkeypatch.setattr(module.os, "read", read)
+        monkeypatch.setattr(module.os, "pipe", pipe)
+
+    def spawn(self, executable, argv, env, **kwargs):
+        self.spawns.append((executable, tuple(argv), env, kwargs))
+        if self.spawn_error:
+            raise self.spawn_error
+        actions = kwargs["file_actions"]
+        for stream, action in zip(("stdout", "stderr"), actions[1:3], strict=True):
+            writer = action[1]
+            matches = [read for read, write in self.pipes if write == writer]
+            assert len(matches) == 1
+            self.reader[matches[0]] = stream
+        return self.spawn_result
+
+    def wait(self, pid, options):
+        self.waits.append((pid, options))
+        assert pid == self.pid and options == os.WNOHANG
+        assert not self.reaped, "owned child waited again after terminal reap"
+        if self.wait_errors:
+            value = self.wait_errors.popleft()
+            if isinstance(value, BaseException):
+                raise value
+            return value
+        if self.wait_mode == "running" and (not self.killed or self.keep_running):
+            return 0, 0
+        self.reaped = True
+        return self.pid, 9 if self.killed else self.exit_status
+
+    def kill(self, pid, number):
+        assert pid == self.pid and number == signal.SIGKILL and not self.reaped
+        assert not self.kill_calls, "duplicate signal"
+        self.kill_calls.append((pid, number))
+        self.kill_at = self.now
+        self.killed = True
+        if self.kill_error:
+            raise self.kill_error
+
+    def queue(self):
+        if self.queue_error:
+            raise self.queue_error
+        owner = self
+
+        class Queue:
+            def control(self, changes, max_events, timeout=None):
+                assert timeout is not None and 0 <= timeout <= 10
+                owner.timeouts.append(timeout)
+                if changes:
+                    for event in changes:
+                        if event.filter == select.KQ_FILTER_PROC:
+                            assert event.ident == owner.pid
+                            if owner.registration_error:
+                                raise owner.registration_error
+                            owner.proc_registered = True
+                        elif event.flags & select.KQ_EV_DELETE:
+                            owner.registered.discard(event.ident)
+                        else:
+                            assert event.ident in owner.reader
+                            owner.registered.add(event.ident)
+                    return []
+                owner.now += timeout if owner.advance_to_deadline else min(timeout, 0.25)
+                if owner.changed_sigchld:
+                    owner.monkeypatch.setattr(owner.module.signal, "getsignal",
+                                              lambda _: signal.SIG_IGN)
+                result = [SimpleNamespace(ident=fd, filter=select.KQ_FILTER_READ,
+                                          flags=0, fflags=0, data=0)
+                          for fd in sorted(owner.registered)]
+                if owner.proc_registered:
+                    result.append(SimpleNamespace(ident=owner.pid, filter=select.KQ_FILTER_PROC,
+                                                  flags=0, fflags=0, data=0))
+                return result[:max_events]
+
+            def close(self):
+                pass
+
+        return Queue()
+
+
+@pytest.fixture
+def backend(diagnostics, monkeypatch):
+    return _Backend(diagnostics, monkeypatch)
+
+
+@pytest.mark.parametrize("kind,argv,budget", [
+    ("getconf", ("/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"), 5),
+    ("ps", ("/bin/ps", "-ww", "-U", "502", "-o", "pid=,comm="), 10),
+])
+def test_fixed_argv_env_and_no_public_overrides(diagnostics, backend, kind, argv, budget):
+    call = diagnostics.capture_getconf if kind == "getconf" else diagnostics.capture_ps
+    with pytest.raises(TypeError):
+        call(pid=123)
+    assert backend.spawns == []
+    result = call()
+    assert result.kind == kind and result.stdout == b"bounded\n" and result.child_pid == 900001
+    executable, actual, env, kwargs = backend.spawns[0]
+    assert actual == argv and executable == argv[0] and env == {"LC_ALL": "C"}
+    assert set(kwargs) == {"file_actions", "setsigdef"}
+    assert kwargs["setsigdef"] == (signal.SIGPIPE, signal.SIGCHLD)
+    assert all(0 <= timeout <= budget for timeout in backend.timeouts)
+    assert backend.kill_calls == []
+    with pytest.raises((AttributeError, TypeError)):
+        result.stdout = b"changed"
+
+
+@pytest.mark.parametrize("status,stderr,retained", [(0, b"", False), (256, b"", False),
+                                                  (9, b"", False), (0, b"secret", False),
+                                                  (0, b"", True)])
+def test_exact_own_wait_zero_and_both_eof_required(diagnostics, backend, status, stderr, retained):
+    backend.exit_status, backend.stderr, backend.retained = status, stderr, retained
+    if status == 0 and not stderr and not retained:
+        assert diagnostics.capture_getconf().stdout == b"bounded\n"
+    else:
+        with pytest.raises(diagnostics.DiagnosticError) as error:
+            diagnostics.capture_getconf()
+        assert error.value.cleanup_uncertain is False
+    assert backend.kill_calls == []  # Already-reaped state cannot authorize a signal.
+
+
+@pytest.mark.parametrize("kind,size,accepted", [
+    ("getconf", 1024, True), ("getconf", 1025, False),
+    ("ps", 65536, True), ("ps", 65537, False),
+])
+def test_each_getconf_stream_and_combined_ps_byte_bounds(diagnostics, backend, kind, size, accepted):
+    backend.stdout = b"x" * size
+    call = diagnostics.capture_getconf if kind == "getconf" else diagnostics.capture_ps
+    if accepted:
+        assert call().stdout == b"x" * size
+    else:
+        with pytest.raises(diagnostics.DiagnosticError):
+            call()
+    assert max(backend.read_sizes) <= (1025 if kind == "getconf" else 65537)
+
+
+def test_deadline_equality_is_refusal(diagnostics, backend):
+    backend.advance_to_deadline = True
+    with pytest.raises(diagnostics.DiagnosticError):
+        diagnostics.capture_getconf()
+    assert backend.now == 105.0
+
+
+@pytest.mark.parametrize("wait", [ChildProcessError(errno.ECHILD, "private detail"),
+                                  (900002, 0), (0, 256), (900001, 0x7f),
+                                  (900001, -256), (900001, 1 << 40)])
+def test_echild_or_wrong_wait_pid_never_signals_or_succeeds(diagnostics, backend, wait, capsys):
+    backend.wait_errors.append(wait)
+    with pytest.raises(diagnostics.DiagnosticError) as error:
+        diagnostics.capture_getconf()
+    assert str(error.value) == "staging diagnostic rejected"
+    assert error.value.cleanup_uncertain is True
+    assert backend.waits, "failure did not reach the scripted owned-wait boundary"
+    assert backend.kill_calls == []
+    assert capsys.readouterr() == ("", "")
+
+
+def test_one_kill_only_for_current_unreaped_child(diagnostics, backend):
+    backend.wait_mode, backend.stdout = "running", b"x" * 1025
+    with pytest.raises(diagnostics.DiagnosticError) as error:
+        diagnostics.capture_getconf()
+    assert error.value.cleanup_uncertain is False
+    assert backend.kill_calls == [(900001, signal.SIGKILL)]
+    assert len(backend.spawns) == 1 and backend.reaped
+
+
+def test_reaped_or_unknown_child_cannot_be_signalled(diagnostics, backend):
+    backend.retained = True
+    with pytest.raises(diagnostics.DiagnosticError):
+        diagnostics.capture_getconf()
+    assert backend.reaped and backend.kill_calls == []
+
+
+@pytest.mark.parametrize("fault", ["expiry", "esrch", "signal_failure", "reap_failure", "queue"])
+def test_two_second_cleanup_and_failed_signal_reap_are_uncertain(diagnostics, backend, fault):
+    backend.wait_mode, backend.stdout = "running", b"x" * 1025
+    if fault == "expiry":
+        backend.keep_running = True
+    elif fault == "esrch":
+        backend.kill_error = ProcessLookupError(errno.ESRCH, "private detail")
+    elif fault == "signal_failure":
+        backend.kill_error = PermissionError(errno.EPERM, "private detail")
+    elif fault == "reap_failure":
+        real_kill = backend.kill
+
+        def kill(pid, number):
+            real_kill(pid, number)
+            backend.wait_errors.append(ChildProcessError(errno.ECHILD, "private detail"))
+
+        backend.monkeypatch.setattr(diagnostics.os, "kill", kill)
+    else:
+        backend.queue_error = OSError(errno.EMFILE, "private detail")
+        backend.keep_running = True
+    with pytest.raises(diagnostics.DiagnosticError) as error:
+        diagnostics.capture_getconf()
+    assert error.value.cleanup_uncertain is True
+    assert len(backend.kill_calls) <= 1 and len(backend.spawns) == 1
+    assert backend.now <= 107.0
+    if backend.kill_calls:
+        assert backend.now - backend.kill_at <= 2.0
+
+
+@pytest.mark.parametrize("fault", ["spawn", "invalid_pid", "changed_sigchld", "registration"])
+def test_no_partial_return_printing_state_access_or_diagnostic_retry(
+    diagnostics, backend, fault, capsys
+):
+    if fault == "spawn":
+        backend.spawn_error = OSError(errno.EIO, "private spawn detail")
+    elif fault == "invalid_pid":
+        backend.spawn_result = -1
+    elif fault == "changed_sigchld":
+        backend.wait_mode, backend.changed_sigchld = "running", True
+    else:
+        backend.wait_mode = "running"
+        backend.registration_error = OSError(errno.EINVAL, "private registration detail")
+    with pytest.raises(diagnostics.DiagnosticError, match="^staging diagnostic rejected$"):
+        diagnostics.capture_getconf()
+    assert len(backend.spawns) == 1 and capsys.readouterr() == ("", "")
+    if fault != "registration":
+        assert backend.kill_calls == []
+
+
+def test_interrupted_wait_preserves_owned_pid_without_command_retry(diagnostics, backend):
+    backend.wait_errors.append(InterruptedError(errno.EINTR, "interrupted"))
+    assert diagnostics.capture_getconf().stdout == b"bounded\n"
+    assert len(backend.spawns) == 1 and backend.kill_calls == []
+
+
+@pytest.mark.parametrize("value", [None, bytearray(), "", 0])
+def test_nonbyte_read_cannot_manufacture_eof(diagnostics, backend, monkeypatch, value):
+    original = diagnostics.os.read
+
+    def read(fd, size):
+        return value if fd in backend.reader else original(fd, size)
+
+    monkeypatch.setattr(diagnostics.os, "read", read)
+    with pytest.raises(diagnostics.DiagnosticError):
+        diagnostics.capture_getconf()
+    assert backend.reaped and backend.kill_calls == []
+
+
+def test_registration_exit_race_requires_exact_terminal_owned_wait(diagnostics, backend):
+    backend.wait_errors.extend([(0, 0), (900001, 0)])
+    backend.registration_error = ProcessLookupError(errno.ESRCH, "exit race")
+    result = diagnostics.capture_getconf()
+    assert result.stdout == b"bounded\n" and backend.waits == [(900001, os.WNOHANG)] * 2
+    assert backend.kill_calls == [] and len(backend.spawns) == 1
+
+
+@pytest.mark.parametrize("kind,per_stream,total", [("getconf", 1024, 2048),
+                                                ("ps", 65536, 65536)])
+def test_both_stream_reads_share_fixed_combined_budget(diagnostics, backend, kind, per_stream, total):
+    backend.stdout, backend.stderr = b"x" * per_stream, b"x" * (per_stream + 1)
+    call = diagnostics.capture_getconf if kind == "getconf" else diagnostics.capture_ps
+    with pytest.raises(diagnostics.DiagnosticError):
+        call()
+    assert all(size <= min(8192, per_stream + 1, total - delivered + 1)
+               for size, delivered in backend.read_budget_records)
+    assert backend.delivered <= total + 1 and len(backend.spawns) == 1
+
+
+def test_reaper_change_after_terminal_wait_still_refuses_capture(diagnostics, backend):
+    backend.changed_sigchld = True
+    with pytest.raises(diagnostics.DiagnosticError) as error:
+        diagnostics.capture_getconf()
+    assert backend.reaped and backend.kill_calls == []
+    assert error.value.cleanup_uncertain is False  # Exact reap remains known.

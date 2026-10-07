@@ -10,6 +10,7 @@ import math
 import os
 import platform
 import pwd
+import select
 import signal
 import stat
 import sys
@@ -18,6 +19,7 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic
+from typing import Literal
 
 AUTHORITY_COMMIT = "1ddebe541ee80c0febc4cd35072f3a5046fac5cb"
 AUTHORITY_FILES = (
@@ -38,6 +40,12 @@ GETCONF_COMBINED_BYTES = 2048
 PS_COMBINED_BYTES = 65536
 MAX_FD_NAMES = 1024
 _FAILURE = "staging diagnostic rejected"
+# Known stdlib/context/cancellation failures are sanitized. Assertion failures
+# are programming/test defects, not substitutes for the intended OS outcome.
+_LIFECYCLE_ERRORS = (
+    OSError, RuntimeError, ValueError, TypeError, AttributeError, OverflowError,
+    MemoryError, KeyboardInterrupt, SystemExit, GeneratorExit,
+)
 
 
 class DiagnosticError(RuntimeError):
@@ -220,6 +228,9 @@ class _Launch:
     def close_child_ends(self) -> None:
         self._close((self.stdin_fd, self.stdout_write, self.stderr_write))
 
+    def close_readers(self) -> None:
+        self._close((self.stdout_read, self.stderr_read))
+
 def _check_deadline(deadline: float) -> None:
     if type(deadline) is not float or not math.isfinite(deadline) or monotonic() >= deadline:
         raise DiagnosticError()
@@ -309,3 +320,192 @@ def _prepare_launch(*, deadline: float):
         if launch is None:
             launch = _Launch(-1, -1, -1, -1, -1, (), owned)
         launch._close(tuple(owned))
+
+
+@dataclass(frozen=True, slots=True)
+class DiagnosticCapture:
+    kind: Literal["getconf", "ps"]
+    stdout: bytes
+    child_pid: int
+
+
+def capture_getconf() -> DiagnosticCapture:
+    _require_identity()
+    return _capture_fixed("getconf")
+
+
+def capture_ps() -> DiagnosticCapture:
+    _require_identity()
+    return _capture_fixed("ps")
+
+
+def _capture_fixed(kind: Literal["getconf", "ps"]) -> DiagnosticCapture:
+    if type(kind) is not str or kind not in {"getconf", "ps"}:
+        raise DiagnosticError()
+    _require_wait_context()
+    _verify_authority()
+    argv = GETCONF_ARGV if kind == "getconf" else PS_ARGV
+    deadline = monotonic() + (GETCONF_SECONDS if kind == "getconf" else PS_SECONDS)
+    total_limit = GETCONF_COMBINED_BYTES if kind == "getconf" else PS_COMBINED_BYTES
+    stream_limit = GETCONF_STREAM_BYTES if kind == "getconf" else PS_COMBINED_BYTES
+    pid = None
+    status = None
+    unknown = False
+    attempted_spawn = False
+    signal_sent = False
+    queue = None
+    process_notification = False
+
+    def owned_wait(until: float) -> bool:
+        nonlocal status, unknown
+        if unknown:
+            raise DiagnosticError(cleanup_uncertain=True)
+        if status is not None:
+            return True  # Reaped is terminal: never wait or signal this PID again.
+        while True:
+            _check_deadline(until)
+            try:
+                _require_wait_context()
+                result = os.waitpid(pid, os.WNOHANG)
+            except InterruptedError:
+                continue
+            except _LIFECYCLE_ERRORS:
+                unknown = True
+                raise DiagnosticError(cleanup_uncertain=True) from None
+            if (
+                type(result) is not tuple or len(result) != 2
+                or any(type(value) is not int for value in result)
+            ):
+                unknown = True
+                raise DiagnosticError(cleanup_uncertain=True)
+            observed_pid, observed_status = result
+            if observed_pid == 0 and observed_status == 0:
+                return False
+            if observed_pid != pid or not 0 <= observed_status <= 2147483647 or not (
+                os.WIFEXITED(observed_status) or os.WIFSIGNALED(observed_status)
+            ):
+                unknown = True
+                raise DiagnosticError(cleanup_uncertain=True)
+            status = observed_status
+            return True
+
+    with _prepare_launch(deadline=deadline) as launch:
+        def cleanup() -> bool:
+            nonlocal signal_sent
+            until = monotonic() + CLEANUP_SECONDS
+            uncertain = False
+            try:
+                launch.close_readers()
+            except _LIFECYCLE_ERRORS:
+                uncertain = True
+            if pid is None:
+                return uncertain or attempted_spawn
+            try:
+                if owned_wait(until):
+                    return uncertain
+                if signal_sent:  # No repeated signal under any failure path.
+                    return True
+                _check_deadline(until)
+                signal_sent = True
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except _LIFECYCLE_ERRORS:
+                    uncertain = True  # ESRCH is not proof of reap.
+                while not owned_wait(until):
+                    if queue is None or not process_notification:
+                        return True
+                    remaining = until - monotonic()
+                    if remaining <= 0:
+                        return True
+                    events = queue.control(None, 3, remaining)
+                    if any(event.flags & select.KQ_EV_ERROR for event in events):
+                        return True
+                return uncertain
+            except _LIFECYCLE_ERRORS:
+                return True
+
+        try:
+            _check_deadline(deadline)
+            attempted_spawn = True
+            created = os.posix_spawn(argv[0], argv, {"LC_ALL": "C"},
+                                     file_actions=launch.file_actions,
+                                     setsigdef=(signal.SIGPIPE, signal.SIGCHLD))
+            if type(created) is not int or created <= 0:
+                raise DiagnosticError(cleanup_uncertain=True)
+            pid = created  # This invocation alone owns its wait status.
+            launch.close_child_ends()
+            os.set_blocking(launch.stdout_read, False)
+            os.set_blocking(launch.stderr_read, False)
+            exited = owned_wait(deadline)
+            queue = select.kqueue()  # Created after spawn; cannot enter that child.
+            if not exited:
+                try:
+                    queue.control([select.kevent(
+                        pid, filter=select.KQ_FILTER_PROC,
+                        flags=select.KQ_EV_ADD | select.KQ_EV_ENABLE | select.KQ_EV_ONESHOT,
+                        fflags=select.KQ_NOTE_EXIT,
+                    )], 0, 0)
+                    process_notification = True
+                except OSError as error:
+                    # Exit may win the registration race. Only an exact owned
+                    # terminal wait settles it; no PID lookup or setup retry.
+                    if error.errno != errno.ESRCH or not owned_wait(deadline):
+                        raise DiagnosticError() from None
+            readers = {launch.stdout_read, launch.stderr_read}
+            output = {fd: bytearray() for fd in readers}
+            queue.control([select.kevent(fd, filter=select.KQ_FILTER_READ,
+                                          flags=select.KQ_EV_ADD | select.KQ_EV_ENABLE)
+                           for fd in readers], 0, 0)
+            while True:
+                _check_deadline(deadline)
+                _require_wait_context()
+                exited = owned_wait(deadline)
+                if exited and not readers:
+                    if status != 0 or output[launch.stderr_read]:
+                        raise DiagnosticError()
+                    _check_deadline(deadline)
+                    return DiagnosticCapture(kind, bytes(output[launch.stdout_read]), pid)
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise DiagnosticError()
+                events = queue.control(None, 3, remaining)
+                _check_deadline(deadline)
+                for event in events:
+                    if event.flags & select.KQ_EV_ERROR:
+                        raise DiagnosticError()
+                    if event.filter == select.KQ_FILTER_PROC and event.ident == pid:
+                        continue  # Notification is never the owned wait result.
+                    if event.filter != select.KQ_FILTER_READ or event.ident not in readers:
+                        raise DiagnosticError()
+                    fd = event.ident
+                    while True:
+                        _check_deadline(deadline)
+                        available = min(stream_limit - len(output[fd]),
+                                        total_limit - sum(map(len, output.values())))
+                        try:
+                            raw = os.read(fd, min(8192, available + 1))
+                        except BlockingIOError:
+                            break
+                        except InterruptedError:
+                            continue
+                        if type(raw) is not bytes:
+                            raise DiagnosticError()
+                        if not raw:
+                            queue.control([select.kevent(fd, filter=select.KQ_FILTER_READ,
+                                                          flags=select.KQ_EV_DELETE)], 0, 0)
+                            readers.remove(fd)
+                            break
+                        if len(raw) > available:
+                            raise DiagnosticError()
+                        output[fd].extend(raw)
+        except _LIFECYCLE_ERRORS as error:
+            uncertain = cleanup()
+            if isinstance(error, DiagnosticError):
+                uncertain = uncertain or error.cleanup_uncertain
+            raise DiagnosticError(cleanup_uncertain=uncertain) from None
+        finally:
+            if queue is not None:
+                try:
+                    queue.close()
+                except _LIFECYCLE_ERRORS:
+                    raise DiagnosticError(cleanup_uncertain=True) from None
