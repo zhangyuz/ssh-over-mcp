@@ -467,3 +467,52 @@ binding. Workflow activation, authenticated original-receipt retrieval, bounded
 apply/journal durability and disposal of unknown `recover.cc8Del` state remain
 separate gates. No live-inspection, Level-3, A1 or Phase7B1 closure credit is
 granted by these codec tests.
+
+## Dormant fixed diagnostic capture
+
+`ops/live-e2e/staging_diagnostics.py` adds argument-free `capture_getconf()` and
+`capture_ps()` helpers under approved ADR 0012 and the separately approved fixed
+diagnostics plan. The exact already-main authority is
+`1ddebe541ee80c0febc4cd35072f3a5046fac5cb`; the module pins and verifies the raw
+bytes of ADR 0011, ADR 0012 and the amended inspection spec before spawning.
+It has no CLI, workflow caller, receipt emitter or staging/marker access.
+
+Commands, environment, stream budgets and deadlines are fixed. Child exec FDs
+contain only disconnected stdin and owned stdout/stderr pipes. Borrowed parent
+FD identities, flags and offsets remain intact, including inheritable handles.
+Darwin rejects CLOSE actions for the scanner's already-closed FD: a bounded
+metadata check omits only EBADF-proven closed non-owned slots before the first
+spawn. Every live FD is still excluded; other errors refuse, and there is no
+spawn retry or inherited-FD fallback.
+
+Direct `posix_spawn`, own-PID nonblocking waits and kqueue notifications retain
+exclusive child ownership. Both EOFs and an exact zero-exit owned wait are
+required. Failure may use one SIGKILL only for that invocation's known unreaped
+child; cleanup is bounded by two seconds. Unknown ownership/status, failed
+signal/reap, an ambiguous low-stdio close or cleanup expiry preserves explicit
+uncertainty. An ambiguously closed descriptor is never closed again by the helper. Reaped PIDs and
+other pipe holders never become signal targets. No output is printed or returned
+on failure, and cleanup success does not convert collection failure into success.
+
+Developer-native evidence on Intel macOS, Darwin 24.6.0: Python 3.13.5 and 3.14.8
+each passed 95 diagnostic tests (77 portable plus 18 eligible native, zero native
+skips). Python 3.13 additionally passed 498 related codec/inventory/recovery/CI
+tests including those diagnostics. Native probes exercise real exec FD exclusion,
+closed stdio/high FDs, fixed diagnostics, output equality/overflow, stalled and
+EOF-before-exit children, exclusive reaping and an exited child's pipe retained
+by another fixture-owned process. Disposable native before/after-close error
+fixtures also prove low-stdio cleanup uncertainty without close retry or borrowed
+FD changes. Registration races, failed notification setup and concurrent
+two-stream budget scheduling are portable boundary-fake evidence; no forced
+native proof of those branches is claimed. Only test account eligibility is faked for
+UID-501 developer fixtures; actual wait-context checks and native waits remain
+real. This does not establish UID-502/GitHub/main workflow-context compatibility.
+Linux self-hosted Python 3.13/3.14 regression remains a separate exact-SHA gate;
+its native skips earn no macOS evidence.
+
+Capture is a partial component, not accepted path/process metadata, quiescence,
+authenticated inspection or cleanup permission. Cancelled-parent/orphan detection
+in both snapshots, namespace revalidation and trusted workflow integration still
+require their later proofs before any inspection activation. Provider/staging
+state and unknown `recover.cc8Del` remain untouched. No Level-3, A1 or Phase 7B1
+closure credit is granted by these component tests.
