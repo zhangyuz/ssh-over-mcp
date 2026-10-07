@@ -15,13 +15,13 @@
 ## Global constraints
 
 - Dormant only: no CLI, no GitHub workflow caller, no printing/log framing, no `GITHUB_*` provenance consumption, no receipt/envelope emission, no network and no target execution.
-- Read-only host authority only. No unlink/rmdir/rename/chmod/chown/write/sudo/process-group signal/operator-selected signal/PID search. The only signal capability remains inside the already-approved fixed diagnostic child lifecycle in `staging_diagnostics.py`.
+- Read-only host authority only. No unlink/rmdir/rename/chmod/chown/write/sudo/process-group signal/operator-selected signal/PID search. The only delivered-signal capability remains inside the already-approved fixed diagnostic child lifecycle in `staging_diagnostics.py`. Separately, owner-death observation uses only the fixed existing recovery semantic `os.kill(38013, 0)`: `ProcessLookupError` means absent, `PermissionError` means live, and any other ambiguous error refuses. Signal zero delivers no signal and grants no cleanup or general PID-probe authority.
 - Only fixed incident selectors `stale-target` and `older-target`. No caller-selected path, UID, inode, marker path, expected commit, command, PID, environment, process pattern or inventory JSON.
 - Fixed UID is 502; selected staging root must match its literal catalog basename/device/inode/mode 0700/expected commit from the approved spec.
 - Fixed marker path is the literal absolute `/Users/gha-e2e-orchestrator/Library/Caches/ssh-over-mcp-e2e/active-run.json`; never expand `~`, `HOME` or caller environment. Its exact stale target is `47531dadb58d365f74089dd5f52ce1b61bb0fdd1` and owner PID is 38013.
 - Derive the temp parent only from successful fixed `capture_getconf()` bytes parsed by `_parse_temp_parent`; never use `TMPDIR`, `tempfile`, environment fallback, arbitrary symlink resolution or caller text.
 - Both process snapshots come only from separate successful fixed `capture_ps()` invocations. Pass each capture's exact `child_pid` to `_require_snapshot`; derive the inspection PID internally from `os.getpid()`. Never accept either identity as an argument to the top-level fixed preflight.
-- Finish/reap fixed getconf before either process snapshot. Snapshot predicate must reject any getconf, extra ps, other python/pypy, QEMU and fixed authority processes. Separately require marker owner PID 38013 absent from each validated snapshot regardless of command basename.
+- Finish/reap fixed getconf before either process snapshot. Snapshot predicate must reject any getconf, extra ps, other python/pypy, QEMU and fixed authority processes. At both pre- and post-inventory stages, require the fixed signal-zero owner probe to report PID 38013 absent **and** require PID 38013 absent from the validated UID-502 snapshot rows regardless of command basename. Never infer marker-owner death solely from `ps -U 502`.
 - Keep every necessary marker-cache and temp/staging namespace descriptor pinned through final post-snapshot revalidation. All owned descriptors close on every success/failure path; caller/fixture borrowed descriptors remain unchanged.
 - Read regular file content only for the fixed provider marker and fixed `payload-content/expected_commit`. No other staging file content, Git object, bundle, ISO, wheel, package or overlay is opened for data.
 - Existing `collect_staging_inventory(root_fd, uid=502)` remains the only staging-tree traversal. Preserve its limits and semantics unchanged.
@@ -47,7 +47,7 @@ Canonical chain:
 
 System ancestors must be root-owned and not group/world writable. Account-owned ancestors must be UID 502 and not group/world writable. Final cache must be UID 502 mode 0700. Do not repair missing or unsafe parents.
 
-Open `active-run.json` relative to the pinned final cache descriptor with no-follow/nonblocking semantics. Validate regular type, UID 502, mode 0600, bounded exact schema, target, owner PID and opened device/inode. Record its initial identity and state. Re-read/revalidate through the same cache descriptor after the second process snapshot; content/state and device/inode must remain identical.
+Open `active-run.json` relative to the pinned final cache descriptor with `O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC`, after descriptor-relative no-follow metadata classification. Preserve the existing 4096-byte maximum and exact target/owner-PID schema. Validate regular type, UID 502, mode 0600 and opened device/inode against the classified object. Record its initial identity and state. Re-read/revalidate through the same cache descriptor after the second process snapshot; content/state and device/inode must remain identical.
 
 Do not reuse an absolute-path `_load_state()` call as provenance proof. If existing recovery parsing logic is reused, extract a descriptor-relative pure reader under focused review rather than weakening this chain.
 
@@ -61,7 +61,7 @@ Shared ancestors are root-owned and not group/world writable. The per-account to
 
 Open only the selected catalog basename relative to pinned `T`; require exact literal device/inode, UID 502 and mode 0700 before any inventory or expected-commit read. No prefix/glob discovery grants authority.
 
-Immediately before success return, after the second process snapshot, revalidate every held parent-to-child edge for both cache and temp chains via `stat(..., dir_fd=parent, follow_symlinks=False)` against the held child `fstat` identity/type/UID/GID/mode and original metadata. Recheck the selected staging root catalog identity. Holding descriptors alone is not final namespace proof.
+Immediately before success return, after the second process snapshot, revalidate every held parent-to-child edge for both cache and temp chains via `stat(..., dir_fd=parent, follow_symlinks=False)` against the held child's original device/inode/type/UID/GID/mode and current `fstat`. Directory timestamps are not authority and need not remain stable. Recheck the selected staging root catalog identity. Holding descriptors alone is not final namespace proof.
 
 ## Expected-commit contract
 
@@ -87,9 +87,9 @@ Order for a successful preflight is fixed:
 1. validate the fixed non-admin Darwin/x86_64 account/runtime context and exact authority binding;
 2. complete/reap fixed getconf capture and parse the temp parent;
 3. pin cache/temp/staging descriptors and read initial marker + first expected_commit observation;
-4. capture/parse/validate **snapshot A** using internally derived inspection PID and that capture's own ps PID; require PID 38013 absent;
+4. capture/parse/validate **snapshot A** using internally derived inspection PID and that capture's own ps PID; require the fixed signal-zero owner probe to report PID 38013 absent and require PID 38013 absent from the validated rows;
 5. collect the complete metadata-only staging inventory using the pinned root descriptor; require its root and expected-commit entry agree with the fixed observations;
-6. invoke a second independent fixed ps capture, then parse/validate **snapshot B** using that invocation's exclusively owned child PID; require PID 38013 absent;
+6. invoke a second independent fixed ps capture, then parse/validate **snapshot B** using that invocation's exclusively owned child PID; require the fixed signal-zero owner probe to report PID 38013 absent and require PID 38013 absent from the validated rows;
 7. reread/revalidate marker and expected_commit;
 8. revalidate every cache/temp/root namespace edge and fixed staging catalog identity;
 9. only then construct and return immutable detached `PreflightObservation`.
@@ -104,7 +104,7 @@ Create immutable/slotted data records in the new preflight module. The exact imp
 
 - fixed incident selector;
 - canonical temp parent path;
-- ordered cache/temp ancestor metadata required by the approved envelope;
+- ordered temp-parent ancestor metadata required by the approved envelope; cache-chain provenance is proven internally and must not grow the reviewed wire schema;
 - marker device/inode/target/owner PID;
 - selected staging basename/device/inode/UID/mode/expected commit;
 - complete `InventoryEntry` tuple from the existing collector;
@@ -117,7 +117,7 @@ Do **not** include workflow authority SHA/run ID/attempt, receipt digest/chunks,
 1. **Authority containment:** no generic path/PID/command/capture input, no accidental workflow/receipt surface, no mutation.
 2. **Namespace provenance:** every path component no-follow pinned; final edge revalidation detects replacement even while old FDs remain valid.
 3. **Content binding:** expected_commit's first read, inventory metadata entry and final reread cannot disagree or normalize drift.
-4. **Quiescence:** real capture child PIDs and internally derived inspection PID feed both snapshots; owner PID 38013 and detectable cancelled diagnostic leftovers refuse.
+4. **Quiescence:** real capture child PIDs and internally derived inspection PID feed both snapshots; fixed signal-zero owner-death probes plus row absence enforce PID 38013, and detectable cancelled diagnostic leftovers refuse.
 5. **Resource lifecycle:** all owned descriptors/captures close/reap under every induced failure; borrowed fixture descriptors remain usable and unchanged; no partial success evidence.
 
 ## Slice A — Descriptor-pinned namespace observation
@@ -136,8 +136,8 @@ Do **not** include workflow authority SHA/run ID/attempt, receipt digest/chunks,
 
 **Files:** modify only the preflight module/tests/README unless a narrowly reviewed sibling import seam is required. No workflow.
 
-- [ ] **B1 — RED the exact sequence.** Inject only private test boundaries and prove getconf completes before snapshot A; one fixed ps capture is invoked for A before inventory; a second fixed ps capture is invoked for B after inventory; final marker/expected-commit/namespace checks occur after B. Wrong order or test-seam replay of one capture result instead of a second invocation refuses. Add a vector where the two independently owned/reaped fixture children intentionally report the same numeric PID and prove no artificial PID-inequality rule is introduced.
-- [ ] **B2 — Compose the fixed helpers.** Call existing `capture_getconf`, `_parse_temp_parent`, `capture_ps`, `_parse_process_rows` and `_require_snapshot`. Derive inspection PID internally. Validate capture kind exactly. Call `capture_ps()` twice; bind each snapshot to that invocation's returned owned PID and require PID 38013 absent. Freshness is the controlled invocation/lifecycle, not numeric PID inequality.
+- [ ] **B1 — RED the exact sequence.** Inject only private test boundaries and prove getconf completes before snapshot A; one fixed ps capture is invoked for A before inventory; a second fixed ps capture is invoked for B after inventory; each stage performs the fixed PID-38013 signal-zero absence probe and validates row absence; final marker/expected-commit/namespace checks occur after B. Wrong order or test-seam replay of one capture result instead of a second invocation refuses. Add a vector where the two independently owned/reaped fixture children intentionally report the same numeric PID and prove no artificial PID-inequality rule is introduced. Owner-probe RED covers `ProcessLookupError` as absent, `PermissionError` as live, a live PID as refusal, and unexpected/ambiguous OS errors as refusal; no delivered signal is permitted.
+- [ ] **B2 — Compose the fixed helpers.** Call existing `capture_getconf`, `_parse_temp_parent`, `capture_ps`, `_parse_process_rows` and `_require_snapshot`. Derive inspection PID internally. Validate capture kind exactly. Call `capture_ps()` twice; bind each snapshot to that invocation's returned owned PID. Add a fixed no-argument owner-absence helper whose only process-existence target is literal PID 38013 and whose signal-zero semantics match existing recovery `_process_exists`; pair that observation with row absence at both stages. Freshness is the controlled invocation/lifecycle, not numeric PID inequality.
 - [ ] **B3 — Cancellation/orphan adversarial fixtures.** On developer UID 501, use disposable native `getconf`/`ps`-named children plus a private capture-boundary substitution that first asserts the fixed production capture operation; feed the real native rows into snapshot A and separately B. Preflight must refuse without signalling/reaping that orphan, output, receipt or state mutation; fixture owner alone tears it down. Record this as native row/composition evidence only, not end-to-end fixed `-U 502` capture proof. Actual UID-502 cancelled-parent/orphan composition remains mandatory in the later trusted-main workflow slice.
 - [ ] **B4 — Native format/PID evidence.** On developer Intel macOS, exercise the real one-byte ps projection and real child PID representation where possible. Record UID-501 substitutions explicitly. Do not claim UID-502/GitHub/main proof. Preserve PR #149's documented limitations for registration-race/notification/two-stream branches unless this slice adds real native forcing evidence.
 - [ ] **B5 — End-to-end disposable preflight fixture.** Use a fully disposable cache/temp/staging tree and capture-boundary fixture to prove success returns only immutable detached evidence after both snapshots/final checks. Induce failure at every late stage and assert no partial evidence/output and all owned descriptors close.
