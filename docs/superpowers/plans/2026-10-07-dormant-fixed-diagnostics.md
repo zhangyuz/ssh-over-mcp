@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-06-incident-staging-inspection-design.md` and ADR 0012. Written authority approved at `10681ce1f218b17c8bba98bcb4eb1d7352f520b6`; approval record reviewed at `666476af7f66d93c85d008eb0439f427a247df16` and merged in #147.
 
-**Status:** Draft implementation plan, not approved for execution. Baseline: 87 inventory/recovery/CI tests PASS. #147 exact-head CI `37615444003` PASS. Its exact merge-main run `37615962268` passed ordinary Python 3.13/3.14 validation but failed overall: stale provider state refused before guest, exit 70; provider absence failed, checkout cleanup passed. No Level-3/A1 closure credit.
+**Status:** Written plan approved by the user at exact `b6c4aa0bbd7e1dc1b8b4848c970444c539ad96d3` on 2026-10-07; native execution method preserved. Implementation pending. The operational contract is unchanged by this approval record. Baseline: 87 inventory/recovery/CI tests PASS. #147 exact-head CI `37615444003` PASS. Its exact merge-main run `37615962268` passed ordinary Python 3.13/3.14 validation but failed overall: stale provider state refused before guest, exit 70; provider absence failed, checkout cleanup passed. No Level-3/A1 closure credit.
 
 ## Already-main authority binding
 
