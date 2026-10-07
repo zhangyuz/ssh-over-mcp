@@ -18,7 +18,7 @@
 - Read-only host authority only. No unlink/rmdir/rename/chmod/chown/write/sudo/process-group signal/operator-selected signal/PID search. The only signal capability remains inside the already-approved fixed diagnostic child lifecycle in `staging_diagnostics.py`.
 - Only fixed incident selectors `stale-target` and `older-target`. No caller-selected path, UID, inode, marker path, expected commit, command, PID, environment, process pattern or inventory JSON.
 - Fixed UID is 502; selected staging root must match its literal catalog basename/device/inode/mode 0700/expected commit from the approved spec.
-- Fixed marker path is `~/Library/Caches/ssh-over-mcp-e2e/active-run.json` for account `gha-e2e-orchestrator`, with exact stale target `47531dadb58d365f74089dd5f52ce1b61bb0fdd1` and owner PID 38013.
+- Fixed marker path is the literal absolute `/Users/gha-e2e-orchestrator/Library/Caches/ssh-over-mcp-e2e/active-run.json`; never expand `~`, `HOME` or caller environment. Its exact stale target is `47531dadb58d365f74089dd5f52ce1b61bb0fdd1` and owner PID is 38013.
 - Derive the temp parent only from successful fixed `capture_getconf()` bytes parsed by `_parse_temp_parent`; never use `TMPDIR`, `tempfile`, environment fallback, arbitrary symlink resolution or caller text.
 - Both process snapshots come only from separate successful fixed `capture_ps()` invocations. Pass each capture's exact `child_pid` to `_require_snapshot`; derive the inspection PID internally from `os.getpid()`. Never accept either identity as an argument to the top-level fixed preflight.
 - Finish/reap fixed getconf before either process snapshot. Snapshot predicate must reject any getconf, extra ps, other python/pypy, QEMU and fixed authority processes. Separately require marker owner PID 38013 absent from each validated snapshot regardless of command basename.
@@ -55,7 +55,7 @@ Do not reuse an absolute-path `_load_state()` call as provenance proof. If exist
 
 `capture_getconf()` must succeed and be fully reaped first. Parse exactly one native `/var/folders/.../T/` path, map only literal `/var` to `/private/var`, then pin from `/` through:
 
-`/private` → `/private/var` → `/private/var/folders` → fixed OS-returned two-character shard → fixed OS-returned account token → `T`.
+`/private` → `/private/var` → `/private/var/folders` → fixed OS-returned two-character shard → fixed OS-returned account token → `T`. Every owned directory FD is opened no-follow with `O_CLOEXEC` as well as the required directory/read flags.
 
 Shared ancestors are root-owned and not group/world writable. The per-account token is UID 502 mode 0700 or 0755. `T` is UID 502 mode 0700. Record canonical ancestor metadata in root-to-T order.
 
@@ -65,7 +65,7 @@ Immediately before success return, after the second process snapshot, revalidate
 
 ## Expected-commit contract
 
-Open fixed `payload-content` relative to the selected root with `O_DIRECTORY | O_NOFOLLOW`; require same device, UID 502 and safe mode. Open only `expected_commit` relative to that descriptor with `O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC`.
+Open fixed `payload-content` relative to the selected root with `O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC`; require same device, UID 502 and safe mode. Open only `expected_commit` relative to that descriptor with `O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC`.
 
 Require:
 - runner-owned regular file;
@@ -89,12 +89,12 @@ Order for a successful preflight is fixed:
 3. pin cache/temp/staging descriptors and read initial marker + first expected_commit observation;
 4. capture/parse/validate **snapshot A** using internally derived inspection PID and that capture's own ps PID; require PID 38013 absent;
 5. collect the complete metadata-only staging inventory using the pinned root descriptor; require its root and expected-commit entry agree with the fixed observations;
-6. capture/parse/validate **snapshot B** from a distinct fresh ps child PID; require PID 38013 absent;
+6. invoke a second independent fixed ps capture, then parse/validate **snapshot B** using that invocation's exclusively owned child PID; require PID 38013 absent;
 7. reread/revalidate marker and expected_commit;
 8. revalidate every cache/temp/root namespace edge and fixed staging catalog identity;
 9. only then construct and return immutable detached `PreflightObservation`.
 
-No fallback/retry snapshot is allowed. Snapshot A and B must be independent fixed captures; a caller cannot supply bytes or reuse a PID. A failed or cleanup-uncertain diagnostic causes preflight failure and no evidence return.
+No fallback/retry snapshot is allowed. Snapshot A and B must come from two separate fixed capture invocations; a caller cannot supply or replay capture bytes/objects. Do not require the two numeric child PIDs to differ: after the first child is reaped, legitimate kernel PID reuse is possible and does not weaken per-invocation exclusive ownership. A failed or cleanup-uncertain diagnostic causes preflight failure and no evidence return.
 
 The top-level helper must not accept captured bytes, inspection PID, ps PID or open descriptors. Private fixture seams may substitute the OS/capture boundary only in tests and must assert the fixed production operation before substitution.
 
@@ -136,9 +136,9 @@ Do **not** include workflow authority SHA/run ID/attempt, receipt digest/chunks,
 
 **Files:** modify only the preflight module/tests/README unless a narrowly reviewed sibling import seam is required. No workflow.
 
-- [ ] **B1 — RED the exact sequence.** Inject only private test boundaries and prove getconf completes before snapshot A; snapshot A before inventory; snapshot B after inventory; final marker/expected-commit/namespace checks after B. Wrong order or reused capture identity refuses.
-- [ ] **B2 — Compose the fixed helpers.** Call existing `capture_getconf`, `_parse_temp_parent`, `capture_ps`, `_parse_process_rows` and `_require_snapshot`. Derive inspection PID internally. Validate capture kind exactly. Require snapshot A/B own-ps PIDs distinct and PID 38013 absent.
-- [ ] **B3 — Cancellation/orphan adversarial fixtures.** Native disposable fixtures leave a prior `getconf` or `ps` process detectable at snapshot A and separately B. Preflight must refuse without signalling/reaping that orphan, output, receipt or state mutation; fixture owner alone tears it down.
+- [ ] **B1 — RED the exact sequence.** Inject only private test boundaries and prove getconf completes before snapshot A; one fixed ps capture is invoked for A before inventory; a second fixed ps capture is invoked for B after inventory; final marker/expected-commit/namespace checks occur after B. Wrong order or test-seam replay of one capture result instead of a second invocation refuses. Add a vector where the two independently owned/reaped fixture children intentionally report the same numeric PID and prove no artificial PID-inequality rule is introduced.
+- [ ] **B2 — Compose the fixed helpers.** Call existing `capture_getconf`, `_parse_temp_parent`, `capture_ps`, `_parse_process_rows` and `_require_snapshot`. Derive inspection PID internally. Validate capture kind exactly. Call `capture_ps()` twice; bind each snapshot to that invocation's returned owned PID and require PID 38013 absent. Freshness is the controlled invocation/lifecycle, not numeric PID inequality.
+- [ ] **B3 — Cancellation/orphan adversarial fixtures.** On developer UID 501, use disposable native `getconf`/`ps`-named children plus a private capture-boundary substitution that first asserts the fixed production capture operation; feed the real native rows into snapshot A and separately B. Preflight must refuse without signalling/reaping that orphan, output, receipt or state mutation; fixture owner alone tears it down. Record this as native row/composition evidence only, not end-to-end fixed `-U 502` capture proof. Actual UID-502 cancelled-parent/orphan composition remains mandatory in the later trusted-main workflow slice.
 - [ ] **B4 — Native format/PID evidence.** On developer Intel macOS, exercise the real one-byte ps projection and real child PID representation where possible. Record UID-501 substitutions explicitly. Do not claim UID-502/GitHub/main proof. Preserve PR #149's documented limitations for registration-race/notification/two-stream branches unless this slice adds real native forcing evidence.
 - [ ] **B5 — End-to-end disposable preflight fixture.** Use a fully disposable cache/temp/staging tree and capture-boundary fixture to prove success returns only immutable detached evidence after both snapshots/final checks. Induce failure at every late stage and assert no partial evidence/output and all owned descriptors close.
 - [ ] **B6 — Full regression + fresh adversarial review.** Require no unresolved Critical/Important findings, resolve Minor or justify safe deferral, run focused suites plus full supported CI/Ruff/compile/diff check and compare Mac failure names against fresh clean main.
