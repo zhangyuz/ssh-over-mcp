@@ -1,6 +1,6 @@
 # Incident staging inspection: activation design
 
-- Status: Written design approved at 7e882cd5c3acc8940cba2ce45aa4eb938a9e1a8a; no workflow activation, deletion or diagnostic-child signal exception approved
+- Status: Original written design approved at 7e882cd5c3acc8940cba2ce45aa4eb938a9e1a8a; ADR 0012 written signal exception and descriptor/leftover-diagnostic amendments approved by the user at `10681ce1f218b17c8bba98bcb4eb1d7352f520b6`; implementation plan, workflow activation and deletion remain separate gates
 - Date: 2026-10-06
 - Parent: ADR 0011, Inspect steps 1–6
 - Prerequisites: merged dormant inventory (#142) and hardened marker reader (#143)
@@ -102,6 +102,26 @@ status 0 and empty stderr. Consume bounded chunks while the child runs; an unbou
 insufficient. Malformed/control-bearing rows, duplicate/noncanonical PIDs,
 unknown child status, unavailable inventory or deadline expiry refuse.
 
+For both pre-collection and post-collection snapshots, first finish and reap this
+inspection's fixed `getconf` child. Any validated UID-502 row with case-folded
+basename exactly `getconf` refuses. Allow exactly one row with case-folded
+basename `ps`: the exact freshly owned diagnostic child that produced that
+snapshot, whose PID is captured from its exclusive lifecycle before reaping,
+not supplied by a caller or inferred as ownership from snapshot contents. Require
+that row exactly once; missing/mismatched own identity or any additional `ps`
+refuses, including leftovers from cancelled inspections and operator diagnostics.
+Never signal a detected leftover or convert it into a borrowed child. Emit no
+receipt on refusal. These bounded observations detect the literal basenames;
+they do not certify historical cleanup or detect renamed/transient processes.
+
+For each fixed diagnostic, restrict the **child's exec-time descriptor table**
+to stdin from fixed `/dev/null` and stdout/stderr owned pipe write ends. Exclude
+all other parent descriptors, even if inheritable. The helper must preserve
+unrelated borrowed/pinned parent descriptors, flags and offsets; it may close
+only helper-owned parent resources. Cache/temp/root/payload provenance handles
+remain open and usable through final namespace and marker revalidation. No
+child may inherit those handles or the pipe read ends.
+
 Reject runner-owned qemu-system-* or qemu-img processes. After bounding and
 validating each process row, case-fold its basename and treat **every basename
 starting with `python` or `pypy`** as an interpreter candidate; reject every such
@@ -123,13 +143,16 @@ workflow concurrency cannot exclude a manual shell or all transient processes.
 The bounded diagnostic helper may terminate/reap **only the child it just
 spawned for fixed ps/getconf**, if needed to enforce output/time limits. It may
 never signal a PID taken from the marker, process inventory, or caller. This
-is a **proposed exception**, not authority granted by this design. ADR 0011's
-current no-process-killing rule remains in force. Before any signal-capable
-preflight code is implemented or merged, even dormant code, a separate ADR 0011
-amendment must be explicitly approved in writing, reviewed, and merged to main.
+is the **limited written exception** governed by ADR 0012, approved by the user
+at `10681ce1f218b17c8bba98bcb4eb1d7352f520b6`. All other process killing remains
+forbidden. Before any signal-capable preflight code is implemented or merged,
+even dormant code, the reviewed ADR 0011 amendment, ADR 0012 and these amended
+spec bytes must be merged to main, and the implementation plan must be separately
+reviewed and approved.
 No dormant label, passing CI, or approval of this design substitutes for that
 prerequisite. The implementation plan must identify the exact already-main
-commit containing the approved amendment, its fixed ADR path and content SHA-256;
+commit containing the approved amendment, both fixed ADR paths and content
+SHA-256 values, plus the reviewed amended spec path and content SHA-256;
 the preflight implementation and final activation must bind to that reviewed
 authority. A proposed/future merge SHA or ancestry alone is insufficient.
 Until that prerequisite exists, only the signal-free envelope slice may proceed
@@ -275,6 +298,13 @@ symlink/owner/mode/inode races, fixed command/child ownership, output/line/count
 time bounds for both fixed children, unsuccessful exit/nonempty stderr, framework
 Python/versioned python/pypy detection, live owner/QEMU/other interpreter and
 ambiguous process results.
+Add native descriptor-inheritance probes proving unrelated/pinned parent handles
+remain unchanged and usable on success/failure while absent in the actual child,
+including deliberately inheritable descriptors. Native cancellation fixtures
+must leave a detectable prior `getconf` or `ps` child and prove the next inspection
+refuses at either snapshot stage without signalling it, emitting a receipt or
+mutating state. Cover extra/missing/wrong own-`ps` identity and mixed-case names;
+dispose of test-owned fixtures separately, never incident processes.
 Integration tests must exercise failed late revalidation producing no success
 receipt; root/cache/ancestor replacement after collection and during the final
 process check; expected_commit replacement or same-inode/same-size rewrite

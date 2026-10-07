@@ -38,8 +38,19 @@ requires a reviewed incident-specific contract first.
 
 Create a separate manual, trusted-main, non-admin recovery workflow after
 written approval. It shares the non-cancelling `live-local-e2e` concurrency
-group. It performs no target execution, sudo, process killing, provisioning,
-or normal-E2E automatic recovery. It never clears the provider marker.
+group. It performs no target execution, sudo, signalling of pre-existing
+processes, provisioning or normal-E2E automatic recovery. It never clears the
+provider marker. Only the bounded newly-owned diagnostic-child exception below
+may depart from the no-process-killing rule.
+
+[ADR 0012](0012-owned-diagnostic-child-lifecycle.md) records the user's written
+approval at `10681ce1f218b17c8bba98bcb4eb1d7352f520b6` for exclusive lifecycle
+management of the two fixed inspection diagnostic children. Before signal-capable
+code is implemented or merged, even dormant code, require an exact already-main
+commit/path/content-digest binding of both ADRs and the amended inspection spec,
+and a separately approved implementation plan. All other process killing remains
+forbidden. ADR 0012 grants no staging deletion, marker clearance or workflow
+activation; this ADR's cleanup proposal remains unapproved.
 
 Only the two exact roots above are eligible. Operator inputs choose one fixed
 incident entry, not a path, glob, command, UID, or new target. Initial inspection
