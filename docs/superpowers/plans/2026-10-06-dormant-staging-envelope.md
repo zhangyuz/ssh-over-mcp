@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-06-incident-staging-inspection-design.md`, approved at `7e882cd5c3acc8940cba2ce45aa4eb938a9e1a8a`, merged by #144 as `4e81fcb1f6981a05f31d4b9f6497a895b778cdf1`.
 
-**Status:** Written plan for review; implementation not started. Baseline: 87 recovery/inventory/CI tests PASS on that merge SHA. No implementation RED/GREEN or Level-3 credit.
+**Status:** Written plan approved at `f849e2d6cdf83ff2f27e283b8296e9e51d1c1fa8`, merged by #145 as `6d3f910403a83c6b4c7eb6be120a045e504ab1f7`; implementation in progress. Baseline: 87 recovery/inventory/CI tests PASS. Exact-head CI, independent review and merge-main gates remain required; no Level-3 or A1 closure credit.
 
 ## Global Constraints
 
