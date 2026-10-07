@@ -489,17 +489,22 @@ Direct `posix_spawn`, own-PID nonblocking waits and kqueue notifications retain
 exclusive child ownership. Both EOFs and an exact zero-exit owned wait are
 required. Failure may use one SIGKILL only for that invocation's known unreaped
 child; cleanup is bounded by two seconds. Unknown ownership/status, failed
-signal/reap or cleanup expiry preserves explicit uncertainty. Reaped PIDs and
+signal/reap, an ambiguous low-stdio close or cleanup expiry preserves explicit
+uncertainty. An ambiguously closed descriptor is never closed again by the helper. Reaped PIDs and
 other pipe holders never become signal targets. No output is printed or returned
 on failure, and cleanup success does not convert collection failure into success.
 
 Developer-native evidence on Intel macOS, Darwin 24.6.0: Python 3.13.5 and 3.14.8
-each passed 91 diagnostic tests (75 portable plus 16 eligible native, zero native
-skips). Python 3.13 additionally passed 494 related codec/inventory/recovery/CI
+each passed 95 diagnostic tests (77 portable plus 18 eligible native, zero native
+skips). Python 3.13 additionally passed 498 related codec/inventory/recovery/CI
 tests including those diagnostics. Native probes exercise real exec FD exclusion,
 closed stdio/high FDs, fixed diagnostics, output equality/overflow, stalled and
 EOF-before-exit children, exclusive reaping and an exited child's pipe retained
-by another fixture-owned process. Only test account eligibility is faked for
+by another fixture-owned process. Disposable native before/after-close error
+fixtures also prove low-stdio cleanup uncertainty without close retry or borrowed
+FD changes. Registration races, failed notification setup and concurrent
+two-stream budget scheduling are portable boundary-fake evidence; no forced
+native proof of those branches is claimed. Only test account eligibility is faked for
 UID-501 developer fixtures; actual wait-context checks and native waits remain
 real. This does not establish UID-502/GitHub/main workflow-context compatibility.
 Linux self-hosted Python 3.13/3.14 regression remains a separate exact-SHA gate;

@@ -361,6 +361,40 @@ def test_fd_verification_other_error_refuses_preserving_borrowed_fd(
         os.close(fd)
 
 
+@pytest.mark.parametrize("number", [errno.EINTR, errno.EIO])
+def test_low_fd_close_error_preserves_uncertainty_without_retry(
+    diagnostics, monkeypatch, number, capsys
+):
+    # OS-boundary simulation owns only these fake slots; it never closes parent stdio.
+    null_info = os.stat("/dev/null")
+    closed = []
+
+    def close(fd):
+        closed.append(fd)
+        if fd == 0:
+            raise OSError(number, "private close detail")
+        assert fd == 900001
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("close uncertainty must refuse before spawning")
+
+    with monkeypatch.context() as fault:
+        fault.setattr(diagnostics.os, "open", lambda *args, **kwargs: 0)
+        fault.setattr(diagnostics.os, "fstat", lambda fd: null_info)
+        fault.setattr(diagnostics.fcntl, "fcntl", lambda *args: 900001)
+        fault.setattr(diagnostics.os, "close", close)
+        fault.setattr(diagnostics.os, "posix_spawn", forbidden)
+        with (
+            pytest.raises(diagnostics.DiagnosticError) as error,
+            diagnostics._prepare_launch(deadline=diagnostics.monotonic() + 5),
+        ):
+            pytest.fail("ambiguous low-FD close accepted")
+    assert str(error.value) == "staging diagnostic rejected"
+    assert error.value.cleanup_uncertain is True
+    assert closed == [0, 900001]  # One ambiguous close, then known duplicate cleanup.
+    assert capsys.readouterr() == ("", "")
+
+
 class _Backend:
     """OS-boundary simulator; real authority reads and launch resources stay real."""
 

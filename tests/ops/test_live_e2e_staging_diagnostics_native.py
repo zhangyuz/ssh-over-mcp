@@ -151,6 +151,65 @@ with open(sys.argv[3],'x') as f: json.dump({'safe':True,'accepted':accepted},f)
         assert result["accepted"] is True
 
 
+@pytest.mark.parametrize("closed_before_error", [False, True])
+def test_native_low_fd_close_failure_is_uncertain_and_preserves_borrowed_fd(
+    tmp_path, closed_before_error
+):
+    # All stdio manipulation and ambiguous-close faults are confined to this
+    # fresh disposable interpreter; the actual native resource path is used.
+    script = r'''
+import os, sys, fcntl, errno, importlib.util, json, time
+spec=importlib.util.spec_from_file_location('fixture_diagnostics', sys.argv[1])
+m=importlib.util.module_from_spec(spec); sys.modules[spec.name]=m; spec.loader.exec_module(m)
+borrowed=os.open(sys.argv[2],os.O_RDWR|os.O_CREAT|os.O_EXCL,0o600)
+os.write(borrowed,b'borrowed-canary'); os.set_inheritable(borrowed,True)
+before=os.fstat(borrowed); flags=(fcntl.fcntl(borrowed,fcntl.F_GETFD),fcntl.fcntl(borrowed,fcntl.F_GETFL))
+real_close=os.close; real_spawn=os.posix_spawn; calls=[]; spawn_calls=[]
+real_close(0)
+def close(fd):
+ if fd==0:
+  calls.append(fd)
+  if sys.argv[3]=='1': real_close(fd)
+  raise InterruptedError(errno.EINTR,'private native close fault')
+ return real_close(fd)
+def spawn(*args,**kwargs):
+ spawn_calls.append(args)
+ raise AssertionError('must not spawn after uncertain close')
+m.os.close=close; m.os.posix_spawn=spawn
+try:
+ try:
+  with m._prepare_launch(deadline=time.monotonic()+5):
+   raise AssertionError('uncertain close accepted')
+ except m.DiagnosticError as error:
+  assert str(error)=='staging diagnostic rejected'
+  uncertain=error.cleanup_uncertain
+finally:
+ m.os.close=real_close; m.os.posix_spawn=real_spawn
+assert calls==[0] and spawn_calls==[]
+assert (before.st_dev,before.st_ino)==(os.fstat(borrowed).st_dev,os.fstat(borrowed).st_ino)
+assert flags==(fcntl.fcntl(borrowed,fcntl.F_GETFD),fcntl.fcntl(borrowed,fcntl.F_GETFL))
+assert os.lseek(borrowed,0,os.SEEK_CUR)==len(b'borrowed-canary')
+assert uncertain is True
+# Fixture-only disposal: in the before-close fault we know this injected
+# close performed no syscall, so the test owns the still-open null descriptor.
+if sys.argv[3]=='0': real_close(0)
+else:
+ try: os.fstat(0)
+ except OSError as error: assert error.errno==errno.EBADF
+ else: raise AssertionError('closed stdio reopened')
+real_close(borrowed)
+print(json.dumps({'safe':True,'uncertain':uncertain}))
+'''
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script, str(MODULE),
+         str(tmp_path / "borrowed"), "1" if closed_before_error else "0"],
+        capture_output=True, timeout=15, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == b""
+    assert json.loads(result.stdout) == {"safe": True, "uncertain": True}
+
+
 def test_darwin_closed_close_action_refuses_before_owned_pid(tmp_path):
     fd = os.open(tmp_path / "closed-slot", os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
     os.close(fd)

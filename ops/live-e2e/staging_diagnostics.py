@@ -247,8 +247,11 @@ def _prepare_launch(*, deadline: float):
             if fd < 3:
                 duplicate = fcntl.fcntl(fd, fcntl.F_DUPFD_CLOEXEC, 3)
                 owned.add(duplicate)
-                owned.remove(fd)
-                os.close(fd)
+                owned.remove(fd)  # An ambiguous close must never be retried.
+                try:
+                    os.close(fd)
+                except OSError:
+                    raise DiagnosticError(cleanup_uncertain=True) from None
                 return duplicate
             return fd
 
