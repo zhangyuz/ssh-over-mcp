@@ -494,3 +494,12 @@ the exact PID only if no temp directories remain. Recovery refuses a live owner,
 any runner-owned QEMU, changed marker identity, ownership/mode/schema mismatch,
 or remaining E2E temp state. It only unlinks the fixed runner-owned marker and
 never uses sudo, kills processes or recursively deletes unknown state.
+
+The recovery marker reader classifies the no-follow metadata before a data open,
+then uses no-follow/nonblocking open and verifies the opened device/inode against
+that observation before reading. A FIFO present initially or substituted at open
+is refused without waiting for a writer; an inode replacement is refused even if
+its JSON is otherwise valid. These checks do not change marker-clear conditions
+or authorize cleanup of staging directories. They do not establish an atomic
+snapshot or protect against a compromised runner account changing file contents
+in place; recovery still requires quiescent operator state and fresh revalidation.

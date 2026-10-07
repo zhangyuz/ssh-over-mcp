@@ -87,9 +87,18 @@ def _parse_expected_pid(value: str) -> int:
 
 
 def _load_state(path: Path, uid: int) -> tuple[ProviderState, StateIdentity]:
-    flags = os.O_RDONLY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        raise RecoveryError("provider state is absent") from None
+    except OSError:
+        raise RecoveryError("provider state cannot be inspected safely") from None
+    if not stat.S_ISREG(before.st_mode) or before.st_uid != uid:
+        raise RecoveryError("provider state ownership/type mismatch")
+    if stat.S_IMODE(before.st_mode) != 0o600 or before.st_size > MAX_STATE_BYTES:
+        raise RecoveryError("provider state mode/size mismatch")
+    # A regular marker can be replaced by a FIFO before open; never await a writer.
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
     try:
         descriptor = os.open(path, flags)
     except FileNotFoundError:
@@ -103,6 +112,8 @@ def _load_state(path: Path, uid: int) -> tuple[ProviderState, StateIdentity]:
             raise RecoveryError("provider state ownership/type mismatch")
         if stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > MAX_STATE_BYTES:
             raise RecoveryError("provider state mode/size mismatch")
+        if (info.st_dev, info.st_ino) != (before.st_dev, before.st_ino):
+            raise RecoveryError("provider state identity changed")
         with os.fdopen(descriptor, "rb", closefd=False) as stream:
             raw = stream.read(MAX_STATE_BYTES + 1)
     finally:

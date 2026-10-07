@@ -97,6 +97,89 @@ def test_inspect_rejects_bad_state_and_non_directory_temp(tmp_path: Path) -> Non
         module.inspect_recovery(TARGET, state_path=state, temp_root=tmp_path, uid=os.geteuid())
 
 
+@pytest.mark.parametrize("replace_at_open", [False, True], ids=["existing", "open-race"])
+def test_provider_state_fifo_is_rejected_without_waiting_for_a_writer(
+    tmp_path: Path, replace_at_open: bool,
+) -> None:
+    state = tmp_path / "active-run.json"
+    if replace_at_open:
+        _state(state)
+    else:
+        os.mkfifo(state, mode=0o600)
+    script = """
+import os, runpy, sys
+from pathlib import Path
+module = runpy.run_path(sys.argv[1])
+state = Path(sys.argv[2])
+if sys.argv[3] == 'replace':
+    original_open = os.open
+    def replacing_open(path, flags, *args, **kwargs):
+        if path == state:
+            state.unlink()
+            os.mkfifo(state, mode=0o600)
+        return original_open(path, flags, *args, **kwargs)
+    os.open = replacing_open
+try:
+    module['_load_state'](Path(sys.argv[2]), os.geteuid())
+except module['RecoveryError']:
+    pass
+else:
+    raise SystemExit('unsafe provider FIFO accepted')
+"""
+    try:
+        result = subprocess.run(
+            [
+                sys.executable, "-I", "-c", script, str(MODULE), str(state),
+                "replace" if replace_at_open else "existing",
+            ],
+            capture_output=True, text=True, timeout=3, check=False,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("provider state FIFO blocked inspection before type validation")
+    assert result.returncode == 0, result.stderr
+    assert state.exists()
+
+
+def test_nonregular_provider_state_is_rejected_before_data_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module()
+    state = tmp_path / "active-run.json"
+    os.mkfifo(state, mode=0o600)
+    real_open = os.open
+
+    def safe_open(path, flags, *args, **kwargs):
+        if path == state:
+            pytest.fail("nonregular provider state reached data-capable open")
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(module.os, "open", safe_open)
+    with pytest.raises(module.RecoveryError, match="ownership/type"):
+        module._load_state(state, os.geteuid())
+    assert state.exists()
+
+
+def test_provider_state_replacement_between_stat_and_open_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module()
+    state = tmp_path / "active-run.json"
+    replacement = tmp_path / "replacement.json"
+    _state(state)
+    _state(replacement, owner_pid=4343)
+    real_open = os.open
+
+    def replacing_open(path, flags, *args, **kwargs):
+        if path == state:
+            replacement.replace(state)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(module.os, "open", replacing_open)
+    with pytest.raises(module.RecoveryError, match="identity"):
+        module._load_state(state, os.geteuid())
+    assert json.loads(state.read_text())["owner_pid"] == 4343
+
+
 def test_temp_diagnostic_escapes_control_characters(tmp_path: Path) -> None:
     module = _load_module()
     state = tmp_path / "active-run.json"
