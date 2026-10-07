@@ -1,6 +1,6 @@
 # Incident staging inspection: activation design
 
-- Status: Original written design approved at 7e882cd5c3acc8940cba2ce45aa4eb938a9e1a8a; ADR 0012 descriptor and leftover-diagnostic amendments below proposed for renewed written review; no workflow activation, deletion or diagnostic-child signal exception approved
+- Status: Original written design approved at 7e882cd5c3acc8940cba2ce45aa4eb938a9e1a8a; ADR 0012 written signal exception and descriptor/leftover-diagnostic amendments approved by the user at `10681ce1f218b17c8bba98bcb4eb1d7352f520b6`; implementation plan, workflow activation and deletion remain separate gates
 - Date: 2026-10-06
 - Parent: ADR 0011, Inspect steps 1–6
 - Prerequisites: merged dormant inventory (#142) and hardened marker reader (#143)
@@ -143,11 +143,12 @@ workflow concurrency cannot exclude a manual shell or all transient processes.
 The bounded diagnostic helper may terminate/reap **only the child it just
 spawned for fixed ps/getconf**, if needed to enforce output/time limits. It may
 never signal a PID taken from the marker, process inventory, or caller. This
-is a **proposed exception**, not authority granted by this design. ADR 0011's
-current no-process-killing rule remains in force. Before any signal-capable
-preflight code is implemented or merged, even dormant code, a separate ADR 0011
-amendment, specified in ADR 0012, must be explicitly approved in writing,
-reviewed, and merged to main along with these proposed spec amendments.
+is the **limited written exception** governed by ADR 0012, approved by the user
+at `10681ce1f218b17c8bba98bcb4eb1d7352f520b6`. All other process killing remains
+forbidden. Before any signal-capable preflight code is implemented or merged,
+even dormant code, the reviewed ADR 0011 amendment, ADR 0012 and these amended
+spec bytes must be merged to main, and the implementation plan must be separately
+reviewed and approved.
 No dormant label, passing CI, or approval of this design substitutes for that
 prerequisite. The implementation plan must identify the exact already-main
 commit containing the approved amendment, both fixed ADR paths and content

@@ -1,25 +1,27 @@
 # ADR 0012: Owned diagnostic-child lifecycle for incident inspection
 
-- Status: Proposed; no signal exception approved or implemented
+- Status: Written exception and amended spec approved by the user at `10681ce1f218b17c8bba98bcb4eb1d7352f520b6`; implementation and workflow activation pending
 - Date: 2026-10-07
 - Amends: ADR 0011 only for the two fixed inspection diagnostic children below
 
 ## Context
 
-The approved incident inspection design requires bounded native `getconf` and
-`ps` observations. Its proposed child-termination exception is explicitly
-unapproved. ADR 0011's no-process-killing rule therefore still applies, even to
-dormant implementation. Pure envelope/receipt codecs in #146 add no such power.
+The incident inspection design requires bounded native `getconf` and `ps`
+observations. The user explicitly approved this written exception and the
+descriptor/leftover-diagnostic spec amendments at `10681ce1f218b17c8bba98bcb4eb1d7352f520b6`.
+The narrow ADR 0011 amendment must still reach main and be bound in a separately
+approved implementation plan before signal-capable code begins, even dormant
+code. Pure envelope/receipt codecs in #146 add no such power.
 
 An output bound or timeout alone cannot ensure a stalled diagnostic child stops
 running. Granting a generic kill helper would unnecessarily widen persistent-host
-authority. This proposal separates a narrow lifecycle decision from inventory,
+authority. This ADR separates a narrow lifecycle decision from inventory,
 workflow activation, staging disposal, provider recovery and product execution.
 
-## Proposed decision
+## Decision
 
-After separate explicit written approval and an already-main authority binding,
-allow the non-admin inspection process to create, collect and reap only:
+After an exact already-main authority binding and approval of the implementation
+plan, allow the non-admin inspection process to create, collect and reap only:
 
 | Fixed argv | Collection deadline | Live output bound |
 | --- | --- | --- |
@@ -111,18 +113,18 @@ certified. Unavailable or ambiguous observations cannot clear uncertainty.
 
 ### Authority approval and exact binding
 
-This document is a proposal, not permission to implement signal-capable code.
-The written approval must explicitly cover this exception, then the reviewed
-ADR amendment must be merged before preflight implementation begins, including
-dormant code. Approval of the codecs, inspection design or this proposal's scope
-does not substitute for approval of the written authority.
+The written exception approval is recorded above. The reviewed ADR amendment
+and amended spec must be merged before preflight implementation begins, including
+dormant code. The subsequent implementation plan also requires its own written
+review and approval; this design approval does not approve an unwritten plan or
+activate a workflow. Earlier codec approval supplied no signal authority.
 
 The subsequent implementation plan must record one exact already-main commit
 containing the approved ADR 0012 and ADR 0011 amendment, both fixed paths and
 their content SHA-256 values, plus the reviewed amended inspection spec's fixed
 path and content SHA-256. Preflight and final activation verify that same
 three-document binding; a future merge SHA, target-authored replacement, ancestry alone or
-caller-selected mapping is insufficient. This proposal deliberately supplies
+caller-selected mapping is insufficient. This record deliberately supplies
 no fictional future SHA or digest. Approved document bytes may identify approval
 evidence independently; any status change requires a new exact reviewed binding.
 
@@ -170,7 +172,7 @@ authority; neither this ADR nor a dormant helper activates inspection.
 3. **Never signal:** preserves the current rule, but a stalled diagnostic can
    outlive its collection deadline and requires separate operator intervention.
 
-The proposed exception is an OS side effect under the existing non-admin account,
+This limited exception is an OS side effect under the existing non-admin account,
 not a generic process-control API. It relies on a trusted, exclusive parent and
 cannot defend against a compromised same-account process. Existing no-network
 guest, trusted-main separation, generic public errors, production authorization
