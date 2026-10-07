@@ -1,6 +1,6 @@
 # Incident staging inspection: activation design
 
-- Status: Draft for written review; no workflow activation or deletion approved
+- Status: Written design approved at 7e882cd5c3acc8940cba2ce45aa4eb938a9e1a8a; no workflow activation, deletion or diagnostic-child signal exception approved
 - Date: 2026-10-06
 - Parent: ADR 0011, Inspect steps 1–6
 - Prerequisites: merged dormant inventory (#142) and hardened marker reader (#143)
