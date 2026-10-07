@@ -65,7 +65,7 @@ Immediately before success return, after the second process snapshot, revalidate
 
 ## Expected-commit contract
 
-Open fixed `payload-content` relative to the selected root with `O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC`; require same device, UID 502 and safe mode. Open only `expected_commit` relative to that descriptor with `O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC`.
+Open fixed `payload-content` relative to the selected root with `O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC`; require same device, UID 502 and safe mode, and keep that payload descriptor pinned through the final reread/edge checks. Open only `expected_commit` relative to that held descriptor with `O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC`.
 
 Require:
 - runner-owned regular file;
@@ -76,7 +76,7 @@ Require:
 - content exactly selected 40 lowercase-hex catalog SHA plus LF;
 - metadata tuple `(device,inode,uid,gid,mode,nlink,size,mtime_ns,ctime_ns)` stable before/after the bounded read.
 
-Record the first observation before inventory. The existing inventory entry `payload-content/expected_commit` must equal the file observation's metadata fields. After inventory and the second process snapshot, re-open/re-read through the pinned root/payload namespace and require identical content and identical metadata to the first observation plus final edge revalidation. Missing, replaced, rewritten or metadata-drifted state refuses.
+Record the first observation before inventory. The existing inventory entry `payload-content/expected_commit` must equal the file observation's metadata fields. After inventory and the second process snapshot, re-open only `expected_commit` relative to the same held payload descriptor, reread it, and require identical content and identical metadata to the first observation plus final root→payload and payload→file edge revalidation. Missing, replaced, rewritten or metadata-drifted state refuses.
 
 The helper claims only the observed quiescent checks from the approved design; malicious same-account ABA changes remain outside the guarantee.
 
