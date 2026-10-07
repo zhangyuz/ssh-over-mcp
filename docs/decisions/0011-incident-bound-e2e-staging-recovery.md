@@ -41,6 +41,14 @@ written approval. It shares the non-cancelling `live-local-e2e` concurrency
 group. It performs no target execution, sudo, process killing, provisioning,
 or normal-E2E automatic recovery. It never clears the provider marker.
 
+[ADR 0012](0012-owned-diagnostic-child-lifecycle.md) proposes a separate exception
+for exclusive lifecycle management of the two fixed inspection diagnostic
+children. That exception is **not approved**. The no-process-killing rule above
+remains in force until explicit written approval and an exact already-main
+commit/path/content-digest binding of both ADRs exist; no signal-capable code may
+be implemented or merged before that gate. ADR 0012 grants no staging deletion,
+marker clearance or workflow activation.
+
 Only the two exact roots above are eligible. Operator inputs choose one fixed
 incident entry, not a path, glob, command, UID, or new target. Initial inspection
 needs the expected stale target, but no input manifest digest: it creates that
