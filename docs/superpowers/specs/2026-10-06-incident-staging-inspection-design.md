@@ -57,8 +57,10 @@ add these activation-specific requirements without widening marker recovery.
 
 Derive the account temp parent from fixed `/usr/bin/getconf DARWIN_USER_TEMP_DIR`
 with an empty environment except LC_ALL=C; never from TMPDIR, TEMP, caller text
-or tempfile's environment-dependent fallback. Output is bounded to 1024 bytes,
-exactly one ASCII path with one final newline and no control bytes. Accept the
+or tempfile's environment-dependent fallback. Require exit status 0, empty
+stderr and a 5-second wall deadline. Bound stdout and stderr separately to
+1024 bytes and combined to 2048 bytes during collection; overflow refuses.
+Successful stdout contains exactly one ASCII path with one final newline and no control bytes. Accept the
 native `/var/folders/<two lowercase alphanumeric characters>/<lowercase
 alphanumeric or underscore token>/T/` shape. Map only the known `/var` alias to
 `/private/var`; do not resolve arbitrary symlinks or use Path.resolve.
@@ -66,12 +68,21 @@ alphanumeric or underscore token>/T/` shape. Map only the known `/var` alias to
 Walk from the pinned `/` descriptor through `/private/var/folders`, the fixed
 OS-returned components and `T`, opening every component with O_DIRECTORY and
 O_NOFOLLOW, checking stat/open device/inode agreement. Shared ancestors must be
-root-owned and not group/world writable; the per-account token directory must be UID 502, mode 0700 or 0755;
+root-owned and not group/world writable; the per-account token directory must
+be UID 502, mode 0700 or 0755;
 T must be UID 502 and mode 0700. Reject unsupported ownership/layout instead of
 falling back. Open the selected literal root relative to the temp parent and
 match the catalog before any expected_commit read or collection. Hold all
 necessary parent/root descriptors until verification is complete and close
-owned descriptors on all paths.
+owned descriptors on all paths. Immediately before receipt emission, after the
+final process checks, revalidate **every parent-to-child namespace edge** of
+both the marker-cache and temp/root chains: no-follow stat relative to each held
+parent must match the held child's device/inode/type/UID/GID/mode and the required
+ownership/permission constraints. Recheck the selected root's literal catalog.
+Missing, replaced, unsafe or mismatched edges refuse, even if the originally
+opened objects remain valid. Holding FDs alone is insufficient provenance.
+These final checks remain observations under quiescence, not an atomic snapshot
+or immunity to changes after the last check.
 
 The initial live run must report the derived parent and safe metadata so this
 macOS provisioning assumption can be checked. A mismatch is a failed inspection,
@@ -84,15 +95,19 @@ Before and after collection, require recorded owner PID 38013 absent. Treat
 permission errors as live and ambiguous process errors as refusal. Run only the
 fixed `/bin/ps -ww -U 502 -o pid=,comm=` with the diagnostic child's environment
 restricted to LC_ALL=C. Bound combined output to 65536 bytes, nonempty process
-rows to 256, each line to 4096 bytes and wall time to 10 seconds. Consume bounded
-chunks while the child runs; an unbounded capture followed by a size check is
+rows to 256, each line to 4096 bytes and wall time to 10 seconds. Require exit
+status 0 and empty stderr. Consume bounded chunks while the child runs; an unbounded capture followed by a size check is
 insufficient. Malformed/control-bearing rows, duplicate/noncanonical PIDs,
 unknown child status, unavailable inventory or deadline expiry refuse.
 
-Reject runner-owned qemu-system-* or qemu-img processes, python/pypy interpreters
-other than this exact inspection PID, or commands whose basename identifies
-an E2E orchestrator. The running inspection process must itself appear exactly
-once. Other ordinary runner/OS processes are not an execution grant. This is a
+Reject runner-owned qemu-system-* or qemu-img processes. Case-fold native
+interpreter basenames and match exactly
+`(?:python|pypy)(?:[0-9]+(?:\.[0-9]+)*)?[dmt]?` with full-match semantics,
+including framework `Python`, python3.x and pypy version/debug/threading variants;
+reject every matching PID except this exact inspection PID. Also reject fixed
+E2E authority basenames run-live-local-e2e-orchestrator.py,
+ssh-over-mcp-live-e2e-gate and recover_provider.py. No caller-selected patterns.
+The running inspection process must itself appear exactly once. Other ordinary runner/OS processes are not an execution grant. This is a
 bounded observational check under the trusted-account assumption, not detection
 of malicious renamed processes. Operator activity on the roots must be stopped;
 workflow concurrency cannot exclude a manual shell or all transient processes.
@@ -107,7 +122,20 @@ No wrapper shell, command interpolation or arbitrary executable is accepted.
 ## Inventory and immutable envelope
 
 Reuse collect_staging_inventory(root_fd, uid=502) and the fixed expected_commit
-reader. Regular data files are never opened or read except the already-approved
+reader's no-follow, nonblocking, ownership/type/41-byte/ASCII validation. The
+activating reader must return a value **and its pinned regular-file metadata**:
+device/inode, UID/GID, mode, nlink, size and mtime_ns/ctime_ns. Compare metadata
+before/after each bounded read, rejecting instability, and require value equal
+to the selector's literal catalog SHA. The existing string-only reader API alone
+does not establish this binding. Require that observation to equal the
+collector's payload-content/expected_commit entry. After collection and final
+process checks, reread and revalidate through pinned payload/root descriptors;
+require identical value/metadata matching the collected entry, and validate its
+parent-to-child namespace edges before emission. Replacement or a same-inode,
+same-size content write at any observed stage refuses. Do not silently update
+the binding or certify a later state with an earlier SHA. Malicious same-account
+ABA changes are outside the promised guarantee, as are changes after the final
+check. Regular data files are never opened or read except the already-approved
 payload-content/expected_commit. Keep the collector's 4096 total entries,
 depth 12, 4096-byte relative path, no-follow/type/UID/device/link/mode/identity
 checks and 60-second checked monotonic deadline. The workflow bounds overall
@@ -160,9 +188,14 @@ bindings, deterministic provenance separation, complete 2 MiB equality/overflow,
 chunk loss/duplication/truncation and invalid trusted provenance values.
 Preflight tests must cover environment-selected temp roots being ignored,
 symlink/owner/mode/inode races, fixed command/child ownership, output/line/count/
-time bounds, live owner/QEMU/other interpreter and ambiguous process results.
+time bounds for both fixed children, unsuccessful exit/nonempty stderr, framework
+Python/versioned python/pypy detection, live owner/QEMU/other interpreter and
+ambiguous process results.
 Integration tests must exercise failed late revalidation producing no success
-receipt, preserved borrowed/closed owned descriptor semantics, unknown selector and
+receipt; root/cache/ancestor replacement after collection and during the final
+process check; expected_commit replacement or same-inode/same-size rewrite
+between first read, collection and final reread; preserved borrowed/closed owned
+descriptor semantics; unknown selector and
 unknown recovery-root exclusion. Add full workflow authority/input/serialization
 contracts and run disposable native macOS fixtures before activation.
 
