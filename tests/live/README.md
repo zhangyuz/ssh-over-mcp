@@ -516,3 +516,49 @@ in both snapshots, namespace revalidation and trusted workflow integration still
 require their later proofs before any inspection activation. Provider/staging
 state and unknown `recover.cc8Del` remain untouched. No Level-3, A1 or Phase 7B1
 closure credit is granted by these component tests.
+
+## Dormant process metadata validation
+
+`ops/live-e2e/staging_process_metadata.py` adds pure private parsers and a
+snapshot rejection predicate under the separately approved process-metadata
+plan. Approval covers reviewed plan head `e1f5d5e33b0c468f9c31b96b7e14d68f97b6d92e`,
+merged in #150 as `3101fd4cfc7186b46cce1f9db6af264021b21392`. The same three
+normative authority documents remain byte-identical to trusted `1ddebe5`.
+The pure module does not verify that authority or observe any host state.
+
+Only exact bytes enter the parsers. The temp-root parser accepts the fixed
+native shape and maps its literal `/var` alias to `/private/var`. Process rows
+consume exactly one post-PID space, preserving command-leading spaces for
+refusal and internal spaces unchanged. Canonical PIDs use the reviewed signed
+32-bit Darwin representation bound. Byte, row and line budgets are enforced
+before record construction/conversion; returned records are frozen and slotted.
+
+The predicate revalidates exact record/scalar shapes, unique PIDs, printable
+ASCII commands, nonempty literal basenames, individual line bounds and the
+65536-byte shortest-serialization aggregate including each LF before
+classification. Representability authenticates neither source/freshness nor
+original capture padding/blank lines/byte count. Exactly one supplied inspection
+PID must have a python/pypy prefix and one distinct supplied own-ps PID must have
+basename `ps`. Other interpreters, any getconf/extra ps and fixed QEMU/authority
+names refuse. Private identity arguments confer no ownership; later integration
+must derive them internally from the real inspection and exact owned capture.
+A return of None supplies no accepted-preflight object, receipt or capability.
+
+Developer verification on Darwin 24.6.0 x86_64: Python 3.13.5 and 3.14.8 each
+passed 136 pure metadata cases. Python 3.13 passed 634 related cases, including
+the existing 95 diagnostic cases. Both full Mac runs had 1673 passes, 84 failures
+and 177 skips, with exactly the same 84 failure names as the fresh clean main
+baseline (1537 passes, 84 failures, 177 skips). These are no-new-failure Mac
+results, not full Mac GREEN. Each full run retained all 18 eligible existing
+Darwin diagnostic passes and zero native skips. Those tests validate the
+existing capture helper; the new pure vectors supply no native orphan or
+two-snapshot composition proof. Exact-head self-hosted Linux full regression
+and fresh independent review remain separate required gates.
+
+The module has no host-action import, capture caller, CLI or workflow wiring.
+Import/validation tests guard host-action surfaces and require no output; they
+do not protect against arbitrary malicious code in a compromised parent.
+Native fixed UID-502 ps format/PID evidence, actual cancelled-parent diagnostics,
+both snapshot identities, inventory/late namespace revalidation and trusted
+workflow/receipt integration remain mandatory before activation. Provider and
+staging state, unknown `recover.cc8Del`, A1 and N1c remain pending their own gates.

@@ -58,3 +58,37 @@ def _parse_process_rows(stdout: bytes) -> tuple[ProcessRow, ...]:
         seen.add(pid)
         rows.append(ProcessRow(pid, command.decode("ascii")))
     return tuple(rows)
+
+
+def _require_snapshot(rows: tuple[ProcessRow, ...], *, inspection_pid: int, own_ps_pid: int) -> None:
+    _require(type(inspection_pid) is int and 1 <= inspection_pid <= 2147483647)
+    _require(type(own_ps_pid) is int and 1 <= own_ps_pid <= 2147483647)
+    _require(inspection_pid != own_ps_pid)
+    _require(type(rows) is tuple and len(rows) <= 256)
+    seen = set()
+    validated = []
+    total = 0
+    for row in rows:
+        _require(type(row) is ProcessRow)
+        pid, command = row.pid, row.command
+        _require(type(pid) is int and 1 <= pid <= 2147483647 and pid not in seen)
+        _require(type(command) is str and 1 <= len(command) <= 4096)
+        _require(command[0] != " " and command[-1] != " " and not command.endswith("/"))
+        line_size = len(str(pid)) + 1 + len(command)
+        total += line_size + 1  # Every record requires its own LF.
+        _require(line_size <= 4096 and total <= 65536)
+        _require(all(32 <= ord(character) <= 126 for character in command))
+        seen.add(pid)
+        validated.append((pid, command))
+    _require(inspection_pid in seen and own_ps_pid in seen)
+    # Classify only after every supplied record meets the representation bounds.
+    for pid, command in validated:
+        basename = command.rsplit("/", 1)[-1].lower()
+        interpreter = basename.startswith(("python", "pypy"))
+        _require(interpreter == (pid == inspection_pid))
+        _require((basename == "ps") == (pid == own_ps_pid))
+        _require(not basename.startswith("qemu-system-"))
+        _require(basename not in (
+            "getconf", "qemu-img", "run-live-local-e2e-orchestrator.py",
+            "ssh-over-mcp-live-e2e-gate", "recover_provider.py",
+        ))

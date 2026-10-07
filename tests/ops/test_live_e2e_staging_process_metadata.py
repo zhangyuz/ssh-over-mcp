@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import builtins
 import importlib.util
+import os
+import socket
+import subprocess
 import sys
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -168,4 +173,176 @@ def test_records_are_immutable_and_failure_has_no_partial_output(metadata, capsy
                        match="^staging process metadata rejected$") as error:
         metadata._parse_process_rows(b"411 Python\nSECRET_CANARY\n")
     assert error.value.args == ("staging process metadata rejected",)
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize("inspection,own_ps", [
+    (411, 411), (True, 512), (411, False), (0, 512), (-1, 512),
+    (2147483648, 512), (411, 2147483648), ("411", 512), (411, 512.0), (None, 512),
+])
+def test_exact_distinct_own_identities_required(metadata, inspection, own_ps):
+    rows = metadata._parse_process_rows(b"411 Python\n512 ps\n")
+    with pytest.raises(metadata.ProcessMetadataError):
+        metadata._require_snapshot(rows, inspection_pid=inspection, own_ps_pid=own_ps)
+
+
+@pytest.mark.parametrize("wire", [
+    b"", b"512 ps\n", b"411 Python\n", b"411 bash\n512 ps\n",
+    b"411 Python\n512 ordinary\n", b"411 Python\n513 ps\n",
+    b"411 Python\n512 Python\n", b"411 Python\n512 ps\n613 Ps\n",
+])
+def test_missing_mismatched_and_extra_own_rows_refuse(metadata, wire):
+    rows = metadata._parse_process_rows(wire)
+    with pytest.raises(metadata.ProcessMetadataError):
+        metadata._require_snapshot(rows, inspection_pid=411, own_ps_pid=512)
+
+
+@pytest.mark.parametrize("candidate", [
+    "Python", "python3.13td", "python3.7dm", "pypy3.10dm", "python3..13",
+    "python3.13tdx", "python-tools", "PyThOn3.13TD", "PYPY3.10DM",
+])
+def test_interpreter_prefix_vectors_and_case_fold(metadata, candidate):
+    own = (metadata.ProcessRow(411, "/framework/" + candidate),
+           metadata.ProcessRow(512, "/bin/Ps"), metadata.ProcessRow(700, "ordinary"))
+    assert metadata._require_snapshot(own, inspection_pid=411, own_ps_pid=512) is None
+    extra = own + (metadata.ProcessRow(613, "/framework/" + candidate),)
+    with pytest.raises(metadata.ProcessMetadataError):
+        metadata._require_snapshot(extra, inspection_pid=411, own_ps_pid=512)
+
+
+@pytest.mark.parametrize("candidate", [
+    "getconf", "GeTcOnF", "ps", "PS", "qemu-system-x86_64", "QEMU-SYSTEM-aarch64",
+    "qemu-system-", "qemu-img", "QEMU-IMG", "run-live-local-e2e-orchestrator.py",
+    "RUN-LIVE-LOCAL-E2E-ORCHESTRATOR.PY", "ssh-over-mcp-live-e2e-gate",
+    "SSH-OVER-MCP-LIVE-E2E-GATE", "recover_provider.py", "RECOVER_PROVIDER.PY",
+])
+def test_fixed_qemu_authority_and_leftover_names_refuse(metadata, candidate):
+    rows = (metadata.ProcessRow(411, "/framework/Python"),
+            metadata.ProcessRow(512, "/bin/ps"), metadata.ProcessRow(613, "/bin/"+candidate))
+    with pytest.raises(metadata.ProcessMetadataError):
+        metadata._require_snapshot(rows, inspection_pid=411, own_ps_pid=512)
+
+
+@pytest.mark.parametrize("stage", ["before", "after"])
+@pytest.mark.parametrize("orphan", ["getconf", "PS", "Python3.13td"])
+def test_both_snapshot_stage_vectors_reject_orphans(metadata, stage, orphan):
+    # Pure vectors only; the different ps IDs do not claim real snapshot wiring.
+    for label, own_ps in (("before", 512), ("after", 513)):
+        rows = (metadata.ProcessRow(411, "Python"), metadata.ProcessRow(own_ps, "ps"))
+        if label == stage:
+            rows += (metadata.ProcessRow(613, orphan),)
+            with pytest.raises(metadata.ProcessMetadataError):
+                metadata._require_snapshot(rows, inspection_pid=411, own_ps_pid=own_ps)
+        else:
+            assert metadata._require_snapshot(rows, inspection_pid=411, own_ps_pid=own_ps) is None
+
+
+class _TupleSubclass(tuple):
+    pass
+
+
+class _StrSubclass(str):
+    pass
+
+
+@pytest.mark.parametrize("shape", ["list", "dict", "none", "tuple-subclass", "record-subclass"])
+def test_forged_container_and_record_shapes_refuse(metadata, shape):
+    own = (metadata.ProcessRow(411, "Python"), metadata.ProcessRow(512, "ps"))
+    class DerivedRow(metadata.ProcessRow):
+        pass
+    choices = {
+        "list": list(own), "dict": {411: "Python", 512: "ps"}, "none": None,
+        "tuple-subclass": _TupleSubclass(own),
+        "record-subclass": own + (DerivedRow(613, "ordinary"),),
+    }
+    with pytest.raises(metadata.ProcessMetadataError):
+        metadata._require_snapshot(choices[shape], inspection_pid=411, own_ps_pid=512)
+
+
+@pytest.mark.parametrize("pid,command", [
+    (True, "ordinary"), (0, "ordinary"), (-1, "ordinary"), (2147483648, "ordinary"),
+    (613.0, "ordinary"), ("613", "ordinary"), (613, None), (613, b"ordinary"),
+    (613, ""), (613, " ordinary"), (613, "ordinary "), (613, "ordi\tnary"),
+    (613, "ordi\nnary"), (613, "ordi\x00nary"), (613, "ordi\x7fnary"),
+    (613, "ordiénaire"), (613, "/path/"), (613, _StrSubclass("ordinary")),
+    (411, "Python"), (613, "z" * 4093),
+])
+def test_forged_intermediate_records_refuse(metadata, pid, command):
+    rows = (metadata.ProcessRow(411, "Python"), metadata.ProcessRow(512, "ps"),
+            metadata.ProcessRow(pid, command))
+    with pytest.raises(metadata.ProcessMetadataError,
+                       match="^staging process metadata rejected$"):
+        metadata._require_snapshot(rows, inspection_pid=411, own_ps_pid=512)
+
+
+def test_forged_snapshot_line_and_row_equality_and_overflow(metadata):
+    own = (metadata.ProcessRow(411, "Python"), metadata.ProcessRow(512, "ps"))
+    # 10 PID digits + one space + 4085 command bytes = 4096, excluding LF.
+    row = metadata.ProcessRow(2147483647, "z" * 4085)
+    assert metadata._require_snapshot(own + (row,), inspection_pid=411, own_ps_pid=512) is None
+    with pytest.raises(metadata.ProcessMetadataError):
+        metadata._require_snapshot(own + (metadata.ProcessRow(2147483647, "z" * 4086),),
+                                   inspection_pid=411, own_ps_pid=512)
+    exact_rows = own + tuple(metadata.ProcessRow(pid, "ordinary") for pid in range(1000, 1254))
+    assert len(exact_rows) == 256
+    assert metadata._require_snapshot(exact_rows, inspection_pid=411, own_ps_pid=512) is None
+    with pytest.raises(metadata.ProcessMetadataError):
+        metadata._require_snapshot(exact_rows + (metadata.ProcessRow(1254, "ordinary"),),
+                                   inspection_pid=411, own_ps_pid=512)
+
+
+def test_forged_snapshot_aggregate_equality_and_overflow(metadata):
+    own = (metadata.ProcessRow(411, "Python"), metadata.ProcessRow(512, "ps"))
+    prefix = tuple(metadata.ProcessRow(pid, "z" * 4091) for pid in range(1000, 1015))
+    exact = own + prefix + (metadata.ProcessRow(1015, "z" * 4057),)
+    overflow = own + prefix + (metadata.ProcessRow(1015, "z" * 4058),)
+    forged = own + tuple(metadata.ProcessRow(pid, "z" * 4000) for pid in range(1000, 1018))
+    assert sum(len(f"{row.pid} {row.command}\n") for row in exact) == 65536
+    assert sum(len(f"{row.pid} {row.command}\n") for row in overflow) == 65537
+    assert sum(len(f"{row.pid} {row.command}\n") for row in forged) == 72126
+    assert all(len(f"{row.pid} {row.command}") <= 4096 for row in overflow + forged)
+    assert metadata._require_snapshot(exact, inspection_pid=411, own_ps_pid=512) is None
+    for rows in (overflow, forged):
+        with pytest.raises(metadata.ProcessMetadataError):
+            metadata._require_snapshot(rows, inspection_pid=411, own_ps_pid=512)
+
+
+def test_import_and_validation_perform_no_host_action_or_output(monkeypatch, capsys):
+    # Read/compile and import stdlib outside the guarded module execution boundary.
+    code = compile(MODULE.read_bytes(), str(MODULE), "exec")
+    name = "ssh_over_mcp_process_metadata_no_host_action"
+    module = ModuleType(name)
+    module.__file__ = str(MODULE)
+    attempted = []
+    original_import = builtins.__import__
+    def forbidden(*args, **kwargs):
+        attempted.append("host action")
+        raise AssertionError("pure metadata attempted host action")
+    def guarded_import(target, *args, **kwargs):
+        if target in {"staging_diagnostics", "staging_inventory", "recover_provider"}:
+            attempted.append("capability import")
+            raise AssertionError("pure metadata imported a host helper")
+        return original_import(target, *args, **kwargs)
+    with monkeypatch.context() as guard:
+        for target, attributes in (
+            (os, ("open", "stat", "lstat", "scandir", "read", "write", "getpid", "getenv",
+                  "posix_spawn", "kill", "waitpid")),
+            (subprocess, ("Popen", "run")), (socket, ("socket", "create_connection")),
+            (builtins, ("open",)), (Path, ("open", "resolve", "read_bytes", "read_text")),
+        ):
+            for attribute in attributes:
+                guard.setattr(target, attribute, forbidden)
+        guard.setattr(builtins, "__import__", guarded_import)
+        guard.setitem(sys.modules, name, module)
+        # Fixed repo-module bytecode only; separate loader I/O from the guarded module boundary.
+        exec(code, module.__dict__)  # noqa: S102
+        parent = module._parse_temp_parent(b"/var/folders/ab/token_123/T/\n")
+        assert parent.canonical_path == "/private/var/folders/ab/token_123/T/"
+        rows = module._parse_process_rows(b"411 Python\n512 ps\n613 /with space/ordinary\n")
+        assert module._require_snapshot(rows, inspection_pid=411, own_ps_pid=512) is None
+        with pytest.raises(module.ProcessMetadataError,
+                           match="^staging process metadata rejected$"):
+            module._require_snapshot(rows + (module.ProcessRow(614, "SECRET_CANARY Python/"),),
+                                     inspection_pid=411, own_ps_pid=512)
+    assert attempted == []
     assert capsys.readouterr() == ("", "")
