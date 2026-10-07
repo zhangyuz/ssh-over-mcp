@@ -27,8 +27,16 @@ allow the non-admin inspection process to create, collect and reap only:
 | `/bin/ps -ww -U 502 -o pid=,comm=` | 10 seconds | stdout and stderr combined 65536 bytes |
 
 Use absolute executables, direct argv, no shell, no PATH search, environment
-exactly `LC_ALL=C`, stdin disconnected and only the intended stdout/stderr pipes
-inherited. Close other descriptors. No caller can choose command, PID, UID,
+exactly `LC_ALL=C`. In the **child's exec-time descriptor table**, stdin is the
+fixed disconnected `/dev/null` source; stdout/stderr are only the owned pipe
+write ends. Exclude every other parent descriptor, including pipe read ends and
+pinned cache/temp/root/payload handles, even if marked inheritable. This is
+child-side descriptor hygiene: the helper MUST NOT close or mutate unrelated
+borrowed/pinned descriptors in the parent, including their flags or offsets.
+Those provenance handles remain usable in the parent through final namespace
+and marker revalidation. Close only helper-owned pipe and `/dev/null` resources
+in the parent on their appropriate lifecycle paths.
+No caller can choose command, PID, UID,
 environment, timeout, output limit, signal, process group or lifecycle handle.
 The internal interface chooses one of these two literal diagnostics; it never
 accepts a caller-owned process object. This grants no arbitrary command or
@@ -76,6 +84,31 @@ kernel syscalls, uninterruptible tasks, spawn, externally cancelled workflows or
 machine failure is promised. Unknown child state blocks acceptance rather than
 being converted into successful inspection or permission for operator killing.
 
+### Later inspections and detectable leftover diagnostics
+
+The next inspection cannot recover the previous parent's exclusive wait
+ownership. A process-inventory PID never becomes an owned child or signal target.
+Instead, require refusal on detectable leftover diagnostics in **both** bounded
+process snapshots before and after inventory collection. Complete and reap this
+inspection's `getconf` before taking either snapshot; any validated UID-502 row
+whose case-folded basename is exactly `getconf` then refuses inspection.
+
+For each snapshot, allow exactly one `ps` row: the exact freshly owned `ps` child
+that produced that snapshot. Capture its PID from this invocation's exclusive
+lifecycle before reaping, never from caller input or parsing the snapshot as
+ownership evidence. Its row must appear exactly once with case-folded basename
+`ps`; a missing or mismatched row refuses. Any other validated UID-502 `ps` row
+refuses, including an operator's diagnostic or a prior cancelled/stalled child.
+Keep the existing parser bounds, ambiguity refusals and other process exclusions.
+
+Refusal emits no receipt/chunks and preserves provider/staging state; it never
+signals the leftover or automatically retries. This adds detection, not orphan
+cleanup authority or a durable lifecycle journal. It proves only the absence
+of these detectable basenames in successful bounded observations. Renamed,
+transient or compromised same-account processes remain outside the stated
+quiescence guarantee; historical cleanup or absence after a snapshot is not
+certified. Unavailable or ambiguous observations cannot clear uncertainty.
+
 ### Authority approval and exact binding
 
 This document is a proposal, not permission to implement signal-capable code.
@@ -86,8 +119,9 @@ does not substitute for approval of the written authority.
 
 The subsequent implementation plan must record one exact already-main commit
 containing the approved ADR 0012 and ADR 0011 amendment, both fixed paths and
-their content SHA-256 values. Preflight and final activation verify that same
-binding; a future merge SHA, target-authored replacement, ancestry alone or
+their content SHA-256 values, plus the reviewed amended inspection spec's fixed
+path and content SHA-256. Preflight and final activation verify that same
+three-document binding; a future merge SHA, target-authored replacement, ancestry alone or
 caller-selected mapping is insufficient. This proposal deliberately supplies
 no fictional future SHA or digest. Approved document bytes may identify approval
 evidence independently; any status change requires a new exact reviewed binding.
@@ -104,6 +138,21 @@ signal/wait failure, ambiguous status, retained pipes, unsupported SIGCHLD/reape
 conditions and cleanup expiry. Negative tests must prove no signals to marker,
 inventory, borrowed, reused or group PIDs and no successful output on uncertainty.
 Disposable test children are test-owned; tests may not signal incident processes.
+
+Native tests must prove parent descriptor preservation on success and every
+failure/cleanup path, including a deliberately inheritable borrowed descriptor:
+identity, usability, flags and offsets remain unchanged, and the actual executed
+child has none of the unrelated/pinned descriptors. A disposable FD probe may
+exercise the same launch primitive under test; it must not introduce a
+configurable production executable or borrowed-process interface.
+
+Add native adversarial fixtures with a cancelled parent and a still-running or
+stalled prior `getconf`/`ps` child. The next inspection must refuse, emit no
+receipt, leave state unchanged and send no signal to that orphan. Cover both
+snapshot stages, an extra `ps` alongside the allowed fresh child, missing/wrong
+own-`ps` identity, mixed-case basenames and unavailable/malformed inventory.
+Fixture owners handle their own disposable teardown separately from inspection;
+passing tests grant no incident orphan-killing authority.
 
 Document native results separately from supported Linux regression. Exact-head
 and exact merge-main ordinary gates remain required. This recovery prerequisite
