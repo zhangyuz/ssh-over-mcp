@@ -275,6 +275,18 @@ def test_forged_intermediate_records_refuse(metadata, pid, command):
         metadata._require_snapshot(rows, inspection_pid=411, own_ps_pid=512)
 
 
+@pytest.mark.parametrize("initialized", [(), ("pid",), ("command",)])
+def test_missing_record_slots_use_fixed_failure(metadata, initialized, capsys):
+    incomplete = object.__new__(metadata.ProcessRow)
+    for name in initialized:
+        object.__setattr__(incomplete, name, 613 if name == "pid" else "ordinary")
+    rows = (metadata.ProcessRow(411, "Python"), metadata.ProcessRow(512, "ps"), incomplete)
+    with pytest.raises(metadata.ProcessMetadataError,
+                       match="^staging process metadata rejected$"):
+        metadata._require_snapshot(rows, inspection_pid=411, own_ps_pid=512)
+    assert capsys.readouterr() == ("", "")
+
+
 def test_forged_snapshot_line_and_row_equality_and_overflow(metadata):
     own = (metadata.ProcessRow(411, "Python"), metadata.ProcessRow(512, "ps"))
     # 10 PID digits + one space + 4085 command bytes = 4096, excluding LF.

@@ -545,8 +545,9 @@ must derive them internally from the real inspection and exact owned capture.
 A return of None supplies no accepted-preflight object, receipt or capability.
 
 Developer verification on Darwin 24.6.0 x86_64: Python 3.13.5 and 3.14.8 each
-passed 136 pure metadata cases. Python 3.13 passed 634 related cases, including
-the existing 95 diagnostic cases. Both full Mac runs had 1673 passes, 84 failures
+passed 139 pure metadata cases, including absent/partially initialized record
+slots refusing with the same fixed error. Python 3.13 passed 637 related cases,
+including the existing 95 diagnostic cases. Both full Mac runs had 1676 passes, 84 failures
 and 177 skips, with exactly the same 84 failure names as the fresh clean main
 baseline (1537 passes, 84 failures, 177 skips). These are no-new-failure Mac
 results, not full Mac GREEN. Each full run retained all 18 eligible existing

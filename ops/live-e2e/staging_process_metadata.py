@@ -70,7 +70,10 @@ def _require_snapshot(rows: tuple[ProcessRow, ...], *, inspection_pid: int, own_
     total = 0
     for row in rows:
         _require(type(row) is ProcessRow)
-        pid, command = row.pid, row.command
+        try:
+            pid, command = row.pid, row.command
+        except AttributeError:
+            raise ProcessMetadataError() from None
         _require(type(pid) is int and 1 <= pid <= 2147483647 and pid not in seen)
         _require(type(command) is str and 1 <= len(command) <= 4096)
         _require(command[0] != " " and command[-1] != " " and not command.endswith("/"))
