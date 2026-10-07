@@ -16,8 +16,10 @@ The existing collector is a metadata component, not proof of root provenance,
 process absence, workflow authority, or an authenticated inspection receipt.
 Activation must establish those bindings around it. Ship three independently
 reviewable slices: canonical envelope, bounded native preflight, then fixed
-manual workflow integration. The first two remain dormant until the third is
-already trusted on main. No product/native package capability is included.
+manual workflow integration. The native-preflight slice additionally requires
+the prior approved, already-main ADR amendment described below. The first two
+remain dormant until the third is already trusted on main. No product/native
+package capability is included.
 
 ## Fixed incident catalog and authority
 
@@ -100,12 +102,18 @@ status 0 and empty stderr. Consume bounded chunks while the child runs; an unbou
 insufficient. Malformed/control-bearing rows, duplicate/noncanonical PIDs,
 unknown child status, unavailable inventory or deadline expiry refuse.
 
-Reject runner-owned qemu-system-* or qemu-img processes. Case-fold native
-interpreter basenames and match exactly
-`(?:python|pypy)(?:[0-9]+(?:\.[0-9]+)*)?[dmt]?` with full-match semantics,
-including framework `Python`, python3.x and pypy version/debug/threading variants;
-reject every matching PID except this exact inspection PID. Also reject fixed
-E2E authority basenames run-live-local-e2e-orchestrator.py,
+Reject runner-owned qemu-system-* or qemu-img processes. After bounding and
+validating each process row, case-fold its basename and treat **every basename
+starting with `python` or `pypy`** as an interpreter candidate; reject every such
+PID except this exact inspection PID. That includes framework `Python`, all
+version/ABI/debug/threading suffix combinations, and malformed or unrelated
+prefix near-misses. No suffix parsing may classify a prefix candidate as an
+ordinary process. Conservative over-blocking is intentional for this dedicated
+account: `python3.13td`, `python3.7dm`, `pypy3.10dm`, `python3..13`,
+`python3.13tdx`, and `python-tools` must all refuse. Require the inspection PID's
+own row to have this recognized prefix as well. Do not claim detection of
+arbitrarily renamed interpreters or unrelated non-prefix executables. Also reject
+fixed E2E authority basenames run-live-local-e2e-orchestrator.py,
 ssh-over-mcp-live-e2e-gate and recover_provider.py. No caller-selected patterns.
 The running inspection process must itself appear exactly once. Other ordinary runner/OS processes are not an execution grant. This is a
 bounded observational check under the trusted-account assumption, not detection
@@ -115,9 +123,18 @@ workflow concurrency cannot exclude a manual shell or all transient processes.
 The bounded diagnostic helper may terminate/reap **only the child it just
 spawned for fixed ps/getconf**, if needed to enforce output/time limits. It may
 never signal a PID taken from the marker, process inventory, or caller. This
-narrow child-lifecycle clarification requires explicit ADR 0011 review before
-activation; it must not become generic process-killing recovery authority.
-No wrapper shell, command interpolation or arbitrary executable is accepted.
+is a **proposed exception**, not authority granted by this design. ADR 0011's
+current no-process-killing rule remains in force. Before any signal-capable
+preflight code is implemented or merged, even dormant code, a separate ADR 0011
+amendment must be explicitly approved in writing, reviewed, and merged to main.
+No dormant label, passing CI, or approval of this design substitutes for that
+prerequisite. The implementation plan must identify the exact already-main
+commit containing the approved amendment, its fixed ADR path and content SHA-256;
+the preflight implementation and final activation must bind to that reviewed
+authority. A proposed/future merge SHA or ancestry alone is insufficient.
+Until that prerequisite exists, only the signal-free envelope slice may proceed
+under its own approved plan. No wrapper shell, command interpolation, generic
+process-killing helper or arbitrary executable is accepted.
 
 ## Inventory and immutable envelope
 
@@ -141,35 +158,72 @@ depth 12, 4096-byte relative path, no-follow/type/UID/device/link/mode/identity
 checks and 60-second checked monotonic deadline. The workflow bounds overall
 invocation; no hard filesystem syscall cancellation guarantee is claimed.
 
-Construct exactly this schema, with integer schema_version 1:
+### Exact wire schema and scalar representations
 
-- inventory: exactly schema_version, incident, parent, marker, staging, entries.
-  parent is {path,ancestors}; ancestors lists every pinned absolute directory
-  from / through T as {path,device,inode,uid,gid,mode}. marker is
-  {device,inode,target,owner_pid}; staging is {basename,device,inode,uid,mode,
-  expected_commit}. entries is the complete ordered collector records.
-- envelope: schema_version, inventory, inventory_sha256, and inspection
-  {authority_sha,run_id,attempt}.
+Every object has exactly the named fields below; extra/duplicate keys, nulls,
+booleans and floating-point values are forbidden. JSON integers use decimal
+integer tokens, never quoted numbers, leading zeros, exponents or negative zero.
+JSON strings use the canonical escaping below; never coerce between types.
 
-The envelope contains exactly the named fields and no timestamps generated by
-this invocation. Authority SHA is canonical 40 lowercase hex; run_id and attempt
-are positive canonical decimal trusted workflow environment values, at most
-19 digits and at most 2^63-1. Do not accept caller-supplied provenance. Fresh
-workflow provenance is outside inventory equality. Sort entry paths by
-filesystem bytes and JSON keys lexically, ensure_ascii=True, compact separators,
-UTF-8/ASCII bytes and no final newline. inventory_sha256 covers the canonical
-inventory bytes. The envelope SHA-256 covers the exact canonical envelope bytes,
-not a recursive digest field. Enforce 2 MiB on the **complete envelope**, before
-retaining/emitting beyond the budget; a collector-only size check is insufficient.
+| Object / field | Exact JSON type and value |
+| --- | --- |
+| inventory | Object: schema_version, incident, parent, marker, staging, entries |
+| envelope | Object: schema_version, inventory, inventory_sha256, inspection |
+| parent | Object: path, ancestors |
+| parent.ancestors | Array of ancestor objects, ordered from / through T |
+| each ancestors element | Object: path, device, inode, uid, gid, mode |
+| marker | Object: device, inode, target, owner_pid |
+| staging | Object: basename, device, inode, uid, mode, expected_commit |
+| inspection | Object: authority_sha, run_id, attempt |
+| inventory.entries | Array of complete collector records, ordered by filesystem-encoded path bytes |
+| each entries element | Object: path, kind, device, inode, uid, gid, mode, nlink, size, mtime_ns, ctime_ns |
+| schema_version (inventory, envelope, receipt) | Integer, exactly 1 |
+| inventory.incident | String, exactly "stale-target" or "older-target"; never an object |
+| parent.path / ancestors[].path | String, pinned canonical absolute path; no trailing slash except root "/" |
+| staging.basename | String, the selected catalog's exact basename |
+| entries[].path | String, "." for root or the collector's canonical relative path |
+| entries[].kind | String, exactly "directory" or "regular" |
+| device, inode, uid, gid, mode, nlink, size | Nonnegative integers observed from pinned filesystem metadata; mode is stat.S_IMODE permission bits as an integer, not an octal string; existing UID/mode/link/type constraints still apply |
+| mtime_ns, ctime_ns | Signed integers observed from filesystem metadata, nanoseconds; never generated invocation timestamps |
+| marker.owner_pid | Integer, exactly 38013 |
+| marker.target / staging.expected_commit | String, exactly the respective literal catalog SHA, 40 lowercase hexadecimal characters |
+| inspection.authority_sha | String, exact trusted workflow authority SHA, 40 lowercase hexadecimal characters |
+| inspection.run_id / inspection.attempt | Strings preserving positive canonical decimal trusted workflow environment values; ASCII digits, no sign/leading zero, at most 19 digits and numeric value at most 2^63-1; never JSON integers |
+| inventory_sha256 / receipt.envelope_sha256 | Strings, exactly 64 lowercase hexadecimal characters, no prefix |
+| receipt | Object: schema_version, envelope_bytes, chunks, envelope_sha256 |
+| receipt.envelope_bytes | Integer, exact canonical envelope byte length, 1 through 2097152 |
+| receipt.chunks | Integer, exact ceiling of envelope_bytes / 1024, 1 through 2048 |
+| chunk | Object: index, data |
+| chunk.index | Integer, consecutive from 0 through receipt.chunks - 1 |
+| chunk.data | String, canonical standard RFC 4648 section 4 base64, as defined below |
 
-Successful output uses STAGING_RECEIPT followed by compact JSON with exactly
-{schema_version,envelope_bytes,chunks,envelope_sha256}, then STAGING_CHUNK lines
-with exactly {index,data}. Indices start at zero, consecutive, with data encoding
-the complete envelope as base64, maximum 1024 raw bytes per chunk. The exact
-chunk count is the ceiling of envelope_bytes / 1024, at most 2048; all chunks
-except the final one carry exactly 1024 raw bytes. Emit no receipt or chunks
-until all filesystem/process/marker revalidation succeeds. JSON-escape all
-metadata names; never print raw exceptions or file contents. Failed or truncated
+Canonical JSON bytes are equivalent to
+`json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("ascii")`.
+There is no final newline in hashed JSON, whitespace outside strings, Unicode
+normalization, optional slash escaping, or alternative number/string encoding.
+The envelope contains no fresh invocation timestamp. Do not accept caller-supplied
+provenance; fresh workflow provenance is outside inventory equality.
+inventory_sha256 covers the exact canonical inventory bytes. The envelope
+SHA-256 covers the exact canonical envelope bytes, not a recursive digest field.
+Enforce 2 MiB on the **complete envelope** before retaining/emitting beyond the
+budget; a collector-only size check is insufficient.
+
+Base64 uses the standard `A-Z a-z 0-9 + /` alphabet, required `=` padding only
+when needed, zero unused pad bits, no whitespace/line wrapping and no URL-safe
+alphabet. Strict decoding followed by standard re-encoding must reproduce the
+exact data string; permissive decoding alone is insufficient. See
+[RFC 4648 sections 3–4](https://www.rfc-editor.org/rfc/rfc4648.html#section-3.5).
+Split the canonical envelope bytes into consecutive chunks of at most 1024 raw
+bytes, then encode **each chunk independently**. Every nonfinal chunk carries
+exactly 1024 raw bytes; the final chunk is nonempty and carries the remainder.
+Do not concatenate encoded strings before decoding: independently padded chunks
+must be decoded separately, then their raw bytes concatenated.
+
+Successful output uses literal `STAGING_RECEIPT ` (one ASCII space) followed by
+the canonical receipt JSON and one LF, then consecutive `STAGING_CHUNK ` lines
+with canonical chunk JSON and one LF. These framing LFs are outside all hashed
+bytes. Emit no receipt or chunks until all filesystem/process/marker revalidation
+succeeds. JSON-escape all metadata names; never print raw exceptions or file contents. Failed or truncated
 logs are not a usable receipt. No local evidence/cache files are created by the
 inspection command. Operator review must include the full reconstructed envelope,
 not only hashes. GitHub transport/log overhead is not counted as envelope bytes.
@@ -183,9 +237,38 @@ retention/failure behavior remain the separately reviewed apply contract.
 
 Each slice uses focused RED, minimal GREEN, real disposable files/processes,
 full self-hosted Python 3.13/3.14 CI and fresh independent adversarial review.
-Envelope tests must cover literal schema/hash derivation, changed marker/staging
-bindings, deterministic provenance separation, complete 2 MiB equality/overflow,
-chunk loss/duplication/truncation and invalid trusted provenance values.
+Before the native-preflight slice, require the separately approved ADR amendment
+already on main and its exact commit/path/content-digest binding in the plan.
+No signal-capable code may be implemented or merged before that gate, even in a
+dormant helper. Final activation must retain that binding and independently
+verify all implementation authorities are already on main; neither this draft
+nor a target's own revision can approve its signal authority.
+Envelope RED tests must pin every scalar type above with hand-written literal
+vectors, not expected bytes generated by the encoder under test. Include a
+complete valid eleven-entry fixture with literal canonical inventory/envelope
+bytes, byte lengths, lowercase digests, receipt JSON and independently encoded
+chunk lines; a consumer using another JSON/base64 implementation must reproduce
+those bytes. Also cover changed marker/staging bindings, deterministic provenance
+separation, complete 2 MiB equality/overflow, chunk loss/duplication/truncation,
+wrong scalar types, uppercase/prefixed digests, URL-safe/unpadded/whitespace or
+nonzero-pad-bit encodings, and invalid trusted provenance values.
+
+These literal primitive vectors supplement, and do not substitute for, the full
+valid inventory/envelope fixture (neither JSON sample is a valid live envelope):
+
+- ASCII bytes `{"incident":"stale-target","run_id":"37563415169","schema_version":1}`:
+  length 69, SHA-256 `54213dd999af295227f6d96133908796a0586cd6ff4b5d4d3a44d66766804d5e`,
+  base64 `eyJpbmNpZGVudCI6InN0YWxlLXRhcmdldCIsInJ1bl9pZCI6IjM3NTYzNDE1MTY5Iiwic2NoZW1hX3ZlcnNpb24iOjF9`.
+- ASCII bytes `{"attempt":"1","authority_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","run_id":"37563415169"}`:
+  length 97, SHA-256 `81e5746c2b075dadcbe423f9953bc705d47da0209c210b8913b9dd85ba56e6a8`.
+  Numeric run_id/attempt instead of strings must not pass this vector.
+- Raw hex `fbff` encodes as `+/8=`; URL-safe `-_8=` and unpadded `+/8` refuse.
+  Raw hex `ff` encodes as `/w==`; `/x==` must refuse for nonzero unused pad bits.
+
+Preflight RED must demonstrate refusal for other-PID candidates `Python`,
+`python3.13td`, `python3.7dm`, `pypy3.10dm`, `python3..13`, `python3.13tdx`,
+`python-tools`, and mixed-case variants; prefix near-misses never become ordinary
+rows. The exact inspection PID is the sole prefix-candidate exception.
 Preflight tests must cover environment-selected temp roots being ignored,
 symlink/owner/mode/inode races, fixed command/child ownership, output/line/count/
 time bounds for both fixed children, unsuccessful exit/nonempty stderr, framework
