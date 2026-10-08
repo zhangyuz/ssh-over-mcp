@@ -574,32 +574,39 @@ and separately approved by the user. The first A2/A3 micro-increment
 introduces `ops/live-e2e/staging_preflight.py` and disposable-only
 `tests/ops/test_live_e2e_staging_preflight.py`.
 
-The module currently contains **only** the two exact, frozen incident catalog
-bindings; a private, read-only descriptor-relative directory chain fixture
-primitive; and the fixed public failure with strictly typed internal
-`cleanup_uncertain`. It opens components with `O_DIRECTORY | O_NOFOLLOW |
-O_CLOEXEC`, checks pre-open/no-follow stat against post-open fstat,
-retains parent and child descriptors through explicit final edge revalidation,
-and closes exclusively helper-owned descriptors, including on failure. A
-failed close raises a sanitized uncertainty failure rather than claiming
-cleanup. It does not treat holding an old FD as proof a replaced namespace
-edge remains authoritative. Borrowed fixture descriptors remain open.
+This first PR increment contains the two immutable, exact incident catalog
+bindings and private, fixture-only read-only components:
+- descriptor-relative `O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC` chain pinning,
+  pre-open/held-FD identity checks and final parent-to-child edge revalidation;
+- fixed leaf-name `active-run.json` strict 4096-byte flat ASCII JSON validation,
+  duplicate-key and wrong-type rejection, initial/final raw-byte and metadata
+  equality with no-follow nonblocking opens;
+- fixed leaf-name `payload-content/expected_commit` exactly 41-byte
+  SHA-plus-LF read, hardlink/symlink/special-file refusal, safe owner/mode/
+  device/mtime/ctime observation and final reread through held payload FD;
+- the existing `staging_inventory.collect_staging_inventory` invoked with a
+  borrowed pinned-root descriptor and compared to root/expected-commit
+  observations, with imported collector path pinned to its sibling module;
+- sanitized `PreflightError` with strict internal `cleanup_uncertain: bool`,
+  reporting ambiguous helper FD cleanup without exposing lower-level paths.
 
-Tests first failed RED because the module/catalog did not exist; subsequent
-GREEN includes literal UID-502 selector/catalog and unknown workspace
-exclusion; malformed component/policy/ownership/mode/symlink refusal;
-replacement between stat and open; parent and leaf replacement with still-open
-FDs; held-object metadata drift; helper FD close and borrowed FD preservation;
-and cleanup uncertainty on injected close failure.
+Disposable RED/GREEN tests cover catalog exclusion, malformed directory
+components, symlink and replacement races, final namespace edge changes,
+borrowed/owned descriptor lifecycle, strict marker parser including duplicate
+keys/nested structures/bools/floats and 4096-byte bound, expected-commit
+same-content inode replacement and same-inode rewrite, unsafe modes/hardlinks,
+inventoried leaf mismatch, actual full-layout collector binding, and
+foreign collector import refusal. Fixed normative ADR/spec files remain the
+reviewed bytes. No incident filesystem content is read by these tests.
 
-This is **not a complete Slice A implementation** and does **not** expose a
-production success entrypoint. The generic component arguments belong only
-to this private disposable fixture seam; they do not permit operator-selected
-temp/cache/incident paths. The fixed marker-cache and temp-parent ancestry,
-strict descriptor-relative marker JSON reader, pinned payload and
-expected_commit observation, inventory binding, late rereads and detached
-preflight evidence are still pending A4–A7 and further RED. It does not call
-getconf/ps, perform process checks, interact with the persistent UID-502
-orchestrator, invoke a workflow, emit a receipt, signal a PID, clear a marker,
-delete staging data, or resume N1c/A1/Level-3. The unknown
-`recover.cc8Del` remains excluded; incident state is untouched.
+**This is still not a completed Slice A preflight and not UID-502 proof.**
+The flexible component/path/policy values are **private disposable fixture
+seams only**, never a production operator/API authority. A later micro-slice
+must construct the fixed cache and OS-derived temp parent chains from actual
+trusted UID-502 context, bind and check both against the exact incident root,
+coordinate marker/inventory/expected-commit observations into one detached
+success object, and perform post-inventory edge/marker checks. That work,
+A7 final gating, and Slice B's fixed getconf/ps composition remain pending.
+There is no production success entrypoint, host capture, process signal,
+workflow, receipt, marker clear, staging deletion, target execution, or
+Level-3/A1/N1c closure. Unknown `recover.cc8Del` remains excluded.

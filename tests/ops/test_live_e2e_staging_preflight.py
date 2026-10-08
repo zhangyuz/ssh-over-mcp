@@ -319,3 +319,434 @@ def test_fixed_catalog_lookup_is_immutable(preflight):
     with pytest.raises(TypeError):
         preflight._INCIDENTS["stale-target"] = preflight._select_incident("older-target")
     assert preflight._select_incident("stale-target") is original
+
+
+# A4/A5: all files/directories below are disposable test-owned fixtures.
+FIXED_SHA = "47531dadb58d365f74089dd5f52ce1b61bb0fdd1"
+MARKER = b'{"target":"47531dadb58d365f74089dd5f52ce1b61bb0fdd1","owner_pid":38013}'
+
+
+@pytest.fixture
+def payload_tree(tmp_path):
+    root = tmp_path / "stage"
+    root.mkdir(mode=0o700)
+    payload = root / "payload-content"
+    payload.mkdir(mode=0o700)
+    leaf = payload / "expected_commit"
+    leaf.write_bytes((FIXED_SHA + "\n").encode("ascii"))
+    leaf.chmod(0o600)
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        yield root, fd
+    finally:
+        os.close(fd)
+
+
+@pytest.fixture
+def marker_tree(tmp_path):
+    cache = tmp_path / "cache"
+    cache.mkdir(mode=0o700)
+    leaf = cache / "active-run.json"
+    leaf.write_bytes(MARKER)
+    leaf.chmod(0o600)
+    fd = os.open(cache, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        yield cache, fd
+    finally:
+        os.close(fd)
+
+
+def test_expected_commit_initial_inventory_and_final_binding(preflight, payload_tree):
+    from types import SimpleNamespace
+
+    root, fd = payload_tree
+    with preflight._pin_expected_commit(
+        fd, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev
+    ) as p:
+        assert p.first.content == (FIXED_SHA + "\n").encode()
+        m = p.first.metadata
+        entry = SimpleNamespace(
+            path="payload-content/expected_commit",
+            kind="regular",
+            **{key: getattr(m, key) for key in m.__dataclass_fields__},
+        )
+        preflight._require_expected_inventory_entry(entry, p.first)
+        p.revalidate(FIXED_SHA, uid=os.geteuid())
+    assert os.fstat(fd).st_ino == root.stat().st_ino
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    (
+        b"X" * 40 + b"\n",
+        b"0" * 40 + b"\n",
+        b"0" * 40,
+        b"\n",
+        b"0" * 41 + b"\n",
+        b"0" * 42,
+        b"0" * 40 + b"\r",
+    ),
+)
+def test_expected_commit_rejects_wrong_content(preflight, payload_tree, replacement):
+    root, fd = payload_tree
+    leaf = root / "payload-content" / "expected_commit"
+    leaf.write_bytes(replacement)
+    with (
+        pytest.raises(preflight.PreflightError, match="^staging preflight rejected$"),
+        preflight._pin_expected_commit(fd, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev),
+    ):
+        pytest.fail("accepted wrong content")
+
+
+def test_expected_commit_refuses_symlink_and_hardlink(preflight, payload_tree):
+    root, fd = payload_tree
+    leaf = root / "payload-content" / "expected_commit"
+    linked = root / "payload-content" / "other"
+    os.link(leaf, linked)
+    with (
+        pytest.raises(preflight.PreflightError),
+        preflight._pin_expected_commit(fd, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev),
+    ):
+        pytest.fail("accepted hardlink")
+    linked.unlink()
+    leaf.rename(linked)
+    leaf.symlink_to("other")
+    with (
+        pytest.raises(preflight.PreflightError),
+        preflight._pin_expected_commit(fd, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev),
+    ):
+        pytest.fail("accepted symlink")
+
+
+def test_expected_commit_refuses_post_observation_replacement(preflight, payload_tree):
+    root, fd = payload_tree
+    leaf = root / "payload-content" / "expected_commit"
+    with preflight._pin_expected_commit(
+        fd, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev
+    ) as p:
+        leaf.rename(leaf.with_name("old"))
+        leaf.write_bytes((FIXED_SHA + "\n").encode())
+        leaf.chmod(0o600)
+        with pytest.raises(preflight.PreflightError):
+            p.revalidate(FIXED_SHA, uid=os.geteuid())
+
+
+def test_expected_commit_refuses_same_inode_rewrite(preflight, payload_tree):
+    root, fd = payload_tree
+    leaf = root / "payload-content" / "expected_commit"
+    with preflight._pin_expected_commit(
+        fd, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev
+    ) as p:
+        leaf.write_bytes(b"0" * 40 + b"\n")
+        leaf.write_bytes((FIXED_SHA + "\n").encode())
+        with pytest.raises(preflight.PreflightError):
+            p.revalidate(FIXED_SHA, uid=os.geteuid())
+
+
+def test_expected_commit_detects_payload_edge_replacement(preflight, payload_tree):
+    root, fd = payload_tree
+    with preflight._pin_expected_commit(
+        fd, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev
+    ) as p:
+        (root / "payload-content").rename(root / "old-payload")
+        (root / "payload-content").mkdir(mode=0o700)
+        with pytest.raises(preflight.PreflightError):
+            p.revalidate(FIXED_SHA, uid=os.geteuid())
+
+
+def test_expected_commit_inventory_disagreement(preflight, payload_tree):
+    from types import SimpleNamespace
+
+    root, fd = payload_tree
+    with preflight._pin_expected_commit(
+        fd, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev
+    ) as p:
+        m = p.first.metadata
+        fields = m.__dataclass_fields__
+        good = SimpleNamespace(
+            path="payload-content/expected_commit",
+            kind="regular",
+            **{key: getattr(m, key) for key in fields},
+        )
+        bad = SimpleNamespace(**vars(good))
+        bad.inode += 1
+        with pytest.raises(preflight.PreflightError):
+            preflight._require_expected_inventory_entry(bad, p.first)
+        with pytest.raises(preflight.PreflightError):
+            preflight._require_expected_inventory_entry(
+                SimpleNamespace(**{**vars(good), "path": "fake"}), p.first
+            )
+
+
+def test_marker_initial_and_final_binding(preflight, marker_tree):
+    cache, fd = marker_tree
+    first = preflight._read_marker(fd, uid=os.geteuid())
+    assert first.content == MARKER
+    preflight._revalidate_marker(fd, first, uid=os.geteuid())
+    assert os.fstat(fd).st_ino == cache.stat().st_ino
+
+
+@pytest.mark.parametrize(
+    "raw",
+    (
+        b"",
+        b"[]",
+        b"{}",
+        b"true",
+        b"1",
+        b" ",
+        b"garbage",
+        b'{"target":"wrong","target":"47531dadb58d365f74089dd5f52ce1b61bb0fdd1","owner_pid":38013}',
+        b'{"target":"47531dadb58d365f74089dd5f52ce1b61bb0fdd1","owner_pid":38013,"owner_pid":38013}',
+        b'{"target":"47531dadb58d365f74089dd5f52ce1b61bb0fdd1","owner_pid":true}',
+        b'{"target":"47531dadb58d365f74089dd5f52ce1b61bb0fdd1","owner_pid":38013.0}',
+        b'{"target":"47531dadb58d365f74089dd5f52ce1b61bb0fdd1","owner_pid":NaN}',
+        b'{"target":"47531dadb58d365f74089dd5f52ce1b61bb0fdd1","owner_pid":999999999999999999999999}',
+        b'{"target":"47531dadb58d365f74089dd5f52ce1b61bb0fdd1","owner_pid":{"nested":[]}}',
+        b'{"target":"47531dadb58d365f74089dd5f52ce1b61bb0fdd1","owner_pid":"38013"}',
+        b"[" * 2000 + b"]" * 2000,
+        b'{"target":"\xff","owner_pid":38013}',
+        b'{"target":"47531dadb58d365f74089dd5f52ce1b61bb0fdd1","owner_pid":38013}\x00',
+    ),
+)
+def test_strict_marker_parser_rejects_invalid_json(preflight, raw):
+    with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$"):
+        preflight._parse_marker(raw)
+
+
+def test_marker_refuses_raw_drift_even_equal_state(preflight, marker_tree):
+    cache, fd = marker_tree
+    first = preflight._read_marker(fd, uid=os.geteuid())
+    leaf = cache / "active-run.json"
+    leaf.write_bytes(b'{ "target":"47531dadb58d365f74089dd5f52ce1b61bb0fdd1","owner_pid":38013}')
+    with pytest.raises(preflight.PreflightError):
+        preflight._revalidate_marker(fd, first, uid=os.geteuid())
+
+
+def test_marker_refuses_fifo(preflight, marker_tree):
+    cache, fd = marker_tree
+    leaf = cache / "active-run.json"
+    leaf.unlink()
+    os.mkfifo(leaf, 0o600)
+    with pytest.raises(preflight.PreflightError):
+        preflight._read_marker(fd, uid=os.geteuid())
+
+
+def test_no_arbitrary_regular_file_content_read(preflight, payload_tree, monkeypatch):
+    root, fd = payload_tree
+    opened = []
+    real_open = os.open
+
+    def audited(name, flags, *args, **kwargs):
+        opened.append(name)
+        assert name in ("payload-content", "expected_commit")
+        return real_open(name, flags, *args, **kwargs)
+
+    monkeypatch.setattr(preflight.os, "open", audited)
+    with preflight._pin_expected_commit(
+        fd, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev
+    ) as p:
+        p.revalidate(FIXED_SHA, uid=os.geteuid())
+    assert opened == ["payload-content", "expected_commit", "expected_commit"]
+
+
+def _populate_collector_layout(root):
+    directories = (
+        "bootstrap-wheels",
+        "payload-iso",
+        "seed",
+        "target.git",
+        "wheels",
+    )
+    regulars = (
+        "git-askpass",
+        "overlay.qcow2",
+        "payload.iso",
+        "seed.iso",
+        "target.bundle",
+    )
+    for name in directories:
+        (root / name).mkdir(mode=0o700)
+    for name in regulars:
+        path = root / name
+        path.write_bytes(b"content is never read during inventory")
+        path.chmod(0o600)
+
+
+def test_actual_inventory_collector_bound_to_pinned_commit(
+    preflight,
+    payload_tree,
+    monkeypatch,
+):
+    root, borrowed = payload_tree
+    _populate_collector_layout(root)
+    monkeypatch.syspath_prepend(str(MODULE.parent))
+    with preflight._pin_expected_commit(
+        borrowed, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev
+    ) as observation:
+        entries = preflight._collect_and_bind(borrowed, observation, uid=os.geteuid())
+        assert type(entries) is tuple
+        paths = {record.path for record in entries}
+        assert "." in paths
+        assert "payload-content/expected_commit" in paths
+        assert len(paths) >= 13
+        observation.revalidate(FIXED_SHA, uid=os.geteuid())
+        with pytest.raises((AttributeError, TypeError)):
+            entries[0].path = "forged"
+    assert os.fstat(borrowed).st_ino == root.stat().st_ino
+
+
+def test_inventory_refuses_expected_commit_drift(
+    preflight,
+    payload_tree,
+    monkeypatch,
+):
+    root, borrowed = payload_tree
+    _populate_collector_layout(root)
+    monkeypatch.syspath_prepend(str(MODULE.parent))
+    with preflight._pin_expected_commit(
+        borrowed, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev
+    ) as observation:
+        leaf = root / "payload-content" / "expected_commit"
+        leaf.write_bytes(b"0" * 40 + b"\n")
+        with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$"):
+            preflight._collect_and_bind(borrowed, observation, uid=os.geteuid())
+
+
+@pytest.mark.parametrize("mode", (0o400, 0o444, 0o600, 0o644))
+def test_expected_commit_safe_read_only_permissions(preflight, payload_tree, mode):
+    root, borrowed = payload_tree
+    (root / "payload-content" / "expected_commit").chmod(mode)
+    with preflight._pin_expected_commit(
+        borrowed, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev
+    ) as observation:
+        assert observation.first.metadata.mode == mode
+        observation.revalidate(FIXED_SHA, uid=os.geteuid())
+
+
+@pytest.mark.parametrize("mode", (0o620, 0o602, 0o777))
+def test_expected_commit_rejects_group_or_world_writable(preflight, payload_tree, mode):
+    root, borrowed = payload_tree
+    (root / "payload-content" / "expected_commit").chmod(mode)
+    with (
+        pytest.raises(preflight.PreflightError, match="^staging preflight rejected$"),
+        preflight._pin_expected_commit(
+            borrowed, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev
+        ),
+    ):
+        pytest.fail("accepted unsafe commit")
+
+
+def test_marker_accepts_exact_maximum_payload(preflight, marker_tree):
+    cache, fd = marker_tree
+    extra = b" " * (4096 - len(MARKER))
+    leaf = cache / "active-run.json"
+    leaf.write_bytes(MARKER + extra)
+    observation = preflight._read_marker(fd, uid=os.geteuid())
+    assert len(observation.content) == 4096
+    preflight._revalidate_marker(fd, observation, uid=os.geteuid())
+
+
+def test_marker_over_maximum_refuses(preflight, marker_tree):
+    cache, fd = marker_tree
+    (cache / "active-run.json").write_bytes(MARKER + b" " * 4096)
+    with pytest.raises(preflight.PreflightError):
+        preflight._read_marker(fd, uid=os.geteuid())
+
+
+def test_inventory_import_shadowing_does_not_execute_foreign_code(
+    preflight, payload_tree, monkeypatch
+):
+    from types import ModuleType
+
+    root, borrowed = payload_tree
+    _populate_collector_layout(root)
+    forged = ModuleType("staging_inventory")
+    forged.__file__ = "/tmp/foreign/staging_inventory.py"
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("foreign collector must not execute")
+
+    forged.collect_staging_inventory = forbidden
+    monkeypatch.setitem(sys.modules, "staging_inventory", forged)
+    with preflight._pin_expected_commit(
+        borrowed, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev
+    ) as observation:
+        entries = preflight._collect_and_bind(borrowed, observation, uid=os.geteuid())
+        assert any(entry.path == "payload-content/expected_commit" for entry in entries)
+
+
+def test_expected_commit_revalidation_bad_sha_fails_closed(preflight, payload_tree):
+    root, borrowed = payload_tree
+    with preflight._pin_expected_commit(
+        borrowed, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev
+    ) as observation:
+        for bad in (None, True, "x", "0" * 40 + "x"):
+            with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$"):
+                observation.revalidate(bad, uid=os.geteuid())
+
+
+def test_marker_stat_open_same_bytes_replacement_refuses(preflight, marker_tree, monkeypatch):
+    cache, borrowed = marker_tree
+    original_open = os.open
+    swapped = False
+
+    def swapping_open(name, flags, *args, **kwargs):
+        nonlocal swapped
+        if name == "active-run.json" and not swapped:
+            swapped = True
+            leaf = cache / name
+            leaf.rename(cache / "old-marker")
+            leaf.write_bytes(MARKER)
+            leaf.chmod(0o600)
+        return original_open(name, flags, *args, **kwargs)
+
+    monkeypatch.setattr(preflight.os, "open", swapping_open)
+    with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$"):
+        preflight._read_marker(borrowed, uid=os.geteuid())
+    assert swapped
+    assert os.fstat(borrowed).st_ino > 0
+
+
+def test_expected_commit_stat_open_same_bytes_replacement_refuses(
+    preflight, payload_tree, monkeypatch
+):
+    root, borrowed = payload_tree
+    original_open = os.open
+    swapped = False
+
+    def swapping_open(name, flags, *args, **kwargs):
+        nonlocal swapped
+        if name == "expected_commit" and not swapped:
+            swapped = True
+            leaf = root / "payload-content" / name
+            leaf.rename(leaf.with_name("former"))
+            leaf.write_bytes((FIXED_SHA + "\n").encode())
+            leaf.chmod(0o600)
+        return original_open(name, flags, *args, **kwargs)
+
+    monkeypatch.setattr(preflight.os, "open", swapping_open)
+    with (
+        pytest.raises(preflight.PreflightError, match="^staging preflight rejected$"),
+        preflight._pin_expected_commit(
+            borrowed, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev
+        ),
+    ):
+        pytest.fail("accepted replaced inode")
+    assert swapped
+    assert os.fstat(borrowed).st_ino > 0
+
+
+def test_fixed_leaf_reader_refuses_custom_budget_or_flags(preflight, marker_tree):
+    _, borrowed = marker_tree
+    for name, mode, limit, device in (
+        ("active-run.json", 0o600, 8192, None),
+        ("active-run.json", None, 4096, None),
+        ("expected_commit", 0o600, 41, 1),
+        ("expected_commit", None, 4096, 1),
+        ("../../some-other-file", None, 41, 1),
+    ):
+        with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$"):
+            preflight._read_named_regular(
+                borrowed, name, uid=os.geteuid(), mode=mode, limit=limit, device=device
+            )

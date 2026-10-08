@@ -209,3 +209,328 @@ def _pin_directory_chain(
                 cleanup_uncertain = True
         if cleanup_uncertain:
             raise PreflightError(cleanup_uncertain=True) from None
+
+
+# These readers are private composition primitives. No caller-selected file path,
+# process PID, checkout, workflow, or full-host inspection entrypoint is exposed.
+import json
+from typing import Any
+
+_FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+_MARKER_TARGET = "47531dadb58d365f74089dd5f52ce1b61bb0fdd1"
+
+
+@dataclass(frozen=True, slots=True)
+class _RegularMetadata:
+    device: int
+    inode: int
+    uid: int
+    gid: int
+    mode: int
+    nlink: int
+    size: int
+    mtime_ns: int
+    ctime_ns: int
+
+
+@dataclass(frozen=True, slots=True)
+class _FileObservation:
+    content: bytes
+    metadata: _RegularMetadata
+
+
+def _file_meta(
+    info: os.stat_result, uid: int, mode: int | None, limit: int, device: int | None
+) -> _RegularMetadata:
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != uid
+        or (
+            stat.S_IMODE(info.st_mode) != mode
+            if mode is not None
+            else bool(stat.S_IMODE(info.st_mode) & 0o022)
+        )
+        or info.st_nlink != 1
+        or info.st_size < 0
+        or info.st_size > limit
+        or (device is not None and info.st_dev != device)
+    ):
+        raise PreflightError()
+    values = (
+        info.st_dev,
+        info.st_ino,
+        info.st_uid,
+        info.st_gid,
+        stat.S_IMODE(info.st_mode),
+        info.st_nlink,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+    if any(type(value) is not int for value in values):
+        raise PreflightError()
+    return _RegularMetadata(*values)
+
+
+def _read_named_regular(
+    parent_fd: int, name: str, *, uid: int, mode: int | None, limit: int, device: int | None
+) -> _FileObservation:
+    """Read only a fixed, trusted literal leaf from a borrowed directory FD."""
+    if (
+        type(parent_fd) is not int
+        or parent_fd < 0
+        or type(name) is not str
+        or name not in {"active-run.json", "expected_commit"}
+        or type(uid) is not int
+        or uid < 0
+        or type(mode) not in (int, type(None))
+        or type(limit) is not int
+        or type(device) not in (int, type(None))
+        or (name == "active-run.json" and (mode != 0o600 or limit != 4096 or device is not None))
+        or (
+            name == "expected_commit"
+            and (mode is not None or limit != 41 or type(device) is not int)
+        )
+    ):
+        raise PreflightError()
+    fd = None
+    uncertain = False
+    try:
+        before = _file_meta(
+            os.stat(name, dir_fd=parent_fd, follow_symlinks=False), uid, mode, limit, device
+        )
+        fd = os.open(name, _FILE_FLAGS, dir_fd=parent_fd)
+        after = _file_meta(os.fstat(fd), uid, mode, limit, device)
+        if before != after:
+            raise PreflightError()
+        data = os.read(fd, limit + 1)
+        last = _file_meta(os.fstat(fd), uid, mode, limit, device)
+        if len(data) != before.size or len(data) > limit or last != before:
+            raise PreflightError()
+        result = _FileObservation(data, before)
+    except (OSError, ValueError, TypeError, OverflowError, MemoryError):
+        raise PreflightError() from None
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except (OSError, ValueError, TypeError, OverflowError):
+                uncertain = True
+        if uncertain:
+            raise PreflightError(cleanup_uncertain=True) from None
+    return result
+
+
+def _parse_marker(raw: bytes) -> None:
+    """No nested JSON and no duplicate or coerced keys, under 4096 bytes."""
+    if type(raw) is not bytes or len(raw) > 4096:
+        raise PreflightError()
+    try:
+        text = raw.decode("ascii")
+        # Outside strings, the only brackets allowed are the single outer
+        # object delimiters. Escapes and quotes are scanned before JSON decode.
+        quoted = False
+        escaped = False
+        delimiters: list[tuple[str, int]] = []
+        for position, char in enumerate(text):
+            if quoted:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    quoted = False
+            elif char == '"':
+                quoted = True
+            elif char in "{}[]":
+                delimiters.append((char, position))
+                if len(delimiters) > 2:
+                    raise PreflightError()
+        if quoted or escaped or delimiters != [("{", text.find("{")), ("}", text.rfind("}"))]:
+            raise PreflightError()
+        if text[: delimiters[0][1]].strip() or text[delimiters[1][1] + 1 :].strip():
+            raise PreflightError()
+
+        def pairs(value: list[tuple[str, Any]]) -> dict[str, Any]:
+            if len(value) != 2 or len({key for key, _ in value}) != 2:
+                raise PreflightError()
+            return dict(value)
+
+        def integer(value: str) -> int:
+            if len(value) > 10:
+                raise PreflightError()
+            return int(value)
+
+        def invalid(_value: str) -> None:
+            raise PreflightError()
+
+        obj = json.loads(
+            text,
+            object_pairs_hook=pairs,
+            parse_int=integer,
+            parse_float=invalid,
+            parse_constant=invalid,
+        )
+        if (
+            type(obj) is not dict
+            or set(obj) != {"target", "owner_pid"}
+            or type(obj["target"]) is not str
+            or obj["target"] != _MARKER_TARGET
+            or type(obj["owner_pid"]) is not int
+            or obj["owner_pid"] != 38013
+        ):
+            raise PreflightError()
+    except (UnicodeError, ValueError, TypeError, RecursionError, OverflowError, MemoryError):
+        raise PreflightError() from None
+
+
+def _read_marker(cache_fd: int, *, uid: int) -> _FileObservation:
+    original = _read_named_regular(
+        cache_fd, "active-run.json", uid=uid, mode=0o600, limit=4096, device=None
+    )
+    _parse_marker(original.content)
+    return original
+
+
+def _revalidate_marker(cache_fd: int, original: _FileObservation, *, uid: int) -> None:
+    if type(original) is not _FileObservation:
+        raise PreflightError()
+    observed = _read_marker(cache_fd, uid=uid)
+    if observed != original:
+        raise PreflightError()
+
+
+@dataclass(frozen=True, slots=True)
+class _ExpectedCommitObservation:
+    first: _FileObservation
+    _payload_chain: _PinnedDirectoryChain
+
+    def revalidate(self, expected_sha: str, *, uid: int) -> None:
+        if (
+            type(expected_sha) is not str
+            or len(expected_sha) != 40
+            or any(c not in "0123456789abcdef" for c in expected_sha)
+            or type(uid) is not int
+        ):
+            raise PreflightError()
+        self._payload_chain.revalidate()
+        original = self.first
+        current = _read_named_regular(
+            self._payload_chain._fds[-1],
+            "expected_commit",
+            uid=uid,
+            mode=None,
+            limit=41,
+            device=original.metadata.device,
+        )
+        if current != original or current.content != (expected_sha + "\n").encode("ascii"):
+            raise PreflightError()
+
+
+@contextmanager
+def _pin_expected_commit(
+    root_fd: int, expected_sha: str, *, uid: int, device: int
+) -> Iterator[_ExpectedCommitObservation]:
+    """Private disposable fixture seam; real catalog/UID supplied later internally."""
+    if (
+        type(expected_sha) is not str
+        or len(expected_sha) != 40
+        or any(c not in "0123456789abcdef" for c in expected_sha)
+        or type(uid) is not int
+        or type(device) is not int
+    ):
+        raise PreflightError()
+    with _pin_directory_chain(
+        root_fd, ("payload-content",), ((uid, (0o700, 0o750, 0o755)),)
+    ) as chain:
+        if chain.metadata[-1].device != device:
+            raise PreflightError()
+        first = _read_named_regular(
+            chain._fds[-1], "expected_commit", uid=uid, mode=None, limit=41, device=device
+        )
+        if first.content != (expected_sha + "\n").encode("ascii"):
+            raise PreflightError()
+        yield _ExpectedCommitObservation(first, chain)
+
+
+def _require_expected_inventory_entry(entry: object, observation: _FileObservation) -> None:
+    """Validate the collector's detached leaf metadata against the content read."""
+    if (
+        getattr(entry, "path", None) != "payload-content/expected_commit"
+        or getattr(entry, "kind", None) != "regular"
+        or not isinstance(observation, _FileObservation)
+    ):
+        raise PreflightError()
+    meta = observation.metadata
+    fields = ("device", "inode", "uid", "gid", "mode", "nlink", "size", "mtime_ns", "ctime_ns")
+    if any(
+        type(getattr(entry, key, None)) is not int or getattr(entry, key) != getattr(meta, key)
+        for key in fields
+    ):
+        raise PreflightError()
+
+
+def _collect_and_bind(root_fd: int, pinned: _ExpectedCommitObservation, *, uid: int) -> tuple:
+    """Collect only actual detached inventory from held root and bind leaf.
+
+    This private fixture seam is not a fixed-host inspection entrypoint:
+    the final caller must prove the root's literal UID/device/inode first.
+    """
+    if (
+        type(root_fd) is not int
+        or root_fd < 0
+        or type(uid) is not int
+        or type(pinned) is not _ExpectedCommitObservation
+    ):
+        raise PreflightError()
+    try:
+        # Execute the single reviewed sibling collector by its literal path,
+        # not by global sys.path/sys.modules lookup or a fixture-supplied callable.
+        import importlib.util
+        import sys
+
+        sibling = os.path.join(os.path.dirname(__file__), "staging_inventory.py")
+        module_name = "_ssh_over_mcp_fixed_staging_inventory"
+        spec = importlib.util.spec_from_file_location(module_name, sibling)
+        if spec is None or spec.loader is None:
+            raise PreflightError()
+        staging_inventory = importlib.util.module_from_spec(spec)
+        sentinel = object()
+        former = sys.modules.get(module_name, sentinel)
+        sys.modules[module_name] = staging_inventory
+        try:
+            spec.loader.exec_module(staging_inventory)
+        finally:
+            if former is sentinel:
+                sys.modules.pop(module_name, None)
+            else:
+                sys.modules[module_name] = former
+        original = _metadata(os.fstat(root_fd))
+        if original.uid != uid or original.mode != 0o700:
+            raise PreflightError()
+        entries = staging_inventory.collect_staging_inventory(root_fd, uid=uid)
+        if _metadata(os.fstat(root_fd)) != original or type(entries) is not tuple:
+            raise PreflightError()
+        roots = [item for item in entries if item.path == "."]
+        leaves = [item for item in entries if item.path == "payload-content/expected_commit"]
+        if len(roots) != 1 or len(leaves) != 1:
+            raise PreflightError()
+        root = roots[0]
+        if root.kind != "directory" or any(
+            getattr(root, key) != getattr(original, key)
+            for key in ("device", "inode", "uid", "gid", "mode")
+        ):
+            raise PreflightError()
+        _require_expected_inventory_entry(leaves[0], pinned.first)
+        pinned._payload_chain.revalidate()
+        return entries
+    except (
+        ImportError,
+        OSError,
+        ValueError,
+        TypeError,
+        OverflowError,
+        AttributeError,
+        RuntimeError,
+    ):
+        raise PreflightError() from None
