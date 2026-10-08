@@ -11,6 +11,7 @@ import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from types import MappingProxyType
 
 _FAILURE = "staging preflight rejected"
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -41,22 +42,24 @@ class _Incident:
     mode: int = 0o700
 
 
-_INCIDENTS = {
-    "stale-target": _Incident(
-        "stale-target",
-        "ssh-over-mcp-e2e-i8ow1ni6",
-        16777220,
-        187176421,
-        "47531dadb58d365f74089dd5f52ce1b61bb0fdd1",
-    ),
-    "older-target": _Incident(
-        "older-target",
-        "ssh-over-mcp-e2e-w_kn4rus",
-        16777220,
-        186877220,
-        "bf84c7aafa5c79d629fc04488b5e0bda1cd98cef",
-    ),
-}
+_INCIDENTS = MappingProxyType(
+    {
+        "stale-target": _Incident(
+            "stale-target",
+            "ssh-over-mcp-e2e-i8ow1ni6",
+            16777220,
+            187176421,
+            "47531dadb58d365f74089dd5f52ce1b61bb0fdd1",
+        ),
+        "older-target": _Incident(
+            "older-target",
+            "ssh-over-mcp-e2e-w_kn4rus",
+            16777220,
+            186877220,
+            "bf84c7aafa5c79d629fc04488b5e0bda1cd98cef",
+        ),
+    }
+)
 
 
 def _select_incident(selector: str) -> _Incident:

@@ -312,3 +312,10 @@ def test_close_error_reports_sanitized_uncertainty_and_closes_remaining(
         with pytest.raises(OSError):
             os.fstat(fd)
     assert os.fstat(borrowed).st_ino > 0
+
+
+def test_fixed_catalog_lookup_is_immutable(preflight):
+    original = preflight._select_incident("stale-target")
+    with pytest.raises(TypeError):
+        preflight._INCIDENTS["stale-target"] = preflight._select_incident("older-target")
+    assert preflight._select_incident("stale-target") is original
