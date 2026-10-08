@@ -1076,3 +1076,34 @@ The disposable regression matrix covers same-inode content rewrite,
 payload directory name replacement, ambiguous owned close plus either
 drift, and a normal settled success. No staging/marker/provider state on
 the real UID-502 incident runner was touched.
+
+
+### Dormant fixed cache-chain literal-root provenance (next Slice B prerequisite)
+
+The private zero-argument `_pin_observed_fixed_cache_chain()` opens **only
+literal /** through the already-reviewed `_open_fixed_native_root()`,
+checks the held FD against a separate literal-root metadata observation,
+and pins the **fixed** `Users/gha-e2e-orchestrator/Library/Caches/
+ssh-over-mcp-e2e` ancestry through the existing descendant no-follow,
+descriptor-relative `_pin_fixed_cache_chain` policy. It yields the chain
+only while the owning context is active, and does not accept any path, PID,
+UID, root FD, selector, marker content or process/capture input.
+
+The original root/descendant metadata is retained and revalidated on exit.
+After the first descendant close boundary, the exact same fixed no-follow
+chain is reopened and compared against the original metadata, then all fresh
+descendant handles close. A final **stat-only** fixed-prefix observation
+after the second descendant close, anchored to the still-held literal root
+FD, verifies each original device/inode/type/owner/mode, plus the held root
+and literal-root identity, before root closure. An ambiguous owned close
+is never retried and yields fixed `PreflightError(cleanup_uncertain=True)`.
+No permanent namespace stability or live UID-502 runner proof is claimed.
+
+Disposable tests cover each unsafe ancestor mode, name replacement while
+held, first/second descendant-close replacement, ambiguous close with
+replacement, literal-root drift and root closure. These fixtures never
+open the *real* UID-502 cache; the helper never opens `active-run.json`,
+reads provider state, activates any workflow, emits receipts or changes
+provider/staging state. Complete preflight still requires separate marker/
+native-temp/selected staging and double-ps provenance composition, exact
+final content binding and independent review before any trusted activation.

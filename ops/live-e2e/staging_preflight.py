@@ -1406,3 +1406,81 @@ def _observe_paired_process_inventory(
         GeneratorExit,
     ):
         raise PreflightError() from None
+
+
+@contextmanager
+def _pin_observed_fixed_cache_chain() -> Iterator[_PinnedDirectoryChain]:
+    """Dormant literal / → fixed marker-cache ancestry, not incident inspection.
+
+    Zero caller selectors, no marker file read, receipt or workflow. The
+    yielded descriptor chain is owned only inside this context; its literal
+    root FD and descendant FDs are not detached as evidence.
+    """
+    root_fd = None
+    try:
+        root_fd = _open_fixed_native_root()
+        if type(root_fd) is not int or root_fd < 0:
+            raise PreflightError(cleanup_uncertain=True)
+        root_initial = _metadata(os.fstat(root_fd))
+        if root_initial != _stat_fixed_native_root():
+            raise PreflightError()
+        with _pin_fixed_cache_chain(root_fd) as chain:
+            if chain._initial[0] != root_initial or chain._parts != _CACHE_PARTS:
+                raise PreflightError()
+            baseline = chain._initial
+            yield chain
+            chain.revalidate()
+            if _stat_fixed_native_root() != root_initial:
+                raise PreflightError()
+
+        # Closing a descendant after its last revalidation can be the point
+        # of a namespace swap. A second fixed no-follow chain compares every
+        # original edge AFTER the first descendant cleanup has completed.
+        with _pin_fixed_cache_chain(root_fd) as fresh:
+            if fresh._initial != baseline:
+                raise PreflightError()
+            fresh.revalidate()
+
+        # Following the second descendant cleanup, stat only the fixed live
+        # prefixes from the still-held literal / FD. No new descriptor opens,
+        # regular-file reads, or additional descendant-close race are added.
+        for index in range(1, len(baseline)):
+            prefix = "/".join(_CACHE_PARTS[:index])
+            if _metadata(os.stat(prefix, dir_fd=root_fd, follow_symlinks=False)) != baseline[index]:
+                raise PreflightError()
+        if (
+            _metadata(os.fstat(root_fd)) != root_initial
+            or _stat_fixed_native_root() != root_initial
+        ):
+            raise PreflightError()
+    except PreflightError:
+        raise
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        AttributeError,
+        RuntimeError,
+        OverflowError,
+        MemoryError,
+        IndexError,
+        KeyboardInterrupt,
+        SystemExit,
+        GeneratorExit,
+    ):
+        raise PreflightError() from None
+    finally:
+        if type(root_fd) is int and root_fd >= 0:
+            try:
+                os.close(root_fd)
+            except (
+                OSError,
+                ValueError,
+                TypeError,
+                RuntimeError,
+                OverflowError,
+                KeyboardInterrupt,
+                SystemExit,
+                GeneratorExit,
+            ):
+                raise PreflightError(cleanup_uncertain=True) from None
