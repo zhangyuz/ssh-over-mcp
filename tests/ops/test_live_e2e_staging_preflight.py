@@ -750,3 +750,15 @@ def test_fixed_leaf_reader_refuses_custom_budget_or_flags(preflight, marker_tree
             preflight._read_named_regular(
                 borrowed, name, uid=os.geteuid(), mode=mode, limit=limit, device=device
             )
+
+
+def test_fixed_collector_returns_stable_record_class(preflight, payload_tree):
+    root, borrowed = payload_tree
+    _populate_collector_layout(root)
+    with preflight._pin_expected_commit(
+        borrowed, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev
+    ) as observation:
+        first = preflight._collect_and_bind(borrowed, observation, uid=os.geteuid())
+        second = preflight._collect_and_bind(borrowed, observation, uid=os.geteuid())
+        assert first == second
+        assert all(type(left) is type(right) for left, right in zip(first, second))

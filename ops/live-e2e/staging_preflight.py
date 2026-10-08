@@ -484,27 +484,7 @@ def _collect_and_bind(root_fd: int, pinned: _ExpectedCommitObservation, *, uid: 
     ):
         raise PreflightError()
     try:
-        # Execute the single reviewed sibling collector by its literal path,
-        # not by global sys.path/sys.modules lookup or a fixture-supplied callable.
-        import importlib.util
-        import sys
-
-        sibling = os.path.join(os.path.dirname(__file__), "staging_inventory.py")
-        module_name = "_ssh_over_mcp_fixed_staging_inventory"
-        spec = importlib.util.spec_from_file_location(module_name, sibling)
-        if spec is None or spec.loader is None:
-            raise PreflightError()
-        staging_inventory = importlib.util.module_from_spec(spec)
-        sentinel = object()
-        former = sys.modules.get(module_name, sentinel)
-        sys.modules[module_name] = staging_inventory
-        try:
-            spec.loader.exec_module(staging_inventory)
-        finally:
-            if former is sentinel:
-                sys.modules.pop(module_name, None)
-            else:
-                sys.modules[module_name] = former
+        staging_inventory = _fixed_inventory_module()
         original = _metadata(os.fstat(root_fd))
         if original.uid != uid or original.mode != 0o700:
             raise PreflightError()
@@ -532,5 +512,41 @@ def _collect_and_bind(root_fd: int, pinned: _ExpectedCommitObservation, *, uid: 
         OverflowError,
         AttributeError,
         RuntimeError,
+        MemoryError,
+        KeyError,
+        IndexError,
     ):
         raise PreflightError() from None
+
+
+# One deterministic trusted sibling module provides stable InventoryEntry
+# identity for repeated detached observations. Never import via sys.path.
+_FIXED_INVENTORY_MODULE = None
+
+
+def _fixed_inventory_module():
+    global _FIXED_INVENTORY_MODULE
+    if _FIXED_INVENTORY_MODULE is not None:
+        return _FIXED_INVENTORY_MODULE
+
+    import importlib.util
+    import sys
+
+    sibling = os.path.join(os.path.dirname(__file__), "staging_inventory.py")
+    module_name = "_ssh_over_mcp_fixed_staging_inventory"
+    spec = importlib.util.spec_from_file_location(module_name, sibling)
+    if spec is None or spec.loader is None:
+        raise PreflightError()
+    module = importlib.util.module_from_spec(spec)
+    sentinel = object()
+    former = sys.modules.get(module_name, sentinel)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if former is sentinel:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = former
+    _FIXED_INVENTORY_MODULE = module
+    return module
