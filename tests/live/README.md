@@ -563,3 +563,43 @@ Native fixed UID-502 ps format/PID evidence, actual cancelled-parent diagnostics
 both snapshot identities, inventory/late namespace revalidation and trusted
 workflow/receipt integration remain mandatory before activation. Provider and
 staging state, unknown `recover.cc8Del`, A1 and N1c remain pending their own gates.
+
+
+## Dormant native preflight, Slice A — initial namespace primitive
+
+Written implementation plan in
+`docs/superpowers/plans/2026-10-07-dormant-native-preflight-composition.md`
+was merged on main in PR #152 at `562cb3886fbe87e56c53e2dc033acd36c02d2a5c`
+and separately approved by the user. The first A2/A3 micro-increment
+introduces `ops/live-e2e/staging_preflight.py` and disposable-only
+`tests/ops/test_live_e2e_staging_preflight.py`.
+
+The module currently contains **only** the two exact, frozen incident catalog
+bindings; a private, read-only descriptor-relative directory chain fixture
+primitive; and the fixed public failure with strictly typed internal
+`cleanup_uncertain`. It opens components with `O_DIRECTORY | O_NOFOLLOW |
+O_CLOEXEC`, checks pre-open/no-follow stat against post-open fstat,
+retains parent and child descriptors through explicit final edge revalidation,
+and closes exclusively helper-owned descriptors, including on failure. A
+failed close raises a sanitized uncertainty failure rather than claiming
+cleanup. It does not treat holding an old FD as proof a replaced namespace
+edge remains authoritative. Borrowed fixture descriptors remain open.
+
+Tests first failed RED because the module/catalog did not exist; subsequent
+GREEN includes literal UID-502 selector/catalog and unknown workspace
+exclusion; malformed component/policy/ownership/mode/symlink refusal;
+replacement between stat and open; parent and leaf replacement with still-open
+FDs; held-object metadata drift; helper FD close and borrowed FD preservation;
+and cleanup uncertainty on injected close failure.
+
+This is **not a complete Slice A implementation** and does **not** expose a
+production success entrypoint. The generic component arguments belong only
+to this private disposable fixture seam; they do not permit operator-selected
+temp/cache/incident paths. The fixed marker-cache and temp-parent ancestry,
+strict descriptor-relative marker JSON reader, pinned payload and
+expected_commit observation, inventory binding, late rereads and detached
+preflight evidence are still pending A4–A7 and further RED. It does not call
+getconf/ps, perform process checks, interact with the persistent UID-502
+orchestrator, invoke a workflow, emit a receipt, signal a PID, clear a marker,
+delete staging data, or resume N1c/A1/Level-3. The unknown
+`recover.cc8Del` remains excluded; incident state is untouched.
