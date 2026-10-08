@@ -1316,9 +1316,19 @@ def _pin_observed_native_temp_chain() -> Iterator[_PinnedDirectoryChain]:
                 raise PreflightError()
             fresh.revalidate()
 
-        # The second pass closes each descendant and rechecks its literal,
-        # single-component name relative to the still-held parent FD.
-        # Joined stat paths are not a no-follow guarantee for ancestors.
+        # The second pass checks each literal single-component edge against
+        # its held parent after the child closes. A later ancestor close may
+        # still change an already-checked descendant. Supplement that
+        # authoritative no-follow traversal with a *reject-only* reverse
+        # metadata drift pass after all descendant closes. Joined stat paths
+        # are NEVER used as proof of intermediate no-follow provenance.
+        # Reverse order prevents a later shallow prefix from silently
+        # authorizing a previously unchecked deeper edge.
+        fixed_parts = ("private", "var", "folders", shard, token, "T")
+        for index in range(len(baseline) - 1, 0, -1):
+            prefix = "/".join(fixed_parts[:index])
+            if _metadata(os.stat(prefix, dir_fd=root_fd, follow_symlinks=False)) != baseline[index]:
+                raise PreflightError()
         if (
             _metadata(os.fstat(root_fd)) != root_initial
             or _stat_fixed_native_root() != root_initial

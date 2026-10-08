@@ -359,23 +359,39 @@ def test_second_pass_close_swap_refuses_after_all_descendants_closed(
     assert events == ["getconf", "root"]
 
 
-def test_final_temp_observation_never_uses_joined_path_stat(env, monkeypatch):
-    """Joined stat follows intermediate symlinks even if final edge is NOFOLLOW."""
+def test_no_follow_first_then_reject_only_reverse_drift_check(env, monkeypatch):
+    """Joined stat is allowed only as *supplemental* drift detection after close."""
     p, _, _, _, events = env
-    original_stat = os.stat
-    observed = []
+    original_stat, original_open, original_close = os.stat, os.open, os.close
+    opened_leaf = []
+    closed_final_leaf = []
+    joined_prefixes = []
 
-    def require_single_edge(path, *args, **kwargs):
-        if kwargs.get("dir_fd") is not None:
-            assert "/" not in str(path), "joined path is not component-wise NOFOLLOW"
-            observed.append(path)
+    def traced_open(path, flags, *args, **kwargs):
+        fd = original_open(path, flags, *args, **kwargs)
+        if path == "T":
+            opened_leaf.append(fd)
+        return fd
+
+    def traced_close(fd):
+        original_close(fd)
+        if len(opened_leaf) == 2 and fd == opened_leaf[-1]:
+            closed_final_leaf.append(True)
+
+    def observed_stat(path, *args, **kwargs):
+        if kwargs.get("dir_fd") is not None and str(path).startswith("private/"):
+            assert closed_final_leaf == [True], "joined stat before final descendant close"
+            joined_prefixes.append(path)
         return original_stat(path, *args, **kwargs)
 
     with monkeypatch.context() as patch:
-        patch.setattr(p.os, "stat", require_single_edge)
+        patch.setattr(p.os, "open", traced_open)
+        patch.setattr(p.os, "close", traced_close)
+        patch.setattr(p.os, "stat", observed_stat)
         with p._pin_observed_native_temp_chain() as chain:
             chain.revalidate()
-    assert "folders" in observed
+    assert len(opened_leaf) == 2
+    assert joined_prefixes == ["/".join(PARTS[:i]) for i in range(len(PARTS), 1, -1)]
     assert events == ["getconf", "root"]
 
 
@@ -446,6 +462,44 @@ def test_final_native_temp_edge_drift_after_second_leaf_close_refuses(env, monke
     with monkeypatch.context() as patch:
         patch.setattr(p.os, "open", trace_open)
         patch.setattr(p.os, "close", close_then_replace)
+        with (
+            pytest.raises(p.PreflightError, match="^staging preflight rejected$") as error,
+            p._pin_observed_native_temp_chain(),
+        ):
+            pass
+    assert swaps == [True]
+    assert error.value.cleanup_uncertain is ambiguous
+    assert error.value.__cause__ is None
+    assert events == ["getconf", "root"]
+
+
+@pytest.mark.parametrize("ambiguous", [False, True])
+def test_temp_leaf_swap_during_second_parent_close_refuses(env, monkeypatch, ambiguous):
+    """A parent FD close may mutate the previously verified child name."""
+    p, _, root, _, events = env
+    native_open, native_close = os.open, os.close
+    token_fds = []
+    swaps = []
+
+    def trace_open(name, flags, *args, **kwargs):
+        fd = native_open(name, flags, *args, **kwargs)
+        if name == "runner_123":
+            token_fds.append(fd)
+        return fd
+
+    def swap_during_token_close(fd):
+        native_close(fd)
+        if len(token_fds) == 2 and fd == token_fds[-1] and not swaps:
+            leaf = root.joinpath(*PARTS)
+            leaf.rename(leaf.with_name("T-former"))
+            leaf.symlink_to("T-former", target_is_directory=True)
+            swaps.append(True)
+            if ambiguous:
+                raise OSError("private ambiguous parent close")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(p.os, "open", trace_open)
+        patch.setattr(p.os, "close", swap_during_token_close)
         with (
             pytest.raises(p.PreflightError, match="^staging preflight rejected$") as error,
             p._pin_observed_native_temp_chain(),

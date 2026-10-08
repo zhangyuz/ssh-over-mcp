@@ -1160,20 +1160,25 @@ after second-pass cleanup. POSIX/Darwin follows intermediate symlinks for
 such *joined* paths, so that is not a final no-follow ancestry guarantee.
 The helper now uses the reviewed shared `post_close_validate=True` mode
 of `_pin_safe_directory_chain` only for the **second** getconf-derived
-`private/var/folders/<shard>/<token>/T` pin. The second pass compares
+`private/var/folders/<shard>/<token>/T` pin. That pass compares
 the entire immutable original six-edge ancestry and uses the parent's
 still-held descriptor to inspect each *single* fixed edge with
-`follow_symlinks=False` directly after closing that child. Every close
-is attempted once even after a cancellation or metadata refusal; the
-literal root FD and root identity are still checked and closed by the
-existing owner. The first pass and its public/private entrypoint remain
-unchanged.
+`follow_symlinks=False` directly after closing that child. A further
+**reverse-order joined-prefix stat** is performed only as a conservative
+*reject-only* drift detector **after all descendant closes**, specifically
+to catch T/descendant swaps during later ancestor closes. It is **never**
+treated as proof of intermediate no-follow provenance; permanent
+namespace stability is not asserted without external process quiescence.
+Every close is attempted once even after cancellation/metadata refusal;
+literal root identity/cleanup and the first-pass entrypoint are unchanged.
 
-Disposable RED→GREEN coverage rejects slash-containing final stat paths,
-a `folders` symlink introduced between no-follow edge stat and open,
-and T replacement during the second owned close (success and ambiguous
-error cases). It also asserts the fixed `cleanup_uncertain=True` behavior
-for the ambiguous close and a clean successful observation.
+Disposable RED→GREEN coverage rejects the original ascending joined
+prefixes as sole final validation, requires the reverse stat pass to run
+only after the final descendant closes, detects a `folders` symlink
+inserted between a single-edge stat and no-follow open, and rejects T
+replacement during either second-pass leaf or parent closure (settled
+and ambiguous cases). It also verifies strict `cleanup_uncertain=True`
+for ambiguous closes and a normal successful observation.
 
 No arbitrary path/UID/PID is accepted, and no real UID-502 temp,
 cache marker, staging, provider state, workflow, receipt, cleanup or
