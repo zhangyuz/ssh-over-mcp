@@ -129,7 +129,7 @@ class _PinnedDirectoryChain:
 def _verify_parts_and_policies(
     start_fd: int,
     parts: tuple[str, ...],
-    rules: tuple[tuple[int, tuple[int, ...]], ...],
+    rules: tuple[tuple[int, tuple[int, ...] | None], ...],
 ) -> None:
     if (
         type(start_fd) is not int
@@ -178,7 +178,7 @@ def _verify_parts_and_policies(
 def _pin_directory_chain(
     start_fd: int,
     parts: tuple[str, ...],
-    rules: tuple[tuple[int, tuple[int, ...]], ...],
+    rules: tuple[tuple[int, tuple[int, ...] | None], ...],
 ) -> Iterator[_PinnedDirectoryChain]:
     """Private, read-only fixture seam; never accepts user-selected incident paths.
 
@@ -595,32 +595,24 @@ _CACHE_ACCOUNT_UID = 502
 
 
 @contextmanager
-def _pin_fixed_cache_chain(root_fd: int) -> Iterator[_PinnedDirectoryChain]:
-    """Dormant fixed-name cache ancestry with no content reads.
-
-    root_fd is a borrowed descriptor. This is not a complete production
-    entrypoint or proof that an arbitrary supplied FD represents literal "/".
-    Only disposable tests substitute the fixed owner globals.
-    """
+def _pin_safe_directory_chain(
+    root_fd: int,
+    parts: tuple[str, ...],
+    rules: tuple[tuple[int, tuple[int, ...] | None], ...],
+    *,
+    system_uid: int,
+) -> Iterator[_PinnedDirectoryChain]:
+    """Private shared safe-baseline check for the fixed namespace wrappers."""
     if type(root_fd) is not int or root_fd < 0:
         raise PreflightError()
     try:
         root_meta = _metadata(os.fstat(root_fd))
-        if root_meta.uid != _CACHE_SYSTEM_UID or root_meta.mode & 0o022:
+        if root_meta.uid != system_uid or root_meta.mode & 0o022:
             raise PreflightError()
     except (OSError, ValueError, TypeError, OverflowError, MemoryError):
         raise PreflightError() from None
 
-    # None means every owner/group/world mode is allowed *except*
-    # group/world writable bits. The final cache has exact 0700 policy.
-    rules = (
-        (_CACHE_SYSTEM_UID, None),
-        (_CACHE_ACCOUNT_UID, None),
-        (_CACHE_ACCOUNT_UID, None),
-        (_CACHE_ACCOUNT_UID, None),
-        (_CACHE_ACCOUNT_UID, (0o700,)),
-    )
-    with _pin_directory_chain(root_fd, _CACHE_PARTS, rules) as chain:
+    with _pin_directory_chain(root_fd, parts, rules) as chain:
         # The caller's preliminary borrowed-FD check cannot authorize the
         # newly duplicated root: its metadata may change between fstat/dup.
         # Bind both the duplicated FD and its immutable baseline to the
@@ -631,11 +623,67 @@ def _pin_fixed_cache_chain(root_fd: int) -> Iterator[_PinnedDirectoryChain]:
             if (
                 pinned_root != root_meta
                 or chain._initial[0] != root_meta
-                or pinned_root.uid != _CACHE_SYSTEM_UID
+                or pinned_root.uid != system_uid
                 or pinned_root.mode & 0o022
             ):
                 raise PreflightError()
         except (OSError, ValueError, TypeError, OverflowError, MemoryError):
             raise PreflightError() from None
         chain.revalidate()
+        yield chain
+
+
+@contextmanager
+def _pin_fixed_cache_chain(root_fd: int) -> Iterator[_PinnedDirectoryChain]:
+    """Dormant fixed-name cache ancestry; borrowed FD does not prove literal /."""
+    # None permits safe permission modes; the cache leaf requires exact 0700.
+    rules = (
+        (_CACHE_SYSTEM_UID, None),
+        (_CACHE_ACCOUNT_UID, None),
+        (_CACHE_ACCOUNT_UID, None),
+        (_CACHE_ACCOUNT_UID, None),
+        (_CACHE_ACCOUNT_UID, (0o700,)),
+    )
+    with _pin_safe_directory_chain(
+        root_fd, _CACHE_PARTS, rules, system_uid=_CACHE_SYSTEM_UID
+    ) as chain:
+        yield chain
+
+
+_TEMP_SYSTEM_UID = 0
+_TEMP_ACCOUNT_UID = 502
+_TEMP_ALNUM = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+
+@contextmanager
+def _pin_fixed_temp_chain(
+    root_fd: int, components: tuple[str, str]
+) -> Iterator[_PinnedDirectoryChain]:
+    """Private component seam, not OS derivation or a production entrypoint.
+
+    Slice B must derive shard/token from its fixed, completed getconf capture.
+    Slice A uses only disposable fixtures and never accepts a full input path.
+    """
+    if type(components) is not tuple or len(components) != 2:
+        raise PreflightError()
+    shard, token = components
+    if (
+        type(shard) is not str
+        or len(shard) != 2
+        or any(char not in _TEMP_ALNUM for char in shard)
+        or type(token) is not str
+        or not 1 <= len(token) <= 255
+        or any(char not in _TEMP_ALNUM + "_" for char in token)
+    ):
+        raise PreflightError()
+    parts = ("private", "var", "folders", shard, token, "T")
+    rules = (
+        (_TEMP_SYSTEM_UID, None),
+        (_TEMP_SYSTEM_UID, None),
+        (_TEMP_SYSTEM_UID, None),
+        (_TEMP_SYSTEM_UID, None),
+        (_TEMP_ACCOUNT_UID, (0o700, 0o755)),
+        (_TEMP_ACCOUNT_UID, (0o700,)),
+    )
+    with _pin_safe_directory_chain(root_fd, parts, rules, system_uid=_TEMP_SYSTEM_UID) as chain:
         yield chain
