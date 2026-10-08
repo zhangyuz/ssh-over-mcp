@@ -879,3 +879,24 @@ The pre-existing static prohibition is retained. Non-contract failures from
 a capture that has already begun are conservatively classified with
 `cleanup_uncertain=True`, even when the underlying exception does not expose
 a trusted boolean status.
+
+
+### PR #160 adversarial follow-up: malformed capture and cancellation
+
+The full-branch adversarial review found an Important lifecycle-certainty
+mismatch: a non-contract return from the fixed `capture_ps()` boundary
+previously produced `PreflightError.cleanup_uncertain=False`, incorrectly
+asserting settled cleanup. The adapter now reports **True** for untrusted
+capture shape/kind/byte type/PID type. Once a strictly typed fixed capture has
+returned, a later bounded process-row or fixed owner-liveness rejection
+retains the ordinary `False` cleanup status; no retry or signal is issued.
+Separate RED-to-GREEN tests cover each stage and retain the existing negative
+row/owner cases.
+
+A Minor interruption case is also handled at the precise boundaries:
+`KeyboardInterrupt`, `SystemExit` and `GeneratorExit` during an attempted
+capture become fixed `PreflightError(cleanup_uncertain=True)`; an unexpected
+cancellation during the literal owner signal-zero probe becomes a sanitized
+fixed error without asserting an unsettled diagnostic child (because the
+successful fixed capture already returned). No generic `BaseException`
+catch, caller-controlled PID or new cleanup authorization is added.

@@ -20,6 +20,15 @@ def require_owner_absent() -> None:
         os.kill(38013, 0)
     except ProcessLookupError:
         return
-    except (OSError, ValueError, TypeError, OverflowError, RuntimeError):
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        OverflowError,
+        RuntimeError,
+        KeyboardInterrupt,
+        SystemExit,
+        GeneratorExit,
+    ):
         raise OwnerProbeError() from None
     raise OwnerProbeError()

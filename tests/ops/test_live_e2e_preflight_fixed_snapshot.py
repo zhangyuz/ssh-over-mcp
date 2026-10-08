@@ -89,26 +89,34 @@ def test_distinct_invocations_can_reuse_pid_and_identical_stdout(modules, monkey
 
 
 @pytest.mark.parametrize(
-    "capture",
+    "capture, cleanup_uncertain",
     [
-        lambda diag: diag.DiagnosticCapture("getconf", _ps(os.getpid(), 34567), 34567),
-        lambda diag: diag.DiagnosticCapture("ps", "not bytes", 34567),
-        lambda diag: diag.DiagnosticCapture("ps", _ps(os.getpid(), 34567), True),
-        lambda diag: diag.DiagnosticCapture("ps", _ps(os.getpid(), 34567), 123456),
-        lambda diag: diag.DiagnosticCapture(
-            "ps", _ps(os.getpid(), 34567, extra=b"38013 idle\n"), 34567
+        (lambda diag: diag.DiagnosticCapture("getconf", _ps(os.getpid(), 34567), 34567), True),
+        (lambda diag: diag.DiagnosticCapture("ps", "not bytes", 34567), True),
+        (lambda diag: diag.DiagnosticCapture("ps", _ps(os.getpid(), 34567), True), True),
+        (lambda diag: diag.DiagnosticCapture("ps", _ps(os.getpid(), 34567), 123456), False),
+        (
+            lambda diag: diag.DiagnosticCapture(
+                "ps", _ps(os.getpid(), 34567, extra=b"38013 idle\n"), 34567
+            ),
+            False,
         ),
-        lambda diag: diag.DiagnosticCapture("ps", b"38013 ps\n", 38013),
-        lambda diag: diag.DiagnosticCapture("ps", b"0 bad\n", 34567),
-        lambda diag: SimpleNamespace(kind="ps", stdout=_ps(os.getpid(), 34567), child_pid=34567),
+        (lambda diag: diag.DiagnosticCapture("ps", b"38013 ps\n", 38013), False),
+        (lambda diag: diag.DiagnosticCapture("ps", b"0 bad\n", 34567), False),
+        (
+            lambda diag: SimpleNamespace(
+                kind="ps", stdout=_ps(os.getpid(), 34567), child_pid=34567
+            ),
+            True,
+        ),
     ],
 )
-def test_invalid_capture_and_owner_row_refuse(modules, monkeypatch, capture):
+def test_invalid_capture_and_owner_row_refuse(modules, monkeypatch, capture, cleanup_uncertain):
     preflight, diag, _ = modules
     calls = _configure(modules, monkeypatch, captures=[capture(diag)])
     with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$") as err:
         preflight._observe_fixed_process_snapshot()
-    assert err.value.cleanup_uncertain is False
+    assert err.value.cleanup_uncertain is cleanup_uncertain
     assert err.value.__cause__ is None
     assert "capture_ps" in calls
 
@@ -217,3 +225,60 @@ def test_owner_probe_has_fixed_literal_pid_and_no_generic_parameters(modules):
     probe = preflight._fixed_owner_probe_module()
     assert str(signature(probe.require_owner_absent)) == "() -> 'None'"
     assert "os.kill" not in PREFLIGHT.read_text()
+
+
+@pytest.mark.parametrize(
+    "capture",
+    [
+        lambda diag: diag.DiagnosticCapture("getconf", _ps(os.getpid(), 34567), 34567),
+        lambda diag: diag.DiagnosticCapture("ps", "not bytes", 34567),
+        lambda diag: diag.DiagnosticCapture("ps", _ps(os.getpid(), 34567), True),
+        lambda diag: SimpleNamespace(kind="ps", stdout=_ps(os.getpid(), 34567), child_pid=34567),
+    ],
+)
+def test_malformed_capture_contract_cannot_certify_owned_cleanup(modules, monkeypatch, capture):
+    preflight, diagnostics, _ = modules
+    calls = _configure(modules, monkeypatch, captures=[capture(diagnostics)])
+    with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$") as err:
+        preflight._observe_fixed_process_snapshot()
+    assert err.value.cleanup_uncertain is True
+    assert err.value.__cause__ is None
+    assert calls == ["capture_ps"]
+
+
+@pytest.mark.parametrize(
+    "interruption",
+    [
+        KeyboardInterrupt("sensitive interrupt"),
+        SystemExit("sensitive exit"),
+        GeneratorExit("sensitive generator close"),
+    ],
+)
+def test_capture_cancellation_refuses_with_uncertain_cleanup(modules, monkeypatch, interruption):
+    preflight, diagnostics, _ = modules
+
+    def interrupted():
+        raise interruption
+
+    monkeypatch.setattr(diagnostics, "capture_ps", interrupted)
+    monkeypatch.setattr(preflight.os, "kill", lambda *_: pytest.fail("no owner probe"))
+    with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$") as err:
+        preflight._observe_fixed_process_snapshot()
+    assert err.value.cleanup_uncertain is True
+    assert err.value.__cause__ is None
+    assert "sensitive" not in str(err.value)
+
+
+def test_owner_probe_cancellation_after_valid_capture_sanitized(modules, monkeypatch):
+    preflight, _, _ = modules
+    calls = _configure(modules, monkeypatch)
+
+    def interrupted_probe(*_args):
+        raise KeyboardInterrupt("sensitive probe interrupted")
+
+    monkeypatch.setattr(preflight.os, "kill", interrupted_probe)
+    with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$") as err:
+        preflight._observe_fixed_process_snapshot()
+    assert err.value.cleanup_uncertain is False
+    assert err.value.__cause__ is None
+    assert "capture_ps" in calls

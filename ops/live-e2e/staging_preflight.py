@@ -985,7 +985,17 @@ def _observe_fixed_process_snapshot() -> None:
         except diagnostics.DiagnosticError as failure:
             try:
                 uncertain = failure.cleanup_uncertain
-            except (AttributeError, RuntimeError, TypeError, ValueError, OSError, MemoryError):
+            except (
+                AttributeError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+                OSError,
+                MemoryError,
+                KeyboardInterrupt,
+                SystemExit,
+                GeneratorExit,
+            ):
                 uncertain = True
             if type(uncertain) is not bool:
                 uncertain = True
@@ -1006,13 +1016,18 @@ def _observe_fixed_process_snapshot() -> None:
             # A non-contract error after capture starts cannot prove that an
             # owned diagnostic child or descriptor cleanup was settled.
             raise PreflightError(cleanup_uncertain=True) from None
+        except (KeyboardInterrupt, SystemExit, GeneratorExit):
+            # Cancellation after an attempted diagnostic capture cannot
+            # establish the disposition of its owned child or descriptors.
+            raise PreflightError(cleanup_uncertain=True) from None
         if (
             type(capture) is not diagnostics.DiagnosticCapture
             or capture.kind != "ps"
             or type(capture.stdout) is not bytes
             or type(capture.child_pid) is not int
         ):
-            raise PreflightError()
+            # A malformed return is not proof of fully reaped/closed capture.
+            raise PreflightError(cleanup_uncertain=True)
         rows = metadata._parse_process_rows(capture.stdout)
         metadata._require_snapshot(rows, inspection_pid=os.getpid(), own_ps_pid=capture.child_pid)
         # ps -U 502 alone cannot establish owner death. Reject that PID
