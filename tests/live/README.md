@@ -1184,3 +1184,36 @@ No arbitrary path/UID/PID is accepted, and no real UID-502 temp,
 cache marker, staging, provider state, workflow, receipt, cleanup or
 recovery authority is exercised. This fixes one ancestry-observation
 boundary only; complete native preflight and Level-3 remain unproven.
+
+
+### Dormant jointly pinned native temp/cache/selected ancestry (fixture only)
+
+Private `_pin_observed_incident_ancestry(selector)` composes the
+already-reviewed independent native getconf→temp, literal-root→cache
+and catalog-selected T→staging directory contexts **without** marker
+file content access or process snapshots. It accepts only the two
+hardcoded incident selectors. The fixed getconf capture is completed
+before pinning any host namespace descriptor; fixed cache and temp
+ancestors are held concurrently while the selected-root name is opened
+with no-follow relative to the pinned T FD. The initial and exit
+revalidation steps cover all three held chains. The existing nested
+owners independently implement their first/second close-boundary
+validation, close exactly their own FD sets and propagate the original
+`PreflightError.cleanup_uncertain` on unsettled cleanup.
+
+The return is a **borrowed triple of private chain handles scoped only
+to the context**. No detached observation is constructed. The handles
+must not escape the context, and no lasting namespace-immutability
+proof is claimed after all three contexts have finished closing (a
+later ancestor close may still coincide with external name mutation).
+A future full preflight needs explicit post-snapshot marker,
+expected-commit, every held edge and authority-byte gates; this helper
+does not perform them or authorize a receipt, CLI, workflow, provider
+cleanup, actual UID-502 inspection, Level-3/A1 or N1c closure.
+
+Disposable fixture tests assert getconf-first order, both fixed
+literal-root openings, simultaneous held-FD liveness and post-exit
+closure, catalog inode/UID/mode, late cache/temp/selected edge swaps,
+invalid selector early rejection, staged symlink refusal, no ps,
+marker, inventory or incident-content actions, and fail-closed cleanup
+uncertainty. Tests never touch the real incident/stale provider state.

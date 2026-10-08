@@ -1548,3 +1548,48 @@ def _pin_observed_fixed_cache_chain() -> Iterator[_PinnedDirectoryChain]:
                 GeneratorExit,
             ):
                 raise PreflightError(cleanup_uncertain=True) from None
+
+
+@contextmanager
+def _pin_observed_incident_ancestry(
+    selector: str,
+) -> Iterator[tuple[_PinnedDirectoryChain, _PinnedDirectoryChain, _PinnedDirectoryChain]]:
+    """Borrow fixed cache, getconf-temp, and selected-root FDs together.
+
+    Private fixture-only ownership context: no detached evidence, host-state
+    content read, snapshot, receipt, activation, or recovery authority.
+    Original fixed selectors alone choose the staging basename. The native
+    getconf child completes before any namespace FD is pinned.
+    """
+    _select_incident(selector)
+    try:
+        with (
+            _pin_observed_native_temp_chain() as temp,
+            _pin_observed_fixed_cache_chain() as cache,
+            _pin_fixed_incident_root(temp._fds[-1], selector) as selected,
+        ):
+            temp.revalidate()
+            cache.revalidate()
+            selected.revalidate()
+            yield (cache, temp, selected)
+            # All three independent held name edges are checked again
+            # before the nested owners start their own fail-closed cleanup.
+            selected.revalidate()
+            temp.revalidate()
+            cache.revalidate()
+    except PreflightError:
+        raise
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        OverflowError,
+        AttributeError,
+        RuntimeError,
+        MemoryError,
+        IndexError,
+        KeyboardInterrupt,
+        SystemExit,
+        GeneratorExit,
+    ):
+        raise PreflightError() from None
