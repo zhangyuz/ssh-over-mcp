@@ -33,7 +33,19 @@ _FAILURE = "staging inventory rejected"
 
 
 class InventoryError(RuntimeError):
-    """The inventory cannot be accepted safely."""
+    """Sanitized inventory refusal, retaining owned-FD cleanup certainty."""
+
+    __slots__ = ("_cleanup_uncertain",)
+
+    def __init__(self, message: str = _FAILURE, *, cleanup_uncertain: bool = False):
+        if type(cleanup_uncertain) is not bool:
+            raise TypeError(_FAILURE)
+        super().__init__(_FAILURE)
+        self._cleanup_uncertain = cleanup_uncertain
+
+    @property
+    def cleanup_uncertain(self) -> bool:
+        return self._cleanup_uncertain
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,8 +136,10 @@ def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry
     def names_at(fd: int, path: str, *, verify_count: int | None = None) -> list[str]:
         nonlocal reserved
         names: list[str] = []
-        # scandir(fd) owns its internal duplicate, not the borrowed descriptor.
-        with os.scandir(fd) as iterator:
+        # scandir(fd) owns an internal duplicate too. Its close outcome
+        # must not be mistaken for conclusively settled directory cleanup.
+        iterator = os.scandir(fd)
+        try:
             for item in iterator:
                 check_deadline()
                 relative = item.name if path == "." else f"{path}/{item.name}"
@@ -137,6 +151,11 @@ def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry
                 elif len(names) >= verify_count:
                     raise InventoryError(_FAILURE)
                 names.append(item.name)
+        finally:
+            try:
+                iterator.close()
+            except (OSError, ValueError, TypeError, MemoryError):
+                raise InventoryError(cleanup_uncertain=True) from None
         check_deadline()
         return sorted(names, key=os.fsencode)
 
@@ -155,6 +174,13 @@ def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry
             raise InventoryError(_FAILURE)
         identities.add(identity)
         return _entry(path, info)
+
+    def close_owned(fd: int) -> None:
+        """Refuse ambiguously closed collector-owned FDs without raw details."""
+        try:
+            os.close(fd)
+        except (OSError, ValueError, TypeError, MemoryError):
+            raise InventoryError(cleanup_uncertain=True) from None
 
     def walk(fd: int, path: str, expected: InventoryEntry | None = None) -> None:
         record = validated(path, os.fstat(fd))
@@ -178,7 +204,7 @@ def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry
                 try:
                     walk(child, relative, snapshot)
                 finally:
-                    os.close(child)
+                    close_owned(child)
             else:
                 append(validated(relative, info))
         if names != names_at(fd, path, verify_count=len(names)):
@@ -196,7 +222,7 @@ def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry
         try:
             walk(owned, ".")
         finally:
-            os.close(owned)
+            close_owned(owned)
         check_deadline()
         result = tuple(sorted(entries, key=lambda entry: _path_key(entry.path)))
         check_deadline()
