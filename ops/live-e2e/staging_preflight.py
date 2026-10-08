@@ -122,7 +122,7 @@ class _PinnedDirectoryChain:
                 )
                 if _metadata(now) != self._initial[index + 1]:
                     raise PreflightError()
-        except (OSError, ValueError, TypeError, OverflowError):
+        except (OSError, ValueError, TypeError, OverflowError, MemoryError):
             raise PreflightError() from None
 
 
@@ -179,7 +179,10 @@ def _pin_directory_chain(
     Duplicates the borrowed start FD; closes only descriptors opened by this
     helper. The caller must retain the context until final edge revalidation.
     """
-    _verify_parts_and_policies(start_fd, parts, rules)
+    try:
+        _verify_parts_and_policies(start_fd, parts, rules)
+    except (OSError, ValueError, TypeError, OverflowError, MemoryError):
+        raise PreflightError() from None
     owned: list[int] = []
     try:
         try:
@@ -197,7 +200,7 @@ def _pin_directory_chain(
                     raise PreflightError()
                 snapshots.append(after)
             pinned = _PinnedDirectoryChain(tuple(owned), parts, tuple(snapshots))
-        except (OSError, ValueError, TypeError, OverflowError):
+        except (OSError, ValueError, TypeError, OverflowError, MemoryError):
             raise PreflightError() from None
         yield pinned
     finally:
@@ -413,7 +416,6 @@ class _ExpectedCommitObservation:
             or type(uid) is not int
         ):
             raise PreflightError()
-        self._payload_chain.revalidate()
         original = self.first
         current = _read_named_regular(
             self._payload_chain._fds[-1],
@@ -425,6 +427,20 @@ class _ExpectedCommitObservation:
         )
         if current != original or current.content != (expected_sha + "\n").encode("ascii"):
             raise PreflightError()
+        # Reading via the held FD cannot establish that its directory entry
+        # still names the same object. Verify the leaf edge *after* the read.
+        try:
+            live_leaf = os.stat(
+                "expected_commit",
+                dir_fd=self._payload_chain._fds[-1],
+                follow_symlinks=False,
+            )
+            if _file_meta(live_leaf, uid, None, 41, original.metadata.device) != original.metadata:
+                raise PreflightError()
+        except (OSError, ValueError, TypeError, OverflowError, MemoryError):
+            raise PreflightError() from None
+        # The root->payload edge may also have changed during the read.
+        self._payload_chain.revalidate()
 
 
 @contextmanager
@@ -504,8 +520,13 @@ def _collect_and_bind(root_fd: int, pinned: _ExpectedCommitObservation, *, uid: 
         _require_expected_inventory_entry(leaves[0], pinned.first)
         pinned._payload_chain.revalidate()
         return entries
+    except PreflightError:
+        # Pre-sanitized failures carry the known child/FD cleanup state.
+        # Never turn cleanup_uncertain=True into a default False here.
+        raise
     except (
         ImportError,
+        SyntaxError,
         OSError,
         ValueError,
         TypeError,

@@ -610,3 +610,25 @@ A7 final gating, and Slice B's fixed getconf/ps composition remain pending.
 There is no production success entrypoint, host capture, process signal,
 workflow, receipt, marker clear, staging deletion, target execution, or
 Level-3/A1/N1c closure. Unknown `recover.cc8Del` remains excluded.
+
+
+### PR #153 adversarial review remediation
+
+Independent review at exact head `c90bdc3f5e29e7655c916c3b63553d1df5bce121`
+([review #6059100957](https://github.com/zhangyuz/ssh-over-mcp/pull/153#issuecomment-6059100957))
+found two Important and one Minor issue, reproduced with seven disposable RED
+fault-injection tests. The fixes make `expected_commit` revalidation reread
+through the held payload descriptor, then check the live leaf name/metadata
+with no-follow stat, then validate the held root-to-payload chain **after**
+that read. A replaced live path or leaf during the final reread refuses.
+Existing sanitized `PreflightError` is passed through the collector boundary
+unchanged so `cleanup_uncertain=True` survives; directory-policy/metadata
+allocation and trusted-sibling loader syntax failures yield the fixed public
+error without exposing lower-level details. These are observation checks, not
+atomic filesystem snapshots.
+
+Local developer Mac Python 3.13 focused/related regression after repair:
+**651 PASS**, including all new adversarial tests; Ruff/format checks PASS.
+Exact-new-head self-hosted Python 3.13/3.14 CI and fresh independent review
+remain required. This repair adds no process/capture authority, CLI, UID-502
+activation, receipt, marker clearing, staging mutation, or Level-3/A1 closure.

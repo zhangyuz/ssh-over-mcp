@@ -762,3 +762,136 @@ def test_fixed_collector_returns_stable_record_class(preflight, payload_tree):
         second = preflight._collect_and_bind(borrowed, observation, uid=os.geteuid())
         assert first == second
         assert all(type(left) is type(right) for left, right in zip(first, second))
+
+
+def test_final_expected_commit_refuses_payload_swap_during_reread(
+    preflight, payload_tree, monkeypatch
+):
+    """Pinned old payload descriptor cannot authorize the new live path."""
+    root, borrowed = payload_tree
+    real_read = preflight._read_named_regular
+    altered = False
+    with preflight._pin_expected_commit(
+        borrowed, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev
+    ) as observation:
+
+        def swapped_read(*args, **kwargs):
+            nonlocal altered
+            if not altered:
+                altered = True
+                (root / "payload-content").rename(root / "moved-away")
+                new_payload = root / "payload-content"
+                new_payload.mkdir(mode=0o700)
+                leaf = new_payload / "expected_commit"
+                leaf.write_bytes((FIXED_SHA + "\n").encode("ascii"))
+                leaf.chmod(0o600)
+            return real_read(*args, **kwargs)
+
+        monkeypatch.setattr(preflight, "_read_named_regular", swapped_read)
+        with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$"):
+            observation.revalidate(FIXED_SHA, uid=os.geteuid())
+        assert altered
+        assert os.fstat(borrowed).st_ino == root.stat().st_ino
+
+
+def test_final_expected_commit_refuses_leaf_swap_after_reread(preflight, payload_tree, monkeypatch):
+    """A replaced directory entry is rejected even when the read was valid."""
+    root, borrowed = payload_tree
+    real_read = preflight._read_named_regular
+    altered = False
+    with preflight._pin_expected_commit(
+        borrowed, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev
+    ) as observation:
+
+        def swapped_read(*args, **kwargs):
+            nonlocal altered
+            result = real_read(*args, **kwargs)
+            if not altered:
+                altered = True
+                leaf = root / "payload-content" / "expected_commit"
+                leaf.rename(leaf.with_name("moved-expected-commit"))
+                leaf.write_bytes((FIXED_SHA + "\n").encode("ascii"))
+                leaf.chmod(0o600)
+            return result
+
+        monkeypatch.setattr(preflight, "_read_named_regular", swapped_read)
+        with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$"):
+            observation.revalidate(FIXED_SHA, uid=os.geteuid())
+        assert altered
+
+
+def test_collector_propagates_known_cleanup_uncertainty(preflight, payload_tree, monkeypatch):
+    root, borrowed = payload_tree
+    with preflight._pin_expected_commit(
+        borrowed, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev
+    ) as observation:
+
+        def uncertain():
+            raise preflight.PreflightError(cleanup_uncertain=True)
+
+        monkeypatch.setattr(preflight, "_fixed_inventory_module", uncertain)
+        with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$") as err:
+            preflight._collect_and_bind(borrowed, observation, uid=os.geteuid())
+        assert err.value.cleanup_uncertain is True
+
+
+def test_directory_metadata_memory_error_is_sanitized(preflight, tree, monkeypatch):
+    _, borrowed = tree
+
+    def exhausted(_stat):
+        raise MemoryError("sensitive allocation internals")
+
+    monkeypatch.setattr(preflight, "_metadata", exhausted)
+    with (
+        pytest.raises(preflight.PreflightError, match="^staging preflight rejected$") as err,
+        _pin(preflight, borrowed),
+    ):
+        pytest.fail("unexpected pin success")
+    assert type(err.value.cleanup_uncertain) is bool
+    assert "sensitive" not in str(err.value)
+    assert os.fstat(borrowed).st_ino > 0
+
+
+def test_final_directory_revalidation_memory_error_is_sanitized(preflight, tree, monkeypatch):
+    _, borrowed = tree
+    with _pin(preflight, borrowed) as chain:
+
+        def exhausted(_stat):
+            raise MemoryError("sensitive allocation internals")
+
+        monkeypatch.setattr(preflight, "_metadata", exhausted)
+        with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$"):
+            chain.revalidate()
+
+
+def test_sibling_loader_syntax_error_is_sanitized(preflight, payload_tree, monkeypatch):
+    root, borrowed = payload_tree
+    with preflight._pin_expected_commit(
+        borrowed, FIXED_SHA, uid=os.geteuid(), device=root.stat().st_dev
+    ) as observation:
+
+        def invalid_loader():
+            raise SyntaxError("sensitive import internals")
+
+        monkeypatch.setattr(preflight, "_fixed_inventory_module", invalid_loader)
+        with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$") as err:
+            preflight._collect_and_bind(borrowed, observation, uid=os.geteuid())
+        assert err.value.cleanup_uncertain is False
+        assert "sensitive" not in str(err.value)
+
+
+def test_directory_policy_allocation_failure_is_sanitized(preflight, tree, monkeypatch):
+    _, borrowed = tree
+
+    def exhausted(*_args, **_kwargs):
+        raise MemoryError("private policy allocation details")
+
+    monkeypatch.setattr(preflight, "_verify_parts_and_policies", exhausted)
+    with (
+        pytest.raises(preflight.PreflightError, match="^staging preflight rejected$") as error,
+        _pin(preflight, borrowed),
+    ):
+        pytest.fail("accepted policy allocation failure")
+    assert error.value.cleanup_uncertain is False
+    assert "private" not in str(error.value)
+    assert os.fstat(borrowed).st_ino > 0
