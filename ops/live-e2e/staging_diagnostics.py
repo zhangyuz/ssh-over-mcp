@@ -127,7 +127,17 @@ def _file_meta(info: os.stat_result, uid: int, size: int) -> tuple[int, ...]:
 
 
 def _verify_authority() -> None:
-    """Verify only the three fixed public documents, through pinned ancestors."""
+    """Verify the three fixed documents; owned-close uncertainty is sticky."""
+    cleanup_uncertain = False
+
+    def owned_close(fd: int) -> None:
+        nonlocal cleanup_uncertain
+        # Never retry an FD after an ambiguous close: the OS may have reused it.
+        try:
+            os.close(fd)
+        except _LIFECYCLE_ERRORS:
+            cleanup_uncertain = True
+
     try:
         module = Path(__file__)
         if not module.is_absolute() or str(module) != __file__ or ".." in module.parts:
@@ -137,7 +147,7 @@ def _verify_authority() -> None:
         directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
         with ExitStack() as owned:
             root_fd = os.open("/", directory_flags)
-            owned.callback(os.close, root_fd)
+            owned.callback(owned_close, root_fd)
             nodes = {(): (root_fd, _dir_meta(os.fstat(root_fd), uid))}
 
             def directory(parts: tuple[str, ...]) -> int:
@@ -146,7 +156,7 @@ def _verify_authority() -> None:
                     before = _dir_meta(os.stat(parts[-1], dir_fd=parent,
                                                follow_symlinks=False), uid)
                     fd = os.open(parts[-1], directory_flags, dir_fd=parent)
-                    owned.callback(os.close, fd)
+                    owned.callback(owned_close, fd)
                     if _dir_meta(os.fstat(fd), uid) != before:
                         raise DiagnosticError()
                     nodes[parts] = fd, before
@@ -160,7 +170,7 @@ def _verify_authority() -> None:
                                             follow_symlinks=False), uid, size)
                 fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK |
                              os.O_CLOEXEC, dir_fd=parent)
-                owned.callback(os.close, fd)
+                owned.callback(owned_close, fd)
                 if _file_meta(os.fstat(fd), uid, size) != before:
                     raise DiagnosticError()
                 chunks = bytearray()
@@ -189,7 +199,7 @@ def _verify_authority() -> None:
                         if _dir_meta(os.fstat(fresh), uid) != before:
                             raise DiagnosticError()
                     finally:
-                        os.close(fresh)
+                        owned_close(fresh)
                 elif _dir_meta(os.stat("/", follow_symlinks=False), uid) != before:
                     raise DiagnosticError()
             for parts, fd, before, size in files:
@@ -199,8 +209,16 @@ def _verify_authority() -> None:
                                           follow_symlinks=False), uid, size) != before
                 ):
                     raise DiagnosticError()
-    except (OSError, ValueError, TypeError, AttributeError, IndexError, RecursionError):
-        raise DiagnosticError() from None
+        if cleanup_uncertain:
+            raise DiagnosticError(cleanup_uncertain=True)
+    except DiagnosticError:
+        # Deterministic validation errors stay certain only if every close
+        # was settled, including closes after a validation failure.
+        if cleanup_uncertain:
+            raise DiagnosticError(cleanup_uncertain=True) from None
+        raise
+    except _LIFECYCLE_ERRORS + (IndexError, RecursionError):
+        raise DiagnosticError(cleanup_uncertain=cleanup_uncertain) from None
 
 
 @dataclass(slots=True)

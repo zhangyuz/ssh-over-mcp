@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -266,3 +267,132 @@ def test_parser_contract_return_is_not_trusted(modules, monkeypatch):
     with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$") as err:
         preflight._observe_fixed_temp_parent()
     assert err.value.cleanup_uncertain is False
+
+
+@pytest.mark.parametrize("size, expected_uncertain", [(1024, False), (1025, True)])
+def test_getconf_stdout_limit_is_capture_contract_not_parser_contract(
+    modules, monkeypatch, size, expected_uncertain
+):
+    preflight, diagnostics, _ = modules
+    events = _setup(
+        modules,
+        monkeypatch,
+        capture=diagnostics.DiagnosticCapture("getconf", b"x" * size, 34567),
+    )
+    with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$") as failure:
+        preflight._observe_fixed_temp_parent()
+    assert events == ["identity", "context", "authority", "getconf"]
+    assert failure.value.cleanup_uncertain is expected_uncertain
+    assert failure.value.__cause__ is None
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    ["document_close", "ancestor_close", "bad_authority_and_close"],
+)
+def test_authority_owned_fd_ambiguous_close_is_preserved_before_getconf(
+    modules, monkeypatch, scenario
+):
+    """Real pinned validator in private disposable checkout; no incident host reads."""
+    import shutil
+    import stat
+    import tempfile
+
+    preflight, diagnostics, _ = modules
+    actual_verify = diagnostics._verify_authority
+    events = _setup(modules, monkeypatch)
+    root = ROOT / ".superpowers"
+    root.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="getconf-close-uncertain-", dir=root) as folder:
+        checkout = Path(folder)
+        for path, _, _ in diagnostics.AUTHORITY_FILES:
+            target = checkout / path
+            target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            shutil.copyfile(ROOT / path, target)
+            target.chmod(0o644)
+        monkeypatch.setattr(
+            diagnostics, "__file__", str(checkout / "ops/live-e2e/staging_diagnostics.py")
+        )
+        actual_verify()
+        if scenario == "bad_authority_and_close":
+            target = checkout / diagnostics.AUTHORITY_FILES[0][0]
+            raw = target.read_bytes()
+            target.write_bytes(bytes((raw[0] ^ 1,)) + raw[1:])
+            target.chmod(0o644)
+
+        def gate():
+            events.append("authority")
+            actual_verify()
+
+        monkeypatch.setattr(diagnostics, "_verify_authority", gate)
+        original_close = os.close
+        ambiguous = []
+        fd_attempts = []
+
+        def checked_close(fd):
+            fd_attempts.append(fd)
+            info = os.fstat(fd)
+            candidate = (
+                stat.S_ISDIR(info.st_mode)
+                if scenario == "ancestor_close"
+                else stat.S_ISREG(info.st_mode)
+            )
+            if candidate and not ambiguous:
+                ambiguous.append(fd)
+                original_close(fd)
+                raise OSError("ambiguous owned authority FD close")
+            return original_close(fd)
+
+        with monkeypatch.context() as temporary:
+            temporary.setattr(diagnostics.os, "close", checked_close)
+            with pytest.raises(
+                preflight.PreflightError, match="^staging preflight rejected$"
+            ) as failure:
+                preflight._observe_fixed_temp_parent()
+        assert ambiguous, "must have injected a real authority FD close"
+        # fstat in checked_close fails on a retry of a closed FD. Descriptor
+        # numbers may legitimately be reused by fresh opens, so never count
+        # numeric FD appearances as evidence of a retry.
+        assert fd_attempts
+        assert events == ["identity", "context", "authority"]
+        assert failure.value.cleanup_uncertain is True
+        assert failure.value.__cause__ is None
+
+
+def test_corrupt_authority_with_settled_closes_stays_certain(modules, monkeypatch):
+    import shutil
+    import tempfile
+
+    preflight, diagnostics, _ = modules
+    actual_verify = diagnostics._verify_authority
+    events = _setup(modules, monkeypatch)
+    root = ROOT / ".superpowers"
+    root.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="getconf-settled-close-", dir=root) as folder:
+        checkout = Path(folder)
+        for path, _, _ in diagnostics.AUTHORITY_FILES:
+            target = checkout / path
+            target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            shutil.copyfile(ROOT / path, target)
+            target.chmod(0o644)
+        monkeypatch.setattr(
+            diagnostics, "__file__", str(checkout / "ops/live-e2e/staging_diagnostics.py")
+        )
+        actual_verify()
+        target = checkout / diagnostics.AUTHORITY_FILES[0][0]
+        raw = target.read_bytes()
+        target.write_bytes(bytes((raw[0] ^ 1,)) + raw[1:])
+        target.chmod(0o644)
+
+        def gate():
+            events.append("authority")
+            actual_verify()
+
+        monkeypatch.setattr(diagnostics, "_verify_authority", gate)
+        with pytest.raises(
+            preflight.PreflightError, match="^staging preflight rejected$"
+        ) as failure:
+            preflight._observe_fixed_temp_parent()
+        assert failure.value.cleanup_uncertain is False
+        assert failure.value.__cause__ is None
+        assert events == ["identity", "context", "authority"]

@@ -1066,7 +1066,29 @@ def _observe_fixed_temp_parent():
         metadata = _fixed_process_metadata_module()
         diagnostics._require_identity()
         diagnostics._require_wait_context()
-        diagnostics._verify_authority()
+        try:
+            diagnostics._verify_authority()
+        except diagnostics.DiagnosticError as failure:
+            # A failed trusted-checkout check happens before child capture,
+            # but its owned document/ancestor descriptor closes can be unsure.
+            try:
+                uncertain = failure.cleanup_uncertain
+            except (
+                OSError,
+                RuntimeError,
+                ValueError,
+                TypeError,
+                AttributeError,
+                OverflowError,
+                MemoryError,
+                KeyboardInterrupt,
+                SystemExit,
+                GeneratorExit,
+            ):
+                uncertain = True
+            if type(uncertain) is not bool:
+                uncertain = True
+            raise PreflightError(cleanup_uncertain=uncertain) from None
         try:
             capture = diagnostics.capture_getconf()
         except diagnostics.DiagnosticError as failure:
@@ -1112,6 +1134,7 @@ def _observe_fixed_temp_parent():
             type(capture) is not diagnostics.DiagnosticCapture
             or capture.kind != "getconf"
             or type(capture.stdout) is not bytes
+            or len(capture.stdout) > diagnostics.GETCONF_STREAM_BYTES
             or type(capture.child_pid) is not int
             or not 1 <= capture.child_pid <= 2147483647
         ):

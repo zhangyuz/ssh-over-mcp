@@ -932,3 +932,26 @@ Existing automatic Level-3 stale-provider fail-closed behavior is unchanged.
 Disposable RED/GREEN tests cover authority-before-capture sequencing, strict
 capture shapes and PID, malformed temp bytes, child cleanup uncertainty and
 cancellation. No real UID-502 dedicated host execution is claimed.
+
+
+### PR #161 adversarial review remediation — capture bound and authority-owned closes
+
+The independent [#6068433034](https://github.com/zhangyuz/ssh-over-mcp/pull/161#issuecomment-6068433034)
+review identified two Important fail-closed gaps. The fixed getconf adapter now
+checks the reviewed `GETCONF_STREAM_BYTES` limit **inside the capture-return
+contract**, before parsing: an oversized (>1024 byte) non-contract result
+yields `PreflightError(cleanup_uncertain=True)`, while bounded malformed
+native bytes remain a settled capture with `False`.
+
+The reviewed three-document trusted-checkout verifier now tracks every
+owned FD close (including transient namespace revalidation handles) with a
+single-use callback. Any ambiguous close sets a sticky uncertainty bit;
+later success, mismatch, or cleanup does not downgrade it. A deterministic
+authority mismatch with settled closes still reports `False`. The new
+pre-capture adapter propagates the verifier's strict `DiagnosticError`
+uncertainty before any getconf invocation. Adversarial tests use disposable
+authority documents, real close-followed-by-OSError injection for owned
+regular-file/ancestor descriptors, concurrent authority mismatch and close
+failure, and a settled-close mismatch control. A descriptor number may be
+reused by a new open and is not, by itself, evidence of a close retry. No
+incident files, provider marker or UID-502 runner state are modified.
