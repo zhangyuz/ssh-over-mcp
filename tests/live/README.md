@@ -668,3 +668,45 @@ revalidation. The root baseline is therefore safe on entry and late
 changes fail when `chain.revalidate()` is called. A third test checks
 late unsafe mode drift; no root namespace/UID-502 proof or live host
 inspection is claimed. Current PR remains dormant and read-only.
+
+### Slice A temp ancestry component after merged PR #154
+
+The private temp-chain seam pins only
+private/var/folders/<shard>/<token>/T relative to a borrowed root FD.
+It accepts two exact, bounded lexical components, never a full input path:
+the shard is two lowercase ASCII alphanumeric characters; the token uses
+lowercase ASCII alphanumeric/underscore characters, with the existing
+directory-chain component limit of 255 bytes. Unsupported layout refuses.
+This component limit does not replace the pure getconf stdout limit of 1024.
+Shared ancestors including the shard require UID 0 and no group/world-write
+bits; the token requires UID 502 and mode 0700 or 0755, and T requires UID 502
+mode 0700. Both fixed cache and temp wrappers use the same safe-root pinning
+check, retaining PR #154's original safe baseline, duplicated-root equality
+and current parent-to-child edge checks.
+
+Disposable developer fixtures substitute ownership only in the private
+module. All six temp edges are exercised for symlink and late namespace
+replacement refusal, including cases where the held original FDs stay valid.
+Root drift during dup, stat/open replacement, malformed components before
+FD actions, borrowed identity/flags/offset preservation, owned-FD closure
+and strict cleanup uncertainty are covered. Metadata/edge checks remain
+observations, not atomic snapshots or protection from malicious account ABA.
+
+Fresh developer-Mac verification: Python 3.13.5 and 3.14.8 each pass 172
+temp/cache/general cases (64 new temp cases). Python 3.13 related regression
+passes 731 cases. Both full Mac runs have 1848 passes, 84 failures and 177
+skips; exact failure names equal the fresh merge-main baseline (1784 passes,
+84 failures, 177 skips). Each retains all 18 eligible existing Darwin
+diagnostic fixture passes with zero native skips. This is no-new-failure Mac
+evidence, not full Mac GREEN or new fixed-diagnostic composition proof.
+Exact-head self-hosted Linux full CI and independent review remain required.
+
+The seam does not derive or authenticate the OS temp path, prove literal /
+or the actual UID-502 runtime, select/open a staging root, read incident
+content, return full detached preflight evidence, or activate a workflow or
+receipt. Slice B must derive these components internally from its actual
+fixed, completed/reaped getconf capture; no caller/operator override is
+authorized. Final marker, inventory, selected-root and complete namespace
+composition remain separate Slice A work. No native getconf/ps composition,
+provider mutation, deletion, marker clearing, Level-3/A1/N1c closure or
+inspection of the unknown recovery workspace is added here.
