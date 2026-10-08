@@ -1568,15 +1568,17 @@ def _pin_observed_incident_ancestry(
             _pin_observed_fixed_cache_chain() as cache,
             _pin_fixed_incident_root(temp._fds[-1], selector) as selected,
         ):
+            _require_shared_incident_ancestry(cache, temp, selected)
             temp.revalidate()
             cache.revalidate()
             selected.revalidate()
             yield (cache, temp, selected)
-            # All three independent held name edges are checked again
-            # before the nested owners start their own fail-closed cleanup.
+            # Rebind root and T provenance while every owner still holds
+            # its FD, before the nested, fail-closed cleanup begins.
             selected.revalidate()
             temp.revalidate()
             cache.revalidate()
+            _require_shared_incident_ancestry(cache, temp, selected)
     except PreflightError:
         raise
     except (
@@ -1593,3 +1595,38 @@ def _pin_observed_incident_ancestry(
         GeneratorExit,
     ):
         raise PreflightError() from None
+
+
+def _require_shared_incident_ancestry(
+    cache: _PinnedDirectoryChain,
+    temp: _PinnedDirectoryChain,
+    selected: _PinnedDirectoryChain,
+) -> None:
+    """Bind two literal-root FD owners and the borrowed selected T parent.
+
+    Compare the *full* device/inode/type/UID/GID/mode tuple at the common
+    boundaries, twice while all three contexts still own live descriptors.
+    """
+    if (
+        type(cache) is not _PinnedDirectoryChain
+        or type(temp) is not _PinnedDirectoryChain
+        or type(selected) is not _PinnedDirectoryChain
+        or not cache._initial
+        or not temp._initial
+        or not selected._initial
+        or not cache._fds
+        or not temp._fds
+        or not selected._fds
+        or cache._initial[0] != temp._initial[0]
+        or selected._initial[0] != temp._initial[-1]
+    ):
+        raise PreflightError()
+    root = temp._initial[0]
+    tail = temp._initial[-1]
+    if (
+        _metadata(os.fstat(temp._fds[0])) != root
+        or _metadata(os.fstat(cache._fds[0])) != root
+        or _metadata(os.fstat(temp._fds[-1])) != tail
+        or _metadata(os.fstat(selected._fds[0])) != tail
+    ):
+        raise PreflightError()

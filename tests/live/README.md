@@ -1217,3 +1217,31 @@ closure, catalog inode/UID/mode, late cache/temp/selected edge swaps,
 invalid selector early rejection, staged symlink refusal, no ps,
 marker, inventory or incident-content actions, and fail-closed cleanup
 uncertainty. Tests never touch the real incident/stale provider state.
+
+
+### PR #166 shared literal-root Important review correction
+
+The adversarial review #6071232461 reproduced **false acceptance** of
+two simultaneously held but different literal-root objects. The native
+temp and fixed marker-cache contexts could each pass their independently
+timed root identity observations during a simulated A→B→A root-view
+transition. Two independent disposable-root regression cases were
+**RED** before the fix. The joint context now calls
+`_require_shared_incident_ancestry(cache, temp, selected)` **before
+yield and after the final three-chain revalidation**, while all owners
+still hold their descriptors. It compares the full immutable
+(device/inode/type/UID/GID/mode) root metadata snapshots from cache and
+temp, freshly `fstat`s both separately opened root FDs against the same
+baseline, and explicitly binds the selected chain's original T parent
+snapshot and fresh duplicated T descriptor metadata to the retained temp
+chain's last snapshot/held T FD.
+
+The selected parent is independently duplicated by the existing pin
+helper: **descriptor integers need not be equal**; object metadata must
+be equal. The new guard owns no additional descriptor and does not
+close or detach any borrowed FD. Disposable tests verify the different
+roots' fail-closed behavior under separately successful local checks,
+simulated A→B→A changes, normal common-root acceptance and forged T
+baseline rejection. No real incident marker/selected staging is read;
+this is still a dormant borrowed-context intermediate, not full
+preflight evidence.

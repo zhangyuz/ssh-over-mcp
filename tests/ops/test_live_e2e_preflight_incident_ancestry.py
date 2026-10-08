@@ -236,3 +236,105 @@ def test_selected_symlink_denied_before_context_yield(env):
     selected.symlink_to(renamed.name, target_is_directory=True)
     with pytest.raises(p.PreflightError), p._pin_observed_incident_ancestry("stale-target"):
         pytest.fail("selected symlink accepted")
+
+
+def _install_two_root_transition(env, monkeypatch):
+    """Exercise actual fixed nofollow opens under different disposable roots.
+
+    Temp sees A, cache sees B. Each wrapper's literal-root stat is
+    individually consistent with a simulated A->B->A root view.
+    """
+    p, root_a, _temp, _cache, _selected, events = env
+    root_b = root_a.parent / "different-root"
+    root_b.mkdir(mode=0o700)
+    root_b.joinpath(*p._CACHE_PARTS).mkdir(parents=True, mode=0o700)
+    old_open = os.open
+    opens = []
+    stats = []
+
+    def two_roots():
+        root = (root_a, root_b)[len(opens)]
+        fd = old_open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        opens.append((root, fd))
+        events.append("root")
+        return fd
+
+    def root_view():
+        # Entry(temp=A, cache=B), exit(cache=B twice, temp=A twice)
+        sequence = (root_a, root_b, root_b, root_b, root_a, root_a)
+        choice = sequence[min(len(stats), len(sequence) - 1)]
+        stats.append(choice)
+        return p._metadata(os.stat(choice))
+
+    monkeypatch.setattr(p, "_open_fixed_native_root", two_roots)
+    monkeypatch.setattr(p, "_stat_fixed_native_root", root_view)
+    return root_a, root_b, opens, stats
+
+
+def test_two_distinct_root_fds_must_not_be_jointly_accepted(env, monkeypatch):
+    p, *_ = env
+    root_a, root_b, opens, stats = _install_two_root_transition(env, monkeypatch)
+    accepted = []
+    with (
+        pytest.raises(p.PreflightError, match="^staging preflight rejected$") as failure,
+        p._pin_observed_incident_ancestry("stale-target") as chains,
+    ):
+        accepted.append(True)
+        assert chains[1]._initial[0] != chains[0]._initial[0]
+    assert accepted == []
+    assert failure.value.cleanup_uncertain is False
+    assert len(opens) == 2
+    assert root_a.stat().st_ino != root_b.stat().st_ino
+    assert stats[:2] == [root_a, root_b]
+    for _, fd in opens:
+        with pytest.raises(OSError):
+            os.fstat(fd)
+
+
+def test_root_view_transition_with_locally_consistent_checks_refuses(env, monkeypatch):
+    p, *_ = env
+    root_a, root_b, opens, stats = _install_two_root_transition(env, monkeypatch)
+    accepted = []
+    with pytest.raises(p.PreflightError), p._pin_observed_incident_ancestry("stale-target"):
+        accepted.append(True)
+    assert accepted == []
+    assert [path for path, _ in opens] == [root_a, root_b]
+    assert stats[:2] == [root_a, root_b]
+
+
+def test_common_root_and_shared_t_are_explicitly_bound(env):
+    p, *_ = env
+    with p._pin_observed_incident_ancestry("stale-target") as chains:
+        cache, temp, selected = chains
+        assert cache._initial[0] == temp._initial[0]
+        assert selected._initial[0] == temp._initial[-1]
+        assert p._metadata(os.fstat(cache._fds[0])) == temp._initial[0]
+        assert p._metadata(os.fstat(selected._fds[0])) == temp._initial[-1]
+
+
+def test_forged_selected_t_baseline_rejected_before_yield(env, monkeypatch):
+    from contextlib import contextmanager
+
+    p, *_ = env
+    original = p._pin_fixed_incident_root
+
+    @contextmanager
+    def forged_parent(*args):
+        with original(*args) as selected:
+            forged = replace(
+                selected,
+                _initial=(
+                    replace(selected._initial[0], inode=selected._initial[0].inode + 1),
+                    selected._initial[1],
+                ),
+            )
+            yield forged
+
+    monkeypatch.setattr(p, "_pin_fixed_incident_root", forged_parent)
+    accepted = []
+    with (
+        pytest.raises(p.PreflightError, match="^staging preflight rejected$"),
+        p._pin_observed_incident_ancestry("stale-target"),
+    ):
+        accepted.append(True)
+    assert accepted == []
