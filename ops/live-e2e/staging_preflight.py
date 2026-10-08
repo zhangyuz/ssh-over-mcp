@@ -1297,3 +1297,71 @@ def _pin_observed_native_temp_chain() -> Iterator[_PinnedDirectoryChain]:
                 GeneratorExit,
             ):
                 raise PreflightError(cleanup_uncertain=True) from None
+
+
+def _observe_paired_process_inventory(
+    selected_chain: _PinnedDirectoryChain, selector: str
+) -> _SelectedInventoryEvidence:
+    """Fixture-only ps-A / selected inventory / ps-B composition.
+
+    The caller must *already* hold and validate the original temp ancestry.
+    This private intermediate neither derives native getconf provenance nor
+    authenticates the cache marker; it is NOT a complete native preflight
+    entrypoint and returns no process identities, capture bytes or receipt.
+    """
+    try:
+        incident = _select_incident(selector)
+        if (
+            type(selected_chain) is not _PinnedDirectoryChain
+            or selected_chain._parts != (incident.basename,)
+            or len(selected_chain._fds) != 2
+            or len(selected_chain._initial) != 2
+            or (
+                selected_chain.metadata[0].device,
+                selected_chain.metadata[0].inode,
+                selected_chain.metadata[0].uid,
+                selected_chain.metadata[0].mode,
+            )
+            != (incident.device, incident.inode, incident.uid, incident.mode)
+        ):
+            raise PreflightError()
+        selected_chain.revalidate()
+        # Real child freshness is two invocations of the reviewed fixed
+        # capture; equal stdout/rows or kernel-reused ps PIDs are permitted.
+        _observe_fixed_process_snapshot()
+        selected = _observe_selected_inventory(selected_chain, selector)
+        _observe_fixed_process_snapshot()
+        # The second child has now been reaped. Recheck the *content* and
+        # immutable metadata of expected_commit, not just its held root FD.
+        with _pin_expected_commit(
+            selected_chain._fds[-1],
+            incident.expected_commit,
+            uid=incident.uid,
+            device=incident.device,
+        ) as expected:
+            if expected.first.metadata != selected.expected_metadata:
+                raise PreflightError()
+            expected.revalidate(incident.expected_commit, uid=incident.uid)
+        # This check follows owned payload-descendant close; no cached
+        # pathname validation from before the second ps is accepted.
+        selected_chain.revalidate()
+        return selected
+    except PreflightError:
+        raise
+    except (
+        ImportError,
+        SyntaxError,
+        OSError,
+        TypeError,
+        ValueError,
+        OverflowError,
+        AttributeError,
+        RuntimeError,
+        MemoryError,
+        KeyError,
+        IndexError,
+        KeyboardInterrupt,
+        SystemExit,
+        GeneratorExit,
+    ):
+        raise PreflightError() from None

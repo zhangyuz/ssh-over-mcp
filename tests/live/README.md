@@ -1011,3 +1011,39 @@ new process operation, receipt, workflow or new cleanup authority is added.
 These are bounded point-in-time checks against concurrent mutation, **not**
 proof of permanent namespace immutability; complete preflight still needs
 an independently reviewed final gate with process quiescence.
+
+
+### Dormant paired fixed ps observations around selected inventory
+
+The private `_observe_paired_process_inventory(selected_chain, selector)` helper
+accepts only an **already pinned** catalog-selected disposable staging chain.
+It first checks the fixed selected basename/device/inode/UID/mode and held
+name edge, then invokes the already-reviewed **fixed** `_observe_fixed_process_snapshot()`
+twice, exactly once before and once after the metadata-only
+`_observe_selected_inventory()`. Each fixed invocation independently runs
+the reviewed bounded `capture_ps()`, validates the real returned owned-child
+PID against internally derived `os.getpid()`, rejects unexpected same-UID
+processes and insists fixed owner PID 38013 is absent both from rows and from
+the literal signal-zero probe. Equal capture stdout and reused numeric ps
+child PIDs are explicitly permitted; invocation **count and order** are the
+proof of two fresh capture operations.
+
+After the second snapshot has successfully reaped its diagnostic child, the
+helper reopens only fixed `payload-content/expected_commit` under the held
+selected-root FD, binds its byte/metadata observation against the earlier
+frozen inventory evidence, then revalidates the selected-root live edge after
+its own payload-descriptor cleanup. Failure at any stage returns **no**
+detached evidence, and preserves typed `PreflightError.cleanup_uncertain`.
+Successful results are the existing immutable `_SelectedInventoryEvidence`,
+without process output, child identity, FD, receipt or cleanup handle.
+
+**Scope limit:** The caller still owns and must independently prove the
+literal root, full native-temp and cache-marker provenance and retain every
+required held ancestor FD; this *fixture-only* seam does not authenticate
+those requirements, and it is not a full native preflight or operational
+entrypoint. No workflow, UID-502 runner call, getconf execution here, marker
+read, recovery/clear, incident mutation, generic PID/path/command capability
+or Level-3/A1/N1c completion is introduced. Disposable RED/GREEN fixtures
+assert process→inventory→process ordering (including identical captures),
+bounded failure propagation, selected-root edge replacement and late
+expected_commit content drift.
