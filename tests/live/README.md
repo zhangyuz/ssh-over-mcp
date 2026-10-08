@@ -955,3 +955,28 @@ regular-file/ancestor descriptors, concurrent authority mismatch and close
 failure, and a settled-close mismatch control. A descriptor number may be
 reused by a new open and is not, by itself, evidence of a close retry. No
 incident files, provider marker or UID-502 runner state are modified.
+
+
+### Dormant fixed native temp-chain binding (Slice B, intermediate)
+
+The private zero-argument `_pin_observed_native_temp_chain()` context
+receives only the already-reviewed successful fixed native getconf
+`TempParent`, validates the exact immutable native/canonical path pair,
+then opens **only literal /** with `O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC`.
+It checks the held root against a fresh literal `/` metadata observation,
+and uses the existing `_pin_fixed_temp_chain` policy to open each fixed
+Darwin `private/var/folders/<shard>/<token>/T` component descriptor-relative.
+The returned pinned chain is private and valid **only inside the context**;
+the root and every owned descriptor are closed on every success/failure path.
+The complete pinned chain and literal-root identity are checked again before
+normal context exit; a late namespace swap rejects the observation. Ambiguous
+root close is a fixed `PreflightError(cleanup_uncertain=True)`.
+
+No caller can supply a path, root descriptor, PID, UID or raw getconf output.
+Fixture-only substitutions for getconf/root metadata use disposable local
+directories and cannot establish UID-502 actual host provenance; live root
+access is **not invoked by any workflow or CLI**. No staging root, marker,
+payload, unknown incident root, child process snapshot, inventory, receipt or
+provider state is accessed by this seam. Later composition must keep this
+context alive across both fixed `ps` observations and selected staging
+inventory before accepting detached evidence. No A1/N1c/Level-3 credit.
