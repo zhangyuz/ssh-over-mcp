@@ -601,13 +601,18 @@ def _pin_safe_directory_chain(
     rules: tuple[tuple[int, tuple[int, ...] | None], ...],
     *,
     system_uid: int,
+    root_mode: int | None = None,
 ) -> Iterator[_PinnedDirectoryChain]:
     """Private shared safe-baseline check for the fixed namespace wrappers."""
     if type(root_fd) is not int or root_fd < 0:
         raise PreflightError()
     try:
         root_meta = _metadata(os.fstat(root_fd))
-        if root_meta.uid != system_uid or root_meta.mode & 0o022:
+        if (
+            root_meta.uid != system_uid
+            or root_meta.mode & 0o022
+            or (root_mode is not None and root_meta.mode != root_mode)
+        ):
             raise PreflightError()
     except (OSError, ValueError, TypeError, OverflowError, MemoryError):
         raise PreflightError() from None
@@ -625,6 +630,7 @@ def _pin_safe_directory_chain(
                 or chain._initial[0] != root_meta
                 or pinned_root.uid != system_uid
                 or pinned_root.mode & 0o022
+                or (root_mode is not None and pinned_root.mode != root_mode)
             ):
                 raise PreflightError()
         except (OSError, ValueError, TypeError, OverflowError, MemoryError):
@@ -686,4 +692,30 @@ def _pin_fixed_temp_chain(
         (_TEMP_ACCOUNT_UID, (0o700,)),
     )
     with _pin_safe_directory_chain(root_fd, parts, rules, system_uid=_TEMP_SYSTEM_UID) as chain:
+        yield chain
+
+
+@contextmanager
+def _pin_fixed_incident_root(temp_fd: int, selector: str) -> Iterator[_PinnedDirectoryChain]:
+    """Private selected-root seam; borrowed T does not prove its OS ancestry.
+
+    Later composition must retain the full temp chain and revalidate all its
+    edges together with this selected edge after final observations.
+    """
+    incident = _select_incident(selector)
+    with _pin_safe_directory_chain(
+        temp_fd,
+        (incident.basename,),
+        ((incident.uid, (incident.mode,)),),
+        system_uid=incident.uid,
+        root_mode=0o700,
+    ) as chain:
+        selected = chain.metadata[0]
+        if (selected.device, selected.inode, selected.uid, selected.mode) != (
+            incident.device,
+            incident.inode,
+            incident.uid,
+            incident.mode,
+        ):
+            raise PreflightError()
         yield chain

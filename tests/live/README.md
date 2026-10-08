@@ -710,3 +710,42 @@ authorized. Final marker, inventory, selected-root and complete namespace
 composition remain separate Slice A work. No native getconf/ps composition,
 provider mutation, deletion, marker clearing, Level-3/A1/N1c closure or
 inspection of the unknown recovery workspace is added here.
+
+### Slice A selected catalog-root component after merged PR #155
+
+The private selected-root seam accepts only the two fixed incident selectors
+and a borrowed, already-pinned T descriptor. It pins only that catalog's
+literal basename using descriptor-relative no-follow stat/open checks.
+The parent must have the catalog UID 502 and exact mode 0700 before any
+duplicate/open; the duplicate and its stored baseline must match that original
+safe parent observation. The selected root must match the literal catalog
+device, inode, UID 502 and mode 0700 before this context yields. Explicit late
+revalidation checks both held descriptors and the T-to-selected-root edge.
+The shared safe-root helper's optional exact mode policy leaves the fixed
+cache/temp wrappers' default policies unchanged.
+
+Disposable fixtures first assert the exact production catalog, then substitute
+only their private filesystem identities. The initial 45 new cases failed at
+the missing interface before implementation; nine additional coverage cases
+exercise existing strict selector/FD/parent-UID rejection without claiming
+another behavior change or RED result. Both Python 3.13.5 and 3.14.8 pass 226
+selected-root/temp/cache/general cases. Namespace replacement, catalog drift,
+original-safe/current-duplicate/stored parent-baseline races, borrowed FD
+preservation and strict cleanup uncertainty remain fail-closed.
+
+Python 3.13 related regression passes 785 cases. Both final full Mac runs have
+1902 passes, 84 failures and 177 skips; all 84 failure names match fresh clean
+main `ec316910015201070595b9b5bb2628bad3696d21` (1848/84/177), and all 18
+eligible existing Darwin diagnostic fixtures pass with zero native skips.
+This is no-new-failure Mac evidence, not full Mac GREEN or new native diagnostic
+composition proof. Supported exact-head self-hosted Linux full CI and fresh
+independent review remain mandatory.
+
+This is a partial private composition component. The borrowed descriptor alone
+does not authenticate the full OS-derived temp ancestry or the actual UID-502
+runtime. Later composition must retain and cross-check the full temp chain,
+this selected edge, marker, expected-commit and inventory observations through
+the final gate. There is no content read, staging traversal, native diagnostic
+composition, full preflight entrypoint, workflow/receipt or mutation here.
+The existing stale-provider refusal remains a failed Level-3 gate, with no A1,
+N1c or recovery credit. All three fixed authority documents remain unchanged.
