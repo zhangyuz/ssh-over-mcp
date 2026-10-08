@@ -271,3 +271,89 @@ def test_original_body_error_stays_uncertain_when_root_close_succeeds(env):
     with pytest.raises(p.PreflightError) as err, p._pin_observed_native_temp_chain():
         raise p.PreflightError(cleanup_uncertain=True)
     assert err.value.cleanup_uncertain is True
+
+
+@pytest.mark.parametrize(
+    "index,ambiguous_close",
+    [
+        (5, False),  # T is replaced immediately after its held FD closes
+        (2, False),  # folders ancestor is replaced on its held FD close
+        (5, True),  # successful close plus raising must retain uncertainty
+        (2, True),  # ancestor ambiguity must likewise retain uncertainty
+    ],
+)
+def test_post_descendant_close_namespace_swap_refuses(env, monkeypatch, index, ambiguous_close):
+    p, _, root, _, events = env
+    close_native = os.close
+    swapped = []
+    chosen_fd = [None]
+
+    def closing(fd):
+        if fd == chosen_fd[0] and not swapped:
+            close_native(fd)
+            edge = root.joinpath(*PARTS[: index + 1])
+            former = edge.with_name("former-" + edge.name)
+            edge.rename(former)
+            edge.mkdir(mode=0o700)
+            swapped.append((edge, former))
+            if ambiguous_close:
+                raise OSError("sensitive ambiguous descendant close")
+            return
+        close_native(fd)
+
+    with monkeypatch.context() as injected:
+        injected.setattr(p.os, "close", closing)
+        with (
+            pytest.raises(p.PreflightError, match="^staging preflight rejected$") as failure,
+            p._pin_observed_native_temp_chain() as chain,
+        ):
+            chosen_fd[0] = chain._fds[index + 1]
+            chain.revalidate()
+    assert swapped, "fault injection must occur after the originally checked edge"
+    assert failure.value.cleanup_uncertain is ambiguous_close
+    assert failure.value.__cause__ is None
+    assert "sensitive" not in str(failure.value)
+    assert events == ["getconf", "root"]
+
+
+@pytest.mark.parametrize("ambiguous_close", [False, True])
+def test_second_pass_close_swap_refuses_after_all_descendants_closed(
+    env, monkeypatch, ambiguous_close
+):
+    p, _, root, _, events = env
+    native_open, native_close = os.open, os.close
+    observed_t = []
+    swapped = []
+
+    def capture_t_open(name, flags, *args, **kwargs):
+        fd = native_open(name, flags, *args, **kwargs)
+        if name == "T":
+            observed_t.append(fd)
+        return fd
+
+    def close_second_t(fd):
+        if len(observed_t) == 2 and fd == observed_t[-1] and not swapped:
+            native_close(fd)
+            leaf = root.joinpath(*PARTS)
+            former = leaf.with_name("former-T")
+            leaf.rename(former)
+            leaf.mkdir(mode=0o700)
+            swapped.append(True)
+            if ambiguous_close:
+                raise OSError("sensitive second-close uncertainty")
+            return
+        native_close(fd)
+
+    with monkeypatch.context() as injected:
+        injected.setattr(p.os, "open", capture_t_open)
+        injected.setattr(p.os, "close", close_second_t)
+        with (
+            pytest.raises(p.PreflightError, match="^staging preflight rejected$") as failure,
+            p._pin_observed_native_temp_chain() as chain,
+        ):
+            chain.revalidate()
+    assert len(observed_t) == 2
+    assert swapped
+    assert failure.value.cleanup_uncertain is ambiguous_close
+    assert failure.value.__cause__ is None
+    assert events == ["getconf", "root"]

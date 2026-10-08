@@ -1233,13 +1233,40 @@ def _pin_observed_native_temp_chain() -> Iterator[_PinnedDirectoryChain]:
         root_initial = _metadata(os.fstat(root_fd))
         if root_initial != _stat_fixed_native_root():
             raise PreflightError()
+        parts = ("private", "var", "folders", shard, token, "T")
         with _pin_fixed_temp_chain(root_fd, (shard, token)) as chain:
             if chain._initial[0] != root_initial:
                 raise PreflightError()
+            baseline = chain._initial
             yield chain
             chain.revalidate()
             if _stat_fixed_native_root() != root_initial:
                 raise PreflightError()
+
+        # The previous revalidation happened before the owned descendant FDs
+        # were closed. Never accept it as final evidence: re-open only the
+        # fixed component-wise, no-follow ancestry and compare every immutable
+        # metadata snapshot AFTER those closes. The nested context owns and
+        # safely closes all its own descriptors, propagating close uncertainty.
+        with _pin_fixed_temp_chain(root_fd, (shard, token)) as fresh:
+            if fresh._initial != baseline:
+                raise PreflightError()
+            fresh.revalidate()
+
+        # A successful close of a fresh-check FD can itself coincide with an
+        # edge replacement. The final stat-only pass runs *after* all
+        # descendant descriptors are closed, using the still-held literal /
+        # FD and never adding another descriptor/cleanup window. No-follow
+        # each prefix, comparing device, inode, type, UID, GID, and mode.
+        for index in range(1, len(baseline)):
+            edge = "/".join(parts[:index])
+            if _metadata(os.stat(edge, dir_fd=root_fd, follow_symlinks=False)) != baseline[index]:
+                raise PreflightError()
+        if (
+            _metadata(os.fstat(root_fd)) != root_initial
+            or _stat_fixed_native_root() != root_initial
+        ):
+            raise PreflightError()
     except PreflightError:
         raise
     except (

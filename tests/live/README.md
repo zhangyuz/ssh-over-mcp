@@ -980,3 +980,34 @@ payload, unknown incident root, child process snapshot, inventory, receipt or
 provider state is accessed by this seam. Later composition must keep this
 context alive across both fixed `ps` observations and selected staging
 inventory before accepting detached evidence. No A1/N1c/Level-3 credit.
+
+
+### PR #162 important follow-up: post-close namespace observation
+
+Review #6069210460 found an accepted namespace swap *during* the successful
+close of an initially pinned T or ancestor FD. The original end-of-context
+revalidation was inside the descendant-owning nested context, so it could
+not notice a subsequent successful close with a path replacement.
+Deterministic disposable-tree probes reproduced **two RED cases**.
+
+After the initial descendant context has finished its owned FD cleanup, this
+private helper now performs a **fresh descriptor-relative component-by-
+component no-follow pin** of the same getconf-derived literal ancestry,
+compares all six recorded device/inode/type/UID/GID/mode snapshots to the
+originals, revalidates all new edges, and lets the second nested context
+close its exclusively owned FDs with the already-reviewed uncertainty policy.
+A final *stat-only* observation compares every fixed-prefix live edge
+against the original snapshots using the still-held literal-root FD; it
+happens **after both descendant descriptor sets are closed**, adding no new
+descendant close window. A final held-root and literal-root metadata check
+also occurs before that remaining root FD is closed.
+
+Adversarial tests now force a successful close-plus-name-swap for the first
+T FD, first folders-ancestor FD, then separately the second pass's T FD.
+These must all refuse. If the same owned close raises after actually
+closing its FD, that failure remains `cleanup_uncertain=True` even when the
+live path has been replaced. No retried ambiguous close, incident-root access,
+new process operation, receipt, workflow or new cleanup authority is added.
+These are bounded point-in-time checks against concurrent mutation, **not**
+proof of permanent namespace immutability; complete preflight still needs
+an independently reviewed final gate with process quiescence.
