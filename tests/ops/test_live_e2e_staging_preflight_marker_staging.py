@@ -226,3 +226,23 @@ def test_cache_edge_swap_after_final_marker_reread_refuses(preflight, staging_pa
     monkeypatch.setattr(preflight, "_revalidate_marker", late_swap)
     with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$"):
         _observe(preflight, staging_pair)
+
+
+def test_malformed_private_chain_state_is_sanitized(preflight, staging_pair):
+    """Damaged private records must never leak raw implementation failures."""
+
+    def reject(cache_chain, _temp_chain, selected_chain):
+        corrupted_cache = preflight._PinnedDirectoryChain(
+            cache_chain._fds, cache_chain._parts, None
+        )
+        corrupted_selected = preflight._PinnedDirectoryChain(
+            None, selected_chain._parts, selected_chain._initial
+        )
+        for cache, selected in (
+            (corrupted_cache, selected_chain),
+            (cache_chain, corrupted_selected),
+        ):
+            with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$"):
+                preflight._observe_marker_staging(cache, selected, "stale-target")
+
+    assert _observe(preflight, staging_pair, hook=reject).marker_target == FIXED_SHA

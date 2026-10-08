@@ -852,21 +852,21 @@ def _observe_marker_staging(
     accepted. This is a private disposable composition seam, not live UID-502
     preflight evidence and it does not authorize any recovery action.
     """
-    incident = _select_incident(selector)
-    if (
-        type(cache_chain) is not _PinnedDirectoryChain
-        or cache_chain._parts != _CACHE_PARTS
-        or len(cache_chain.metadata) != len(_CACHE_PARTS)
-        or type(selected_chain) is not _PinnedDirectoryChain
-        or selected_chain._parts != (incident.basename,)
-        or len(selected_chain.metadata) != 1
-        or len(selected_chain._fds) != 2
-    ):
-        raise PreflightError()
-    last = cache_chain.metadata[-1]
-    if last.uid != _CACHE_ACCOUNT_UID or last.mode != 0o700:
-        raise PreflightError()
     try:
+        incident = _select_incident(selector)
+        if (
+            type(cache_chain) is not _PinnedDirectoryChain
+            or cache_chain._parts != _CACHE_PARTS
+            or len(cache_chain.metadata) != len(_CACHE_PARTS)
+            or type(selected_chain) is not _PinnedDirectoryChain
+            or selected_chain._parts != (incident.basename,)
+            or len(selected_chain.metadata) != 1
+            or len(selected_chain._fds) != 2
+        ):
+            raise PreflightError()
+        last = cache_chain.metadata[-1]
+        if last.uid != _CACHE_ACCOUNT_UID or last.mode != 0o700:
+            raise PreflightError()
         cache_chain.revalidate()
         selected_chain.revalidate()
         marker = _read_marker(cache_chain._fds[-1], uid=_CACHE_ACCOUNT_UID)
