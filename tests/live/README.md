@@ -672,7 +672,7 @@ inspection is claimed. Current PR remains dormant and read-only.
 ### Slice A temp ancestry component after merged PR #154
 
 The private temp-chain seam pins only
-private/var/folders/<shard>/<token>/T relative to a borrowed root FD.
+`private/var/folders/<shard>/<token>/T` relative to a borrowed root FD.
 It accepts two exact, bounded lexical components, never a full input path:
 the shard is two lowercase ASCII alphanumeric characters; the token uses
 lowercase ASCII alphanumeric/underscore characters, with the existing
@@ -701,7 +701,7 @@ diagnostic fixture passes with zero native skips. This is no-new-failure Mac
 evidence, not full Mac GREEN or new fixed-diagnostic composition proof.
 Exact-head self-hosted Linux full CI and independent review remain required.
 
-The seam does not derive or authenticate the OS temp path, prove literal /
+The seam does not derive or authenticate the OS temp path, prove literal `/`
 or the actual UID-502 runtime, select/open a staging root, read incident
 content, return full detached preflight evidence, or activate a workflow or
 receipt. Slice B must derive these components internally from its actual
