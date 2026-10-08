@@ -900,3 +900,58 @@ cancellation during the literal owner signal-zero probe becomes a sanitized
 fixed error without asserting an unsettled diagnostic child (because the
 successful fixed capture already returned). No generic `BaseException`
 catch, caller-controlled PID or new cleanup authorization is added.
+
+
+### Next dormant Slice B prerequisite: fixed getconf-to-temp-parent adapter
+
+The private no-argument `_observe_fixed_temp_parent()` adapter first requires
+the existing fixed UID-502 identity, single-reaper Darwin runtime and full
+reviewed authority-file byte/size/SHA-256 checks **before** invoking the
+literal `capture_getconf()`. The reviewed capture implementation independently
+rechecks its authority and exclusively owns the bounded `/usr/bin/getconf
+DARWIN_USER_TEMP_DIR` child lifecycle. No environment/TMPDIR/HOME fallback,
+arbitrary command, checkout selector or caller path is accepted.
+
+Only a valid exact `DiagnosticCapture(kind="getconf", stdout=bytes,
+child_pid=int)` with a strictly bounded positive PID is treated as a settled
+capture. Other non-contract returns and interruptions fail with the fixed
+public `PreflightError(cleanup_uncertain=True)`; a trusted
+`DiagnosticError` propagates its strictly typed uncertainty boolean, with
+missing or throwing internal status conservatively treated as `True`.
+The existing pure bounded `_parse_temp_parent` rejects malformed native
+bytes and permits only a single canonical `/private/var/folders/.../T/`
+mapping. The returned frozen `TempParent` contains no raw capture, child PID,
+file descriptor or receipt.
+
+This is **not** full native preflight: no directory is opened, no incident
+marker/staging files are read, no process snapshot is triggered here, and no
+workflow/receipt/cleanup authority is granted. Later independently reviewed
+composition must keep root/cache/temp/staging handles pinned through both
+fresh process snapshots, inventory, final content and edge revalidation.
+Existing automatic Level-3 stale-provider fail-closed behavior is unchanged.
+Disposable RED/GREEN tests cover authority-before-capture sequencing, strict
+capture shapes and PID, malformed temp bytes, child cleanup uncertainty and
+cancellation. No real UID-502 dedicated host execution is claimed.
+
+
+### PR #161 adversarial review remediation — capture bound and authority-owned closes
+
+The independent [#6068433034](https://github.com/zhangyuz/ssh-over-mcp/pull/161#issuecomment-6068433034)
+review identified two Important fail-closed gaps. The fixed getconf adapter now
+checks the reviewed `GETCONF_STREAM_BYTES` limit **inside the capture-return
+contract**, before parsing: an oversized (>1024 byte) non-contract result
+yields `PreflightError(cleanup_uncertain=True)`, while bounded malformed
+native bytes remain a settled capture with `False`.
+
+The reviewed three-document trusted-checkout verifier now tracks every
+owned FD close (including transient namespace revalidation handles) with a
+single-use callback. Any ambiguous close sets a sticky uncertainty bit;
+later success, mismatch, or cleanup does not downgrade it. A deterministic
+authority mismatch with settled closes still reports `False`. The new
+pre-capture adapter propagates the verifier's strict `DiagnosticError`
+uncertainty before any getconf invocation. Adversarial tests use disposable
+authority documents, real close-followed-by-OSError injection for owned
+regular-file/ancestor descriptors, concurrent authority mismatch and close
+failure, and a settled-close mismatch control. A descriptor number may be
+reused by a new open and is not, by itself, evidence of a close retry. No
+incident files, provider marker or UID-502 runner state are modified.
