@@ -735,7 +735,7 @@ _TEMP_ALNUM = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 @contextmanager
 def _pin_fixed_temp_chain(
-    root_fd: int, components: tuple[str, str]
+    root_fd: int, components: tuple[str, str], *, post_close_validate: bool = False
 ) -> Iterator[_PinnedDirectoryChain]:
     """Private component seam, not OS derivation or a production entrypoint.
 
@@ -763,7 +763,13 @@ def _pin_fixed_temp_chain(
         (_TEMP_ACCOUNT_UID, (0o700, 0o755)),
         (_TEMP_ACCOUNT_UID, (0o700,)),
     )
-    with _pin_safe_directory_chain(root_fd, parts, rules, system_uid=_TEMP_SYSTEM_UID) as chain:
+    with _pin_safe_directory_chain(
+        root_fd,
+        parts,
+        rules,
+        system_uid=_TEMP_SYSTEM_UID,
+        post_close_validate=post_close_validate,
+    ) as chain:
         yield chain
 
 
@@ -1291,7 +1297,6 @@ def _pin_observed_native_temp_chain() -> Iterator[_PinnedDirectoryChain]:
         root_initial = _metadata(os.fstat(root_fd))
         if root_initial != _stat_fixed_native_root():
             raise PreflightError()
-        parts = ("private", "var", "folders", shard, token, "T")
         with _pin_fixed_temp_chain(root_fd, (shard, token)) as chain:
             if chain._initial[0] != root_initial:
                 raise PreflightError()
@@ -1306,19 +1311,23 @@ def _pin_observed_native_temp_chain() -> Iterator[_PinnedDirectoryChain]:
         # fixed component-wise, no-follow ancestry and compare every immutable
         # metadata snapshot AFTER those closes. The nested context owns and
         # safely closes all its own descriptors, propagating close uncertainty.
-        with _pin_fixed_temp_chain(root_fd, (shard, token)) as fresh:
+        with _pin_fixed_temp_chain(root_fd, (shard, token), post_close_validate=True) as fresh:
             if fresh._initial != baseline:
                 raise PreflightError()
             fresh.revalidate()
 
-        # A successful close of a fresh-check FD can itself coincide with an
-        # edge replacement. The final stat-only pass runs *after* all
-        # descendant descriptors are closed, using the still-held literal /
-        # FD and never adding another descriptor/cleanup window. No-follow
-        # each prefix, comparing device, inode, type, UID, GID, and mode.
-        for index in range(1, len(baseline)):
-            edge = "/".join(parts[:index])
-            if _metadata(os.stat(edge, dir_fd=root_fd, follow_symlinks=False)) != baseline[index]:
+        # The second pass checks each literal single-component edge against
+        # its held parent after the child closes. A later ancestor close may
+        # still change an already-checked descendant. Supplement that
+        # authoritative no-follow traversal with a *reject-only* reverse
+        # metadata drift pass after all descendant closes. Joined stat paths
+        # are NEVER used as proof of intermediate no-follow provenance.
+        # Reverse order prevents a later shallow prefix from silently
+        # authorizing a previously unchecked deeper edge.
+        fixed_parts = ("private", "var", "folders", shard, token, "T")
+        for index in range(len(baseline) - 1, 0, -1):
+            prefix = "/".join(fixed_parts[:index])
+            if _metadata(os.stat(prefix, dir_fd=root_fd, follow_symlinks=False)) != baseline[index]:
                 raise PreflightError()
         if (
             _metadata(os.fstat(root_fd)) != root_initial

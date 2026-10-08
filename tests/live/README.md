@@ -1150,3 +1150,37 @@ the duplicated and literal root, was attempted exactly once and closed.
 A separate root-close `MemoryError` test verifies the exact status and no
 secret exception text. The component remains dormant with no host incident
 inspection or provider-state mutation.
+
+
+### Dormant native temp final no-follow revalidation
+
+The private fixed `_pin_observed_native_temp_chain()` used to rely on
+`os.stat("private/var/.../T", dir_fd=root, follow_symlinks=False)`
+after second-pass cleanup. POSIX/Darwin follows intermediate symlinks for
+such *joined* paths, so that is not a final no-follow ancestry guarantee.
+The helper now uses the reviewed shared `post_close_validate=True` mode
+of `_pin_safe_directory_chain` only for the **second** getconf-derived
+`private/var/folders/<shard>/<token>/T` pin. That pass compares
+the entire immutable original six-edge ancestry and uses the parent's
+still-held descriptor to inspect each *single* fixed edge with
+`follow_symlinks=False` directly after closing that child. A further
+**reverse-order joined-prefix stat** is performed only as a conservative
+*reject-only* drift detector **after all descendant closes**, specifically
+to catch T/descendant swaps during later ancestor closes. It is **never**
+treated as proof of intermediate no-follow provenance; permanent
+namespace stability is not asserted without external process quiescence.
+Every close is attempted once even after cancellation/metadata refusal;
+literal root identity/cleanup and the first-pass entrypoint are unchanged.
+
+Disposable RED→GREEN coverage rejects the original ascending joined
+prefixes as sole final validation, requires the reverse stat pass to run
+only after the final descendant closes, detects a `folders` symlink
+inserted between a single-edge stat and no-follow open, and rejects T
+replacement during either second-pass leaf or parent closure (settled
+and ambiguous cases). It also verifies strict `cleanup_uncertain=True`
+for ambiguous closes and a normal successful observation.
+
+No arbitrary path/UID/PID is accepted, and no real UID-502 temp,
+cache marker, staging, provider state, workflow, receipt, cleanup or
+recovery authority is exercised. This fixes one ancestry-observation
+boundary only; complete native preflight and Level-3 remain unproven.
