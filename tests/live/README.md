@@ -955,3 +955,59 @@ regular-file/ancestor descriptors, concurrent authority mismatch and close
 failure, and a settled-close mismatch control. A descriptor number may be
 reused by a new open and is not, by itself, evidence of a close retry. No
 incident files, provider marker or UID-502 runner state are modified.
+
+
+### Dormant fixed native temp-chain binding (Slice B, intermediate)
+
+The private zero-argument `_pin_observed_native_temp_chain()` context
+receives only the already-reviewed successful fixed native getconf
+`TempParent`, validates the exact immutable native/canonical path pair,
+then opens **only literal /** with `O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC`.
+It checks the held root against a fresh literal `/` metadata observation,
+and uses the existing `_pin_fixed_temp_chain` policy to open each fixed
+Darwin `private/var/folders/<shard>/<token>/T` component descriptor-relative.
+The returned pinned chain is private and valid **only inside the context**;
+the root and every owned descriptor are closed on every success/failure path.
+The complete pinned chain and literal-root identity are checked again before
+normal context exit; a late namespace swap rejects the observation. Ambiguous
+root close is a fixed `PreflightError(cleanup_uncertain=True)`.
+
+No caller can supply a path, root descriptor, PID, UID or raw getconf output.
+Fixture-only substitutions for getconf/root metadata use disposable local
+directories and cannot establish UID-502 actual host provenance; live root
+access is **not invoked by any workflow or CLI**. No staging root, marker,
+payload, unknown incident root, child process snapshot, inventory, receipt or
+provider state is accessed by this seam. Later composition must keep this
+context alive across both fixed `ps` observations and selected staging
+inventory before accepting detached evidence. No A1/N1c/Level-3 credit.
+
+
+### PR #162 important follow-up: post-close namespace observation
+
+Review #6069210460 found an accepted namespace swap *during* the successful
+close of an initially pinned T or ancestor FD. The original end-of-context
+revalidation was inside the descendant-owning nested context, so it could
+not notice a subsequent successful close with a path replacement.
+Deterministic disposable-tree probes reproduced **two RED cases**.
+
+After the initial descendant context has finished its owned FD cleanup, this
+private helper now performs a **fresh descriptor-relative component-by-
+component no-follow pin** of the same getconf-derived literal ancestry,
+compares all six recorded device/inode/type/UID/GID/mode snapshots to the
+originals, revalidates all new edges, and lets the second nested context
+close its exclusively owned FDs with the already-reviewed uncertainty policy.
+A final *stat-only* observation compares every fixed-prefix live edge
+against the original snapshots using the still-held literal-root FD; it
+happens **after both descendant descriptor sets are closed**, adding no new
+descendant close window. A final held-root and literal-root metadata check
+also occurs before that remaining root FD is closed.
+
+Adversarial tests now force a successful close-plus-name-swap for the first
+T FD, first folders-ancestor FD, then separately the second pass's T FD.
+These must all refuse. If the same owned close raises after actually
+closing its FD, that failure remains `cleanup_uncertain=True` even when the
+live path has been replaced. No retried ambiguous close, incident-root access,
+new process operation, receipt, workflow or new cleanup authority is added.
+These are bounded point-in-time checks against concurrent mutation, **not**
+proof of permanent namespace immutability; complete preflight still needs
+an independently reviewed final gate with process quiescence.

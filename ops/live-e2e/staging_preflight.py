@@ -1163,3 +1163,137 @@ def _observe_fixed_temp_parent():
         GeneratorExit,
     ):
         raise PreflightError() from None
+
+
+def _open_fixed_native_root() -> int:
+    """Open only literal /; caller never supplies a root path or descriptor."""
+    return os.open("/", _DIR_FLAGS)
+
+
+def _stat_fixed_native_root() -> DirectoryMetadata:
+    """Re-observe literal root; no caller-selected pathname."""
+    return _metadata(os.stat("/", follow_symlinks=False))
+
+
+@contextmanager
+def _pin_observed_native_temp_chain() -> Iterator[_PinnedDirectoryChain]:
+    """Pin getconf-derived native T ancestry, with no incident-state access.
+
+    Private dormant composition seam only. The yielded chain is valid solely
+    inside this context. This is not a complete incident preflight or evidence
+    receipt; it neither opens selected staging nor grants caller path authority.
+    """
+    try:
+        native = _observe_fixed_temp_parent()
+        process = _fixed_process_metadata_module()
+        if type(native) is not process.TempParent:
+            raise PreflightError()
+        source = native.native_path
+        canonical = native.canonical_path
+        if (
+            type(source) is not str
+            or type(canonical) is not str
+            or not source.startswith("/var/folders/")
+            or canonical != "/private" + source
+        ):
+            raise PreflightError()
+        pieces = source.split("/")
+        if len(pieces) != 7 or pieces[:3] != ["", "var", "folders"] or pieces[5:] != ["T", ""]:
+            raise PreflightError()
+        shard, token = pieces[3], pieces[4]
+        if (
+            len(shard) != 2
+            or any(c not in _TEMP_ALNUM for c in shard)
+            or not 1 <= len(token) <= 255
+            or any(c not in _TEMP_ALNUM + "_" for c in token)
+        ):
+            raise PreflightError()
+    except PreflightError:
+        raise
+    except (
+        OSError,
+        RuntimeError,
+        TypeError,
+        AttributeError,
+        ValueError,
+        IndexError,
+        OverflowError,
+        MemoryError,
+        KeyboardInterrupt,
+        SystemExit,
+        GeneratorExit,
+    ):
+        raise PreflightError() from None
+
+    root_fd = None
+    try:
+        root_fd = _open_fixed_native_root()
+        if type(root_fd) is not int or root_fd < 0:
+            raise PreflightError(cleanup_uncertain=True)
+        root_initial = _metadata(os.fstat(root_fd))
+        if root_initial != _stat_fixed_native_root():
+            raise PreflightError()
+        parts = ("private", "var", "folders", shard, token, "T")
+        with _pin_fixed_temp_chain(root_fd, (shard, token)) as chain:
+            if chain._initial[0] != root_initial:
+                raise PreflightError()
+            baseline = chain._initial
+            yield chain
+            chain.revalidate()
+            if _stat_fixed_native_root() != root_initial:
+                raise PreflightError()
+
+        # The previous revalidation happened before the owned descendant FDs
+        # were closed. Never accept it as final evidence: re-open only the
+        # fixed component-wise, no-follow ancestry and compare every immutable
+        # metadata snapshot AFTER those closes. The nested context owns and
+        # safely closes all its own descriptors, propagating close uncertainty.
+        with _pin_fixed_temp_chain(root_fd, (shard, token)) as fresh:
+            if fresh._initial != baseline:
+                raise PreflightError()
+            fresh.revalidate()
+
+        # A successful close of a fresh-check FD can itself coincide with an
+        # edge replacement. The final stat-only pass runs *after* all
+        # descendant descriptors are closed, using the still-held literal /
+        # FD and never adding another descriptor/cleanup window. No-follow
+        # each prefix, comparing device, inode, type, UID, GID, and mode.
+        for index in range(1, len(baseline)):
+            edge = "/".join(parts[:index])
+            if _metadata(os.stat(edge, dir_fd=root_fd, follow_symlinks=False)) != baseline[index]:
+                raise PreflightError()
+        if (
+            _metadata(os.fstat(root_fd)) != root_initial
+            or _stat_fixed_native_root() != root_initial
+        ):
+            raise PreflightError()
+    except PreflightError:
+        raise
+    except (
+        OSError,
+        RuntimeError,
+        TypeError,
+        AttributeError,
+        ValueError,
+        IndexError,
+        OverflowError,
+        MemoryError,
+        KeyboardInterrupt,
+        SystemExit,
+        GeneratorExit,
+    ):
+        raise PreflightError() from None
+    finally:
+        if type(root_fd) is int and root_fd >= 0:
+            try:
+                os.close(root_fd)
+            except (
+                OSError,
+                RuntimeError,
+                TypeError,
+                OverflowError,
+                KeyboardInterrupt,
+                SystemExit,
+                GeneratorExit,
+            ):
+                raise PreflightError(cleanup_uncertain=True) from None
