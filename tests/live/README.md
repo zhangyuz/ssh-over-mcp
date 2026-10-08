@@ -1092,11 +1092,14 @@ UID, root FD, selector, marker content or process/capture input.
 The original root/descendant metadata is retained and revalidated on exit.
 After the first descendant close boundary, the exact same fixed no-follow
 chain is reopened and compared against the original metadata, then all fresh
-descendant handles close. A final **stat-only** fixed-prefix observation
-after the second descendant close, anchored to the still-held literal root
-FD, verifies each original device/inode/type/owner/mode, plus the held root
-and literal-root identity, before root closure. An ambiguous owned close
-is never retried and yields fixed `PreflightError(cleanup_uncertain=True)`.
+descendant handles close. During the **second descendant cleanup**, each child close is followed
+by a single-component, no-follow edge stat relative to its still-held
+parent FD; no slash-containing stat path can act as proof of intermediate
+symlink safety. The held root FD and literal-root identity are then
+rechecked before root closure. Each owned FD receives exactly one close
+attempt even if a prior close returns a cancellation or an uncertain result.
+An ambiguous owned close is never retried and yields fixed
+`PreflightError(cleanup_uncertain=True)`.
 No permanent namespace stability or live UID-502 runner proof is claimed.
 
 Disposable tests cover each unsafe ancestor mode, name replacement while
@@ -1107,3 +1110,28 @@ reads provider state, activates any workflow, emits receipts or changes
 provider/staging state. Complete preflight still requires separate marker/
 native-temp/selected staging and double-ps provenance composition, exact
 final content binding and independent review before any trusted activation.
+
+
+### PR #164 adversarial review #6070461198 fixes
+
+The final joined-prefix `os.stat("Users/.../Library/Caches",
+follow_symlinks=False)` did **not** prohibit traversal through symlinks
+in intermediate components. A disposable Library→Library-former symlink
+race reproduced false success RED. The final check now relies only on
+pinned component-by-component `O_NOFOLLOW|O_DIRECTORY` traversal and,
+while a parent descriptor remains held, a **single-component** no-follow
+`os.stat(name, dir_fd=parent_fd)` immediately following each descendant
+close. No joined-prefix stat is used as a security guarantee. A disposable
+symlink replacement between stat and second-pass open is rejected.
+
+The common `_pin_directory_chain` FD owner now continues closing the
+remaining descriptors after a known cancellation or ambiguous close,
+rather than leaking them and reporting settled cleanup. Known interrupted
+close outcomes (`KeyboardInterrupt`, `SystemExit`, `GeneratorExit`,
+`MemoryError`) set a sticky uncertainty bit; every FD is attempted once,
+without unsafe retry, and the caller receives a fixed
+`PreflightError(cleanup_uncertain=True)`. RED→GREEN tests cover
+`KeyboardInterrupt`/`MemoryError`, with and without a second close
+exception, and verify owned-descriptor closure. No broad exception masking
+of programming assertions is introduced, and tests touch no actual runner
+cache or incident files.

@@ -181,6 +181,8 @@ def _pin_directory_chain(
     start_fd: int,
     parts: tuple[str, ...],
     rules: tuple[tuple[int, tuple[int, ...] | None], ...],
+    *,
+    post_close_validate: bool = False,
 ) -> Iterator[_PinnedDirectoryChain]:
     """Private, read-only fixture seam; never accepts user-selected incident paths.
 
@@ -215,13 +217,59 @@ def _pin_directory_chain(
         yield pinned
     finally:
         cleanup_uncertain = False
-        for fd in reversed(owned):
+        edge_invalid = False
+        # Every owned FD receives one close attempt, even when another
+        # close is ambiguous or interrupted. Never retry a possibly closed FD.
+        for index in range(len(owned) - 1, -1, -1):
+            fd = owned[index]
             try:
                 os.close(fd)
-            except (OSError, ValueError, TypeError, OverflowError):
+            except (
+                OSError,
+                ValueError,
+                TypeError,
+                OverflowError,
+                MemoryError,
+                KeyboardInterrupt,
+                SystemExit,
+                GeneratorExit,
+            ):
                 cleanup_uncertain = True
+            if post_close_validate and index > 0:
+                if index >= len(snapshots):
+                    # A post-open metadata failure may leave an owned FD but
+                    # no completed snapshot; never abort the remaining closes.
+                    edge_invalid = True
+                    continue
+                # A no-follow SINGLE edge check after each child close,
+                # anchored to its still-held parent (never a slash path).
+                try:
+                    if (
+                        _metadata(
+                            os.stat(
+                                parts[index - 1],
+                                dir_fd=owned[index - 1],
+                                follow_symlinks=False,
+                            )
+                        )
+                        != snapshots[index]
+                    ):
+                        edge_invalid = True
+                except (
+                    OSError,
+                    ValueError,
+                    TypeError,
+                    OverflowError,
+                    MemoryError,
+                    KeyboardInterrupt,
+                    SystemExit,
+                    GeneratorExit,
+                ):
+                    edge_invalid = True
         if cleanup_uncertain:
             raise PreflightError(cleanup_uncertain=True) from None
+        if edge_invalid:
+            raise PreflightError() from None
 
 
 # These readers are private composition primitives. No caller-selected file path,
@@ -616,6 +664,7 @@ def _pin_safe_directory_chain(
     *,
     system_uid: int,
     root_mode: int | None = None,
+    post_close_validate: bool = False,
 ) -> Iterator[_PinnedDirectoryChain]:
     """Private shared safe-baseline check for the fixed namespace wrappers."""
     if type(root_fd) is not int or root_fd < 0:
@@ -631,7 +680,9 @@ def _pin_safe_directory_chain(
     except (OSError, ValueError, TypeError, OverflowError, MemoryError):
         raise PreflightError() from None
 
-    with _pin_directory_chain(root_fd, parts, rules) as chain:
+    with _pin_directory_chain(
+        root_fd, parts, rules, post_close_validate=post_close_validate
+    ) as chain:
         # The caller's preliminary borrowed-FD check cannot authorize the
         # newly duplicated root: its metadata may change between fstat/dup.
         # Bind both the duplicated FD and its immutable baseline to the
@@ -654,7 +705,9 @@ def _pin_safe_directory_chain(
 
 
 @contextmanager
-def _pin_fixed_cache_chain(root_fd: int) -> Iterator[_PinnedDirectoryChain]:
+def _pin_fixed_cache_chain(
+    root_fd: int, *, post_close_validate: bool = False
+) -> Iterator[_PinnedDirectoryChain]:
     """Dormant fixed-name cache ancestry; borrowed FD does not prove literal /."""
     # None permits safe permission modes; the cache leaf requires exact 0700.
     rules = (
@@ -665,7 +718,11 @@ def _pin_fixed_cache_chain(root_fd: int) -> Iterator[_PinnedDirectoryChain]:
         (_CACHE_ACCOUNT_UID, (0o700,)),
     )
     with _pin_safe_directory_chain(
-        root_fd, _CACHE_PARTS, rules, system_uid=_CACHE_SYSTEM_UID
+        root_fd,
+        _CACHE_PARTS,
+        rules,
+        system_uid=_CACHE_SYSTEM_UID,
+        post_close_validate=post_close_validate,
     ) as chain:
         yield chain
 
@@ -1436,18 +1493,14 @@ def _pin_observed_fixed_cache_chain() -> Iterator[_PinnedDirectoryChain]:
         # Closing a descendant after its last revalidation can be the point
         # of a namespace swap. A second fixed no-follow chain compares every
         # original edge AFTER the first descendant cleanup has completed.
-        with _pin_fixed_cache_chain(root_fd) as fresh:
+        with _pin_fixed_cache_chain(root_fd, post_close_validate=True) as fresh:
             if fresh._initial != baseline:
                 raise PreflightError()
             fresh.revalidate()
 
-        # Following the second descendant cleanup, stat only the fixed live
-        # prefixes from the still-held literal / FD. No new descriptor opens,
-        # regular-file reads, or additional descendant-close race are added.
-        for index in range(1, len(baseline)):
-            prefix = "/".join(_CACHE_PARTS[:index])
-            if _metadata(os.stat(prefix, dir_fd=root_fd, follow_symlinks=False)) != baseline[index]:
-                raise PreflightError()
+        # Every descendant close was followed by a single-component,
+        # no-follow name check relative to its still-held original parent.
+        # A multi-component stat cannot prove this invariant.
         if (
             _metadata(os.fstat(root_fd)) != root_initial
             or _stat_fixed_native_root() != root_initial

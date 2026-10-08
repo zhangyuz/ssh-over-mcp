@@ -225,3 +225,130 @@ def test_owned_literal_root_closes_on_success_and_preserves_uncertain(fixture, m
             pass
     assert err.value.cleanup_uncertain is True
     assert err.value.__cause__ is None
+
+
+def test_final_never_relies_on_multicomponent_stat_as_nofollow(fixture, monkeypatch):
+    """Review RED: the old final pass observed joined paths after a close."""
+    p, _, _, _ = fixture
+    actual_stat = os.stat
+    checked = []
+
+    def forbid_joined_prefix(path, *args, **kwargs):
+        if kwargs.get("dir_fd") is not None and "/" in str(path):
+            pytest.fail("multi-component stat follows intermediate symlinks")
+        if kwargs.get("dir_fd") is not None:
+            checked.append(path)
+        return actual_stat(path, *args, **kwargs)
+
+    with monkeypatch.context() as m:
+        m.setattr(p.os, "stat", forbid_joined_prefix)
+        with p._pin_observed_fixed_cache_chain() as chain:
+            chain.revalidate()
+    assert "Library" in checked
+
+
+def test_last_no_follow_traversal_rejects_intermediate_symlink_swap(fixture, monkeypatch):
+    """Swap Library after a single-edge stat and before O_NOFOLLOW open."""
+    p, root, _, _ = fixture
+    actual_stat, actual_open = os.stat, os.open
+    leaf_opens = []
+    swapped = []
+
+    def open_trace(path, flags, *args, **kwargs):
+        fd = actual_open(path, flags, *args, **kwargs)
+        if path == p._CACHE_PARTS[-1]:
+            leaf_opens.append(fd)
+        return fd
+
+    def stat_and_swap(path, *args, **kwargs):
+        result = actual_stat(path, *args, **kwargs)
+        if (
+            path == "Library"
+            and kwargs.get("dir_fd") is not None
+            and len(leaf_opens) == 1
+            and not swapped
+        ):
+            library = root.joinpath(*p._CACHE_PARTS[:3])
+            library.rename(library.with_name("Library-former"))
+            library.symlink_to("Library-former", target_is_directory=True)
+            swapped.append(True)
+        return result
+
+    with monkeypatch.context() as m:
+        m.setattr(p.os, "open", open_trace)
+        m.setattr(p.os, "stat", stat_and_swap)
+        with (
+            pytest.raises(p.PreflightError, match="^staging preflight rejected$"),
+            p._pin_observed_fixed_cache_chain(),
+        ):
+            pass
+    assert swapped == [True]
+    assert root.joinpath(*p._CACHE_PARTS[:3]).is_symlink()
+
+
+@pytest.mark.parametrize("cancel", [KeyboardInterrupt, MemoryError])
+@pytest.mark.parametrize("prior_failure", [False, True])
+def test_owned_descendant_close_cancellation_attempts_all_fds(
+    fixture, monkeypatch, cancel, prior_failure
+):
+    """A close-after-success cancellation must not leak or downgrade uncertainty."""
+    p, _root, _, events = fixture
+    actual_open, actual_dup, actual_close = os.open, os.dup, os.close
+    opened = []
+    duped = []
+    attempted = []
+    once = []
+    failed_second = []
+
+    def trace_open(path, flags, *args, **kwargs):
+        fd = actual_open(path, flags, *args, **kwargs)
+        if path in p._CACHE_PARTS:
+            opened.append((path, fd))
+        return fd
+
+    def trace_dup(fd):
+        fresh = actual_dup(fd)
+        duped.append(fresh)
+        return fresh
+
+    def close_cancel(fd):
+        attempted.append(fd)
+        actual_close(fd)
+        if opened and fd == opened[-1][1] and not once:
+            once.append(True)
+            raise cancel("private cancellation")
+        if once and prior_failure and not failed_second:
+            failed_second.append(True)
+            raise OSError("private second close error")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(p.os, "open", trace_open)
+        patch.setattr(p.os, "dup", trace_dup)
+        patch.setattr(p.os, "close", close_cancel)
+        try:
+            with (
+                pytest.raises(p.PreflightError, match="^staging preflight rejected$") as err,
+                p._pin_observed_fixed_cache_chain(),
+            ):
+                pass
+        finally:
+            # Guarantee the disposable test cannot leak FDs even in the RED run.
+            with monkeypatch.context() as restored:
+                restored.setattr(p.os, "close", actual_close)
+                for fd in {fd for _, fd in opened}.union(duped):
+                    try:
+                        os.fstat(fd)
+                    except OSError:
+                        continue
+                    else:
+                        actual_close(fd)
+    assert once == [True]
+    assert bool(failed_second) is prior_failure
+    assert err.value.cleanup_uncertain is True
+    assert err.value.__cause__ is None
+    assert "private" not in str(err.value)
+    for _, fd in opened:
+        assert attempted.count(fd) == 1
+    for fd in duped:
+        assert attempted.count(fd) == 1
+    assert events.count("open-root") == 1
