@@ -563,3 +563,72 @@ Native fixed UID-502 ps format/PID evidence, actual cancelled-parent diagnostics
 both snapshot identities, inventory/late namespace revalidation and trusted
 workflow/receipt integration remain mandatory before activation. Provider and
 staging state, unknown `recover.cc8Del`, A1 and N1c remain pending their own gates.
+
+
+## Dormant native preflight, Slice A — initial namespace primitive
+
+Written implementation plan in
+`docs/superpowers/plans/2026-10-07-dormant-native-preflight-composition.md`
+was merged on main in PR #152 at `562cb3886fbe87e56c53e2dc033acd36c02d2a5c`
+and separately approved by the user. The first A2/A3 micro-increment
+introduces `ops/live-e2e/staging_preflight.py` and disposable-only
+`tests/ops/test_live_e2e_staging_preflight.py`.
+
+This first PR increment contains the two immutable, exact incident catalog
+bindings and private, fixture-only read-only components:
+- descriptor-relative `O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC` chain pinning,
+  pre-open/held-FD identity checks and final parent-to-child edge revalidation;
+- fixed leaf-name `active-run.json` strict 4096-byte flat ASCII JSON validation,
+  duplicate-key and wrong-type rejection, initial/final raw-byte and metadata
+  equality with no-follow nonblocking opens;
+- fixed leaf-name `payload-content/expected_commit` exactly 41-byte
+  SHA-plus-LF read, hardlink/symlink/special-file refusal, safe owner/mode/
+  device/mtime/ctime observation and final reread through held payload FD;
+- the existing `staging_inventory.collect_staging_inventory` invoked with a
+  borrowed pinned-root descriptor and compared to root/expected-commit
+  observations, with imported collector path pinned to its sibling module;
+- sanitized `PreflightError` with strict internal `cleanup_uncertain: bool`,
+  reporting ambiguous helper FD cleanup without exposing lower-level paths.
+
+Disposable RED/GREEN tests cover catalog exclusion, malformed directory
+components, symlink and replacement races, final namespace edge changes,
+borrowed/owned descriptor lifecycle, strict marker parser including duplicate
+keys/nested structures/bools/floats and 4096-byte bound, expected-commit
+same-content inode replacement and same-inode rewrite, unsafe modes/hardlinks,
+inventoried leaf mismatch, actual full-layout collector binding, and
+foreign collector import refusal. Fixed normative ADR/spec files remain the
+reviewed bytes. No incident filesystem content is read by these tests.
+
+**This is still not a completed Slice A preflight and not UID-502 proof.**
+The flexible component/path/policy values are **private disposable fixture
+seams only**, never a production operator/API authority. A later micro-slice
+must construct the fixed cache and OS-derived temp parent chains from actual
+trusted UID-502 context, bind and check both against the exact incident root,
+coordinate marker/inventory/expected-commit observations into one detached
+success object, and perform post-inventory edge/marker checks. That work,
+A7 final gating, and Slice B's fixed getconf/ps composition remain pending.
+There is no production success entrypoint, host capture, process signal,
+workflow, receipt, marker clear, staging deletion, target execution, or
+Level-3/A1/N1c closure. Unknown `recover.cc8Del` remains excluded.
+
+
+### PR #153 adversarial review remediation
+
+Independent review at exact head `c90bdc3f5e29e7655c916c3b63553d1df5bce121`
+([review #6059100957](https://github.com/zhangyuz/ssh-over-mcp/pull/153#issuecomment-6059100957))
+found two Important and one Minor issue, reproduced with seven disposable RED
+fault-injection tests. The fixes make `expected_commit` revalidation reread
+through the held payload descriptor, then check the live leaf name/metadata
+with no-follow stat, then validate the held root-to-payload chain **after**
+that read. A replaced live path or leaf during the final reread refuses.
+Existing sanitized `PreflightError` is passed through the collector boundary
+unchanged so `cleanup_uncertain=True` survives; directory-policy/metadata
+allocation and trusted-sibling loader syntax failures yield the fixed public
+error without exposing lower-level details. These are observation checks, not
+atomic filesystem snapshots.
+
+Local developer Mac Python 3.13 focused/related regression after repair:
+**651 PASS**, including all new adversarial tests; Ruff/format checks PASS.
+Exact-new-head self-hosted Python 3.13/3.14 CI and fresh independent review
+remain required. This repair adds no process/capture authority, CLI, UID-502
+activation, receipt, marker clearing, staging mutation, or Level-3/A1 closure.
