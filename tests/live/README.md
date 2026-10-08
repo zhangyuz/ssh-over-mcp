@@ -1047,3 +1047,32 @@ or Level-3/A1/N1c completion is introduced. Disposable RED/GREEN fixtures
 assert process→inventory→process ordering (including identical captures),
 bounded failure propagation, selected-root edge replacement and late
 expected_commit content drift.
+
+
+### PR #163 review remediation — post-payload-close binding
+
+The adversarial [#6069838296](https://github.com/zhangyuz/ssh-over-mcp/pull/163#issuecomment-6069838296)
+review exposed a successful-close race: rewriting the literal
+`payload-content/expected_commit` or replacing its payload directory
+**during the final payload FD close** allowed the previous implementation
+to return frozen evidence. The disposable real-close fault injectors
+reproduced this with two RED cases; an ambiguous close correctly failed
+with `cleanup_uncertain=True`.
+
+After the first post-B payload context closes, the fixed helper now reopens
+**only** the literal no-follow payload/expected_commit through the pinned
+selected-root FD, compares the original payload directory device/inode/owner
+and mode plus the exact expected-commit file metadata/content, and closes
+the second pinned payload context. A final root-anchored **stat-only** check,
+after all descendant descriptors are closed, checks the fixed
+`payload-content` directory edge before/after the fixed leaf metadata
+(including mtime/ctime); it performs **no file-content reads** or added
+descriptor close. The selected catalog root edge is also revalidated.
+This defends the documented deterministic close interleavings but does not
+claim permanent namespace immutability or the full preflight's required
+single payload FD retained across both process snapshots.
+
+The disposable regression matrix covers same-inode content rewrite,
+payload directory name replacement, ambiguous owned close plus either
+drift, and a normal settled success. No staging/marker/provider state on
+the real UID-502 incident runner was touched.

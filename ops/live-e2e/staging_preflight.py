@@ -1341,9 +1341,50 @@ def _observe_paired_process_inventory(
         ) as expected:
             if expected.first.metadata != selected.expected_metadata:
                 raise PreflightError()
+            original_payload = expected._payload_chain.metadata[0]
             expected.revalidate(incident.expected_commit, uid=incident.uid)
-        # This check follows owned payload-descendant close; no cached
-        # pathname validation from before the second ps is accepted.
+        # Owned payload-close can itself change the live name after the
+        # previous read. Reopen only the same fixed no-follow payload/leaf,
+        # bind both directory and leaf identities to the earlier observation,
+        # and close the new descendant FDs before the final stat-only pass.
+        selected_chain.revalidate()
+        with _pin_expected_commit(
+            selected_chain._fds[-1],
+            incident.expected_commit,
+            uid=incident.uid,
+            device=incident.device,
+        ) as after_close:
+            if (
+                after_close._payload_chain.metadata[0] != original_payload
+                or after_close.first.metadata != selected.expected_metadata
+            ):
+                raise PreflightError()
+            after_close.revalidate(incident.expected_commit, uid=incident.uid)
+
+        # Final no-content, no-new-FD observation runs AFTER both payload
+        # contexts have closed. It checks the fixed parent edge on either
+        # side of a metadata-only leaf stat and refuses a changed parent or
+        # file even if a close induced a same-inode content rewrite.
+        # The leaf path is fixed, anchored to the held selected root and
+        # follow_symlinks=False; no new regular-file content is opened.
+        root_fd = selected_chain._fds[-1]
+        if (
+            _metadata(os.stat("payload-content", dir_fd=root_fd, follow_symlinks=False))
+            != original_payload
+        ):
+            raise PreflightError()
+        leaf = os.stat(
+            "payload-content/expected_commit",
+            dir_fd=root_fd,
+            follow_symlinks=False,
+        )
+        if _file_meta(leaf, incident.uid, None, 41, incident.device) != selected.expected_metadata:
+            raise PreflightError()
+        if (
+            _metadata(os.stat("payload-content", dir_fd=root_fd, follow_symlinks=False))
+            != original_payload
+        ):
+            raise PreflightError()
         selected_chain.revalidate()
         return selected
     except PreflightError:

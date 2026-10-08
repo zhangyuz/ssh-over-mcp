@@ -240,3 +240,71 @@ def test_validated_selected_root_rechecked_before_ps(stage, monkeypatch):
     with pytest.raises(p.PreflightError, match="^staging preflight rejected$"):
         p._observe_paired_process_inventory(chain, "stale-target")
     assert events == []
+
+
+@pytest.mark.parametrize(
+    "drift,ambiguous",
+    [
+        ("rewrite", False),
+        ("replace_payload", False),
+        ("rewrite", True),
+        ("replace_payload", True),
+    ],
+)
+def test_final_payload_close_drift_never_returns_evidence(stage, monkeypatch, drift, ambiguous):
+    """Inject a real successful close then mutate only disposable staged bytes."""
+    p, _d, root, commit, chain, events, _calls = stage
+    actual_open, actual_close = os.open, os.close
+    final_payload_fds = []
+    injected = []
+
+    def tracked_open(name, flags, *args, **kwargs):
+        fd = actual_open(name, flags, *args, **kwargs)
+        if name == "payload-content" and events.count("ps") == 2:
+            final_payload_fds.append(fd)
+        return fd
+
+    def close_and_drift(fd):
+        if fd in final_payload_fds and not injected:
+            actual_close(fd)
+            injected.append(True)
+            if drift == "rewrite":
+                commit.write_bytes(b"0" * 40 + b"\n")
+            else:
+                payload = root / "payload-content"
+                payload.rename(root / "former-payload")
+                payload.mkdir(mode=0o700)
+                new_commit = payload / "expected_commit"
+                new_commit.write_bytes((SHA + "\n").encode())
+                new_commit.chmod(0o600)
+            if ambiguous:
+                raise OSError("private ambiguous close")
+            return
+        return actual_close(fd)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(p.os, "open", tracked_open)
+        patch.setattr(p.os, "close", close_and_drift)
+        with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as err:
+            p._observe_paired_process_inventory(chain, "stale-target")
+    assert injected == [True]
+    assert err.value.cleanup_uncertain is ambiguous
+    assert err.value.__cause__ is None
+    assert "private" not in str(err.value)
+    assert events == ["ps", "owner", "inventory", "ps", "owner"]
+
+
+def test_final_payload_close_normal_settled_path_keeps_success(stage, monkeypatch):
+    p, _, _, _, chain, _, _ = stage
+    close = os.close
+    seen = []
+
+    def record(fd):
+        seen.append(fd)
+        return close(fd)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(p.os, "close", record)
+        result = p._observe_paired_process_inventory(chain, "stale-target")
+    assert type(result) is p._SelectedInventoryEvidence
+    assert seen
