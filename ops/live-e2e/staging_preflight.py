@@ -1051,3 +1051,92 @@ def _observe_fixed_process_snapshot() -> None:
         IndexError,
     ):
         raise PreflightError() from None
+
+
+def _observe_fixed_temp_parent():
+    """Get one native-derived temp parent without granting path or staging access.
+
+    The strict trusted-checkout authority check occurs *before* any diagnostic
+    capture invocation. The real fixed child implementation independently
+    repeats its UID-502/authority checks before spawn, using its reviewed
+    owned-child cleanup lifecycle. No environment or caller path is consulted.
+    """
+    try:
+        diagnostics = _fixed_diagnostics_module()
+        metadata = _fixed_process_metadata_module()
+        diagnostics._require_identity()
+        diagnostics._require_wait_context()
+        diagnostics._verify_authority()
+        try:
+            capture = diagnostics.capture_getconf()
+        except diagnostics.DiagnosticError as failure:
+            try:
+                uncertain = failure.cleanup_uncertain
+            except (
+                OSError,
+                RuntimeError,
+                ValueError,
+                TypeError,
+                AttributeError,
+                OverflowError,
+                MemoryError,
+                KeyboardInterrupt,
+                SystemExit,
+                GeneratorExit,
+            ):
+                uncertain = True
+            if type(uncertain) is not bool:
+                uncertain = True
+            raise PreflightError(cleanup_uncertain=uncertain) from None
+        except (
+            OSError,
+            RuntimeError,
+            ValueError,
+            TypeError,
+            AttributeError,
+            OverflowError,
+            MemoryError,
+            ImportError,
+            SyntaxError,
+            KeyError,
+            IndexError,
+            KeyboardInterrupt,
+            SystemExit,
+            GeneratorExit,
+        ):
+            # An attempted capture without a contract result cannot prove
+            # that an owned child and its descriptors have been settled.
+            raise PreflightError(cleanup_uncertain=True) from None
+
+        if (
+            type(capture) is not diagnostics.DiagnosticCapture
+            or capture.kind != "getconf"
+            or type(capture.stdout) is not bytes
+            or type(capture.child_pid) is not int
+            or not 1 <= capture.child_pid <= 2147483647
+        ):
+            raise PreflightError(cleanup_uncertain=True)
+
+        observed = metadata._parse_temp_parent(capture.stdout)
+        if type(observed) is not metadata.TempParent:
+            raise PreflightError()
+        return observed
+    except PreflightError:
+        raise
+    except (
+        OSError,
+        RuntimeError,
+        ValueError,
+        TypeError,
+        AttributeError,
+        OverflowError,
+        MemoryError,
+        ImportError,
+        SyntaxError,
+        KeyError,
+        IndexError,
+        KeyboardInterrupt,
+        SystemExit,
+        GeneratorExit,
+    ):
+        raise PreflightError() from None
