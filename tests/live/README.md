@@ -846,3 +846,57 @@ OS-derived temp ancestry, the complete native process snapshot sequence,
 trusted-main workflow provenance, receipt and any recovery/marker
 mutation are still deferred. It does not change the automatic stale-provider
 Level-3 refusal or grant A1/N1c/Level-3 completion credit.
+
+
+### Dormant fixed one-snapshot process guard (next isolated Slice B prerequisite)
+
+The private `_observe_fixed_process_snapshot()` adapter imports only the two
+fixed sibling components, obtains a fresh **fixed** `capture_ps()` invocation,
+checks the exact detached capture type/kind/bytes/owned child PID, and uses the
+existing bounded process-row parser and strict inspection/own-ps predicate.
+It separately rejects marker owner PID 38013 in the UID-502 rows and probes
+**only** literal `os.kill(38013, 0)` for absence: ESRCH means absent; live,
+permission-denied and ambiguous outcomes refuse. It returns no process rows,
+raw stdout, child identity, receipt or reusable authority. It never kills a
+process; the existing reviewed diagnostic helper alone owns any necessary
+cleanup of a child **it spawned**.
+
+Known fixed diagnostic errors are sanitized into `PreflightError` while
+preserving an exact `cleanup_uncertain: bool`; absent/throwing/non-boolean
+status is treated as uncertain. A separate fresh invocation is needed on each
+side of an inventory in the later complete preflight. Two calls must not
+infer freshness from unequal PID/stdout/rows: PID reuse and identical output
+are permitted. No production caller, workflow, root provenance, getconf
+composition, staged read, receipt, provider mutation or new signal authority
+is added by this helper. Local fixtures replace the capture boundary only in
+tests; they do not prove the UID-502 dedicated runner integration. Existing
+stale-provider exit 70 still blocks automatic Level-3.
+
+The fixed owner-presence operation is deliberately isolated in
+`ops/live-e2e/staging_owner_probe.py` rather than adding a signal-capable
+primitive to the previously no-host-action `staging_preflight.py` file.
+The pre-existing static prohibition is retained. Non-contract failures from
+a capture that has already begun are conservatively classified with
+`cleanup_uncertain=True`, even when the underlying exception does not expose
+a trusted boolean status.
+
+
+### PR #160 adversarial follow-up: malformed capture and cancellation
+
+The full-branch adversarial review found an Important lifecycle-certainty
+mismatch: a non-contract return from the fixed `capture_ps()` boundary
+previously produced `PreflightError.cleanup_uncertain=False`, incorrectly
+asserting settled cleanup. The adapter now reports **True** for untrusted
+capture shape/kind/byte type/PID type. Once a strictly typed fixed capture has
+returned, a later bounded process-row or fixed owner-liveness rejection
+retains the ordinary `False` cleanup status; no retry or signal is issued.
+Separate RED-to-GREEN tests cover each stage and retain the existing negative
+row/owner cases.
+
+A Minor interruption case is also handled at the precise boundaries:
+`KeyboardInterrupt`, `SystemExit` and `GeneratorExit` during an attempted
+capture become fixed `PreflightError(cleanup_uncertain=True)`; an unexpected
+cancellation during the literal owner signal-zero probe becomes a sanitized
+fixed error without asserting an unsettled diagnostic child (because the
+successful fixed capture already returned). No generic `BaseException`
+catch, caller-controlled PID or new cleanup authorization is added.

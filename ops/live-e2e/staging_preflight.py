@@ -1,7 +1,9 @@
-"""Dormant incident preflight building blocks; no CLI, capture, or workflow.
+"""Dormant incident preflight building blocks; no CLI or workflow.
 
 The private chain seam accepts disposable fixture components only in Slice A.
-It is not an inspection entrypoint and confers no authority over incident roots.
+The fixed one-snapshot adapter delegates to the separately reviewed diagnostic
+capture and a literal signal-zero presence leaf. Neither is an operational
+incident-inspection entrypoint nor grants cleanup authority.
 """
 
 from __future__ import annotations
@@ -882,6 +884,157 @@ def _observe_marker_staging(
             marker_metadata=marker.metadata,
             selected=staging,
         )
+    except PreflightError:
+        raise
+    except (
+        ImportError,
+        SyntaxError,
+        OSError,
+        ValueError,
+        TypeError,
+        OverflowError,
+        AttributeError,
+        RuntimeError,
+        MemoryError,
+        KeyError,
+        IndexError,
+    ):
+        raise PreflightError() from None
+
+
+# Dormant one-snapshot adapter. The complete incident inspection sequence,
+# trusted-main caller, namespace provenance and receipt remain separate gates.
+_FIXED_DIAGNOSTICS_MODULE = None
+_FIXED_PROCESS_METADATA_MODULE = None
+_FIXED_OWNER_PROBE_MODULE = None
+
+
+def _load_fixed_process_sibling(filename: str, module_name: str):
+    """Load only three fixed local components, never caller-selected paths."""
+    if (filename, module_name) not in {
+        ("staging_diagnostics.py", "_ssh_over_mcp_fixed_staging_diagnostics"),
+        ("staging_process_metadata.py", "_ssh_over_mcp_fixed_process_metadata"),
+        ("staging_owner_probe.py", "_ssh_over_mcp_fixed_staging_owner_probe"),
+    }:
+        raise PreflightError()
+    import importlib.util
+    import sys
+
+    sibling = os.path.join(os.path.dirname(__file__), filename)
+    spec = importlib.util.spec_from_file_location(module_name, sibling)
+    if spec is None or spec.loader is None:
+        raise PreflightError()
+    module = importlib.util.module_from_spec(spec)
+    sentinel = object()
+    former = sys.modules.get(module_name, sentinel)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if former is sentinel:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = former
+    return module
+
+
+def _fixed_diagnostics_module():
+    global _FIXED_DIAGNOSTICS_MODULE
+    if _FIXED_DIAGNOSTICS_MODULE is None:
+        _FIXED_DIAGNOSTICS_MODULE = _load_fixed_process_sibling(
+            "staging_diagnostics.py", "_ssh_over_mcp_fixed_staging_diagnostics"
+        )
+    return _FIXED_DIAGNOSTICS_MODULE
+
+
+def _fixed_process_metadata_module():
+    global _FIXED_PROCESS_METADATA_MODULE
+    if _FIXED_PROCESS_METADATA_MODULE is None:
+        _FIXED_PROCESS_METADATA_MODULE = _load_fixed_process_sibling(
+            "staging_process_metadata.py", "_ssh_over_mcp_fixed_process_metadata"
+        )
+    return _FIXED_PROCESS_METADATA_MODULE
+
+
+def _fixed_owner_probe_module():
+    global _FIXED_OWNER_PROBE_MODULE
+    if _FIXED_OWNER_PROBE_MODULE is None:
+        _FIXED_OWNER_PROBE_MODULE = _load_fixed_process_sibling(
+            "staging_owner_probe.py", "_ssh_over_mcp_fixed_staging_owner_probe"
+        )
+    return _FIXED_OWNER_PROBE_MODULE
+
+
+def _require_fixed_marker_owner_absent() -> None:
+    """Delegate the strictly fixed signal-zero operation to its isolated leaf."""
+    _fixed_owner_probe_module().require_owner_absent()
+
+
+def _observe_fixed_process_snapshot() -> None:
+    """Validate one fresh fixed ps capture, never return process or child data.
+
+    The real capture performs its own UID-502, Darwin, authority-digest and
+    exclusive-owned-child checks. A future full preflight must call this twice,
+    independently, on opposite sides of inventory and alongside held paths.
+    """
+    try:
+        diagnostics = _fixed_diagnostics_module()
+        metadata = _fixed_process_metadata_module()
+        try:
+            capture = diagnostics.capture_ps()
+        except diagnostics.DiagnosticError as failure:
+            try:
+                uncertain = failure.cleanup_uncertain
+            except (
+                AttributeError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+                OSError,
+                MemoryError,
+                KeyboardInterrupt,
+                SystemExit,
+                GeneratorExit,
+            ):
+                uncertain = True
+            if type(uncertain) is not bool:
+                uncertain = True
+            raise PreflightError(cleanup_uncertain=uncertain) from None
+        except (
+            ImportError,
+            SyntaxError,
+            OSError,
+            ValueError,
+            TypeError,
+            OverflowError,
+            AttributeError,
+            RuntimeError,
+            MemoryError,
+            KeyError,
+            IndexError,
+        ):
+            # A non-contract error after capture starts cannot prove that an
+            # owned diagnostic child or descriptor cleanup was settled.
+            raise PreflightError(cleanup_uncertain=True) from None
+        except (KeyboardInterrupt, SystemExit, GeneratorExit):
+            # Cancellation after an attempted diagnostic capture cannot
+            # establish the disposition of its owned child or descriptors.
+            raise PreflightError(cleanup_uncertain=True) from None
+        if (
+            type(capture) is not diagnostics.DiagnosticCapture
+            or capture.kind != "ps"
+            or type(capture.stdout) is not bytes
+            or type(capture.child_pid) is not int
+        ):
+            # A malformed return is not proof of fully reaped/closed capture.
+            raise PreflightError(cleanup_uncertain=True)
+        rows = metadata._parse_process_rows(capture.stdout)
+        metadata._require_snapshot(rows, inspection_pid=os.getpid(), own_ps_pid=capture.child_pid)
+        # ps -U 502 alone cannot establish owner death. Reject that PID
+        # independently of command classification, then signal-zero-probe it.
+        if any(type(row) is not metadata.ProcessRow or row.pid == 38013 for row in rows):
+            raise PreflightError()
+        _require_fixed_marker_owner_absent()
     except PreflightError:
         raise
     except (
