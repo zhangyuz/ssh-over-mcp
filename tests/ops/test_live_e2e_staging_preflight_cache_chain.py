@@ -139,3 +139,71 @@ def test_no_production_marker_or_host_action(preflight):
     assert preflight._CACHE_SYSTEM_UID == 0
     assert preflight._CACHE_ACCOUNT_UID == 502
     assert preflight._CACHE_PARTS == PARTS
+
+
+def test_fixed_cache_rejects_root_mode_change_during_dup(preflight, cache_fixture, monkeypatch):
+    """Initial borrowed FD check must not authorize an unsafe pinned baseline."""
+    root, _, borrowed = cache_fixture
+    real_dup = os.dup
+    changed = False
+
+    def change_root_before_dup(fd):
+        nonlocal changed
+        result = real_dup(fd)
+        if fd == borrowed and not changed:
+            changed = True
+            root.chmod(0o777)
+        return result
+
+    monkeypatch.setattr(preflight.os, "dup", change_root_before_dup)
+    with (
+        pytest.raises(preflight.PreflightError, match="^staging preflight rejected$"),
+        preflight._pin_fixed_cache_chain(borrowed),
+    ):
+        pytest.fail("unsafe mode on pinned root was accepted")
+    assert changed
+    assert os.fstat(borrowed).st_ino == root.stat().st_ino
+
+
+def test_fixed_cache_rejects_root_owner_change_during_dup(preflight, cache_fixture, monkeypatch):
+    """Simulate a UID drift without chown or touching any real account."""
+    from dataclasses import replace
+
+    root, _, borrowed = cache_fixture
+    real_dup = os.dup
+    real_metadata = preflight._metadata
+    duplicated = False
+    mutated = False
+
+    def mark_dup(fd):
+        nonlocal duplicated
+        result = real_dup(fd)
+        if fd == borrowed:
+            duplicated = True
+        return result
+
+    def changed_uid(info):
+        nonlocal mutated
+        result = real_metadata(info)
+        if duplicated and result.inode == root.stat().st_ino:
+            mutated = True
+            return replace(result, uid=os.geteuid() + 77)
+        return result
+
+    monkeypatch.setattr(preflight.os, "dup", mark_dup)
+    monkeypatch.setattr(preflight, "_metadata", changed_uid)
+    with (
+        pytest.raises(preflight.PreflightError, match="^staging preflight rejected$"),
+        preflight._pin_fixed_cache_chain(borrowed),
+    ):
+        pytest.fail("unsafe UID on pinned root was accepted")
+    assert duplicated and mutated
+    assert os.fstat(borrowed).st_ino == root.stat().st_ino
+
+
+def test_fixed_cache_root_mode_drift_detected_on_late_revalidate(preflight, cache_fixture):
+    root, _, borrowed = cache_fixture
+    with preflight._pin_fixed_cache_chain(borrowed) as chain:
+        root.chmod(0o777)
+        with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$"):
+            chain.revalidate()

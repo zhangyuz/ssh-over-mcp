@@ -621,5 +621,21 @@ def _pin_fixed_cache_chain(root_fd: int) -> Iterator[_PinnedDirectoryChain]:
         (_CACHE_ACCOUNT_UID, (0o700,)),
     )
     with _pin_directory_chain(root_fd, _CACHE_PARTS, rules) as chain:
+        # The caller's preliminary borrowed-FD check cannot authorize the
+        # newly duplicated root: its metadata may change between fstat/dup.
+        # Bind both the duplicated FD and its immutable baseline to the
+        # *already safe* borrowed-root snapshot. Consequently, later
+        # chain.revalidate() also checks the root against a safe baseline.
+        try:
+            pinned_root = _metadata(os.fstat(chain._fds[0]))
+            if (
+                pinned_root != root_meta
+                or chain._initial[0] != root_meta
+                or pinned_root.uid != _CACHE_SYSTEM_UID
+                or pinned_root.mode & 0o022
+            ):
+                raise PreflightError()
+        except (OSError, ValueError, TypeError, OverflowError, MemoryError):
+            raise PreflightError() from None
         chain.revalidate()
         yield chain
