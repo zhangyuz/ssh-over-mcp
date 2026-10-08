@@ -250,3 +250,35 @@ def test_scandir_owned_iterator_close_ambiguity_is_not_settled(case, monkeypatch
         assert injected
         assert error.value.cleanup_uncertain is True
     assert os.fstat(borrowed).st_ino > 0
+
+
+@pytest.mark.parametrize("fault", ("missing-status", "throwing-getter", "nonbool-status"))
+def test_unreadable_inventory_cleanup_status_fails_uncertain(case, monkeypatch, fault):
+    """Unknown collector cleanup must never be reported as settled."""
+    preflight, root, borrowed = case
+    inventory = preflight._fixed_inventory_module()
+    failure = inventory.InventoryError(cleanup_uncertain=True)
+
+    with monkeypatch.context() as patch:
+        if fault == "missing-status":
+            del failure._cleanup_uncertain
+        elif fault == "throwing-getter":
+
+            def broken_status(_self):
+                raise RuntimeError("private getter failure details")
+
+            patch.setattr(inventory.InventoryError, "cleanup_uncertain", property(broken_status))
+        else:
+            failure._cleanup_uncertain = "unknown"
+
+        def refuse(_root_fd, *, uid):
+            raise failure
+
+        patch.setattr(inventory, "collect_staging_inventory", refuse)
+        with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$") as error:
+            _observe(preflight, borrowed)
+
+    assert type(error.value.cleanup_uncertain) is bool
+    assert error.value.cleanup_uncertain is True
+    assert "private" not in str(error.value)
+    assert os.fstat(borrowed).st_ino == root.parent.stat().st_ino

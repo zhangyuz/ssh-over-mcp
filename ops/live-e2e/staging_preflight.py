@@ -517,7 +517,11 @@ def _collect_and_bind(root_fd: int, pinned: _ExpectedCommitObservation, *, uid: 
         except staging_inventory.InventoryError as failure:
             # Preserve the collector's strictly typed owned-descriptor cleanup
             # status. Unknown/forged types cannot assert settled cleanup.
-            uncertain = failure.cleanup_uncertain
+            try:
+                uncertain = failure.cleanup_uncertain
+            except (AttributeError, RuntimeError, TypeError, ValueError, OSError, MemoryError):
+                # Even an unreadable internal status cannot prove cleanup.
+                uncertain = True
             if type(uncertain) is not bool:
                 uncertain = True
             raise PreflightError(cleanup_uncertain=uncertain) from None

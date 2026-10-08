@@ -805,3 +805,17 @@ UID-502 runtime or incident mutation authority is added.
 The already-started marker/staging paired-observation experiment remains in
 its **separate unmerged worktree**. It is not included in this safety fix and
 must be rebased on an approved merge of this change before progressing.
+
+
+### PR #158 post-review cleanup-status accessor hardening
+
+Independent review [#6065377839](https://github.com/zhangyuz/ssh-over-mcp/pull/158#issuecomment-6065377839)
+found a Minor fail-closed gap: an absent or raising internal
+`InventoryError.cleanup_uncertain` accessor was normalized by the outer
+adapter into a settled `PreflightError.cleanup_uncertain=False`. A focused
+RED reproduced this with a missing slotted field and a throwing property;
+the pre-existing non-boolean status control stayed `True`.
+The narrow collector-error boundary now guards the read itself and treats
+unreadable/malformed cleanup status conservatively as `True`, without
+changing the fixed public error text. This does not enable live incident
+inspection, marker clearing, or Level-3 completion.
