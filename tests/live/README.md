@@ -632,3 +632,22 @@ Local developer Mac Python 3.13 focused/related regression after repair:
 Exact-new-head self-hosted Python 3.13/3.14 CI and fresh independent review
 remain required. This repair adds no process/capture authority, CLI, UID-502
 activation, receipt, marker clearing, staging mutation, or Level-3/A1 closure.
+
+
+### Slice A cache namespace increment after merged PR #153
+
+The follow-up dormant preflight component pins the fixed cache ancestor names
+relative to an already-borrowed root descriptor:
+`Users/gha-e2e-orchestrator/Library/Caches/ssh-over-mcp-e2e`.
+The production UID policy is literal root (0) for `Users` and account UID
+502 for the home, Library, Caches and cache leaf. Ancestors refuse group/world
+write bits; the leaf requires exact 0700. It uses existing descriptor-relative
+no-follow identity checks and final edge revalidation, closing only helper-owned
+FDs. Private disposable tests substitute fixture ownership, never the actual
+UID-502 cache.
+
+This **does not** assert the borrowed root FD represents real `/`, invoke a
+live marker read, construct the OS-derived temp chain, emit detached full
+preflight evidence, or run diagnostics/workflows. Full runtime-context/root
+provenance, authority hash gate, UID-502 native tests and Slice A closure remain
+separate stages. Stale provider state and unknown recovery roots are untouched.

@@ -159,10 +159,16 @@ def _verify_parts_and_policies(
         if (
             type(uid) is not int
             or uid < 0
-            or type(modes) is not tuple
-            or not modes
-            or any(
-                type(mode) is not int or mode < 0 or mode > 0o777 or mode & 0o022 for mode in modes
+            or (
+                modes is not None
+                and (
+                    type(modes) is not tuple
+                    or not modes
+                    or any(
+                        type(mode) is not int or mode < 0 or mode > 0o777 or mode & 0o022
+                        for mode in modes
+                    )
+                )
             )
         ):
             raise PreflightError()
@@ -191,7 +197,9 @@ def _pin_directory_chain(
             snapshots = [_metadata(os.fstat(root))]
             for name, (uid, modes) in zip(parts, rules, strict=True):
                 before = _metadata(os.stat(name, dir_fd=owned[-1], follow_symlinks=False))
-                if before.uid != uid or before.mode not in modes:
+                if before.uid != uid or (
+                    before.mode & 0o022 if modes is None else before.mode not in modes
+                ):
                     raise PreflightError()
                 child = os.open(name, _DIR_FLAGS, dir_fd=owned[-1])
                 owned.append(child)
@@ -571,3 +579,47 @@ def _fixed_inventory_module():
             sys.modules[module_name] = former
     _FIXED_INVENTORY_MODULE = module
     return module
+
+
+# Literal runner marker-cache path *relative to a separately pinned "/" FD*.
+# A complete trusted root-FD provenance and UID-502 call path are deferred.
+_CACHE_PARTS = (
+    "Users",
+    "gha-e2e-orchestrator",
+    "Library",
+    "Caches",
+    "ssh-over-mcp-e2e",
+)
+_CACHE_SYSTEM_UID = 0
+_CACHE_ACCOUNT_UID = 502
+
+
+@contextmanager
+def _pin_fixed_cache_chain(root_fd: int) -> Iterator[_PinnedDirectoryChain]:
+    """Dormant fixed-name cache ancestry with no content reads.
+
+    root_fd is a borrowed descriptor. This is not a complete production
+    entrypoint or proof that an arbitrary supplied FD represents literal "/".
+    Only disposable tests substitute the fixed owner globals.
+    """
+    if type(root_fd) is not int or root_fd < 0:
+        raise PreflightError()
+    try:
+        root_meta = _metadata(os.fstat(root_fd))
+        if root_meta.uid != _CACHE_SYSTEM_UID or root_meta.mode & 0o022:
+            raise PreflightError()
+    except (OSError, ValueError, TypeError, OverflowError, MemoryError):
+        raise PreflightError() from None
+
+    # None means every owner/group/world mode is allowed *except*
+    # group/world writable bits. The final cache has exact 0700 policy.
+    rules = (
+        (_CACHE_SYSTEM_UID, None),
+        (_CACHE_ACCOUNT_UID, None),
+        (_CACHE_ACCOUNT_UID, None),
+        (_CACHE_ACCOUNT_UID, None),
+        (_CACHE_ACCOUNT_UID, (0o700,)),
+    )
+    with _pin_directory_chain(root_fd, _CACHE_PARTS, rules) as chain:
+        chain.revalidate()
+        yield chain
