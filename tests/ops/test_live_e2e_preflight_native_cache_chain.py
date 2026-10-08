@@ -352,3 +352,103 @@ def test_owned_descendant_close_cancellation_attempts_all_fds(
     for fd in duped:
         assert attempted.count(fd) == 1
     assert events.count("open-root") == 1
+
+
+def test_post_second_close_symlink_rejection_drains_all_ownership(fixture, monkeypatch):
+    """A metadata PreflightError during close must not abandon parent handles."""
+    from collections import Counter
+
+    p, root, _, _ = fixture
+    native_open, native_dup, native_close = os.open, os.dup, os.close
+    original_root = p._open_fixed_native_root
+    opened = []
+    duped = []
+    roots = []
+    closed = []
+    leaf_opens = []
+    injected = []
+
+    def root_open():
+        fd = original_root()
+        roots.append(fd)
+        return fd
+
+    def open_trace(name, flags, *args, **kwargs):
+        fd = native_open(name, flags, *args, **kwargs)
+        if name in p._CACHE_PARTS:
+            opened.append(fd)
+        if name == p._CACHE_PARTS[-1]:
+            leaf_opens.append(fd)
+        return fd
+
+    def dup_trace(fd):
+        result = native_dup(fd)
+        duped.append(result)
+        return result
+
+    def close_trace(fd):
+        closed.append(fd)
+        native_close(fd)
+        if len(leaf_opens) == 2 and fd == leaf_opens[-1] and not injected:
+            leaf = root.joinpath(*p._CACHE_PARTS)
+            leaf.rename(leaf.with_name("formerly-cache"))
+            leaf.symlink_to("formerly-cache", target_is_directory=True)
+            injected.append(True)
+
+    monkeypatch.setattr(p, "_open_fixed_native_root", root_open)
+    with monkeypatch.context() as patch:
+        patch.setattr(p.os, "open", open_trace)
+        patch.setattr(p.os, "dup", dup_trace)
+        patch.setattr(p.os, "close", close_trace)
+        try:
+            with (
+                pytest.raises(p.PreflightError, match="^staging preflight rejected$") as err,
+                p._pin_observed_fixed_cache_chain(),
+            ):
+                pass
+        finally:
+            # Do not let a failing RED run leave disposable FDs behind.
+            for fd in set(opened + duped + roots):
+                try:
+                    os.fstat(fd)
+                except OSError:
+                    continue
+                else:
+                    native_close(fd)
+    assert injected == [True]
+    assert err.value.cleanup_uncertain is False
+    assert err.value.__cause__ is None
+    assert Counter(closed) == Counter(opened + duped + roots)
+
+
+def test_literal_root_memory_error_during_close_preserves_uncertainty(fixture, monkeypatch):
+    p, _, _, _ = fixture
+    actual_root = p._open_fixed_native_root
+    native_close = os.close
+    roots = []
+    injected = []
+
+    def root_open():
+        fd = actual_root()
+        roots.append(fd)
+        return fd
+
+    def interrupted_root_close(fd):
+        native_close(fd)
+        if fd == roots[-1] and not injected:
+            injected.append(True)
+            raise MemoryError("private root close uncertainty")
+
+    monkeypatch.setattr(p, "_open_fixed_native_root", root_open)
+    with monkeypatch.context() as patch:
+        patch.setattr(p.os, "close", interrupted_root_close)
+        with (
+            pytest.raises(p.PreflightError, match="^staging preflight rejected$") as err,
+            p._pin_observed_fixed_cache_chain(),
+        ):
+            pass
+    assert injected == [True]
+    assert err.value.cleanup_uncertain is True
+    assert err.value.__cause__ is None
+    with pytest.raises(OSError):
+        os.fstat(roots[0])

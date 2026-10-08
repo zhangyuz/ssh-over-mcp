@@ -256,6 +256,7 @@ def _pin_directory_chain(
                     ):
                         edge_invalid = True
                 except (
+                    PreflightError,
                     OSError,
                     ValueError,
                     TypeError,
@@ -1532,6 +1533,7 @@ def _pin_observed_fixed_cache_chain() -> Iterator[_PinnedDirectoryChain]:
                 TypeError,
                 RuntimeError,
                 OverflowError,
+                MemoryError,
                 KeyboardInterrupt,
                 SystemExit,
                 GeneratorExit,

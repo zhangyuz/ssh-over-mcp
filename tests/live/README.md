@@ -1135,3 +1135,18 @@ without unsafe retry, and the caller receives a fixed
 exception, and verify owned-descriptor closure. No broad exception masking
 of programming assertions is introduced, and tests touch no actual runner
 cache or incident files.
+
+
+The first independent post-fix reviewer also found two narrower cleanup issues:
+a fixed post-close edge metadata rejection could raise `PreflightError`
+*inside* the cleanup loop, interrupting the remaining closes; and the
+literal root's last close could raise `MemoryError` without a fixed
+uncertainty error. The cleanup edge observer now records that typed
+rejection as `edge_invalid` and continues every remaining close before
+raising, while the root-close handler maps `MemoryError` to the fixed
+`PreflightError(cleanup_uncertain=True)`. Disposable tests force a symlink
+swap after the second pass leaf close and assert every owned FD, including
+the duplicated and literal root, was attempted exactly once and closed.
+A separate root-close `MemoryError` test verifies the exact status and no
+secret exception text. The component remains dormant with no host incident
+inspection or provider-state mutation.
