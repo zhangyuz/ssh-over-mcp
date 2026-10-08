@@ -185,3 +185,24 @@ def test_root_edge_swap_during_nested_descriptor_cleanup_refuses(preflight, stag
         with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$"):
             preflight._observe_selected_inventory(chain, "stale-target")
         assert changed
+
+
+def test_second_inventory_loader_syntax_error_is_sanitized(preflight, staging, monkeypatch):
+    """No raw loader exception may cross the composition boundary."""
+    _, _, _, borrowed = staging
+    real_loader = preflight._fixed_inventory_module
+    calls = 0
+
+    def failing_second_call():
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise SyntaxError("sensitive module loader internals")
+        return real_loader()
+
+    monkeypatch.setattr(preflight, "_fixed_inventory_module", failing_second_call)
+    with pytest.raises(preflight.PreflightError, match="^staging preflight rejected$") as err:
+        _observe(preflight, borrowed)
+    assert calls == 2
+    assert err.value.cleanup_uncertain is False
+    assert "sensitive" not in str(err.value)

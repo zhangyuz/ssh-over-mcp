@@ -803,6 +803,8 @@ def _observe_selected_inventory(
         # descriptor closure failed in a nested observer.
         raise
     except (
+        ImportError,
+        SyntaxError,
         OSError,
         TypeError,
         ValueError,

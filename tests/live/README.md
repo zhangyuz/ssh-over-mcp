@@ -772,3 +772,9 @@ root FD, OS-derived temp ancestry, fixed marker cache and initial/final marker
 state, UID-502 native capture, two ps snapshots, workflow/receipt authority and
 overall final gates remain deferred. No live staging/provider state is touched,
 no marker is cleared, and Level-3/A1/N1c closure is not claimed.
+
+
+A second adversarial self-review test reproduced a raw `SyntaxError` escaping
+when the trusted inventory-record class is requested after collection; the
+private composition now sanitizes loader `ImportError`/`SyntaxError` at that
+boundary while passing through `PreflightError.cleanup_uncertain=True`.
