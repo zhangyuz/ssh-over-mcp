@@ -1011,3 +1011,68 @@ new process operation, receipt, workflow or new cleanup authority is added.
 These are bounded point-in-time checks against concurrent mutation, **not**
 proof of permanent namespace immutability; complete preflight still needs
 an independently reviewed final gate with process quiescence.
+
+
+### Dormant paired fixed ps observations around selected inventory
+
+The private `_observe_paired_process_inventory(selected_chain, selector)` helper
+accepts only an **already pinned** catalog-selected disposable staging chain.
+It first checks the fixed selected basename/device/inode/UID/mode and held
+name edge, then invokes the already-reviewed **fixed** `_observe_fixed_process_snapshot()`
+twice, exactly once before and once after the metadata-only
+`_observe_selected_inventory()`. Each fixed invocation independently runs
+the reviewed bounded `capture_ps()`, validates the real returned owned-child
+PID against internally derived `os.getpid()`, rejects unexpected same-UID
+processes and insists fixed owner PID 38013 is absent both from rows and from
+the literal signal-zero probe. Equal capture stdout and reused numeric ps
+child PIDs are explicitly permitted; invocation **count and order** are the
+proof of two fresh capture operations.
+
+After the second snapshot has successfully reaped its diagnostic child, the
+helper reopens only fixed `payload-content/expected_commit` under the held
+selected-root FD, binds its byte/metadata observation against the earlier
+frozen inventory evidence, then revalidates the selected-root live edge after
+its own payload-descriptor cleanup. Failure at any stage returns **no**
+detached evidence, and preserves typed `PreflightError.cleanup_uncertain`.
+Successful results are the existing immutable `_SelectedInventoryEvidence`,
+without process output, child identity, FD, receipt or cleanup handle.
+
+**Scope limit:** The caller still owns and must independently prove the
+literal root, full native-temp and cache-marker provenance and retain every
+required held ancestor FD; this *fixture-only* seam does not authenticate
+those requirements, and it is not a full native preflight or operational
+entrypoint. No workflow, UID-502 runner call, getconf execution here, marker
+read, recovery/clear, incident mutation, generic PID/path/command capability
+or Level-3/A1/N1c completion is introduced. Disposable RED/GREEN fixtures
+assert process→inventory→process ordering (including identical captures),
+bounded failure propagation, selected-root edge replacement and late
+expected_commit content drift.
+
+
+### PR #163 review remediation — post-payload-close binding
+
+The adversarial [#6069838296](https://github.com/zhangyuz/ssh-over-mcp/pull/163#issuecomment-6069838296)
+review exposed a successful-close race: rewriting the literal
+`payload-content/expected_commit` or replacing its payload directory
+**during the final payload FD close** allowed the previous implementation
+to return frozen evidence. The disposable real-close fault injectors
+reproduced this with two RED cases; an ambiguous close correctly failed
+with `cleanup_uncertain=True`.
+
+After the first post-B payload context closes, the fixed helper now reopens
+**only** the literal no-follow payload/expected_commit through the pinned
+selected-root FD, compares the original payload directory device/inode/owner
+and mode plus the exact expected-commit file metadata/content, and closes
+the second pinned payload context. A final root-anchored **stat-only** check,
+after all descendant descriptors are closed, checks the fixed
+`payload-content` directory edge before/after the fixed leaf metadata
+(including mtime/ctime); it performs **no file-content reads** or added
+descriptor close. The selected catalog root edge is also revalidated.
+This defends the documented deterministic close interleavings but does not
+claim permanent namespace immutability or the full preflight's required
+single payload FD retained across both process snapshots.
+
+The disposable regression matrix covers same-inode content rewrite,
+payload directory name replacement, ambiguous owned close plus either
+drift, and a normal settled success. No staging/marker/provider state on
+the real UID-502 incident runner was touched.
