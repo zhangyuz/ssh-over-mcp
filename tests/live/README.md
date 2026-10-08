@@ -749,3 +749,26 @@ the final gate. There is no content read, staging traversal, native diagnostic
 composition, full preflight entrypoint, workflow/receipt or mutation here.
 The existing stale-provider refusal remains a failed Level-3 gate, with no A1,
 N1c or recovery credit. All three fixed authority documents remain unchanged.
+
+
+### Slice A selected staging evidence micro-increment after PR #156
+
+The next private, fixture-only composition binds a previously pinned
+catalog-selected root to the existing 41-byte `expected_commit` reader and
+the existing metadata-only inventory collector. It checks selected-root
+catalog identity, inventory/expected-commit metadata equality, performs final
+expected-commit reread and selected-root edge revalidation, and returns only
+a frozen/slotted **selected-staging subset** record containing catalog fields,
+the detached inventory tuple and immutable expected-file metadata. It carries
+no live descriptors, raw marker bytes or process handles.
+
+Disposable RED→GREEN coverage proves refusal for selector/chain mismatch,
+expected-commit drift, selected-root edge replacement during inventory and
+**during nested payload descriptor cleanup**, and preserves a pre-sanitized
+`cleanup_uncertain=True`. No marker or process capture is invoked.
+
+This is **not** the complete `PreflightObservation`: the actual trusted
+root FD, OS-derived temp ancestry, fixed marker cache and initial/final marker
+state, UID-502 native capture, two ps snapshots, workflow/receipt authority and
+overall final gates remain deferred. No live staging/provider state is touched,
+no marker is cleared, and Level-3/A1/N1c closure is not claimed.

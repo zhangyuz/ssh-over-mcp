@@ -719,3 +719,98 @@ def _pin_fixed_incident_root(temp_fd: int, selector: str) -> Iterator[_PinnedDir
         ):
             raise PreflightError()
         yield chain
+
+
+@dataclass(frozen=True, slots=True)
+class _SelectedInventoryEvidence:
+    """Detached staging-only fixture evidence, not an operational preflight."""
+
+    selector: str
+    basename: str
+    device: int
+    inode: int
+    uid: int
+    mode: int
+    expected_commit: str
+    expected_metadata: _RegularMetadata
+    inventory: tuple
+
+
+def _observe_selected_inventory(
+    selected_chain: _PinnedDirectoryChain, selector: str
+) -> _SelectedInventoryEvidence:
+    """Private Slice A composition on an already-pinned selected-root chain.
+
+    Neither the supplied chain nor this result authenticates the host's
+    full temp ancestry, dedicated UID-502 context, or the fixed cache marker.
+    This must never be used as a production preflight/receipt entrypoint.
+    """
+    incident = _select_incident(selector)
+    if (
+        type(selected_chain) is not _PinnedDirectoryChain
+        or incident.selector != selector
+        or selected_chain._parts != (incident.basename,)
+        or len(selected_chain.metadata) != 1
+        or len(selected_chain._fds) != 2
+    ):
+        raise PreflightError()
+    observed_root = selected_chain.metadata[0]
+    if (
+        observed_root.device,
+        observed_root.inode,
+        observed_root.uid,
+        observed_root.mode,
+    ) != (incident.device, incident.inode, incident.uid, incident.mode):
+        raise PreflightError()
+    try:
+        # Verify the T-to-root edge before observing the fixed payload leaf.
+        selected_chain.revalidate()
+        with _pin_expected_commit(
+            selected_chain._fds[-1],
+            incident.expected_commit,
+            uid=incident.uid,
+            device=incident.device,
+        ) as expected:
+            entries = _collect_and_bind(selected_chain._fds[-1], expected, uid=incident.uid)
+            # An inventory from an actual fixed collector consists only of
+            # frozen records. No borrowed descriptors or raw file bytes escape.
+            inventory_type = _fixed_inventory_module().InventoryEntry
+            if type(entries) is not tuple or any(
+                type(entry) is not inventory_type for entry in entries
+            ):
+                raise PreflightError()
+            expected.revalidate(incident.expected_commit, uid=incident.uid)
+            # A valid held root FD alone cannot prove the live root name
+            # still resolves to the same object after inventory/read.
+            selected_chain.revalidate()
+            evidence = _SelectedInventoryEvidence(
+                selector=incident.selector,
+                basename=incident.basename,
+                device=incident.device,
+                inode=incident.inode,
+                uid=incident.uid,
+                mode=incident.mode,
+                expected_commit=incident.expected_commit,
+                expected_metadata=expected.first.metadata,
+                inventory=entries,
+            )
+        # Nested payload FD cleanup is itself a race boundary: the selected
+        # name may change after the last content read but before return.
+        selected_chain.revalidate()
+        return evidence
+    except PreflightError:
+        # Keep the strictly typed cleanup_uncertain status if any owned
+        # descriptor closure failed in a nested observer.
+        raise
+    except (
+        OSError,
+        TypeError,
+        ValueError,
+        OverflowError,
+        AttributeError,
+        MemoryError,
+        RuntimeError,
+        KeyError,
+        IndexError,
+    ):
+        raise PreflightError() from None
