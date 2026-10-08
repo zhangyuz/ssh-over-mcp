@@ -632,3 +632,39 @@ Local developer Mac Python 3.13 focused/related regression after repair:
 Exact-new-head self-hosted Python 3.13/3.14 CI and fresh independent review
 remain required. This repair adds no process/capture authority, CLI, UID-502
 activation, receipt, marker clearing, staging mutation, or Level-3/A1 closure.
+
+
+### Slice A cache namespace increment after merged PR #153
+
+The follow-up dormant preflight component pins the fixed cache ancestor names
+relative to an already-borrowed root descriptor:
+`Users/gha-e2e-orchestrator/Library/Caches/ssh-over-mcp-e2e`.
+The production UID policy is literal root (0) for `Users` and account UID
+502 for the home, Library, Caches and cache leaf. Ancestors refuse group/world
+write bits; the leaf requires exact 0700. It uses existing descriptor-relative
+no-follow identity checks and final edge revalidation, closing only helper-owned
+FDs. Private disposable tests substitute fixture ownership, never the actual
+UID-502 cache.
+
+This **does not** assert the borrowed root FD represents real `/`, invoke a
+live marker read, construct the OS-derived temp chain, emit detached full
+preflight evidence, or run diagnostics/workflows. Full runtime-context/root
+provenance, authority hash gate, UID-502 native tests and Slice A closure remain
+separate stages. Stale provider state and unknown recovery roots are untouched.
+
+
+### PR #154 root-FD pinning race remediation
+
+Independent review at `ea69c652433ba70409418ba7496dcb8934c48457`
+([review #6062651928](https://github.com/zhangyuz/ssh-over-mcp/pull/154#issuecomment-6062651928))
+found a root-FD TOCTOU gap: after safe preliminary fstat but before
+the directory chain duplicated and recorded the root, owner/mode drift
+could be admitted as the baseline. Disposable RED reproduced both
+`0700→0777` mode drift during `dup` and a synthetic UID change on
+the duplicated root. The repaired wrapper compares the freshly pinned
+root metadata **and the stored chain baseline** against the previously
+validated, safe borrowed-root metadata, then calls full edge
+revalidation. The root baseline is therefore safe on entry and late
+changes fail when `chain.revalidate()` is called. A third test checks
+late unsafe mode drift; no root namespace/UID-502 proof or live host
+inspection is claimed. Current PR remains dormant and read-only.
