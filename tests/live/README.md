@@ -796,8 +796,10 @@ and duplicated-root closes, and converts it to the fixed public
 with completed cleanup still report `False`. Disposable RED/GREEN tests inject
 a real close followed by an artificial OSError for each owned FD category,
 traversal failure followed by ambiguous cleanup, and two simultaneous
-ambiguous closes; strict boolean construction and borrowed-FD retention are
-also covered. No existing staging content-read, inventory traversal, workflow,
+ambiguous closes. A separate RED→GREEN test covers the implicit owned
+duplicate managed by `os.scandir(fd)`; its iterator close is now checked
+explicitly, with ambiguity propagated as `cleanup_uncertain=True`. Strict
+boolean construction and borrowed-FD retention are also covered. No existing staging content-read, inventory traversal, workflow,
 UID-502 runtime or incident mutation authority is added.
 
 The already-started marker/staging paired-observation experiment remains in

@@ -211,3 +211,42 @@ def test_two_ambiguous_inventory_closes_keep_uncertainty(case, monkeypatch):
         assert error.value.cleanup_uncertain is True
         chain.revalidate()
     assert os.fstat(borrowed).st_ino > 0
+
+
+def test_scandir_owned_iterator_close_ambiguity_is_not_settled(case, monkeypatch):
+    preflight, _, borrowed = case
+    actual_scandir = os.scandir
+    injected = False
+
+    class UncertainIterator:
+        def __init__(self, wrapped):
+            self.wrapped = wrapped
+
+        def __iter__(self):
+            return iter(self.wrapped)
+
+        def close(self):
+            nonlocal injected
+            self.wrapped.close()
+            injected = True
+            raise OSError("scandir-owned duplicate close ambiguous")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.close()
+
+    def uncertain_scandir(fd):
+        return UncertainIterator(actual_scandir(fd))
+
+    with preflight._pin_fixed_incident_root(borrowed, "stale-target") as chain:
+        with monkeypatch.context() as patch:
+            patch.setattr(os, "scandir", uncertain_scandir)
+            with pytest.raises(
+                preflight.PreflightError, match="^staging preflight rejected$"
+            ) as error:
+                preflight._observe_selected_inventory(chain, "stale-target")
+        assert injected
+        assert error.value.cleanup_uncertain is True
+    assert os.fstat(borrowed).st_ino > 0

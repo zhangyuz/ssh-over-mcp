@@ -136,8 +136,10 @@ def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry
     def names_at(fd: int, path: str, *, verify_count: int | None = None) -> list[str]:
         nonlocal reserved
         names: list[str] = []
-        # scandir(fd) owns its internal duplicate, not the borrowed descriptor.
-        with os.scandir(fd) as iterator:
+        # scandir(fd) owns an internal duplicate too. Its close outcome
+        # must not be mistaken for conclusively settled directory cleanup.
+        iterator = os.scandir(fd)
+        try:
             for item in iterator:
                 check_deadline()
                 relative = item.name if path == "." else f"{path}/{item.name}"
@@ -149,6 +151,11 @@ def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry
                 elif len(names) >= verify_count:
                     raise InventoryError(_FAILURE)
                 names.append(item.name)
+        finally:
+            try:
+                iterator.close()
+            except (OSError, ValueError, TypeError, MemoryError):
+                raise InventoryError(cleanup_uncertain=True) from None
         check_deadline()
         return sorted(names, key=os.fsencode)
 
