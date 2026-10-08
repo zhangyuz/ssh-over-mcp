@@ -357,3 +357,101 @@ def test_second_pass_close_swap_refuses_after_all_descendants_closed(
     assert failure.value.cleanup_uncertain is ambiguous_close
     assert failure.value.__cause__ is None
     assert events == ["getconf", "root"]
+
+
+def test_final_temp_observation_never_uses_joined_path_stat(env, monkeypatch):
+    """Joined stat follows intermediate symlinks even if final edge is NOFOLLOW."""
+    p, _, _, _, events = env
+    original_stat = os.stat
+    observed = []
+
+    def require_single_edge(path, *args, **kwargs):
+        if kwargs.get("dir_fd") is not None:
+            assert "/" not in str(path), "joined path is not component-wise NOFOLLOW"
+            observed.append(path)
+        return original_stat(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(p.os, "stat", require_single_edge)
+        with p._pin_observed_native_temp_chain() as chain:
+            chain.revalidate()
+    assert "folders" in observed
+    assert events == ["getconf", "root"]
+
+
+def test_second_pass_temp_symlink_replace_after_stat_refuses(env, monkeypatch):
+    """Replace folders with a symlink to the moved original before nofollow open."""
+    p, _, root, _, events = env
+    original_stat, original_open = os.stat, os.open
+    leaf_opens = []
+    swaps = []
+
+    def trace_open(name, flags, *args, **kwargs):
+        fd = original_open(name, flags, *args, **kwargs)
+        if name == "T":
+            leaf_opens.append(fd)
+        return fd
+
+    def interleave(path, *args, **kwargs):
+        value = original_stat(path, *args, **kwargs)
+        if (
+            path == "folders"
+            and kwargs.get("dir_fd") is not None
+            and len(leaf_opens) == 1
+            and not swaps
+        ):
+            original = root.joinpath(*PARTS[:3])
+            original.rename(original.with_name("folders-former"))
+            original.symlink_to("folders-former", target_is_directory=True)
+            swaps.append(True)
+        return value
+
+    with monkeypatch.context() as patch:
+        patch.setattr(p.os, "open", trace_open)
+        patch.setattr(p.os, "stat", interleave)
+        with (
+            pytest.raises(p.PreflightError, match="^staging preflight rejected$") as error,
+            p._pin_observed_native_temp_chain(),
+        ):
+            pass
+    assert swaps == [True]
+    assert error.value.cleanup_uncertain is False
+    assert root.joinpath(*PARTS[:3]).is_symlink()
+    assert events == ["getconf", "root"]
+
+
+@pytest.mark.parametrize("ambiguous", [False, True])
+def test_final_native_temp_edge_drift_after_second_leaf_close_refuses(env, monkeypatch, ambiguous):
+    p, _, root, _, events = env
+    original_close, original_open = os.close, os.open
+    leaves = []
+    swaps = []
+
+    def trace_open(name, flags, *args, **kwargs):
+        fd = original_open(name, flags, *args, **kwargs)
+        if name == "T":
+            leaves.append(fd)
+        return fd
+
+    def close_then_replace(fd):
+        original_close(fd)
+        if len(leaves) == 2 and fd == leaves[-1] and not swaps:
+            edge = root.joinpath(*PARTS)
+            edge.rename(edge.with_name("T-former"))
+            edge.symlink_to("T-former", target_is_directory=True)
+            swaps.append(True)
+            if ambiguous:
+                raise OSError("private ambiguous temp close")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(p.os, "open", trace_open)
+        patch.setattr(p.os, "close", close_then_replace)
+        with (
+            pytest.raises(p.PreflightError, match="^staging preflight rejected$") as error,
+            p._pin_observed_native_temp_chain(),
+        ):
+            pass
+    assert swaps == [True]
+    assert error.value.cleanup_uncertain is ambiguous
+    assert error.value.__cause__ is None
+    assert events == ["getconf", "root"]
