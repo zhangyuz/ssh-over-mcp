@@ -846,3 +846,36 @@ OS-derived temp ancestry, the complete native process snapshot sequence,
 trusted-main workflow provenance, receipt and any recovery/marker
 mutation are still deferred. It does not change the automatic stale-provider
 Level-3 refusal or grant A1/N1c/Level-3 completion credit.
+
+
+### Dormant fixed one-snapshot process guard (next isolated Slice B prerequisite)
+
+The private `_observe_fixed_process_snapshot()` adapter imports only the two
+fixed sibling components, obtains a fresh **fixed** `capture_ps()` invocation,
+checks the exact detached capture type/kind/bytes/owned child PID, and uses the
+existing bounded process-row parser and strict inspection/own-ps predicate.
+It separately rejects marker owner PID 38013 in the UID-502 rows and probes
+**only** literal `os.kill(38013, 0)` for absence: ESRCH means absent; live,
+permission-denied and ambiguous outcomes refuse. It returns no process rows,
+raw stdout, child identity, receipt or reusable authority. It never kills a
+process; the existing reviewed diagnostic helper alone owns any necessary
+cleanup of a child **it spawned**.
+
+Known fixed diagnostic errors are sanitized into `PreflightError` while
+preserving an exact `cleanup_uncertain: bool`; absent/throwing/non-boolean
+status is treated as uncertain. A separate fresh invocation is needed on each
+side of an inventory in the later complete preflight. Two calls must not
+infer freshness from unequal PID/stdout/rows: PID reuse and identical output
+are permitted. No production caller, workflow, root provenance, getconf
+composition, staged read, receipt, provider mutation or new signal authority
+is added by this helper. Local fixtures replace the capture boundary only in
+tests; they do not prove the UID-502 dedicated runner integration. Existing
+stale-provider exit 70 still blocks automatic Level-3.
+
+The fixed owner-presence operation is deliberately isolated in
+`ops/live-e2e/staging_owner_probe.py` rather than adding a signal-capable
+primitive to the previously no-host-action `staging_preflight.py` file.
+The pre-existing static prohibition is retained. Non-contract failures from
+a capture that has already begun are conservatively classified with
+`cleanup_uncertain=True`, even when the underlying exception does not expose
+a trusted boolean status.
