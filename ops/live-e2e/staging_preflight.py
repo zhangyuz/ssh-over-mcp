@@ -828,3 +828,73 @@ def _observe_selected_inventory(
         IndexError,
     ):
         raise PreflightError() from None
+
+
+@dataclass(frozen=True, slots=True)
+class _MarkerStagingEvidence:
+    """Detached fixture-only marker/staging pair; not a full preflight."""
+
+    marker_target: str
+    marker_owner_pid: int
+    marker_metadata: _RegularMetadata
+    selected: _SelectedInventoryEvidence
+
+
+def _observe_marker_staging(
+    cache_chain: _PinnedDirectoryChain,
+    selected_chain: _PinnedDirectoryChain,
+    selector: str,
+) -> _MarkerStagingEvidence:
+    """Observe fixed marker plus staging without OS provenance or process capture.
+
+    The caller must hold and independently validate the complete original
+    cache/temp ancestry. No arbitrary file name, PID, uid or captured data is
+    accepted. This is a private disposable composition seam, not live UID-502
+    preflight evidence and it does not authorize any recovery action.
+    """
+    incident = _select_incident(selector)
+    if (
+        type(cache_chain) is not _PinnedDirectoryChain
+        or cache_chain._parts != _CACHE_PARTS
+        or len(cache_chain.metadata) != len(_CACHE_PARTS)
+        or type(selected_chain) is not _PinnedDirectoryChain
+        or selected_chain._parts != (incident.basename,)
+        or len(selected_chain.metadata) != 1
+        or len(selected_chain._fds) != 2
+    ):
+        raise PreflightError()
+    last = cache_chain.metadata[-1]
+    if last.uid != _CACHE_ACCOUNT_UID or last.mode != 0o700:
+        raise PreflightError()
+    try:
+        cache_chain.revalidate()
+        selected_chain.revalidate()
+        marker = _read_marker(cache_chain._fds[-1], uid=_CACHE_ACCOUNT_UID)
+        staging = _observe_selected_inventory(selected_chain, selector)
+        _revalidate_marker(cache_chain._fds[-1], marker, uid=_CACHE_ACCOUNT_UID)
+        # Both name chains must still refer to their originally held objects
+        # after the marker reread and nested selected-inventory FD cleanup.
+        cache_chain.revalidate()
+        selected_chain.revalidate()
+        return _MarkerStagingEvidence(
+            marker_target=_MARKER_TARGET,
+            marker_owner_pid=38013,
+            marker_metadata=marker.metadata,
+            selected=staging,
+        )
+    except PreflightError:
+        raise
+    except (
+        ImportError,
+        SyntaxError,
+        OSError,
+        ValueError,
+        TypeError,
+        OverflowError,
+        AttributeError,
+        RuntimeError,
+        MemoryError,
+        KeyError,
+        IndexError,
+    ):
+        raise PreflightError() from None

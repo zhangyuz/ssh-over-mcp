@@ -780,6 +780,7 @@ private composition now sanitizes loader `ImportError`/`SyntaxError` at that
 boundary while passing through `PreflightError.cleanup_uncertain=True`.
 
 
+
 ### Post-merge PR #157 inventory-owned FD cleanup uncertainty remediation
 
 [Independent review #6064699025](https://github.com/zhangyuz/ssh-over-mcp/pull/157#issuecomment-6064699025)
@@ -802,9 +803,8 @@ explicitly, with ambiguity propagated as `cleanup_uncertain=True`. Strict
 boolean construction and borrowed-FD retention are also covered. No existing staging content-read, inventory traversal, workflow,
 UID-502 runtime or incident mutation authority is added.
 
-The already-started marker/staging paired-observation experiment remains in
-its **separate unmerged worktree**. It is not included in this safety fix and
-must be rebased on an approved merge of this change before progressing.
+The marker/staging paired-observation work is isolated in a subsequent
+reviewable slice based on this remediation.
 
 
 ### PR #158 post-review cleanup-status accessor hardening
@@ -819,3 +819,30 @@ The narrow collector-error boundary now guards the read itself and treats
 unreadable/malformed cleanup status conservatively as `True`, without
 changing the fixed public error text. This does not enable live incident
 inspection, marker clearing, or Level-3 completion.
+
+
+### Slice A marker + selected-staging paired observation after PR #158
+
+The next private fixture-only, read-only component combines **two already
+pinned chains**: the fixed marker-cache chain and the selected-catalog-root
+chain. It checks both chains before observation; reads only the fixed
+`active-run.json` marker; obtains the immutable selected staging/inventory
+subset through the previous reviewed component; re-reads/revalidates the
+original marker content/device/inode/metadata; then revalidates both held
+namespace chains before returning a frozen detached pair containing only
+marker target/PID/metadata and the frozen selected subset. A single
+`PreflightError(cleanup_uncertain=True)` remains preserved.
+
+Disposable RED/GREEN tests cover strict detached immutable evidence,
+marker drift with equal logical state, same-content inode replacement,
+cache-edge and staging-edge replacement at separate stages, bad selectors
+and foreign chains, uncertain-cleanup propagation and zero process or
+mutation authority. The tests substitute fixed ownership only inside a
+disposable fixture after asserting the production UID0/UID502 constants.
+
+This is **not** an operational preflight or proof of native UID-502
+provenance. The supplied root FD is not authenticated as literal `/`;
+OS-derived temp ancestry, the complete native process snapshot sequence,
+trusted-main workflow provenance, receipt and any recovery/marker
+mutation are still deferred. It does not change the automatic stale-provider
+Level-3 refusal or grant A1/N1c/Level-3 completion credit.
