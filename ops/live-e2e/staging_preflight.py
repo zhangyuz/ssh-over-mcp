@@ -512,7 +512,15 @@ def _collect_and_bind(root_fd: int, pinned: _ExpectedCommitObservation, *, uid: 
         original = _metadata(os.fstat(root_fd))
         if original.uid != uid or original.mode != 0o700:
             raise PreflightError()
-        entries = staging_inventory.collect_staging_inventory(root_fd, uid=uid)
+        try:
+            entries = staging_inventory.collect_staging_inventory(root_fd, uid=uid)
+        except staging_inventory.InventoryError as failure:
+            # Preserve the collector's strictly typed owned-descriptor cleanup
+            # status. Unknown/forged types cannot assert settled cleanup.
+            uncertain = failure.cleanup_uncertain
+            if type(uncertain) is not bool:
+                uncertain = True
+            raise PreflightError(cleanup_uncertain=uncertain) from None
         if _metadata(os.fstat(root_fd)) != original or type(entries) is not tuple:
             raise PreflightError()
         roots = [item for item in entries if item.path == "."]

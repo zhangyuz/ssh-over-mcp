@@ -778,3 +778,28 @@ A second adversarial self-review test reproduced a raw `SyntaxError` escaping
 when the trusted inventory-record class is requested after collection; the
 private composition now sanitizes loader `ImportError`/`SyntaxError` at that
 boundary while passing through `PreflightError.cleanup_uncertain=True`.
+
+
+### Post-merge PR #157 inventory-owned FD cleanup uncertainty remediation
+
+[Independent review #6064699025](https://github.com/zhangyuz/ssh-over-mcp/pull/157#issuecomment-6064699025)
+identified an Important error-contract gap in the existing metadata-only
+inventory collector exposed by the new selected-staging composition. An
+ambiguous `os.close` outcome for its duplicated root or descendant directory
+FD had been collapsed into a generic `InventoryError`, and upstream
+`_collect_and_bind` incorrectly reported `PreflightError.cleanup_uncertain=False`.
+
+A narrowly scoped follow-up makes `InventoryError` retain a strict internal
+bool `cleanup_uncertain`, raises `True` for failed collector-owned directory
+and duplicated-root closes, and converts it to the fixed public
+`PreflightError` message without losing `True`. Ordinary invalid layouts
+with completed cleanup still report `False`. Disposable RED/GREEN tests inject
+a real close followed by an artificial OSError for each owned FD category,
+traversal failure followed by ambiguous cleanup, and two simultaneous
+ambiguous closes; strict boolean construction and borrowed-FD retention are
+also covered. No existing staging content-read, inventory traversal, workflow,
+UID-502 runtime or incident mutation authority is added.
+
+The already-started marker/staging paired-observation experiment remains in
+its **separate unmerged worktree**. It is not included in this safety fix and
+must be rebased on an approved merge of this change before progressing.
