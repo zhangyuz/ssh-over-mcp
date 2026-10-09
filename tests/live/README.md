@@ -1628,3 +1628,36 @@ or trusted evidence. Someone who controls both artifact bytes and the
 expected digest can substitute both. The codec never accepts or grants
 inspection authority, trusted source provenance, workflow IDs,
 UID-502 access, receipt, recovery, deletion or Level-3 acceptance.
+
+### Cross-binding a portable drift artifact to two frozen offline snapshots
+
+`staging_drift_binding.build_detached_drift_artifact(before, after)`
+is a one-step **offline, non-authorizing** composition of independently
+validated joint observations into the strict v1 canonical drift artifact.
+`verify_detached_drift_artifact(before, after, raw, expected_sha256=...)`
+then strictly decodes and checks the supplied artifact, independently
+recomputes the report from **both** supplied source observations using
+the existing projector/comparator, and requires both complete typed
+report equality and exact canonical artifact/digest byte equality.
+
+The returned frozen `ConsistentDetachedDrift(report, artifact_sha256)`
+attests only **internal consistency of the three supplied data objects**.
+The important distinction is that **a correct SHA-256 of a forged artifact
+is insufficient**: forged marker/parent/selected drift *flags*, encoded
+inventory fields, or metadata claimed as changed are checked against the
+recomputed **v1 report**. This does **not** uniquely bind the full source
+snapshot pair: the report stores a `marker_changed` boolean rather than
+before/after values for metadata omitted from inventory-v1 wire bytes. For
+example, if marker mtime changes from 1 to 42, changing the post-observation
+mtime again to 99 or reversing the pair can still produce the same canonical
+v1 drift artifact. It is a deliberately **lossy summary**. Tests exercise
+a complete builder→verifier round trip, two identical snapshots, forged
+report fields with correctly recomputed checksums, changed source records,
+swapped before/after, mixed incident selectors, malformed/oversized
+payloads, uninitialized cache refusal and host/process/observer I/O traps.
+
+The supplied before/after snapshots, artifact and checksum can all be
+controlled by the caller. A matching result is **NOT an authenticated
+inspection or freshness claim**, cryptographic signature, trusted receipt,
+workflow permission or recovery/Level-3 decision. There is no real UID-502
+capture, provider read/clear, marker mutation, or unknown-workspace access.

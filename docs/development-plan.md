@@ -935,12 +935,24 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   added/removed paths, changed metadata, getconf ancestry/marker changes,
   payload digests, and strict fail-closed input behavior. Exact-head self-hosted
   Ubuntu Python 3.13/3.14 CI `37919751648` PASS; PR Level-3 SKIPPED.
-- **Next functional slice (#177)** — canonical bounded offline drift artifact
-  export/import, including exact schema/version, stable JSON bytes,
-  SHA-256 checksum verification, rejection of forged and noncanonical bytes,
-  a real comparator-to-artifact round-trip and negative security tests.
-  It must pass review and exact-head self-hosted CI before being treated as
-  delivered. A checksum is not a trusted workflow provenance or receipt.
+- **PR #177** — merged as `f2c78878b6b10147de92a26eccf9f46418c822ea`
+  after zero-actionable independent review, 89/89 focused tests and
+  exact-head self-hosted Ubuntu 26.04 Python 3.13/3.14 CI
+  `37920715971` PASS. Delivered strict bounded canonical v1 drift
+  artifact JSON export/import, SHA-256 content validation, no-I/O
+  round-trip, duplicate/noncanonical JSON and forged-path refusal.
+  A checksum is **not** a trusted signature, receipt or provenance.
+- **Next functional slice (#178)** — cross-bind a portable drift report
+  artifact to **both** of its supplied frozen observations. Independently
+  project each source and recompute the full metadata drift, then require
+  strict report and canonical artifact equality even if a forged checksum
+  has been recomputed. **Known v1 limit:** a report's boolean
+  `marker_changed` does not preserve the exact non-wire metadata values
+  or their change direction; this binds the lossy report, not a unique
+  raw snapshot pair. Acceptance: RED/GREEN, adversarial forged/non-wire
+  drift tests, developer full regressions, independent review and
+  exact-head self-hosted Python 3.13/3.14 CI. The verifier proves only
+  consistency among caller-supplied data, never trusted host provenance.
 
 **Roadmap / global consistency:** These primitives are test fixtures and
 offline data transformations. The original Phase 7B1 Task 3 / N1 native
