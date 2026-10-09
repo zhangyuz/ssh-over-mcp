@@ -373,3 +373,178 @@ def test_warm_evidence_but_cold_module_cache_fails_closed_without_loader(
         patch.setattr(p, "_fixed_inventory_module", forbidden)
         with pytest.raises(projection.ProjectionError, match="^staging projection rejected$"):
             projection.project_detached_inventory(evidence)
+
+
+@pytest.fixture
+def drift(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "ops/live-e2e"))
+    return importlib.import_module("staging_drift")
+
+
+def test_offline_drift_same_observation_is_stable_and_immutable(drift, evidence, modules):
+    _, projector = modules
+    report = drift.compare_detached_observations(evidence, evidence)
+    sha = projector.project_detached_inventory(evidence).sha256
+    assert type(report) is drift.DetachedDriftReport
+    assert report.before_sha256 == report.after_sha256 == sha
+    assert report.incident == "stale-target"
+    assert not report.has_drift
+    assert report.added_paths == ()
+    assert report.removed_paths == ()
+    assert report.modified_entries == ()
+    assert not report.marker_changed
+    assert not report.parent_changed
+    assert not report.selected_metadata_changed
+    with pytest.raises(FrozenInstanceError):
+        report.has_drift = True
+
+
+def test_offline_drift_reports_one_changed_regular_file_metadata(drift, evidence, modules):
+    _p, projector = modules
+    entries = list(evidence.selected.inventory)
+    index = next(i for i, x in enumerate(entries) if x.path == "target.bundle")
+    entries[index] = replace(entries[index], size=entries[index].size + 1)
+    altered = replace(evidence, selected=replace(evidence.selected, inventory=tuple(entries)))
+    report = drift.compare_detached_observations(evidence, altered)
+    assert report.has_drift
+    assert report.before_sha256 == projector.project_detached_inventory(evidence).sha256
+    assert report.after_sha256 == projector.project_detached_inventory(altered).sha256
+    assert report.before_sha256 != report.after_sha256
+    assert report.modified_entries == (drift.ChangedEntry("target.bundle", ("size",)),)
+    assert not report.marker_changed
+    assert not report.parent_changed
+    assert report.added_paths == report.removed_paths == ()
+
+
+def test_offline_drift_detects_unencoded_marker_timestamp_change(drift, evidence, modules):
+    _, projector = modules
+    altered = replace(evidence, marker_metadata=replace(evidence.marker_metadata, mtime_ns=31))
+    report = drift.compare_detached_observations(evidence, altered)
+    assert report.before_sha256 == report.after_sha256
+    assert report.before_sha256 == projector.project_detached_inventory(evidence).sha256
+    assert report.has_drift
+    assert report.marker_changed
+    assert report.modified_entries == ()
+
+
+def test_offline_drift_detects_getconf_ancestor_metadata_change(drift, evidence):
+    ancestors = list(evidence.parent.ancestors)
+    ancestor = ancestors[1]
+    ancestors[1] = replace(
+        ancestor, metadata=replace(ancestor.metadata, inode=ancestor.metadata.inode + 1)
+    )
+    altered = replace(evidence, parent=replace(evidence.parent, ancestors=tuple(ancestors)))
+    report = drift.compare_detached_observations(evidence, altered)
+    assert report.parent_changed
+    assert report.has_drift
+    assert report.added_paths == report.removed_paths == report.modified_entries == ()
+
+
+def test_offline_drift_rejects_mixed_catalogs(drift, evidence, modules):
+    p, _ = modules
+    alt = p._select_incident("older-target")
+    entries = list(evidence.selected.inventory)
+    entries[0] = replace(entries[0], inode=alt.inode)
+    selected = replace(
+        evidence.selected,
+        selector="older-target",
+        basename=alt.basename,
+        inode=alt.inode,
+        expected_commit=alt.expected_commit,
+        inventory=tuple(entries),
+    )
+    altered = replace(evidence, selected=selected)
+    with pytest.raises(drift.DriftError, match="^staging drift rejected$"):
+        drift.compare_detached_observations(evidence, altered)
+
+
+@pytest.mark.parametrize("side", ["before", "after"])
+def test_offline_drift_refuses_invalid_or_forged_source(drift, evidence, side):
+    forged = replace(evidence, selected=replace(evidence.selected, inventory=(None,) * 13))
+    one, two = (forged, evidence) if side == "before" else (evidence, forged)
+    with pytest.raises(drift.DriftError, match="^staging drift rejected$") as failure:
+        drift.compare_detached_observations(one, two)
+    assert failure.value.__cause__ is None
+
+
+def test_offline_drift_does_not_access_host_or_observer(drift, evidence, modules, monkeypatch):
+    p, _projector = modules
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("offline diff attempted any host I/O or live observation")
+
+    with monkeypatch.context() as patch:
+        for method in ("open", "stat", "scandir", "listdir", "system", "kill", "fork"):
+            if hasattr(os, method):
+                patch.setattr(os, method, forbidden)
+        patch.setattr(p, "_observe_detached_joint_preflight", forbidden)
+        patch.setattr(p, "_fixed_inventory_module", forbidden)
+        report = drift.compare_detached_observations(evidence, evidence)
+    assert not report.has_drift
+
+
+def test_offline_drift_rejects_cold_inventory_cache_without_loader(
+    drift, evidence, modules, monkeypatch
+):
+    p, _ = modules
+    with monkeypatch.context() as patch:
+        patch.setattr(p, "_FIXED_INVENTORY_MODULE", None)
+        patch.setattr(p, "_fixed_inventory_module", lambda: pytest.fail("unexpected module load"))
+        with pytest.raises(drift.DriftError, match="^staging drift rejected$"):
+            drift.compare_detached_observations(evidence, evidence)
+
+
+def test_offline_drift_identifies_added_and_removed_nested_entry(drift, evidence, modules):
+    _p, projector = modules
+    old_entries = list(evidence.selected.inventory)
+    parent_index = next(
+        i for i, item in enumerate(old_entries) if item.path == "payload-content/expected_commit"
+    )
+    additional = replace(
+        old_entries[parent_index],
+        path="payload-content/extra.bin",
+        inode=202601,
+        size=17,
+    )
+    expanded = old_entries[: parent_index + 1] + [additional] + old_entries[parent_index + 1 :]
+    later = replace(evidence, selected=replace(evidence.selected, inventory=tuple(expanded)))
+    assert (
+        projector.project_detached_inventory(later).sha256
+        != projector.project_detached_inventory(evidence).sha256
+    )
+    added = drift.compare_detached_observations(evidence, later)
+    assert added.has_drift
+    assert added.added_paths == ("payload-content/extra.bin",)
+    assert added.removed_paths == added.modified_entries == ()
+    removed = drift.compare_detached_observations(later, evidence)
+    assert removed.has_drift
+    assert removed.removed_paths == ("payload-content/extra.bin",)
+    assert removed.added_paths == removed.modified_entries == ()
+
+
+def test_offline_drift_tracks_expected_file_metadata_and_selected_binding(drift, evidence):
+    entries = list(evidence.selected.inventory)
+    index = next(
+        i for i, item in enumerate(entries) if item.path == "payload-content/expected_commit"
+    )
+    entries[index] = replace(entries[index], ctime_ns=entries[index].ctime_ns + 1)
+    changed_meta = replace(evidence.selected.expected_metadata, ctime_ns=entries[index].ctime_ns)
+    updated = replace(
+        evidence,
+        selected=replace(
+            evidence.selected, inventory=tuple(entries), expected_metadata=changed_meta
+        ),
+    )
+    report = drift.compare_detached_observations(evidence, updated)
+    assert report.has_drift
+    assert report.selected_metadata_changed
+    assert report.modified_entries == (
+        drift.ChangedEntry("payload-content/expected_commit", ("ctime_ns",)),
+    )
+
+
+@pytest.mark.parametrize("invalid", [None, True, "stale-target", {}, [], b"fixture"])
+def test_offline_drift_refuses_untyped_inputs(drift, evidence, invalid):
+    with pytest.raises(drift.DriftError, match="^staging drift rejected$") as failure:
+        drift.compare_detached_observations(invalid, evidence)
+    assert failure.value.__cause__ is None
