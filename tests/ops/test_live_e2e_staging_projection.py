@@ -548,3 +548,22 @@ def test_offline_drift_refuses_untyped_inputs(drift, evidence, invalid):
     with pytest.raises(drift.DriftError, match="^staging drift rejected$") as failure:
         drift.compare_detached_observations(invalid, evidence)
     assert failure.value.__cause__ is None
+
+
+def test_offline_drift_artifact_full_comparison_round_trip(drift, evidence, modules, monkeypatch):
+    """End-to-end: two pinned-style evidence values -> drift -> bytes -> verified report."""
+    monkeypatch.syspath_prepend(str(ROOT / "ops/live-e2e"))
+    codec = importlib.import_module("staging_drift_artifact")
+    entries = list(evidence.selected.inventory)
+    at = next(i for i, record in enumerate(entries) if record.path == "target.bundle")
+    entries[at] = replace(entries[at], size=entries[at].size + 1)
+    changed = replace(evidence, selected=replace(evidence.selected, inventory=tuple(entries)))
+    original_report = drift.compare_detached_observations(evidence, changed)
+    artifact = codec.encode_detached_drift(original_report)
+    restored = codec.decode_detached_drift(artifact.payload, expected_sha256=artifact.sha256)
+    assert restored == original_report
+    assert restored.modified_entries == (drift.ChangedEntry("target.bundle", ("size",)),)
+    assert restored.has_drift
+    assert codec.encode_detached_drift(restored) == artifact
+    assert not hasattr(artifact, "inspection")
+    assert not hasattr(restored, "receipt")
