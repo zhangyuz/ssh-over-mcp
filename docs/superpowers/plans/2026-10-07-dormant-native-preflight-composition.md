@@ -388,3 +388,19 @@ stale provider marker, exit 70. This does not authorize cleanup.
 The housekeeping request removed only 30 clean fully-merged exactly
 remote-matched historical branches/worktrees; recovery, dirty,
 diverged and paused native worktrees remain preserved.
+
+
+## Public-only consensus interval projection — PR #189
+
+#188 merged as `ca382de725956252eeafba49d2c7c67806a5b896`
+with independent reviewed exact-head Ubuntu 26.04 Python 3.13/3.14
+validation PASS. #189 is intentionally smaller: one **public-only**
+≤64-KiB canonical consensus interval projector and independently
+original-source verifying API. It coalesces adjacent identical
+classification/supporter/absent-member states into half-open hop
+windows, retains exact #188 source consensus SHA-256 and summary counts,
+and fails closed on forged, swapped or malformed detached inputs.
+Private raw path audit scope, native provider mutation, UI, A1/B8
+receipt authority, N1c recovery/ADR 0011 and UID-502 acceptance
+are **not** touched or newly authorized. Merge-main native Level-3
+must be assessed separately from PR-only SKIPPED status.
