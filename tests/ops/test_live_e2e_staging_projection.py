@@ -303,3 +303,73 @@ def test_bounded_paths_refused_before_expensive_encode(modules, evidence, field,
     fake = replace(evidence, selected=replace(evidence.selected, inventory=tuple(entries)))
     with pytest.raises(projection.ProjectionError, match="^staging projection rejected$"):
         projection.project_detached_inventory(fake)
+
+
+class _DeceptiveAncestorPath(str):
+    def __ne__(self, other):
+        return False
+
+
+@pytest.mark.parametrize(
+    "spoofed",
+    [
+        _DeceptiveAncestorPath("/wrong/untrusted/ancestor"),
+        None,
+        3,
+        b"/private",
+    ],
+)
+def test_reject_forged_ancestor_path_exact_type(modules, evidence, spoofed):
+    _p, projection = modules
+    ancestors = list(evidence.parent.ancestors)
+    ancestors[3] = replace(ancestors[3], path=spoofed)
+    fake = replace(evidence, parent=replace(evidence.parent, ancestors=tuple(ancestors)))
+    with pytest.raises(projection.ProjectionError, match="^staging projection rejected$"):
+        projection.project_detached_inventory(fake)
+
+
+def test_reject_oversized_ancestor_without_copying_it(modules, evidence):
+    _p, projection = modules
+    ancestors = list(evidence.parent.ancestors)
+    ancestors[2] = replace(ancestors[2], path="a" * 24600)
+    fake = replace(evidence, parent=replace(evidence.parent, ancestors=tuple(ancestors)))
+    with pytest.raises(projection.ProjectionError, match="^staging projection rejected$"):
+        projection.project_detached_inventory(fake)
+
+
+def test_cold_cache_refuses_before_any_fixed_module_load_or_host_access(
+    modules, evidence, monkeypatch
+):
+    p, projection = modules
+
+    # Evidence was assembled from the real fixed InventoryEntry type while
+    # cache was warm. A fresh uninitialized projection MUST NOT dynamically
+    # fetch/execute that module just to perform an entry type check.
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("cold-cache projection attempted to load or access host")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(p, "_FIXED_INVENTORY_MODULE", None)
+        patch.setattr(p, "_fixed_inventory_module", forbidden)
+        for method in ("open", "scandir", "stat", "listdir", "system", "kill", "fork"):
+            if hasattr(os, method):
+                patch.setattr(os, method, forbidden)
+        cold = replace(evidence, selected=replace(evidence.selected, inventory=(None,) * 13))
+        with pytest.raises(projection.ProjectionError, match="^staging projection rejected$"):
+            projection.project_detached_inventory(cold)
+        assert p._FIXED_INVENTORY_MODULE is None
+
+
+def test_warm_evidence_but_cold_module_cache_fails_closed_without_loader(
+    modules, evidence, monkeypatch
+):
+    p, projection = modules
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("cold cache should fail closed rather than load a module")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(p, "_FIXED_INVENTORY_MODULE", None)
+        patch.setattr(p, "_fixed_inventory_module", forbidden)
+        with pytest.raises(projection.ProjectionError, match="^staging projection rejected$"):
+            projection.project_detached_inventory(evidence)

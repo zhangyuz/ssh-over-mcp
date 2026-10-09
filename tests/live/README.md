@@ -1560,9 +1560,12 @@ Output is only frozen `ProjectedInventory(payload: bytes, sha256: str)`.
 Fixture golden inventory bytes/digest must match exactly; both incident
 selectors, malformed/forged records, wrong ancestor paths, root/inventory
 catalog mismatches, wrong expected_commit metadata, unsafe marker modes,
-entry order/duplicates, scalar-type misuse, immutability and projection
-determinism have explicit tests. Host-access traps prove the converter
+entry order/duplicates, scalar-type misuse (including deceptive `str` subclasses on discarded
+ancestor paths), immutability and projection determinism have explicit tests. Host-access traps prove the converter
 does not call `os.open/stat/scandir/kill/fork` or the preflight observer.
+When the fixed inventory-entry module cache is uninitialized, it refuses
+without loading/compiling a file; normal jointly pinned observation has
+already initialized that fixed inventory type during collection.
 
 This feature **does not authenticate provenance** of a supplied detached
 record. It neither accepts `inspection` authority/run ID/attempt nor

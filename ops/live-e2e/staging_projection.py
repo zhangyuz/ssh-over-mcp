@@ -105,6 +105,8 @@ def project_detached_inventory(observation: object) -> ProjectedInventory:
         for index, ancestor in enumerate(parent.ancestors):
             if (
                 type(ancestor) is not preflight._DirectoryAncestor
+                or type(ancestor.path) is not str
+                or len(ancestor.path) > 24578
                 or type(ancestor.metadata) is not preflight.DirectoryMetadata
             ):
                 raise ProjectionError(_FAILURE)
@@ -136,7 +138,13 @@ def project_detached_inventory(observation: object) -> ProjectedInventory:
         if parent.path != ancestor_rows[-1]["path"]:
             raise ProjectionError(_FAILURE)
 
-        entry_type = preflight._fixed_inventory_module().InventoryEntry
+        # The real pinned inventory observer initializes this cache while
+        # collecting records. Never import/execute checkout code from a
+        # supposedly pure projection call, including cold-cache failures.
+        inventory_module = preflight._FIXED_INVENTORY_MODULE
+        if inventory_module is None:
+            raise ProjectionError(_FAILURE)
+        entry_type = inventory_module.InventoryEntry
         entries = []
         expected_entry = None
         for entry in selected.inventory:
