@@ -937,8 +937,10 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
 offline data transformations. The original Phase 7B1 Task 3 / N1 native
 toolchain prerequisite remains blocked, as do the separately reviewed
 trusted-main authority-file binding (A1), actual dedicated UID-502 read-only
-preflight, authenticated workflow provenance/receipt integration (N1c), and
-real no-network Level-3 after stale provider disposition. Their acceptance
-criteria remain **open**, irrespective of the PR-only Level-3 SKIPPED status.
+preflight, separately reviewed incident-workflow provenance/receipt
+integration (preflight plan B8), and real no-network Level-3 after stale
+provider disposition. **N1c is a distinct paused native-input authentication
+subtask; ADR 0011 requires recovery/A1 closure before N1c resumes.** These
+acceptance criteria remain **open**, irrespective of PR-only Level-3 SKIPPED.
 No real incident, provider cleanup, marker clear, process signal, or unknown
 recovery workspace action has been authorized by this progress.
