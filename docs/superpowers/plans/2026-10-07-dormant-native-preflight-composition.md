@@ -404,3 +404,8 @@ Private raw path audit scope, native provider mutation, UI, A1/B8
 receipt authority, N1c recovery/ADR 0011 and UID-502 acceptance
 are **not** touched or newly authorized. Merge-main native Level-3
 must be assessed separately from PR-only SKIPPED status.
+
+#188 merge-main workflow `37980323392`: Python 3.13/3.14 complete
+Ubuntu validation PASS; real no-network native Level-3 FAIL-CLOSED on
+pre-existing stale provider state, exit 70. Offline interval analysis
+does not authorize marker clear or provider recovery.

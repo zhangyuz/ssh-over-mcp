@@ -1076,8 +1076,10 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   #187 8m08s/9m05s → #188 8m24s/8m51s (3.13/3.14), not a demonstrated
   total CI speedup. CI emits the 15 slowest pytest durations on trusted
   main with unchanged two full version suites and 20-minute job budget.
-  #188 merge-main CI `37980323392` must be independently checked for
-  actual native Level-3 result; no native recovery/acceptance implied.
+  #188 merge-main CI `37980323392`: Ubuntu Python 3.13/3.14 full
+  validation PASS; real no-network Level-3 FAIL-CLOSED on the existing
+  stale E2E provider state (exit 70). No provider marker altered and no
+  native acceptance or recovery implied.
 - **Next smaller complete functional slice (#189)** — **path-free
   source-verified consensus interval report**, no private interface.
   Compose bounded canonical ≤64-KiB public ASCII bytes from a newly

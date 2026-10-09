@@ -2121,3 +2121,8 @@ content consistency only, not trusted capture chronology or identity.
 exact-head Python 3.13/3.14 CI `37975594044` SUCCESS. Its PR native
 Level-3 was SKIPPED, not real provider success. Main Level-3 disposition
 remains subject to actual merge-main run evidence.
+
+#188 merge-main `37980323392`: Ubuntu 26.04 Python 3.13/3.14 full
+validation PASS, actual no-network native Level-3 FAIL-CLOSED on the
+existing stale provider state (exit 70). Neither #188 nor #189 changes
+the real provider marker or permits native workflow acceptance.
