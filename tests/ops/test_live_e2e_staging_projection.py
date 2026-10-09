@@ -1010,3 +1010,86 @@ def test_snapshot_seal_no_io_and_cold_cache_fail_closed(
         patch.setattr(p, "_fixed_inventory_module", forbidden)
         with pytest.raises(seal.SnapshotSealError, match="^staging snapshot seal rejected$"):
             seal.build_snapshot_pair_seal(evidence, evidence, drift.payload, drift.sha256)
+
+
+@pytest.mark.parametrize("digits", [5001, 10001])
+@pytest.mark.parametrize("negative", [False, True])
+@pytest.mark.parametrize("source", ["marker", "expected_commit"])
+def test_snapshot_seal_large_signed_timestamp_reuses_local_bounded_decimal(
+    seal, binding, evidence, source, digits, negative, monkeypatch
+):
+    """Existing projector/wire domain allows >4300 signed timestamp digits."""
+    import sys
+
+    guard = sys.get_int_max_str_digits()
+    value = 10 ** (digits - 1)
+    if negative:
+        value = -value
+
+    def forbidden(*_args):
+        pytest.fail("snapshot seal changed the process-wide integer guard")
+
+    monkeypatch.setattr(sys, "set_int_max_str_digits", forbidden)
+    if source == "marker":
+        changed = replace(
+            evidence,
+            marker_metadata=replace(evidence.marker_metadata, mtime_ns=value),
+        )
+    else:
+        entries = list(evidence.selected.inventory)
+        index = next(
+            i for i, entry in enumerate(entries) if entry.path == "payload-content/expected_commit"
+        )
+        entries[index] = replace(entries[index], ctime_ns=value)
+        changed = replace(
+            evidence,
+            selected=replace(
+                evidence.selected,
+                inventory=tuple(entries),
+                expected_metadata=replace(evidence.selected.expected_metadata, ctime_ns=value),
+            ),
+        )
+    artifact = binding.build_detached_drift_artifact(evidence, changed)
+    assert binding.verify_detached_drift_artifact(
+        evidence, changed, artifact.payload, expected_sha256=artifact.sha256
+    ).report.has_drift
+    packed = seal.build_snapshot_pair_seal(evidence, changed, artifact.payload, artifact.sha256)
+    verified = seal.verify_snapshot_pair_seal(
+        evidence, changed, artifact.payload, artifact.sha256, packed.payload, packed.sha256
+    )
+    assert verified.before_snapshot_sha256 != verified.after_snapshot_sha256
+    assert verified.seal_sha256 == packed.sha256
+    assert sys.get_int_max_str_digits() == guard
+
+
+def test_snapshot_seal_metadata_bytes_remain_backward_compatible(seal, evidence):
+    """No hash-format change for previously accepted ordinary metadata."""
+    marker = evidence.marker_metadata
+    expected = evidence.selected.expected_metadata
+    fields = ("device", "inode", "uid", "gid", "mode", "nlink", "size", "mtime_ns", "ctime_ns")
+    previous = json.dumps(
+        {
+            "marker_metadata": {name: getattr(marker, name) for name in fields},
+            "selected_expected_metadata": {name: getattr(expected, name) for name in fields},
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("ascii")
+    assert seal._metadata_fingerprint_bytes(marker, expected) == previous
+
+
+def test_snapshot_seal_rejects_forged_huge_signed_marker_value(seal, binding, evidence):
+    """Both values have the same lossy v1 marker_changed flag, not the same seal."""
+    huge = -(10**5000)
+    changed = replace(evidence, marker_metadata=replace(evidence.marker_metadata, ctime_ns=huge))
+    forged = replace(changed, marker_metadata=replace(changed.marker_metadata, ctime_ns=huge - 1))
+    artifact = binding.build_detached_drift_artifact(evidence, changed)
+    assert binding.verify_detached_drift_artifact(
+        evidence, forged, artifact.payload, expected_sha256=artifact.sha256
+    ).report.marker_changed
+    pair = seal.build_snapshot_pair_seal(evidence, changed, artifact.payload, artifact.sha256)
+    with pytest.raises(seal.SnapshotSealError, match="^staging snapshot seal rejected$"):
+        seal.verify_snapshot_pair_seal(
+            evidence, forged, artifact.payload, artifact.sha256, pair.payload, pair.sha256
+        )

@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from staging_drift import DetachedDriftReport
 from staging_drift_binding import verify_detached_drift_artifact
 from staging_projection import project_detached_inventory
+from staging_wire import MAX_BYTES as MAX_WIRE_BYTES
+from staging_wire import encode_integer
 
 _FAILURE = "staging snapshot seal rejected"
 _DOMAIN = b"ssh-over-mcp:detached-snapshot-content:v1\x00"
@@ -60,6 +62,38 @@ def _canonical(value: dict) -> bytes:
     ).encode("ascii")
 
 
+def _metadata_fingerprint_bytes(marker: object, expected: object) -> bytes:
+    """Fixed-key canonical JSON metadata, bounded local decimal conversion.
+
+    Do not call json.dumps on source integers: CPython's default max-str-digits
+    would reject metadata that the existing bounded inventory wire accepts.
+    Preserve the exact previous sorted-key JSON representation for ordinary
+    values and the same representation for arbitrarily long bounded integers.
+    """
+    out = bytearray()
+
+    def append(raw: bytes) -> None:
+        if len(out) + len(raw) > MAX_WIRE_BYTES:
+            raise SnapshotSealError(_FAILURE)
+        out.extend(raw)
+
+    append(b'{"marker_metadata":{')
+    for label, metadata in (("marker", marker), ("expected", expected)):
+        if label == "expected":
+            append(b',"selected_expected_metadata":{')
+        for index, field in enumerate(sorted(_META)):
+            if index:
+                append(b",")
+            append(b'"' + field.encode("ascii") + b'":')
+            # Projector already checks exact built-in int. Keep a local
+            # per-field byte budget to avoid unbounded intermediate strings.
+            remaining = MAX_WIRE_BYTES - len(out)
+            append(encode_integer(getattr(metadata, field), max_bytes=remaining))
+        append(b"}")
+    append(b"}")
+    return bytes(out)
+
+
 def _source_fingerprint(observation: object) -> str:
     # Projector validates all record types, incident catalog, exact marker
     # invariants, expected-commit binding and canonical inventory bounds.
@@ -68,12 +102,7 @@ def _source_fingerprint(observation: object) -> str:
     expected = observation.selected.expected_metadata
     # The inventory wire omits some marker metadata. Preserve all nine
     # exact checked integer scalar values, even ones not emitted on wire.
-    extra = _canonical(
-        {
-            "marker_metadata": {field: getattr(marker, field) for field in _META},
-            "selected_expected_metadata": {field: getattr(expected, field) for field in _META},
-        }
-    )
+    extra = _metadata_fingerprint_bytes(marker, expected)
     digest = hashlib.sha256()
     digest.update(_DOMAIN)
     digest.update(len(projection.payload).to_bytes(8, byteorder="big"))

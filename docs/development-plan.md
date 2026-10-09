@@ -958,7 +958,11 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   cross-binds those digests to the canonical v1 drift artifact. It closes
   the lossy timestamp-value and reversal ambiguity **for a fixed supplied
   tuple**, without changing v1 or claiming trusted host origin, freshness
-  or incident authorization. Require adversarial RED/GREEN, full regression,
+  or incident authorization. **Post-review P2** fixed by reusing the
+  bounded local integer wire codec: legal signed metadata values over
+  4300 digits must work without changing Python's global digit guard;
+  preexisting ordinary canonical bytes stay identical. Require
+  adversarial RED/GREEN, full regression,
   independent review and exact-head self-hosted Python 3.13/3.14 gates.
 
 **Roadmap / global consistency:** These primitives are test fixtures and

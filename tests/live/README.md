@@ -1678,6 +1678,13 @@ equality with the seal.
 The snapshot fingerprint is domain-separated SHA-256 over canonical
 inventory-v1 bytes **plus every strictly checked scalar field of the
 full marker and selected expected-file regular metadata records**.
+The supplementary metadata integers reuse the fixed wire codec's **locally
+bounded decimal encoder**, retaining the legacy canonical JSON bytes for
+ordinary values while accepting already-valid signed timestamps beyond
+CPython's 4300-decimal-digit conversion guard (including 5001/10001-digit
+positive and negative values). It never disables or mutates that global guard.
+The extra metadata encoding uses a fixed 2 MiB byte budget; failure is
+sanitized and does not open a host access path.
 This includes marker fields omitted from inventory wire bytes, such as
 the actual before/after `mtime_ns` and `ctime_ns` values. Unlike the
 lossy v1 drift report's `marker_changed` boolean, this separate
