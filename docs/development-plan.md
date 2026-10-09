@@ -1028,7 +1028,9 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   deep reviews `6083652021` and `6083820365` found zero
   Critical/Important/Minor; 1,607 related tests passed. Exact-head
   self-hosted Ubuntu 26.04 Python 3.13/3.14 CI `37947379672` PASS;
-  PR-only native Level-3 SKIPPED, not E2E approval.
+  PR-only native Level-3 SKIPPED, not E2E approval. Merge-main CI
+  `37951075646` Ubuntu validation PASS, but native no-network Level-3
+  FAIL-CLOSED (exit 70: pre-existing stale E2E provider state).
 - **Next larger complete functional slice (#186)** — **two-series offline
   investigation comparison dossier**, not another small primitive.
   Accepts TWO independently verified, source-bound, contiguous #184

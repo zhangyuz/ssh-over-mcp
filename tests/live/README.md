@@ -1962,3 +1962,15 @@ replacement. There is no host/process/network/UID-502/provider I/O, staging
 mutation, trusted A1/B8 receipt, paused N1c activation, native Phase 7B1
 acceptance or Level-3 recovery power. The native stale-provider state must be
 disposed separately and must not be silently cleared to make this test green.
+
+#185 merge-main workflow `37951075646`: Ubuntu Python 3.13/3.14 validation
+PASS; native no-network Level-3 FAIL-CLOSED on stale E2E provider state
+(exit 70). #186 never clears a provider marker or upgrades offline evidence
+into trusted A1/B8/native authority.
+
+The first exact-head #186 CI attempt `37952154503` ran Python 3.13 tests
+successfully but was CANCELLED during the expensive 3.14 full test step
+by the workflow's 20-minute job budget; **not a passing CI run**. The
+128-hop comparison limit remains exercised in the public build, while
+byte-exact verification is covered by separate adversarial end-to-end tests
+instead of recomputing the entire maximal pair a second time in one test.
