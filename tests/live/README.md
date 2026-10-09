@@ -1245,3 +1245,74 @@ simulated A→B→A changes, normal common-root acceptance and forged T
 baseline rejection. No real incident marker/selected staging is read;
 this is still a dormant borrowed-context intermediate, not full
 preflight evidence.
+
+
+### Dormant jointly rooted marker + selected inventory observation
+
+Private `_observe_joint_marker_staging(selector)` applies the previously
+reviewed fixed marker/selected-staging observation inside the concurrently
+pinned cache, native-temp and catalog-selected staging ownership context.
+The fixed two-item selector is validated before any getconf or filesystem
+open. The shared literal-root and borrowed selected T identity are checked
+before and after observing the fixed `active-run.json` marker and
+metadata-only staging inventory. The existing strict descriptor-relative
+marker parser and selected inventory are unchanged; only fixed
+`payload-content/expected_commit` content is additionally reread under
+the held selected FD and compared with the frozen inventory metadata.
+The marker is also re-read after that bounded expected-commit operation
+and its immutable metadata must match the earlier observation.
+
+The result is only existing immutable `_MarkerStagingEvidence`; it contains
+no FD, raw marker bytes, process stdout, child identity, PID argument, receipt,
+workflow or recovery capability. All new test reads are confined to
+disposable fixture trees. This helper is dormant and not a complete native
+preflight; in particular it does **not** establish the exact checkout
+authority bytes, a pair of fixed ps captures, trusted workflow provenance,
+persistent-runner process quiescence, or namespace immutability after FD
+closure. Its partial evidence may not be used for recovery or Level-3/A1.
+
+
+The first independent PR #167 security reviewer also reproduced a late
+expected-commit TOCTOU: the third marker read could rewrite the fixed
+expected_commit leaf after its last content revalidation while the outer
+composition still accepted stale evidence. The new ordering keeps the
+single fixed payload FD held during the late marker read, validates
+expected-commit content/metadata again afterward, then closes the owned
+payload descriptor. A further fixed marker reread detects marker drift
+caused during that owned payload cleanup, and a **reject-only metadata**
+check of the fixed payload directory and expected_commit leaf (parent
+metadata before and after) rejects a leaf rewrite during the last marker
+read or payload close. The slash-separated stat is supplemental drift
+detection, not a no-follow proof for intermediate directories; original
+descriptor-relative `_pin_expected_commit` provides the content-read
+authority. Disposable fault injection demonstrates the reviewer case RED
+and the corrected code GREEN, without reading live incident state.
+
+
+### PR #167 second adversarial Review: last marker leaf and owned file closes
+
+The independent #6072158191 review identified two Important close-boundary
+holes in the dormant joint marker/staging partial evidence. A deterministic
+disposable fixture makes the fourth fixed marker reader's owned regular-file
+close successfully rename `active-run.json` to `old-marker` and install
+either a symlink to its original bytes or a freshly created same-byte file
+with another inode. Previously partial evidence could be returned; now,
+**after that final marker FD is closed**, the wrapper performs a fixed,
+single-component `os.stat("active-run.json", dir_fd=held_cache_fd,
+follow_symlinks=False)` and compares the complete original strict
+regular-file metadata (device/inode/type/UID/GID/mode/nlink/size/mtime/ctime).
+This rejects the symlink and different inode, regardless of byte equality.
+The pinned cache directory stays held through the check, with no new
+regular-file read or temporary FD ownership.
+
+The existing owned-file reader `_read_named_regular` also used to
+propagate `KeyboardInterrupt`, `SystemExit`, `GeneratorExit` or
+`MemoryError` from its `os.close(fd)` to an outer handler that claimed
+`cleanup_uncertain=False`. It now normalizes just those known ambiguous
+close failures to the fixed `PreflightError(cleanup_uncertain=True)`,
+without retrying, double-closing or exposing native exception details.
+The flag also remains True if there was a primary read failure before
+the uncertain close. All fault injections operate on disposable fixture
+FDs only. This is a bounded end-of-reader marker-name binding, not a
+promise of permanent post-context namespace stability or full preflight
+authority, and does not authorize any real UID-502 inspection or cleanup.

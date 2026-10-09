@@ -376,7 +376,16 @@ def _read_named_regular(
         if fd is not None:
             try:
                 os.close(fd)
-            except (OSError, ValueError, TypeError, OverflowError):
+            except (
+                OSError,
+                ValueError,
+                TypeError,
+                OverflowError,
+                MemoryError,
+                KeyboardInterrupt,
+                SystemExit,
+                GeneratorExit,
+            ):
                 uncertain = True
         if uncertain:
             raise PreflightError(cleanup_uncertain=True) from None
@@ -1630,3 +1639,113 @@ def _require_shared_incident_ancestry(
         or _metadata(os.fstat(selected._fds[0])) != tail
     ):
         raise PreflightError()
+
+
+def _observe_joint_marker_staging(selector: str) -> _MarkerStagingEvidence:
+    """Private dormant marker/staging observation under jointly pinned roots.
+
+    No ps, trusted-runner invocation, receipt, workflow or recovery action.
+    This detached *partial* evidence does not prove complete native preflight.
+    """
+    incident = _select_incident(selector)
+    try:
+        with _pin_observed_incident_ancestry(selector) as (cache, temp, selected):
+            _require_shared_incident_ancestry(cache, temp, selected)
+            observed = _observe_marker_staging(cache, selected, selector)
+            # The inventory can change after its inner helper returns.
+            # Rebind only the catalog's fixed expected_commit through the
+            # still-held selected FD, then confirm the marker's fixed schema
+            # and immutable metadata once again after that bounded read.
+            with _pin_expected_commit(
+                selected._fds[-1],
+                incident.expected_commit,
+                uid=incident.uid,
+                device=incident.device,
+            ) as expected:
+                if expected.first.metadata != observed.selected.expected_metadata:
+                    raise PreflightError()
+                original_payload = expected._payload_chain.metadata[0]
+                expected.revalidate(incident.expected_commit, uid=incident.uid)
+                late_marker = _read_marker(cache._fds[-1], uid=_CACHE_ACCOUNT_UID)
+                if late_marker.metadata != observed.marker_metadata:
+                    raise PreflightError()
+                # Content is reread through the SAME pinned payload descriptor
+                # after the marker read, while it is still held.
+                expected.revalidate(incident.expected_commit, uid=incident.uid)
+            # The owned payload close may itself mutate the marker. Bind the
+            # fixed marker again *after* the payload descriptors are closed.
+            settled_marker = _read_marker(cache._fds[-1], uid=_CACHE_ACCOUNT_UID)
+            if settled_marker.metadata != observed.marker_metadata:
+                raise PreflightError()
+            # The final marker owned FD is now closed. Its successful
+            # close can rename the *currently named* fixed leaf while
+            # leaving the frozen returned metadata unchanged. Bind that
+            # literal single-component live edge with NOFOLLOW relative
+            # to the still-held cache directory FD, before releasing it.
+            if (
+                _file_meta(
+                    os.stat(
+                        "active-run.json",
+                        dir_fd=cache._fds[-1],
+                        follow_symlinks=False,
+                    ),
+                    _CACHE_ACCOUNT_UID,
+                    0o600,
+                    4096,
+                    None,
+                )
+                != observed.marker_metadata
+            ):
+                raise PreflightError()
+            # Descendant closure itself can mutate a name. After it completes,
+            # perform only a reject-only metadata drift check of the original
+            # fixed payload and expected-commit identities. The joined leaf
+            # stat is NOT a no-follow proof for intermediate components; the
+            # preceding descriptor-relative pin supplies that authority.
+            selected_fd = selected._fds[-1]
+            if (
+                _metadata(os.stat("payload-content", dir_fd=selected_fd, follow_symlinks=False))
+                != original_payload
+            ):
+                raise PreflightError()
+            late_leaf = os.stat(
+                "payload-content/expected_commit",
+                dir_fd=selected_fd,
+                follow_symlinks=False,
+            )
+            if (
+                _file_meta(late_leaf, incident.uid, None, 41, incident.device)
+                != observed.selected.expected_metadata
+            ):
+                raise PreflightError()
+            if (
+                _metadata(os.stat("payload-content", dir_fd=selected_fd, follow_symlinks=False))
+                != original_payload
+            ):
+                raise PreflightError()
+            # Both content readers completed before this final common-root,
+            # pinned-name-edge and ownership gate.
+            selected.revalidate()
+            cache.revalidate()
+            temp.revalidate()
+            _require_shared_incident_ancestry(cache, temp, selected)
+        return observed
+    except PreflightError:
+        raise
+    except (
+        ImportError,
+        SyntaxError,
+        OSError,
+        TypeError,
+        ValueError,
+        AttributeError,
+        RuntimeError,
+        OverflowError,
+        MemoryError,
+        IndexError,
+        KeyError,
+        KeyboardInterrupt,
+        SystemExit,
+        GeneratorExit,
+    ):
+        raise PreflightError() from None
