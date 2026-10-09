@@ -946,7 +946,10 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   artifact to **both** of its supplied frozen observations. Independently
   project each source and recompute the full metadata drift, then require
   strict report and canonical artifact equality even if a forged checksum
-  has been recomputed. Acceptance: RED/GREEN, adversarial forged/non-wire
+  has been recomputed. **Known v1 limit:** a report's boolean
+  `marker_changed` does not preserve the exact non-wire metadata values
+  or their change direction; this binds the lossy report, not a unique
+  raw snapshot pair. Acceptance: RED/GREEN, adversarial forged/non-wire
   drift tests, developer full regressions, independent review and
   exact-head self-hosted Python 3.13/3.14 CI. The verifier proves only
   consistency among caller-supplied data, never trusted host provenance.

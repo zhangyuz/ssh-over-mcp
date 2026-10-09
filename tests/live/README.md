@@ -1643,9 +1643,14 @@ report equality and exact canonical artifact/digest byte equality.
 The returned frozen `ConsistentDetachedDrift(report, artifact_sha256)`
 attests only **internal consistency of the three supplied data objects**.
 The important distinction is that **a correct SHA-256 of a forged artifact
-is insufficient**: a modified marker timestamp, parent ancestry, per-entry
-metadata, or changed-field flags are detected against the originals,
-including metadata omitted from inventory-v1 wire bytes. Tests exercise
+is insufficient**: forged marker/parent/selected drift *flags*, encoded
+inventory fields, or metadata claimed as changed are checked against the
+recomputed **v1 report**. This does **not** uniquely bind the full source
+snapshot pair: the report stores a `marker_changed` boolean rather than
+before/after values for metadata omitted from inventory-v1 wire bytes. For
+example, if marker mtime changes from 1 to 42, changing the post-observation
+mtime again to 99 or reversing the pair can still produce the same canonical
+v1 drift artifact. It is a deliberately **lossy summary**. Tests exercise
 a complete builder→verifier round trip, two identical snapshots, forged
 report fields with correctly recomputed checksums, changed source records,
 swapped before/after, mixed incident selectors, malformed/oversized

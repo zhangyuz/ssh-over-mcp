@@ -811,3 +811,26 @@ def test_offline_binding_artifact_flags_forged_with_correct_content_digest(
         binding.verify_detached_drift_artifact(
             evidence, later_snapshot, forged.payload, expected_sha256=forged.sha256
         )
+
+
+def test_offline_binding_v1_nonwire_marker_values_are_not_uniquely_bound(binding, evidence):
+    """Regression for reviewed lossy v1 semantics; not a raw source fingerprint."""
+    before = replace(evidence, marker_metadata=replace(evidence.marker_metadata, mtime_ns=1))
+    after_42 = replace(evidence, marker_metadata=replace(evidence.marker_metadata, mtime_ns=42))
+    after_99 = replace(evidence, marker_metadata=replace(evidence.marker_metadata, mtime_ns=99))
+    artifact = binding.build_detached_drift_artifact(before, after_42)
+    baseline = binding.verify_detached_drift_artifact(
+        before, after_42, artifact.payload, expected_sha256=artifact.sha256
+    )
+    same_report_different_value = binding.verify_detached_drift_artifact(
+        before, after_99, artifact.payload, expected_sha256=artifact.sha256
+    )
+    same_report_reversed_pair = binding.verify_detached_drift_artifact(
+        after_42, before, artifact.payload, expected_sha256=artifact.sha256
+    )
+    assert baseline.report.marker_changed
+    assert baseline.report.before_sha256 == baseline.report.after_sha256
+    assert same_report_different_value == baseline
+    assert same_report_reversed_pair == baseline
+    assert after_42.marker_metadata != after_99.marker_metadata
+    assert before.marker_metadata != after_42.marker_metadata

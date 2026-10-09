@@ -58,9 +58,13 @@ def verify_detached_drift_artifact(
 
     Strict decoding/checksum validation precedes comparison. Both snapshots
     are independently validated through the existing projection. Equality
-    covers non-wire marker and expected-metadata changes as well as encoded
-    paths and content SHA digests. Matching proves *only* internal consistency
-    among the three supplied objects, not capture provenance or freshness.
+    covers the *reported drift flags* for non-wire marker metadata and
+    expected-metadata changes, plus encoded paths and content SHA digests.
+    The v1 drift report is lossy: it does NOT bind exact omitted marker
+    metadata values or their before/after direction when both report only
+    marker_changed=True. A matching report proves only consistency at v1
+    report granularity, not unique snapshot-pair identity, provenance, or
+    freshness.
     """
     try:
         supplied = decode_detached_drift(raw, expected_sha256=expected_sha256)
