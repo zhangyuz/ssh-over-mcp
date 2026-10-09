@@ -364,3 +364,119 @@ def test_scandir_iterator_close_cancellation_remains_uncertain(case, monkeypatch
         assert failure.value.cleanup_uncertain is True
         assert failure.value.__cause__ is None
         chain.revalidate()
+
+
+@pytest.mark.parametrize("boundary", ["dup", "scandir"])
+@pytest.mark.parametrize("error_type", [OSError, KeyboardInterrupt, RuntimeError])
+def test_ambiguous_owned_resource_acquisition_is_not_reported_settled(
+    case, monkeypatch, boundary, error_type
+):
+    preflight, root, borrowed = case
+    original_dup, original_scandir, original_close = os.dup, os.scandir, os.close
+    attempted = []
+
+    with preflight._pin_fixed_incident_root(borrowed, "stale-target") as chain:
+        selected_root = chain._fds[-1]
+
+        def uncertain_dup(fd):
+            if (
+                boundary == "dup"
+                and fd == selected_root
+                and sys._getframe(1).f_code.co_name == "collect_staging_inventory"
+            ):
+                # The test fixture disposes its own post-syscall clone; the
+                # caller receives no FD, so it cannot prove a settled close.
+                allocated = original_dup(fd)
+                original_close(allocated)
+                attempted.append("dup")
+                raise error_type("private ambiguous dup")
+            return original_dup(fd)
+
+        def uncertain_scandir(fd):
+            if boundary == "scandir":
+                acquired = original_scandir(fd)
+                acquired.close()
+                attempted.append("scandir")
+                raise error_type("private ambiguous iterator allocation")
+            return original_scandir(fd)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(os, "dup", uncertain_dup)
+            patch.setattr(os, "scandir", uncertain_scandir)
+            with pytest.raises(
+                preflight.PreflightError, match="^staging preflight rejected$"
+            ) as failure:
+                preflight._observe_selected_inventory(chain, "stale-target")
+        assert attempted == [boundary]
+        assert failure.value.cleanup_uncertain is True
+        assert failure.value.__cause__ is None
+        chain.revalidate()
+    assert root.is_dir()
+
+
+def test_failed_borrowed_root_fstat_before_acquisition_remains_settled(case, monkeypatch):
+    preflight, _root, borrowed = case
+    actual_fstat = os.fstat
+    attempted = []
+
+    with preflight._pin_fixed_incident_root(borrowed, "stale-target") as chain:
+        original_collect = preflight._fixed_inventory_module().collect_staging_inventory
+        module = preflight._fixed_inventory_module()
+
+        def reject_before_dup(fd):
+            original = os.dup
+
+            def forbidden_dup(*args):
+                attempted.append("dup")
+                return original(*args)
+
+            with monkeypatch.context() as patch:
+                patch.setattr(os, "dup", forbidden_dup)
+
+                def fail_fstat(candidate):
+                    if candidate == fd:
+                        raise OSError("before collector acquisition")
+                    return actual_fstat(candidate)
+
+                patch.setattr(os, "fstat", fail_fstat)
+                return original_collect(fd, uid=os.geteuid())
+
+        with pytest.raises(module.InventoryError, match="^staging inventory rejected$") as failure:
+            reject_before_dup(chain._fds[-1])
+        assert failure.value.cleanup_uncertain is False
+        assert attempted == []
+        chain.revalidate()
+
+
+@pytest.mark.parametrize("error_type", [OSError, RuntimeError, KeyboardInterrupt])
+def test_child_directory_open_acquisition_unknown_cleanup_is_true(case, monkeypatch, error_type):
+    preflight, root, borrowed = case
+    original_open, original_close = os.open, os.close
+    injected = []
+
+    def ambiguous_open(name, flags, *args, **kwargs):
+        if (
+            name == "payload-content"
+            and kwargs.get("dir_fd") is not None
+            and sys._getframe(1).f_code.co_name == "walk"
+            and not injected
+        ):
+            owned = original_open(name, flags, *args, **kwargs)
+            original_close(owned)  # Fixture disposes its own post-syscall FD.
+            injected.append("child")
+            raise error_type("ambiguous child acquisition")
+        return original_open(name, flags, *args, **kwargs)
+
+    with preflight._pin_fixed_incident_root(borrowed, "stale-target") as chain:
+        with monkeypatch.context() as patch:
+            patch.setattr(os, "open", ambiguous_open)
+            with pytest.raises(
+                preflight.PreflightError, match="^staging preflight rejected$"
+            ) as failure:
+                preflight._observe_selected_inventory(chain, "stale-target")
+        assert injected == ["child"]
+        assert failure.value.cleanup_uncertain is True
+        assert failure.value.__cause__ is None
+        chain.revalidate()
+    assert root.is_dir()
+    assert os.fstat(borrowed).st_ino == root.parent.stat().st_ino

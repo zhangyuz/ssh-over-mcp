@@ -138,7 +138,13 @@ def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry
         names: list[str] = []
         # scandir(fd) owns an internal duplicate too. Its close outcome
         # must not be mistaken for conclusively settled directory cleanup.
-        iterator = os.scandir(fd)
+        try:
+            iterator = os.scandir(fd)
+        except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):  # noqa: BLE001
+            # scandir(fd) internally duplicates an owned descriptor. An
+            # untyped failure during acquisition cannot certify that it
+            # released that clone, even when no iterator was returned.
+            raise InventoryError(cleanup_uncertain=True) from None
         try:
             for item in iterator:
                 check_deadline()
@@ -218,7 +224,13 @@ def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry
             if path == "." and snapshot.kind != _LAYOUT[name]:
                 raise InventoryError(_FAILURE)
             if stat.S_ISDIR(info.st_mode):
-                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                try:
+                    child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):  # noqa: BLE001
+                    # The child descriptor may have been allocated before
+                    # failure without an owned handle being returned. Never
+                    # retry or report such cleanup as conclusively settled.
+                    raise InventoryError(cleanup_uncertain=True) from None
                 try:
                     walk(child, relative, snapshot)
                 finally:
@@ -236,7 +248,12 @@ def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry
 
     try:
         device = os.fstat(root_fd).st_dev
-        owned = os.dup(root_fd)
+        try:
+            owned = os.dup(root_fd)
+        except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):  # noqa: BLE001
+            # A failing duplication may have allocated its FD before
+            # reporting an error. No owned handle escaped for safe closure.
+            raise InventoryError(cleanup_uncertain=True) from None
         try:
             walk(owned, ".")
         finally:

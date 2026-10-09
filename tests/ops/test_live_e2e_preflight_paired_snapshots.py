@@ -384,3 +384,73 @@ def test_paired_inventory_owned_root_close_cancellation_is_uncertain(
     assert events.count("ps") == 1
     assert events.count("inventory") == 1
     chain.revalidate()
+
+
+@pytest.mark.parametrize("boundary", ["dup", "scandir"])
+def test_paired_uncertain_owned_acquire_blocks_ps_b(stage, monkeypatch, boundary):
+    p, _diagnostics, _root, _commit, chain, events, _calls = stage
+    real_dup, real_scandir, real_close = os.dup, os.scandir, os.close
+    triggered = []
+
+    def dup(fd):
+        if (
+            boundary == "dup"
+            and fd == chain._fds[-1]
+            and events.count("ps") == 1
+            and "inventory" in events
+            and sys._getframe(1).f_code.co_name == "collect_staging_inventory"
+        ):
+            acquired = real_dup(fd)
+            real_close(acquired)
+            triggered.append("dup")
+            raise OSError("unknown collector root clone")
+        return real_dup(fd)
+
+    def scandir(fd):
+        if boundary == "scandir" and events.count("ps") == 1 and "inventory" in events:
+            acquired = real_scandir(fd)
+            acquired.close()
+            triggered.append("scandir")
+            raise OSError("unknown scandir clone")
+        return real_scandir(fd)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "dup", dup)
+        patch.setattr(os, "scandir", scandir)
+        with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as failure:
+            p._observe_paired_process_inventory(chain, "stale-target")
+    assert triggered == [boundary]
+    assert failure.value.cleanup_uncertain is True
+    assert events.count("ps") == 1
+    assert events.count("inventory") == 1
+    chain.revalidate()
+
+
+@pytest.mark.parametrize("error_type", [OSError, KeyboardInterrupt])
+def test_paired_child_directory_open_ambiguity_blocks_ps_b(stage, monkeypatch, error_type):
+    p, _d, _root, _commit, chain, events, _calls = stage
+    original_open, original_close = os.open, os.close
+    injected = []
+
+    def ambiguous_open(name, flags, *args, **kwargs):
+        if (
+            name == "payload-content"
+            and kwargs.get("dir_fd") is not None
+            and sys._getframe(1).f_code.co_name == "walk"
+            and not injected
+        ):
+            owned = original_open(name, flags, *args, **kwargs)
+            original_close(owned)
+            injected.append("child")
+            raise error_type("unknown owned child acquisition")
+        return original_open(name, flags, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "open", ambiguous_open)
+        with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as failure:
+            p._observe_paired_process_inventory(chain, "stale-target")
+    assert injected == ["child"]
+    assert failure.value.cleanup_uncertain is True
+    assert events.count("ps") == 1
+    assert events.count("inventory") == 1
+    chain.revalidate()
