@@ -1346,3 +1346,256 @@ def test_snapshot_timeline_rejects_correct_hash_noncanonical_json(
             raw,
             expected_sha256=hashlib.sha256(raw).hexdigest(),
         )
+
+
+@pytest.fixture
+def timeline_summary(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "ops/live-e2e"))
+    return importlib.import_module("staging_timeline_summary")
+
+
+def _make_timeline_summary(timeline, timeline_summary, snapshots):
+    chain = timeline.build_snapshot_timeline(snapshots)
+    summary = timeline_summary.build_timeline_change_summary(
+        snapshots,
+        chain.hops,
+        chain.manifest.payload,
+        expected_timeline_sha256=chain.manifest.sha256,
+    )
+    return chain, summary
+
+
+def test_timeline_summary_reports_only_bounded_counts_and_flags(
+    timeline, timeline_summary, timeline_sources
+):
+    chain, summary = _make_timeline_summary(timeline, timeline_summary, timeline_sources)
+    parsed = json.loads(summary.payload)
+    assert parsed["schema_version"] == 1
+    assert parsed["incident"] == "stale-target"
+    assert parsed["timeline_sha256"] == chain.manifest.sha256
+    assert parsed["changed_hops"] == [0, 1]
+    assert len(parsed["hops"]) == 2
+    assert all(hop["marker_changed"] and hop["changed"] for hop in parsed["hops"])
+    assert all(hop["added_count"] == 0 and hop["removed_count"] == 0 for hop in parsed["hops"])
+    assert all(
+        hop["modified_count"] == 0 and not hop["inventory_changed"] for hop in parsed["hops"]
+    )
+    assert b"mtime_ns" not in summary.payload
+    assert b"payload-content" not in summary.payload
+    checked = timeline_summary.verify_timeline_change_summary(
+        timeline_sources,
+        chain.hops,
+        chain.manifest.payload,
+        summary.payload,
+        expected_timeline_sha256=chain.manifest.sha256,
+        expected_summary_sha256=summary.sha256,
+    )
+    assert checked.summary_sha256 == summary.sha256
+    assert checked.timeline_sha256 == chain.manifest.sha256
+    assert checked.changed_hops == (0, 1)
+    assert len(checked.hops) == 2
+    assert (
+        timeline_summary.build_timeline_change_summary(
+            timeline_sources,
+            chain.hops,
+            chain.manifest.payload,
+            expected_timeline_sha256=chain.manifest.sha256,
+        )
+        == summary
+    )
+    with pytest.raises(FrozenInstanceError):
+        checked.hops = ()
+
+
+def test_timeline_summary_empty_changes(timeline, timeline_summary, evidence):
+    sources = (evidence, evidence, evidence)
+    _, summary = _make_timeline_summary(timeline, timeline_summary, sources)
+    raw = json.loads(summary.payload)
+    assert raw["changed_hops"] == []
+    assert all(not hop["changed"] for hop in raw["hops"])
+
+
+def test_timeline_summary_rejects_intermediate_splice(timeline, timeline_summary, timeline_sources):
+    chain, summary = _make_timeline_summary(timeline, timeline_summary, timeline_sources)
+    mutated = list(timeline_sources)
+    mutated[1] = replace(
+        mutated[1],
+        marker_metadata=replace(mutated[1].marker_metadata, mtime_ns=77),
+    )
+    with pytest.raises(
+        timeline_summary.TimelineSummaryError, match="^staging timeline summary rejected$"
+    ):
+        timeline_summary.verify_timeline_change_summary(
+            tuple(mutated),
+            chain.hops,
+            chain.manifest.payload,
+            summary.payload,
+            expected_timeline_sha256=chain.manifest.sha256,
+            expected_summary_sha256=summary.sha256,
+        )
+
+
+def test_timeline_summary_rejects_swapped_hops(timeline, timeline_summary, timeline_sources):
+    chain, summary = _make_timeline_summary(timeline, timeline_summary, timeline_sources)
+    with pytest.raises(timeline_summary.TimelineSummaryError):
+        timeline_summary.verify_timeline_change_summary(
+            timeline_sources,
+            tuple(reversed(chain.hops)),
+            chain.manifest.payload,
+            summary.payload,
+            expected_timeline_sha256=chain.manifest.sha256,
+            expected_summary_sha256=summary.sha256,
+        )
+
+
+def test_timeline_summary_rejects_recomputed_forged_digest(
+    timeline, timeline_summary, timeline_sources
+):
+    chain, summary = _make_timeline_summary(timeline, timeline_summary, timeline_sources)
+    forged = json.loads(summary.payload)
+    forged["hops"][0]["marker_changed"] = False
+    raw = json.dumps(forged, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+        "ascii"
+    )
+    with pytest.raises(
+        timeline_summary.TimelineSummaryError, match="^staging timeline summary rejected$"
+    ):
+        timeline_summary.verify_timeline_change_summary(
+            timeline_sources,
+            chain.hops,
+            chain.manifest.payload,
+            raw,
+            expected_timeline_sha256=chain.manifest.sha256,
+            expected_summary_sha256=hashlib.sha256(raw).hexdigest(),
+        )
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"{}",
+        b"[]",
+        b"null",
+        b"\xff",
+        b'{"schema_version":1,"schema_version":1}',
+        b"x" * 9000,
+    ],
+)
+def test_timeline_summary_rejects_malformed_wire(timeline, timeline_summary, timeline_sources, raw):
+    chain, _ = _make_timeline_summary(timeline, timeline_summary, timeline_sources)
+    with pytest.raises(
+        timeline_summary.TimelineSummaryError, match="^staging timeline summary rejected$"
+    ):
+        timeline_summary.verify_timeline_change_summary(
+            timeline_sources,
+            chain.hops,
+            chain.manifest.payload,
+            raw,
+            expected_timeline_sha256=chain.manifest.sha256,
+            expected_summary_sha256=hashlib.sha256(raw).hexdigest(),
+        )
+
+
+def test_timeline_summary_rejects_noncanonical_even_with_new_hash(
+    timeline, timeline_summary, timeline_sources
+):
+    chain, summary = _make_timeline_summary(timeline, timeline_summary, timeline_sources)
+    raw = json.dumps(json.loads(summary.payload), indent=1).encode("ascii")
+    with pytest.raises(timeline_summary.TimelineSummaryError):
+        timeline_summary.verify_timeline_change_summary(
+            timeline_sources,
+            chain.hops,
+            chain.manifest.payload,
+            raw,
+            expected_timeline_sha256=chain.manifest.sha256,
+            expected_summary_sha256=hashlib.sha256(raw).hexdigest(),
+        )
+
+
+def test_timeline_summary_max_sixteen_hops(timeline, timeline_summary, evidence):
+    chain, summary = _make_timeline_summary(timeline, timeline_summary, (evidence,) * 17)
+    assert len(json.loads(summary.payload)["hops"]) == 16
+    assert len(summary.payload) <= timeline_summary.MAX_SUMMARY_BYTES
+    assert len(chain.hops) == 16
+
+
+def test_timeline_summary_huge_signed_metadata_and_no_global_guard_change(
+    timeline, timeline_summary, timeline_sources
+):
+    import sys
+
+    guard_before = sys.get_int_max_str_digits()
+    middle = replace(
+        timeline_sources[1],
+        marker_metadata=replace(timeline_sources[1].marker_metadata, mtime_ns=-(10**5000)),
+    )
+    chain, summary = _make_timeline_summary(
+        timeline, timeline_summary, (timeline_sources[0], middle, timeline_sources[2])
+    )
+    assert json.loads(summary.payload)["changed_hops"] == [0, 1]
+    assert len(chain.hops) == 2
+    assert sys.get_int_max_str_digits() == guard_before
+
+
+def test_timeline_summary_no_host_io(
+    timeline, timeline_summary, timeline_sources, modules, monkeypatch
+):
+    p, _ = modules
+    chain, summary = _make_timeline_summary(timeline, timeline_summary, timeline_sources)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("summary accessed host or trusted workflow")
+
+    with monkeypatch.context() as patch:
+        for method in ("open", "stat", "scandir", "listdir", "kill", "system", "fork"):
+            if hasattr(os, method):
+                patch.setattr(os, method, forbidden)
+        patch.setattr(p, "_observe_detached_joint_preflight", forbidden)
+        checked = timeline_summary.verify_timeline_change_summary(
+            timeline_sources,
+            chain.hops,
+            chain.manifest.payload,
+            summary.payload,
+            expected_timeline_sha256=chain.manifest.sha256,
+            expected_summary_sha256=summary.sha256,
+        )
+    assert checked.timeline_sha256 == chain.manifest.sha256
+
+
+def test_timeline_summary_reports_inventory_modification_counts(
+    timeline, timeline_summary, evidence
+):
+    entries = list(evidence.selected.inventory)
+    index = next(i for i, entry in enumerate(entries) if entry.path == "target.bundle")
+    entries[index] = replace(entries[index], size=entries[index].size + 1)
+    altered = replace(evidence, selected=replace(evidence.selected, inventory=tuple(entries)))
+    _, summary = _make_timeline_summary(timeline, timeline_summary, (evidence, altered))
+    hop = json.loads(summary.payload)["hops"][0]
+    assert hop["modified_count"] == 1
+    assert hop["added_count"] == hop["removed_count"] == 0
+    assert hop["inventory_changed"]
+    assert hop["changed"]
+    assert not hop["marker_changed"]
+    assert b"target.bundle" not in summary.payload
+
+
+def test_timeline_summary_rejects_cold_fixed_inventory_cache(
+    timeline, timeline_summary, timeline_sources, modules, monkeypatch
+):
+    p, _ = modules
+    chain = timeline.build_snapshot_timeline(timeline_sources)
+    monkeypatch.setattr(p, "_FIXED_INVENTORY_MODULE", None)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("cold inventory cache tried to access host")
+
+    monkeypatch.setattr(p, "_fixed_inventory_module", forbidden)
+    with pytest.raises(
+        timeline_summary.TimelineSummaryError, match="^staging timeline summary rejected$"
+    ):
+        timeline_summary.build_timeline_change_summary(
+            timeline_sources,
+            chain.hops,
+            chain.manifest.payload,
+            expected_timeline_sha256=chain.manifest.sha256,
+        )

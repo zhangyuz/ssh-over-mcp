@@ -963,17 +963,28 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   5001/10001-digit positive and negative signed timestamp values,
   preserving the global Python digit guard and ordinary canonical bytes.
   PR-only Level-3 SKIPPED is not native acceptance.
-- **Next functional slice (#180)** — an **offline ordered multi-hop
-  snapshot timeline** (2–17 caller-supplied snapshots, 1–16 linked
-  transitions). Builds a canonical drift artifact and complete metadata
-  pair seal for every adjacent hop, verifies shared intermediate snapshots,
-  and publishes a bounded deterministic manifest of ordered snapshot and
-  hop fingerprints, identified drift indices and incident. Rejects
-  spliced/reordered/forged claims with exact canonical regeneration.
-  Acceptance: RED/GREEN adversarial chain tests, full related regression,
-  independent global review, and exact-head self-hosted Python
-  3.13/3.14 CI. This is purely data-consistency validation: no
-  authenticated chronology, host read, workflow receipt or recovery power.
+- **PR #180** — merged as `bc9fb95dfc36ad62174f30835b6535e0143d7587`
+  from exact HEAD `48947ad2512da53e84ac11d38bf9f612c21da06b`.
+  Delivered 2–17 ordered caller-supplied snapshots, 1–16 adjacent
+  drift artifacts and complete pair seals, plus bounded canonical
+  manifest and exact-hop recomputation. Two zero-actionable reviews,
+  138 focused tests and exact-head self-hosted Ubuntu 26.04 x86
+  CI `37930797706` PASS. PR Level-3 SKIPPED, not native acceptance.
+  Post-merge main CI `37933406912`: Ubuntu 3.13/3.14 validation
+  PASS, but merge-main Level-3 FAIL (exit 70: stale E2E provider
+  state; cleanup absence gate also failed). Overall workflow FAIL,
+  leaving provider disposition/native acceptance separately blocked.
+- **Next functional slice (#181)** — detached, path-free bounded
+  **timeline change summary**. From one independently verified
+  #180 timeline, export a deterministic canonical v1 JSON summary
+  of per-hop changed flags and inventory/path change **counts**,
+  source/hop content checksums and drift indices. Reverify source,
+  seal, timeline, and summary bytes against the exact supplied
+  snapshot tuple; fail closed even on a forged summary with a
+  recomputed checksum. Neither raw paths/metadata nor trusted
+  workflow authority is exposed. Acceptance: adversarial RED/GREEN,
+  16-hop bounds, full related regression, code/docs global review,
+  exact-head self-hosted Python 3.13/3.14 CI.
 
 **Roadmap / global consistency:** These primitives are test fixtures and
 offline data transformations. The original Phase 7B1 Task 3 / N1 native
