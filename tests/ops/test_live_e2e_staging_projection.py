@@ -834,3 +834,179 @@ def test_offline_binding_v1_nonwire_marker_values_are_not_uniquely_bound(binding
     assert same_report_reversed_pair == baseline
     assert after_42.marker_metadata != after_99.marker_metadata
     assert before.marker_metadata != after_42.marker_metadata
+
+
+@pytest.fixture
+def seal(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "ops/live-e2e"))
+    return importlib.import_module("staging_snapshot_seal")
+
+
+def test_snapshot_seal_end_to_end_v1(seal, binding, evidence):
+    after = replace(evidence, marker_metadata=replace(evidence.marker_metadata, mtime_ns=42))
+    drift_artifact = binding.build_detached_drift_artifact(evidence, after)
+    artifact = seal.build_snapshot_pair_seal(
+        evidence, after, drift_artifact.payload, drift_artifact.sha256
+    )
+    verified = seal.verify_snapshot_pair_seal(
+        evidence,
+        after,
+        drift_artifact.payload,
+        drift_artifact.sha256,
+        artifact.payload,
+        artifact.sha256,
+    )
+    assert verified.seal_sha256 == artifact.sha256
+    assert verified.before_snapshot_sha256 != verified.after_snapshot_sha256
+    assert verified.drift_report.marker_changed
+    assert verified.drift_report.before_sha256 == verified.drift_report.after_sha256
+    with pytest.raises(FrozenInstanceError):
+        verified.after_snapshot_sha256 = "0" * 64
+    with pytest.raises(FrozenInstanceError):
+        artifact.payload = b""
+
+
+def test_snapshot_seal_rejects_replaced_nonwire_timestamp_with_same_v1_report(
+    seal, binding, evidence
+):
+    after = replace(evidence, marker_metadata=replace(evidence.marker_metadata, mtime_ns=42))
+    after_99 = replace(evidence, marker_metadata=replace(evidence.marker_metadata, mtime_ns=99))
+    drift = binding.build_detached_drift_artifact(evidence, after)
+    binding.verify_detached_drift_artifact(
+        evidence, after_99, drift.payload, expected_sha256=drift.sha256
+    )  # v1 intentionally lossy; the exact same v1 artifact passes.
+    full = seal.build_snapshot_pair_seal(evidence, after, drift.payload, drift.sha256)
+    with pytest.raises(seal.SnapshotSealError, match="^staging snapshot seal rejected$"):
+        seal.verify_snapshot_pair_seal(
+            evidence, after_99, drift.payload, drift.sha256, full.payload, full.sha256
+        )
+
+
+def test_snapshot_seal_rejects_reversal_of_only_nonwire_marker_change(seal, binding, evidence):
+    after = replace(evidence, marker_metadata=replace(evidence.marker_metadata, ctime_ns=42))
+    drift = binding.build_detached_drift_artifact(evidence, after)
+    full = seal.build_snapshot_pair_seal(evidence, after, drift.payload, drift.sha256)
+    binding.verify_detached_drift_artifact(
+        after, evidence, drift.payload, expected_sha256=drift.sha256
+    )  # v1 no direction for marker boolean
+    with pytest.raises(seal.SnapshotSealError, match="^staging snapshot seal rejected$"):
+        seal.verify_snapshot_pair_seal(
+            after, evidence, drift.payload, drift.sha256, full.payload, full.sha256
+        )
+
+
+def test_snapshot_seal_same_snapshots_has_identical_ordered_fingerprints(seal, binding, evidence):
+    drift = binding.build_detached_drift_artifact(evidence, evidence)
+    seal_data = seal.build_snapshot_pair_seal(evidence, evidence, drift.payload, drift.sha256)
+    verified = seal.verify_snapshot_pair_seal(
+        evidence, evidence, drift.payload, drift.sha256, seal_data.payload, seal_data.sha256
+    )
+    assert verified.before_snapshot_sha256 == verified.after_snapshot_sha256
+    assert not verified.drift_report.has_drift
+    assert (
+        seal.build_snapshot_pair_seal(evidence, evidence, drift.payload, drift.sha256) == seal_data
+    )
+
+
+@pytest.mark.parametrize("field", ["size", "gid", "mtime_ns", "ctime_ns"])
+def test_snapshot_seal_binds_all_nonwire_marker_fields(seal, binding, evidence, field):
+    after = replace(
+        evidence,
+        marker_metadata=replace(
+            evidence.marker_metadata, **{field: getattr(evidence.marker_metadata, field) + 1}
+        ),
+    )
+    if field == "size":
+        # A changed size must remain valid marker 1..4096.
+        assert after.marker_metadata.size <= 4096
+    drift = binding.build_detached_drift_artifact(evidence, after)
+    full = seal.build_snapshot_pair_seal(evidence, after, drift.payload, drift.sha256)
+    after_more = replace(
+        after,
+        marker_metadata=replace(
+            after.marker_metadata, **{field: getattr(after.marker_metadata, field) + 1}
+        ),
+    )
+    with pytest.raises(seal.SnapshotSealError, match="^staging snapshot seal rejected$"):
+        seal.verify_snapshot_pair_seal(
+            evidence, after_more, drift.payload, drift.sha256, full.payload, full.sha256
+        )
+
+
+def test_snapshot_seal_rejects_self_consistent_forged_fingerprints(seal, binding, evidence):
+    import hashlib
+
+    drift = binding.build_detached_drift_artifact(evidence, evidence)
+    good = seal.build_snapshot_pair_seal(evidence, evidence, drift.payload, drift.sha256)
+    payload = json.loads(good.payload)
+    payload["after_snapshot_sha256"] = "f" * 64
+    forged = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("ascii")
+    digest = hashlib.sha256(forged).hexdigest()
+    assert digest != good.sha256
+    with pytest.raises(seal.SnapshotSealError, match="^staging snapshot seal rejected$"):
+        seal.verify_snapshot_pair_seal(
+            evidence, evidence, drift.payload, drift.sha256, forged, digest
+        )
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        b"{}",
+        b"null",
+        b"[]",
+        b"\xff",
+        b'{"schema_version":1,"schema_version":1}',
+        b" " * 1025,
+    ],
+)
+def test_snapshot_seal_rejects_malformed_or_oversized_wire(seal, binding, evidence, corruption):
+    import hashlib
+
+    drift = binding.build_detached_drift_artifact(evidence, evidence)
+    with pytest.raises(seal.SnapshotSealError, match="^staging snapshot seal rejected$"):
+        seal.verify_snapshot_pair_seal(
+            evidence,
+            evidence,
+            drift.payload,
+            drift.sha256,
+            corruption,
+            hashlib.sha256(corruption).hexdigest(),
+        )
+
+
+@pytest.mark.parametrize("bad", [None, True, 1, b"untyped", {}])
+def test_snapshot_seal_refuses_invalid_snapshot_sources(seal, binding, evidence, bad):
+    drift = binding.build_detached_drift_artifact(evidence, evidence)
+    with pytest.raises(seal.SnapshotSealError, match="^staging snapshot seal rejected$"):
+        seal.build_snapshot_pair_seal(bad, evidence, drift.payload, drift.sha256)
+
+
+def test_snapshot_seal_no_io_and_cold_cache_fail_closed(
+    seal, binding, evidence, modules, monkeypatch
+):
+    p, _ = modules
+    drift = binding.build_detached_drift_artifact(evidence, evidence)
+    full = seal.build_snapshot_pair_seal(evidence, evidence, drift.payload, drift.sha256)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("offline snapshot seal performed host operation/module load")
+
+    with monkeypatch.context() as patch:
+        for name in ("open", "scandir", "stat", "listdir", "system", "fork", "kill"):
+            if hasattr(os, name):
+                patch.setattr(os, name, forbidden)
+        patch.setattr(p, "_observe_detached_joint_preflight", forbidden)
+        patch.setattr(p, "_fixed_inventory_module", forbidden)
+        assert (
+            seal.verify_snapshot_pair_seal(
+                evidence, evidence, drift.payload, drift.sha256, full.payload, full.sha256
+            ).seal_sha256
+            == full.sha256
+        )
+
+    with monkeypatch.context() as patch:
+        patch.setattr(p, "_FIXED_INVENTORY_MODULE", None)
+        patch.setattr(p, "_fixed_inventory_module", forbidden)
+        with pytest.raises(seal.SnapshotSealError, match="^staging snapshot seal rejected$"):
+            seal.build_snapshot_pair_seal(evidence, evidence, drift.payload, drift.sha256)

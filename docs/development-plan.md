@@ -942,17 +942,24 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   artifact JSON export/import, SHA-256 content validation, no-I/O
   round-trip, duplicate/noncanonical JSON and forged-path refusal.
   A checksum is **not** a trusted signature, receipt or provenance.
-- **Next functional slice (#178)** — cross-bind a portable drift report
-  artifact to **both** of its supplied frozen observations. Independently
-  project each source and recompute the full metadata drift, then require
-  strict report and canonical artifact equality even if a forged checksum
-  has been recomputed. **Known v1 limit:** a report's boolean
-  `marker_changed` does not preserve the exact non-wire metadata values
-  or their change direction; this binds the lossy report, not a unique
-  raw snapshot pair. Acceptance: RED/GREEN, adversarial forged/non-wire
-  drift tests, developer full regressions, independent review and
-  exact-head self-hosted Python 3.13/3.14 CI. The verifier proves only
-  consistency among caller-supplied data, never trusted host provenance.
+- **PR #178** — merged as `4b733e32fd9466aaceb7276146f1b40176009c61`
+  from exact head `1b9eca642816a092f099b5745f89d9390278750e`
+  after full regression, zero-actionable independent review and self-hosted
+  Python 3.13/3.14 CI `37927015576` PASS. The *lossy v1*
+  cross-binding verifies a portable drift artifact against two supplied
+  observations, with strict checksum and independently recomputed report.
+  Its **documented limit:** `marker_changed` does not encode raw non-wire
+  metadata values or before/after direction. The original wire/API remains
+  stable; Level-3 SKIPPED did not close its independent gate.
+- **Next functional slice (#179)** — a **separate** domain-separated,
+  ordered offline snapshot-pair content seal that fingerprints each
+  independently validated full supplied snapshot (canonical inventory-v1
+  bytes and all strictly checked raw marker/expected-file metadata), then
+  cross-binds those digests to the canonical v1 drift artifact. It closes
+  the lossy timestamp-value and reversal ambiguity **for a fixed supplied
+  tuple**, without changing v1 or claiming trusted host origin, freshness
+  or incident authorization. Require adversarial RED/GREEN, full regression,
+  independent review and exact-head self-hosted Python 3.13/3.14 gates.
 
 **Roadmap / global consistency:** These primitives are test fixtures and
 offline data transformations. The original Phase 7B1 Task 3 / N1 native

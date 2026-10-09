@@ -209,3 +209,18 @@ receipt or incident recovery eligibility test. A1, B8 trusted-main workflow,
 actual UID-502 preflight, N1c native-input authentication (paused until
 recovery/A1 closure under ADR 0011) and native Level-3 remain separate
 unmet acceptance gates; this feature does not turn them green.
+
+## New offline snapshot-pair fingerprint slice — 2026-10-09
+
+The next **separately reviewed offline-only** capability fingerprints
+both ordered supplied frozen observations at metadata-field granularity,
+alongside their strictly verified v1 drift-report artifact. The content
+seal is domain separated, bounded and canonical. It resolves the known
+v1 summary collision in marker timestamp values and direction without
+changing v1 drift-report compatibility or adding untrusted host I/O.
+
+This remains a *content-only, caller-supplied* data integrity check,
+not trust evidence. A1 authority-byte-before-capture tests, UID-502
+native proof, B8 trusted workflow provenance/receipts, recovery/A1
+before resumed native-input N1c, and real Level-3 remain independent,
+uncompleted gates. No incident/provider access is authorized.
