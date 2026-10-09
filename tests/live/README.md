@@ -1886,3 +1886,36 @@ Phase 7B1 and real E2E validation remain separate OPEN gates.
 Post-#183 merge-main workflow `37942814022`: Ubuntu Python 3.13/3.14
 validation PASS; no-network Level-3 FAIL-CLOSED (pre-existing stale
 provider state, exit 70). Nothing in #184 restores provider authority.
+
+### Opt-in private path-bearing casefile series (PR #185)
+
+`staging_private_casefile_series` extends #184's fully verified path-free
+contiguous series with a distinct, private **2-MiB maximum canonical JSON**
+report. `build_private_casefile_series(segments, allow_sensitive_paths=True)`
+returns **both** the original path-free public series and a private report
+bound to the exact public series SHA-256. The private report includes every
+source-reverified #183 sensitive segment audit, each segment's exact public
+and private casefile digests, the private audit digest, global hop offset,
+changed-hop indices and net-change classification. Path-bearing per-segment
+added/removed inventory names and modified field details remain confidential;
+they are never appended to or constructed by the #184 public-series API.
+The result objects suppress ordinary `repr` to avoid accidental disclosure.
+
+`verify_private_casefile_series(segments, public_raw, private_raw,
+expected_public_sha256=..., expected_private_sha256=...,
+allow_sensitive_paths=True)` validates canonical ASCII bytes, SHA-256s and
+strict 64-KiB public/2-MiB private bounds **before** untrusted JSON parsing,
+regenerates all source snapshots, paired seals, segment casefiles and
+cross-segment boundaries, checks path-detail counts against independent public
+count-only reports, and requires byte-exact reproduction of BOTH series.
+Rehashing forged audits or attempting to pair a genuine private series with
+another public series is rejected with a fixed sanitized `PrivateSeriesError`.
+
+The exact-True opt-in is a programming guard to reduce accidental path export,
+**not** authentication or authorization. Raw path strings are sensitive; no
+host/provider/process inspection, staging access, trusted chronology or
+signed receipt is acquired. A1/B8, UID-502, ADR-paused N1c, the native
+Phase 7B1 prerequisite, provider recovery and native Level-3 are still OPEN.
+
+#184 merge-main CI `37946298917`: Ubuntu Python 3.13/3.14 PASS, native
+no-network Level-3 FAIL-CLOSED (stale provider state, exit 70).

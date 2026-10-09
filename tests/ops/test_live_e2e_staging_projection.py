@@ -2496,3 +2496,349 @@ def test_series_rejects_overbound_valid_json_before_parsing(
             casefile_series.verify_public_casefile_series(
                 series_sources, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
             )
+
+
+@pytest.fixture
+def private_casefile_series(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "ops/live-e2e"))
+    return importlib.import_module("staging_private_casefile_series")
+
+
+def test_private_series_complete_build_verify_with_public_binding(
+    private_casefile_series, series_sources
+):
+    case = private_casefile_series
+    pub, private = case.build_private_casefile_series(series_sources, allow_sensitive_paths=True)
+    outer = json.loads(private.payload)
+    public = json.loads(pub.payload)
+    assert outer["schema_version"] == 1
+    assert outer["audience"] == "private"
+    assert outer["public_series_sha256"] == pub.sha256
+    assert outer["segment_count"] == 3
+    assert outer["hop_count"] == public["hop_count"] == 6
+    assert outer["changed_hops"] == public["changed_hops"]
+    assert len(outer["segments"]) == 3
+    assert all(item["private_casefile_sha256"] for item in outer["segments"])
+    assert tuple(item["hop_offset"] for item in outer["segments"]) == (0, 2, 4)
+    assert b"target.bundle" not in pub.payload
+    assert len(private.payload) <= case.MAX_PRIVATE_SERIES_BYTES
+    checked = case.verify_private_casefile_series(
+        series_sources,
+        pub.payload,
+        private.payload,
+        expected_public_sha256=pub.sha256,
+        expected_private_sha256=private.sha256,
+        allow_sensitive_paths=True,
+    )
+    assert checked.public.series_sha256 == pub.sha256
+    assert checked.private_series_sha256 == private.sha256
+    assert len(checked.private_segment_sha256s) == 3
+    assert "private_series_sha256" not in repr(private)
+    assert "audit" not in repr(checked)
+    assert case.build_private_casefile_series(series_sources, allow_sensitive_paths=True) == (
+        pub,
+        private,
+    )
+    with pytest.raises(FrozenInstanceError):
+        private.payload = b"altered"
+
+
+def test_private_series_includes_paths_only_in_private(private_casefile_series, evidence):
+    entries = list(evidence.selected.inventory)
+    index = next(i for i, row in enumerate(entries) if row.path == "target.bundle")
+    entries[index] = replace(entries[index], size=entries[index].size + 1)
+    changed = replace(evidence, selected=replace(evidence.selected, inventory=tuple(entries)))
+    sources = ((evidence, changed), (changed, evidence))
+    pub, private = private_casefile_series.build_private_casefile_series(
+        sources, allow_sensitive_paths=True
+    )
+    assert b"target.bundle" not in pub.payload
+    assert b"target.bundle" in private.payload
+    assert b"size" in private.payload
+    assert (
+        private_casefile_series.verify_private_casefile_series(
+            sources,
+            pub.payload,
+            private.payload,
+            expected_public_sha256=pub.sha256,
+            expected_private_sha256=private.sha256,
+            allow_sensitive_paths=True,
+        ).public.net_changed
+        is False
+    )
+    assert "target.bundle" not in repr(private)
+
+
+@pytest.mark.parametrize("flag", [None, False, 0, 1, "true", [], {}])
+def test_private_series_requires_exact_true(private_casefile_series, series_sources, flag):
+    case = private_casefile_series
+    with pytest.raises(case.PrivateSeriesError, match="^staging private series rejected$"):
+        case.build_private_casefile_series(series_sources, allow_sensitive_paths=flag)
+    with pytest.raises(case.PrivateSeriesError, match="^staging private series rejected$"):
+        case.verify_private_casefile_series(
+            series_sources,
+            b"{}",
+            b"{}",
+            expected_public_sha256="0" * 64,
+            expected_private_sha256="0" * 64,
+            allow_sensitive_paths=flag,
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "public_series_sha256",
+        "segment_count",
+        "hop_count",
+        "changed_hops",
+        "net_changed",
+        "segments",
+        "private_casefile_sha256",
+        "audit",
+    ],
+)
+def test_private_series_rejects_rehashed_forged_content(
+    private_casefile_series, series_sources, field
+):
+    case = private_casefile_series
+    pub, private = case.build_private_casefile_series(series_sources, allow_sensitive_paths=True)
+    parsed = json.loads(private.payload)
+    if field == "public_series_sha256":
+        parsed[field] = "f" * 64
+    elif field == "segment_count" or field == "hop_count":
+        parsed[field] += 1
+    elif field == "changed_hops":
+        parsed[field].clear()
+    elif field == "net_changed":
+        parsed[field] = not parsed[field]
+    elif field == "segments":
+        parsed[field][0]["hop_offset"] += 1
+    elif field == "private_casefile_sha256":
+        parsed["segments"][0][field] = "f" * 64
+    else:
+        parsed["segments"][0]["audit"]["net_changed"] = not parsed["segments"][0]["audit"][
+            "net_changed"
+        ]
+    raw = json.dumps(parsed, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode(
+        "ascii"
+    )
+    with pytest.raises(case.PrivateSeriesError, match="^staging private series rejected$") as exc:
+        case.verify_private_casefile_series(
+            series_sources,
+            pub.payload,
+            raw,
+            expected_public_sha256=pub.sha256,
+            expected_private_sha256=hashlib.sha256(raw).hexdigest(),
+            allow_sensitive_paths=True,
+        )
+    assert exc.value.__cause__ is None
+
+
+def test_private_series_rejects_genuine_mismatched_public_private(
+    private_casefile_series, series_sources
+):
+    case = private_casefile_series
+    left_pub, left_priv = case.build_private_casefile_series(
+        series_sources, allow_sensitive_paths=True
+    )
+    changed = list(series_sources)
+    src = list(changed[1])
+    src[1] = replace(src[1], marker_metadata=replace(src[1].marker_metadata, ctime_ns=156))
+    changed[1] = tuple(src)
+    # The new tuple is internally valid and has unchanged cross-segment endpoints.
+    right_pub, right_priv = case.build_private_casefile_series(
+        tuple(changed), allow_sensitive_paths=True
+    )
+    assert left_pub.sha256 != right_pub.sha256
+    for pub, priv in ((left_pub, right_priv), (right_pub, left_priv)):
+        with pytest.raises(case.PrivateSeriesError, match="^staging private series rejected$"):
+            case.verify_private_casefile_series(
+                series_sources,
+                pub.payload,
+                priv.payload,
+                expected_public_sha256=pub.sha256,
+                expected_private_sha256=priv.sha256,
+                allow_sensitive_paths=True,
+            )
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        None,
+        {},
+        True,
+        "{}",
+        bytearray(b"{}"),
+        b"{}",
+        b"null",
+        b"[]",
+        bytes([255]),
+        b'{"a":1,"a":2}',
+        b" " * ((2 * 1024 * 1024) + 1),
+    ],
+)
+def test_private_series_rejects_invalid_wire_before_source(
+    private_casefile_series, series_sources, raw
+):
+    case = private_casefile_series
+    pub = importlib.import_module("staging_casefile_series").build_public_casefile_series(
+        series_sources
+    )
+    digest = hashlib.sha256(raw).hexdigest() if type(raw) is bytes else "0" * 64
+    with pytest.raises(case.PrivateSeriesError, match="^staging private series rejected$"):
+        case.verify_private_casefile_series(
+            series_sources,
+            pub.payload,
+            raw,
+            expected_public_sha256=pub.sha256,
+            expected_private_sha256=digest,
+            allow_sensitive_paths=True,
+        )
+
+
+def test_private_series_rejects_source_splice_or_segment_reorder(
+    private_casefile_series, series_sources
+):
+    case = private_casefile_series
+    pub, private = case.build_private_casefile_series(series_sources, allow_sensitive_paths=True)
+    changed = list(series_sources)
+    src = list(changed[0])
+    src[1] = replace(src[1], marker_metadata=replace(src[1].marker_metadata, mtime_ns=1001))
+    changed[0] = tuple(src)
+    for sources in (tuple(changed), (series_sources[1], series_sources[0], series_sources[2])):
+        with pytest.raises(case.PrivateSeriesError, match="^staging private series rejected$"):
+            case.verify_private_casefile_series(
+                sources,
+                pub.payload,
+                private.payload,
+                expected_public_sha256=pub.sha256,
+                expected_private_sha256=private.sha256,
+                allow_sensitive_paths=True,
+            )
+
+
+def test_private_series_max_eight_segments_and_128_hops(private_casefile_series, evidence):
+    sources = ((evidence,) * 17,) * 8
+    pub, private = private_casefile_series.build_private_casefile_series(
+        sources, allow_sensitive_paths=True
+    )
+    parsed = json.loads(private.payload)
+    assert parsed["segment_count"] == 8
+    assert parsed["hop_count"] == 128
+    assert len(private.payload) <= private_casefile_series.MAX_PRIVATE_SERIES_BYTES
+    assert (
+        private_casefile_series.verify_private_casefile_series(
+            sources,
+            pub.payload,
+            private.payload,
+            expected_public_sha256=pub.sha256,
+            expected_private_sha256=private.sha256,
+            allow_sensitive_paths=True,
+        ).public.hop_count
+        == 128
+    )
+    with pytest.raises(private_casefile_series.PrivateSeriesError):
+        private_casefile_series.build_private_casefile_series(
+            sources + (sources[0],), allow_sensitive_paths=True
+        )
+
+
+def test_private_series_no_host_io_and_cold_cache(
+    private_casefile_series, series_sources, modules, monkeypatch
+):
+    p, _projection = modules
+    case = private_casefile_series
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("private series triggered live inspection, process or loader")
+
+    with monkeypatch.context() as patch:
+        for name in ("open", "stat", "scandir", "listdir", "fork", "kill", "system"):
+            if hasattr(os, name):
+                patch.setattr(os, name, forbidden)
+        patch.setattr(p, "_observe_detached_joint_preflight", forbidden)
+        patch.setattr(p, "_fixed_inventory_module", forbidden)
+        pub, private = case.build_private_casefile_series(
+            series_sources, allow_sensitive_paths=True
+        )
+        assert (
+            case.verify_private_casefile_series(
+                series_sources,
+                pub.payload,
+                private.payload,
+                expected_public_sha256=pub.sha256,
+                expected_private_sha256=private.sha256,
+                allow_sensitive_paths=True,
+            ).private_series_sha256
+            == private.sha256
+        )
+
+    with monkeypatch.context() as patch:
+        patch.setattr(p, "_FIXED_INVENTORY_MODULE", None)
+        patch.setattr(p, "_fixed_inventory_module", forbidden)
+        with pytest.raises(case.PrivateSeriesError):
+            case.build_private_casefile_series(series_sources, allow_sensitive_paths=True)
+
+
+def test_private_series_rejects_overbound_valid_json_before_parsing(
+    private_casefile_series, series_sources, monkeypatch
+):
+    case = private_casefile_series
+    raw = b'{"padding":"' + b"x" * case.MAX_PRIVATE_SERIES_BYTES + b'"}'
+    assert len(raw) > case.MAX_PRIVATE_SERIES_BYTES
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversized private series entered JSON parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(case.json, "loads", forbidden)
+        with pytest.raises(case.PrivateSeriesError, match="^staging private series rejected$"):
+            case._validate(
+                raw,
+                hashlib.sha256(raw).hexdigest(),
+                max_bytes=case.MAX_PRIVATE_SERIES_BYTES,
+            )
+
+
+def test_private_series_rejects_noncanonical_with_correct_hash(
+    private_casefile_series, series_sources
+):
+    case = private_casefile_series
+    public, private = case.build_private_casefile_series(series_sources, allow_sensitive_paths=True)
+    raw = json.dumps(json.loads(private.payload), ensure_ascii=True, indent=2).encode("ascii")
+    assert raw != private.payload
+    with pytest.raises(case.PrivateSeriesError, match="^staging private series rejected$"):
+        case.verify_private_casefile_series(
+            series_sources,
+            public.payload,
+            raw,
+            expected_public_sha256=public.sha256,
+            expected_private_sha256=hashlib.sha256(raw).hexdigest(),
+            allow_sensitive_paths=True,
+        )
+
+
+def test_private_series_extreme_negative_nonwire_metadata(
+    private_casefile_series, timeline_sources
+):
+    import sys
+
+    initial_digit_guard = sys.get_int_max_str_digits()
+    a, b, c = timeline_sources
+    large = replace(b, marker_metadata=replace(b.marker_metadata, ctime_ns=-(10**5000)))
+    sources = ((a, large), (large, c))
+    public, private = private_casefile_series.build_private_casefile_series(
+        sources, allow_sensitive_paths=True
+    )
+    checked = private_casefile_series.verify_private_casefile_series(
+        sources,
+        public.payload,
+        private.payload,
+        expected_public_sha256=public.sha256,
+        expected_private_sha256=private.sha256,
+        allow_sensitive_paths=True,
+    )
+    assert checked.public.hop_count == 2
+    assert sys.get_int_max_str_digits() == initial_digit_guard
