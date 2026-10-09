@@ -272,3 +272,21 @@ closed due to pre-existing stale provider state. No cleanup was authorized.
 This detailed #182 audit is deliberately separate from the #181 path-free
 count summary. Its raw caller-supplied paths are potentially sensitive and
 are not approved for broader dissemination or automated logging.
+
+
+## Offline path-separated timeline casefile export — 2026-10-09
+
+After #181 (path-free summary) and #182 (private path-bearing audit) merged,
+PR #183 composes one bounded reproducible **public** timeline casefile
+(manifest + count-only summary) and a separately opt-in **private** path audit
+casefile whose content is bound to the public digest. Both have canonical
+strict re-verification from the entire original supplied typed observation
+tuple and refuse rehashed forgeries or swaps. Public export never includes
+path/field contents from the private report. This remains offline fixture-only
+processing; no signed provenance, chronology, UID-502 access, trusted A1/B8
+workflow receipt, paused N1c input approval, stale-provider recovery or native
+Level-3 acceptance is conveyed. #182 merge-main Python 3.13/3.14 validation
+passed but no-network Level-3 failed closed on the prior stale provider state.
+
+The explicit private-path opt-in is a programming guard against accidental
+export, **not** caller authentication or an authorization policy.
