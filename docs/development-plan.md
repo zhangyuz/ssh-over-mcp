@@ -951,19 +951,29 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   Its **documented limit:** `marker_changed` does not encode raw non-wire
   metadata values or before/after direction. The original wire/API remains
   stable; Level-3 SKIPPED did not close its independent gate.
-- **Next functional slice (#179)** — a **separate** domain-separated,
-  ordered offline snapshot-pair content seal that fingerprints each
-  independently validated full supplied snapshot (canonical inventory-v1
-  bytes and all strictly checked raw marker/expected-file metadata), then
-  cross-binds those digests to the canonical v1 drift artifact. It closes
-  the lossy timestamp-value and reversal ambiguity **for a fixed supplied
-  tuple**, without changing v1 or claiming trusted host origin, freshness
-  or incident authorization. **Post-review P2** fixed by reusing the
-  bounded local integer wire codec: legal signed metadata values over
-  4300 digits must work without changing Python's global digit guard;
-  preexisting ordinary canonical bytes stay identical. Require
-  adversarial RED/GREEN, full regression,
-  independent review and exact-head self-hosted Python 3.13/3.14 gates.
+- **PR #179** — merged as `06b0bd2b811f89e7dd1d276c097437ee7ff5a8b1`
+  after P2 repair at exact HEAD `dfbde0902a903991074e83f792aa689a6f8be3aa`,
+  zero-actionable independent review and self-hosted Ubuntu Python
+  3.13/3.14 CI `37929732642` PASS. Delivered a separately versioned,
+  bounded, domain-separated ordered snapshot-pair content seal over
+  canonical inventory and **all** checked marker/expected-file scalar
+  metadata. It closes the v1 lossy timestamp/value-direction ambiguity
+  for a fixed supplied tuple, with no trusted producer identity.
+  P2 repair used the existing locally bounded integer wire codec for
+  5001/10001-digit positive and negative signed timestamp values,
+  preserving the global Python digit guard and ordinary canonical bytes.
+  PR-only Level-3 SKIPPED is not native acceptance.
+- **Next functional slice (#180)** — an **offline ordered multi-hop
+  snapshot timeline** (2–17 caller-supplied snapshots, 1–16 linked
+  transitions). Builds a canonical drift artifact and complete metadata
+  pair seal for every adjacent hop, verifies shared intermediate snapshots,
+  and publishes a bounded deterministic manifest of ordered snapshot and
+  hop fingerprints, identified drift indices and incident. Rejects
+  spliced/reordered/forged claims with exact canonical regeneration.
+  Acceptance: RED/GREEN adversarial chain tests, full related regression,
+  independent global review, and exact-head self-hosted Python
+  3.13/3.14 CI. This is purely data-consistency validation: no
+  authenticated chronology, host read, workflow receipt or recovery power.
 
 **Roadmap / global consistency:** These primitives are test fixtures and
 offline data transformations. The original Phase 7B1 Task 3 / N1 native

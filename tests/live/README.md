@@ -1703,3 +1703,35 @@ read-only UID-502 inspection, fresh trusted workflow provenance, receipt,
 Level-3 acceptance, marker clearing or recovery permission. Someone
 who controls both observations and their artifact/seal can replace the
 entire coherent tuple. Existing v1 drift artifact wire schema is unchanged.
+
+### Bounded offline snapshot timeline — ordered multi-hop consistency
+
+The private `staging_snapshot_timeline` feature composes **2–17
+caller-supplied frozen observations** into **1–16 adjacent pair hops**.
+`build_snapshot_timeline(tuple_of_snapshots)` produces a frozen
+`BuiltSnapshotTimeline` containing one canonical v1 drift artifact
+and one full-content snapshot-pair seal for every hop, plus a bounded
+canonical v1 JSON timeline manifest. The manifest records the single
+incident selector, **ordered** full-content snapshot digests, per-hop
+drift artifact and pair-seal checksums, and zero-based hops reporting
+drift; it has its own SHA-256 content checksum.
+
+`verify_snapshot_timeline(snapshots, hops, manifest_raw,
+expected_sha256=...)` refuses invalid counts, untyped hop objects,
+duplicate/missing/noncanonical manifest keys, digest mismatch, source
+splicing, changed intermediate snapshot metadata or reordered pair
+seals. It independently runs the previously reviewed strict drift
+and full metadata pair-seal verification for every adjacent pair,
+then requires byte-identical regeneration of the entire manifest.
+The same snapshot at index i feeds both neighboring hops; no caller
+may supply a separate unlinked "right side" for one transition.
+A fixed bounded count prevents unbounded host work and output size.
+Every failure is a sanitized `TimelineError` without exception chains.
+
+This proves **only internal consistency and order of supplied data**.
+Unkeyed hashes cannot authenticate who acquired any observation, when
+it was acquired, or whether the caller changed the entire tuple.
+The feature performs no host/process I/O, UID-502 capture, provider
+mutation, trusted workflow/receipt issuance, or native Level-3
+authorization. Existing v1 drift and snapshot-seal wire formats are
+unchanged. A green offline timeline never closes A1/B8/N1c/Level-3.
