@@ -2035,3 +2035,8 @@ or modified. Independent native recovery and disposition remain blocked.
 #186 was merged as `459cb6622f609e8cb4f1eb9d094a0f22f317edab`
 after its independently reviewed exact-head Ubuntu Python 3.13/3.14 CI
 `37962020041` PASS; PR Level-3 was SKIPPED. No native acceptance claimed.
+
+#186 merge-main CI `37965175659`: Ubuntu Python 3.13/3.14 validation
+PASS, real no-network native Level-3 FAIL-CLOSED on the unchanged stale
+E2E provider marker (exit 70). No provider-state disposition is implied
+by #187's offline cohort tests.

@@ -357,3 +357,8 @@ regenerate byte-for-byte from those original caller snapshots. Caller
 ordering is **not** authenticated capture chronology. A1/B8 receipts,
 paused ADR 0011/N1c, UID-502, stale provider marker/recovery and native
 no-network Level-3 remain separately open; no host state is touched.
+
+#186 merge-main `37965175659` completed with Ubuntu 26.04 x86
+Python 3.13/3.14 PASS and real no-network Level-3 FAIL-CLOSED on
+pre-existing stale E2E provider state (exit 70). #187 performs no
+recovery or marker modification.

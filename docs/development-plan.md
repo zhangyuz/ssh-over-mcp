@@ -1044,7 +1044,9 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   unchanged 20-minute job limit; source-validated **single-pass verified
   builders** removed redundant traversal without dropping any input, seal,
   continuity, audit or count checks. PR-only Level-3 SKIPPED, not native
-  acceptance. Merge-main native outcome must be independently recorded.
+  acceptance. Merge-main `37965175659`: Ubuntu 26.04 Python 3.13/3.14
+  PASS; real no-network Level-3 FAIL-CLOSED on pre-existing stale E2E
+  provider state (exit 70). No marker or provider state changed.
 - **Next larger complete functional slice (#187)** — bounded **multi-series
   investigation comparison portfolio** with one positional baseline and 2–4
   independent candidates (exact 3–5 caller-provided complete #184/#185
