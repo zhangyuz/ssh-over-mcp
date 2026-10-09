@@ -461,3 +461,144 @@ def test_full_joint_observer_settled_inventory_mismatch_is_not_uncertain(env, mo
     assert failure.value.cleanup_uncertain is False
     assert events.count("ps") == 1
     assert events.count("inventory") == 1
+
+
+@pytest.mark.parametrize("release", ["dup-root", "child-open", "scandir-iterator"])
+@pytest.mark.parametrize("error_type", [OSError, RuntimeError, KeyboardInterrupt])
+def test_full_joint_owned_inventory_release_uncertainty_blocks_ps_b(
+    env, monkeypatch, release, error_type
+):
+    p, _root, _cache, marker, _temp, selected, expected, events = env
+    _spy(env, monkeypatch)
+    real_dup, real_open, real_close, real_scandir = os.dup, os.open, os.close, os.scandir
+    target_owned_fd = None
+    fired = []
+
+    def dup(fd):
+        nonlocal target_owned_fd
+        owned = real_dup(fd)
+        if (
+            release == "dup-root"
+            and sys._getframe(1).f_code.co_name == "collect_staging_inventory"
+            and os.fstat(fd).st_ino == selected.stat().st_ino
+        ):
+            target_owned_fd = owned
+        return owned
+
+    def open_child(name, flags, *args, **kwargs):
+        nonlocal target_owned_fd
+        owned = real_open(name, flags, *args, **kwargs)
+        if (
+            release == "child-open"
+            and name == "payload-content"
+            and kwargs.get("dir_fd") is not None
+            and sys._getframe(1).f_code.co_name == "walk"
+        ):
+            target_owned_fd = owned
+        return owned
+
+    def close(fd):
+        should_inject = (
+            release != "scandir-iterator"
+            and fd == target_owned_fd
+            and not fired
+            and sys._getframe(1).f_code.co_name == "close_owned"
+        )
+        real_close(fd)
+        if should_inject:
+            fired.append(release)
+            raise error_type("uncertain owned FD release after close")
+
+    class OwnedIterator:
+        def __init__(self, actual):
+            self.actual = actual
+
+        def __iter__(self):
+            return iter(self.actual)
+
+        def close(self):
+            self.actual.close()
+            if not fired:
+                fired.append(release)
+                raise error_type("uncertain scandir iterator release")
+
+    def scandir(fd):
+        actual = real_scandir(fd)
+        if (
+            release == "scandir-iterator"
+            and not fired
+            and sys._getframe(1).f_code.co_name == "names_at"
+        ):
+            return OwnedIterator(actual)
+        return actual
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "dup", dup)
+        patch.setattr(os, "open", open_child)
+        patch.setattr(os, "close", close)
+        patch.setattr(os, "scandir", scandir)
+        with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as failure:
+            p._observe_joint_marker_paired_inventory("stale-target")
+    assert fired == [release]
+    assert failure.value.cleanup_uncertain is True
+    assert failure.value.__cause__ is None
+    assert events.count("ps") == 1
+    assert events.count("inventory") == 1
+    assert marker.read_bytes() == MARKER
+    assert expected.read_bytes() == (SHA + "\n").encode()
+
+
+@pytest.mark.parametrize("error_type", [OSError, KeyboardInterrupt])
+def test_full_joint_secondary_traversal_failure_then_owned_close_uncertain(
+    env, monkeypatch, error_type
+):
+    p, _root, _cache, marker, _temp, selected, expected, events = env
+    _spy(env, monkeypatch)
+    real_dup, real_close, real_stat = os.dup, os.close, os.stat
+    owned_root = None
+    fired = []
+
+    def dup(fd):
+        nonlocal owned_root
+        result = real_dup(fd)
+        if (
+            sys._getframe(1).f_code.co_name == "collect_staging_inventory"
+            and os.fstat(fd).st_ino == selected.stat().st_ino
+        ):
+            owned_root = result
+        return result
+
+    def stat(path, *args, **kwargs):
+        if (
+            path == "target.bundle"
+            and kwargs.get("dir_fd") is not None
+            and sys._getframe(1).f_code.co_name == "walk"
+        ):
+            fired.append("traversal")
+            raise OSError("primary traversal failure")
+        return real_stat(path, *args, **kwargs)
+
+    def close(fd):
+        inject = (
+            fd == owned_root
+            and not any(event == "close" for event in fired)
+            and sys._getframe(1).f_code.co_name == "close_owned"
+        )
+        real_close(fd)
+        if inject:
+            fired.append("close")
+            raise error_type("secondary ambiguous owned close")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "dup", dup)
+        patch.setattr(os, "stat", stat)
+        patch.setattr(os, "close", close)
+        with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as failure:
+            p._observe_joint_marker_paired_inventory("stale-target")
+    assert fired == ["traversal", "close"]
+    assert failure.value.cleanup_uncertain is True
+    assert failure.value.__cause__ is None
+    assert events.count("ps") == 1
+    assert events.count("inventory") == 1
+    assert marker.read_bytes() == MARKER
+    assert expected.read_bytes() == (SHA + "\n").encode()

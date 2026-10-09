@@ -1488,3 +1488,22 @@ inventory mode remains a known-settled `cleanup_uncertain=False` refusal.
 This PR adds only regression coverage at the existing private wrapper;
 no new API, UID-502 inspection, workflow, receipt or recovery authority.
 PR-only Level-3 skip remains separate from main's stale-provider gate.
+
+### Full joint marker/paired inventory release uncertainty
+
+The dormant `_observe_joint_marker_paired_inventory()` now has end-to-end
+disposable fixture coverage for collector-owned **release**, complementing
+its existing acquisition matrix. Tests trap the exact `close_owned()` calls
+for its duplicated inventory-root FD and no-follow child-directory FD, plus
+the `names_at()` iterator's `scandir.close()` call. In each fixture the real
+owned resource is released first, then a deliberately ambiguous OS/runtime
+error or cancellation is raised. The full wrapper must refuse with fixed
+`PreflightError(cleanup_uncertain=True)` and no chained error, without
+performing ps B or changing marker/expected-commit bytes.
+
+A secondary-failure test first injects a traversal error, then an uncertain
+owned-root FD release from the same failure unwind. The secondary uncertain
+cleanup state must take precedence over a normally settled traversal error.
+None of these fixtures use a real UID-502 incident, provider cleanup,
+operator workflow, recovery authority or process signal. Level-3 is not
+activated by this evidence-only slice.
