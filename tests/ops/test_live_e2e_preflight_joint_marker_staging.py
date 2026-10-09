@@ -293,3 +293,126 @@ def test_expected_commit_rewrite_during_last_marker_read_refuses(env, monkeypatc
     assert calls == [True] * 3
     assert err.value.cleanup_uncertain is False
     assert err.value.__cause__ is None
+
+
+@pytest.mark.parametrize("replacement", ["symlink", "identical-new-inode"])
+def test_fourth_marker_close_swap_refuses(env, monkeypatch, replacement):
+    """A successful final marker FD close must not authorize the old leaf."""
+    p, _root, _cache, marker, *_ = env
+    native_close = os.close
+    native_fstat = os.fstat
+    calls = []
+    injected = []
+    original_read = p._read_marker
+
+    def marker_read(*args, **kwargs):
+        calls.append(True)
+        return original_read(*args, **kwargs)
+
+    def swapped_close(fd):
+        is_marker = False
+        try:
+            is_marker = native_fstat(fd).st_ino == marker.stat().st_ino
+        except OSError:
+            pass
+        native_close(fd)
+        if is_marker and len(calls) == 4 and not injected:
+            marker.rename(marker.with_name("old-marker"))
+            if replacement == "symlink":
+                marker.symlink_to("old-marker")
+            else:
+                marker.write_bytes(MARKER)
+                marker.chmod(0o600)
+            injected.append(True)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(p, "_read_marker", marker_read)
+        patch.setattr(p.os, "close", swapped_close)
+        with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as err:
+            p._observe_joint_marker_staging("stale-target")
+    assert len(calls) == 4
+    assert injected == [True]
+    assert err.value.cleanup_uncertain is False
+    assert err.value.__cause__ is None
+    if replacement == "symlink":
+        assert marker.is_symlink()
+    else:
+        assert marker.read_bytes() == MARKER
+
+
+def test_fourth_marker_close_settled_succeeds(env, monkeypatch):
+    p, _root, _cache, marker, *_ = env
+    actual_close = os.close
+    actual_fstat = os.fstat
+    observed_closes = []
+
+    def tracked_close(fd):
+        if actual_fstat(fd).st_ino == marker.stat().st_ino:
+            observed_closes.append(fd)
+        actual_close(fd)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(p.os, "close", tracked_close)
+        result = p._observe_joint_marker_staging("stale-target")
+    assert type(result) is p._MarkerStagingEvidence
+    assert len(observed_closes) == 4
+
+
+@pytest.mark.parametrize("target", ["marker", "expected_commit"])
+@pytest.mark.parametrize("cancel", [KeyboardInterrupt, MemoryError, SystemExit, GeneratorExit])
+def test_owned_regular_fd_cancel_close_preserves_uncertainty(env, monkeypatch, target, cancel):
+    p, _root, _cache, marker, _temp, _selected, expected, _events = env
+    target_path = marker if target == "marker" else expected
+    target_inode = target_path.stat().st_ino
+    native_close, native_fstat = os.close, os.fstat
+    injected = []
+    close_calls = []
+
+    def interrupted_close(fd):
+        inode = native_fstat(fd).st_ino
+        close_calls.append((fd, inode))
+        native_close(fd)
+        if inode == target_inode and not injected:
+            injected.append(fd)
+            raise cancel("private file close outcome")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(p.os, "close", interrupted_close)
+        with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as err:
+            p._observe_joint_marker_staging("stale-target")
+    assert len(injected) == 1
+    assert sum(fd == injected[0] for fd, _ in close_calls) == 1
+    assert err.value.cleanup_uncertain is True
+    assert err.value.__cause__ is None
+    assert "private" not in str(err.value)
+    with pytest.raises(OSError):
+        os.fstat(injected[0])
+
+
+def test_primary_marker_read_failure_plus_cancelled_close_stays_uncertain(env, monkeypatch):
+    p, _root, _cache, marker, *_ = env
+    original_read, original_close, original_fstat = os.read, os.close, os.fstat
+    original_marker_inode = marker.stat().st_ino
+    events = []
+
+    def failed_read(fd, amount):
+        if original_fstat(fd).st_ino == original_marker_inode:
+            events.append("read")
+            raise OSError("private primary read failed")
+        return original_read(fd, amount)
+
+    def ambiguous_close(fd):
+        is_marker = original_fstat(fd).st_ino == original_marker_inode
+        original_close(fd)
+        if is_marker:
+            events.append("close")
+            raise KeyboardInterrupt("private close unknown")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(p.os, "read", failed_read)
+        patch.setattr(p.os, "close", ambiguous_close)
+        with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as err:
+            p._observe_joint_marker_staging("stale-target")
+    assert events == ["read", "close"]
+    assert err.value.cleanup_uncertain is True
+    assert err.value.__cause__ is None

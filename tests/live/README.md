@@ -1287,3 +1287,32 @@ detection, not a no-follow proof for intermediate directories; original
 descriptor-relative `_pin_expected_commit` provides the content-read
 authority. Disposable fault injection demonstrates the reviewer case RED
 and the corrected code GREEN, without reading live incident state.
+
+
+### PR #167 second adversarial Review: last marker leaf and owned file closes
+
+The independent #6072158191 review identified two Important close-boundary
+holes in the dormant joint marker/staging partial evidence. A deterministic
+disposable fixture makes the fourth fixed marker reader's owned regular-file
+close successfully rename `active-run.json` to `old-marker` and install
+either a symlink to its original bytes or a freshly created same-byte file
+with another inode. Previously partial evidence could be returned; now,
+**after that final marker FD is closed**, the wrapper performs a fixed,
+single-component `os.stat("active-run.json", dir_fd=held_cache_fd,
+follow_symlinks=False)` and compares the complete original strict
+regular-file metadata (device/inode/type/UID/GID/mode/nlink/size/mtime/ctime).
+This rejects the symlink and different inode, regardless of byte equality.
+The pinned cache directory stays held through the check, with no new
+regular-file read or temporary FD ownership.
+
+The existing owned-file reader `_read_named_regular` also used to
+propagate `KeyboardInterrupt`, `SystemExit`, `GeneratorExit` or
+`MemoryError` from its `os.close(fd)` to an outer handler that claimed
+`cleanup_uncertain=False`. It now normalizes just those known ambiguous
+close failures to the fixed `PreflightError(cleanup_uncertain=True)`,
+without retrying, double-closing or exposing native exception details.
+The flag also remains True if there was a primary read failure before
+the uncertain close. All fault injections operate on disposable fixture
+FDs only. This is a bounded end-of-reader marker-name binding, not a
+promise of permanent post-context namespace stability or full preflight
+authority, and does not authorize any real UID-502 inspection or cleanup.

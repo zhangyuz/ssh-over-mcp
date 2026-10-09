@@ -376,7 +376,16 @@ def _read_named_regular(
         if fd is not None:
             try:
                 os.close(fd)
-            except (OSError, ValueError, TypeError, OverflowError):
+            except (
+                OSError,
+                ValueError,
+                TypeError,
+                OverflowError,
+                MemoryError,
+                KeyboardInterrupt,
+                SystemExit,
+                GeneratorExit,
+            ):
                 uncertain = True
         if uncertain:
             raise PreflightError(cleanup_uncertain=True) from None
@@ -1667,6 +1676,26 @@ def _observe_joint_marker_staging(selector: str) -> _MarkerStagingEvidence:
             # fixed marker again *after* the payload descriptors are closed.
             settled_marker = _read_marker(cache._fds[-1], uid=_CACHE_ACCOUNT_UID)
             if settled_marker.metadata != observed.marker_metadata:
+                raise PreflightError()
+            # The final marker owned FD is now closed. Its successful
+            # close can rename the *currently named* fixed leaf while
+            # leaving the frozen returned metadata unchanged. Bind that
+            # literal single-component live edge with NOFOLLOW relative
+            # to the still-held cache directory FD, before releasing it.
+            if (
+                _file_meta(
+                    os.stat(
+                        "active-run.json",
+                        dir_fd=cache._fds[-1],
+                        follow_symlinks=False,
+                    ),
+                    _CACHE_ACCOUNT_UID,
+                    0o600,
+                    4096,
+                    None,
+                )
+                != observed.marker_metadata
+            ):
                 raise PreflightError()
             # Descendant closure itself can mutate a name. After it completes,
             # perform only a reject-only metadata drift check of the original
