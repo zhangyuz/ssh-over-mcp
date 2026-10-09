@@ -305,3 +305,15 @@ forged aggregate cannot bypass independent re-generation from sources.
 No path-bearing audit is called or exported; no authenticated chronology,
 trusted UID-502 inspection, A1/B8 receipt, N1c approval, native Level-3
 acceptance, provider inspection or recovery action is acquired.
+
+## Offline private casefile series — 2026-10-09
+
+After #184's path-free public multi-segment series merged, #185 adds a separate
+bounded 2-MiB private path-bearing forensic casefile, requiring exact-True
+opt-in and hash-linked to the exact public series digest. Every segment's
+#183 original private audit is regenerated and independently checked against
+the original supplied tuple; cross-segment continuity and path-count alignment
+are validated against the #184 public report. It neither widens the public
+series with raw paths nor authenticates the caller. No privileged host read,
+UID-502 inspection, A1/B8 trusted workflow receipt, paused N1c input
+activation, provider remediation or native Level-3 acceptance is granted.

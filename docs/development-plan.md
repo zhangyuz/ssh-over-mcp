@@ -1008,20 +1008,34 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   `37942814022` Python 3.13/3.14 PASS, but native Level-3 FAIL-CLOSED
   (exit 70: pre-existing stale E2E provider state). The privacy opt-in is
   intentional export handling, never trusted caller authorization.
-- **Next complete functional slice (#184)** — independently verifiable
-  **contiguous public casefile series** (2–8 casefiles, each 2–17 supplied
-  snapshots; at most 128 global transitions/129 snapshot positions).
-  Rebuilds and validates each source-bound #183 public casefile, enforcing
-  identical incident selector and exact full-content digest equality at
-  every shared segment endpoint. Emits canonical bounded 64-KiB path-free
-  multi-segment report with public casefile digests, per-segment change
-  counts, global changed/stable indices, aggregate path **counts**,
-  first-to-last net content change and prior-fingerprint revisits.
-  Source splice, segment reorder/gap and rehashed forged global summaries
-  must fail closed on exact original caller-supplied tuples. Acceptance:
-  RED/GREEN adversaries, 8x16-hop maximum, no-private/no-host-I/O and
-  cold-cache fail-close, full regression, self-review and exact-head CI.
-  The input ordering is caller-supplied, **not** authenticated chronology.
+- **PR #184** — merged as `2ec5ec1db940a61c76c2dd66872178419536826d`
+  from exact HEAD `0d0c2e7baf16056d8d6b681c19eda6101768fd98`.
+  Delivered bounded 64-KiB canonical path-free multi-segment series with
+  2–8 segments, 128 source-sealed transitions, full-content cross-segment
+  boundary checks, global changed/stable hop indices, aggregate counts,
+  net-change and snapshot revisit classification. Independent deep review
+  `6083111449`: 0 Critical/Important/Minor; 1,572 related tests PASS.
+  Exact-head self-hosted Ubuntu 26.04 Python 3.13/3.14 CI `37944002739`
+  SUCCESS. PR-only Level-3 SKIPPED, not native acceptance. Merge-main
+  CI `37946298917`: Ubuntu 3.13/3.14 validation PASS, but no-network
+  native Level-3 FAIL-CLOSED on pre-existing stale E2E provider state
+  (exit 70). Real provider disposition remains separately blocked.
+- **Next complete functional slice (#185)** — bounded, explicit-opt-in
+  **private multi-segment audit** for the same already-validated contiguous
+  public casefile series (#184), with exact public-series SHA-256 binding.
+  Rebuilds and verifies each source-bound private #183 audit, preserving
+  full caller-supplied raw path and modified-field detail per segment,
+  global hop offsets and independently checked path change counts.
+  Audits are never embedded in the path-free public series. The 2-MiB
+  canonical private report and all source/public/private attachments are
+  validated byte-exactly, rejecting cross-series splice, mismatched
+  source tuple, rehashed forgery, malformed/noncanonical/oversized data,
+  bad opt-in, host I/O and 8x16-hop bound violations. Private output
+  must suppress ordinary repr. Opt-in prevents accidental path export;
+  it **does not authenticate or authorize** a private reader. Acceptance:
+  RED/GREEN adversarial tests, related regression, full code/docs/security
+  review, exact-head Ubuntu 3.13/3.14 CI. Offline checksums never assert
+  producer identity, trusted capture chronology or recovery authority.
 
 
 **Roadmap / global consistency:** These primitives are test fixtures and
