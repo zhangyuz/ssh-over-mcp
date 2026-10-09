@@ -282,3 +282,42 @@ def test_joint_inventory_owned_root_close_cancellation_is_uncertain(
     assert failure.value.cleanup_uncertain is True
     assert events.count("ps") == 1
     assert events.count("inventory") == 1
+
+
+@pytest.mark.parametrize("boundary", ["dup", "scandir"])
+def test_joint_uncertain_owned_acquire_blocks_ps_b(env, monkeypatch, boundary):
+    p, _root, _cache, _temp, selected, _commit, events = env
+    real_dup, real_scandir, real_close = os.dup, os.scandir, os.close
+    triggered = []
+
+    def dup(fd):
+        if (
+            boundary == "dup"
+            and events.count("ps") == 1
+            and "inventory" in events
+            and os.fstat(fd).st_ino == selected.stat().st_ino
+            and sys._getframe(1).f_code.co_name == "collect_staging_inventory"
+        ):
+            acquired = real_dup(fd)
+            real_close(acquired)
+            triggered.append("dup")
+            raise OSError("unknown collector clone")
+        return real_dup(fd)
+
+    def scandir(fd):
+        if boundary == "scandir" and events.count("ps") == 1 and "inventory" in events:
+            acquired = real_scandir(fd)
+            acquired.close()
+            triggered.append("scandir")
+            raise OSError("unknown iterator allocation")
+        return real_scandir(fd)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "dup", dup)
+        patch.setattr(os, "scandir", scandir)
+        with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as failure:
+            p._observe_joint_paired_inventory("stale-target")
+    assert triggered == [boundary]
+    assert failure.value.cleanup_uncertain is True
+    assert events.count("ps") == 1
+    assert events.count("inventory") == 1
