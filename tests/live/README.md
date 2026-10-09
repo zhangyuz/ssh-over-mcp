@@ -1471,3 +1471,20 @@ before ps B. A control fixture proves ordinary failure on a borrowed
 root fstat **before** any allocation retains the settled False status.
 No new production path, PID, helper command, receipt, workflow,
 provider mutation or UID-502 incident access is introduced.
+
+### Full joint marker/paired inventory collector-acquisition fault matrix
+
+The private `_observe_joint_marker_paired_inventory()` is now exercised at
+the final composition boundary for every collector-owned acquisition type:
+`os.dup` of a borrowed staging root, `os.scandir` iterator acquisition and
+no-follow nested directory `os.open` from `walk`. Disposable fixtures
+allocate and explicitly release their *own* clones before raising an
+untyped OS error, runtime error or cancellation from the exact collector
+operation. The fully composed observer must return the fixed sanitized
+refusal with `cleanup_uncertain=True`, stop after ps A (before ps B),
+and leave marker and expected-commit bytes intact. An ordinary invalid
+inventory mode remains a known-settled `cleanup_uncertain=False` refusal.
+
+This PR adds only regression coverage at the existing private wrapper;
+no new API, UID-502 inspection, workflow, receipt or recovery authority.
+PR-only Level-3 skip remains separate from main's stale-provider gate.
