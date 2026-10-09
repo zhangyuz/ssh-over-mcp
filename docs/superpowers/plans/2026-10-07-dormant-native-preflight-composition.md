@@ -195,3 +195,17 @@ incident receipt integration in B8, or resume paused N1c. N1c remains
 a distinct native-input authentication subtask deferred until
 recovery/A1 closure per ADR 0011. Existing trusted-main and native
 acceptance checkboxes in this plan remain open.
+
+## Offline artifact cross-binding progress — 2026-10-09 (not a plan gate)
+
+After merged PRs #176 (immutable comparator) and #177 (canonical bounded
+drift artifact), the follow-up **offline** feature cross-checks the entire
+portable claim against two supplied frozen observations by independently
+validating/projecting each snapshot and requiring full typed report and
+canonical byte equality, **even when a forged artifact has a freshly
+recomputed content checksum**. It is a private data-consistency function,
+not an additional native capture, authoritative observation, trusted
+receipt or incident recovery eligibility test. A1, B8 trusted-main workflow,
+actual UID-502 preflight, N1c native-input authentication (paused until
+recovery/A1 closure under ADR 0011) and native Level-3 remain separate
+unmet acceptance gates; this feature does not turn them green.

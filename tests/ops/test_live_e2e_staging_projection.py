@@ -567,3 +567,247 @@ def test_offline_drift_artifact_full_comparison_round_trip(drift, evidence, modu
     assert codec.encode_detached_drift(restored) == artifact
     assert not hasattr(artifact, "inspection")
     assert not hasattr(restored, "receipt")
+
+
+@pytest.fixture
+def binding(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "ops/live-e2e"))
+    return importlib.import_module("staging_drift_binding")
+
+
+@pytest.fixture
+def later_snapshot(evidence):
+    entries = list(evidence.selected.inventory)
+    index = next(i for i, record in enumerate(entries) if record.path == "target.bundle")
+    entries[index] = replace(entries[index], size=entries[index].size + 9)
+    return replace(evidence, selected=replace(evidence.selected, inventory=tuple(entries)))
+
+
+def test_offline_binding_full_build_verify_round_trip(binding, evidence, later_snapshot, modules):
+    _p, projection = modules
+    codec = importlib.import_module("staging_drift_artifact")
+    artifact = binding.build_detached_drift_artifact(evidence, later_snapshot)
+    verified = binding.verify_detached_drift_artifact(
+        evidence, later_snapshot, artifact.payload, expected_sha256=artifact.sha256
+    )
+    assert type(verified) is binding.ConsistentDetachedDrift
+    assert verified.report.has_drift
+    assert verified.report.modified_entries == (
+        importlib.import_module("staging_drift").ChangedEntry("target.bundle", ("size",)),
+    )
+    assert verified.report.before_sha256 == projection.project_detached_inventory(evidence).sha256
+    assert (
+        verified.report.after_sha256 == projection.project_detached_inventory(later_snapshot).sha256
+    )
+    assert verified.artifact_sha256 == artifact.sha256
+    assert (
+        codec.decode_detached_drift(artifact.payload, expected_sha256=artifact.sha256)
+        == verified.report
+    )
+    with pytest.raises(FrozenInstanceError):
+        verified.report = None
+
+
+def test_offline_binding_identical_snapshots_no_drift(binding, evidence):
+    artifact = binding.build_detached_drift_artifact(evidence, evidence)
+    report = binding.verify_detached_drift_artifact(
+        evidence, evidence, artifact.payload, expected_sha256=artifact.sha256
+    )
+    assert not report.report.has_drift
+    assert report.report.before_sha256 == report.report.after_sha256
+
+
+def test_offline_binding_rejects_recomputed_checksum_of_forged_metadata_claim(
+    binding, evidence, later_snapshot
+):
+    codec = importlib.import_module("staging_drift_artifact")
+    legitimate = binding.build_detached_drift_artifact(evidence, later_snapshot)
+    report = codec.decode_detached_drift(legitimate.payload, expected_sha256=legitimate.sha256)
+    forged = codec.encode_detached_drift(replace(report, marker_changed=True))
+    assert forged.sha256 != legitimate.sha256
+    assert codec.decode_detached_drift(forged.payload, expected_sha256=forged.sha256).marker_changed
+    with pytest.raises(binding.BindingError, match="^staging drift binding rejected$") as failure:
+        binding.verify_detached_drift_artifact(
+            evidence, later_snapshot, forged.payload, expected_sha256=forged.sha256
+        )
+    assert failure.value.__cause__ is None
+
+
+def test_offline_binding_detects_nonwire_marker_mutation_even_with_same_inventory_sha(
+    binding, evidence
+):
+    updated = replace(evidence, marker_metadata=replace(evidence.marker_metadata, mtime_ns=42))
+    artifact = binding.build_detached_drift_artifact(evidence, updated)
+    report = binding.verify_detached_drift_artifact(
+        evidence, updated, artifact.payload, expected_sha256=artifact.sha256
+    )
+    assert report.report.has_drift
+    assert report.report.marker_changed
+    assert report.report.before_sha256 == report.report.after_sha256
+    with pytest.raises(binding.BindingError, match="^staging drift binding rejected$"):
+        binding.verify_detached_drift_artifact(
+            evidence, evidence, artifact.payload, expected_sha256=artifact.sha256
+        )
+
+
+def test_offline_binding_rejects_same_content_digest_but_wrong_report_claims(binding, evidence):
+    codec = importlib.import_module("staging_drift_artifact")
+    artifact = binding.build_detached_drift_artifact(evidence, evidence)
+    report = codec.decode_detached_drift(artifact.payload, expected_sha256=artifact.sha256)
+    forged = codec.encode_detached_drift(replace(report, marker_changed=True, has_drift=True))
+    with pytest.raises(binding.BindingError, match="^staging drift binding rejected$"):
+        binding.verify_detached_drift_artifact(
+            evidence, evidence, forged.payload, expected_sha256=forged.sha256
+        )
+
+
+@pytest.mark.parametrize("invalid", [None, 1, b"garbage", {}, []])
+def test_offline_binding_refuses_forged_sources(binding, evidence, invalid):
+    with pytest.raises(binding.BindingError, match="^staging drift binding rejected$") as failure:
+        binding.build_detached_drift_artifact(invalid, evidence)
+    assert failure.value.__cause__ is None
+
+
+def test_offline_binding_rejects_wrong_order_and_one_changed_source(
+    binding, evidence, later_snapshot
+):
+    artifact = binding.build_detached_drift_artifact(evidence, later_snapshot)
+    with pytest.raises(binding.BindingError, match="^staging drift binding rejected$"):
+        binding.verify_detached_drift_artifact(
+            later_snapshot, evidence, artifact.payload, expected_sha256=artifact.sha256
+        )
+    with pytest.raises(binding.BindingError, match="^staging drift binding rejected$"):
+        binding.verify_detached_drift_artifact(
+            evidence, evidence, artifact.payload, expected_sha256=artifact.sha256
+        )
+
+
+def test_offline_binding_rejects_checksum_and_noncanonical_bytes(binding, evidence):
+    artifact = binding.build_detached_drift_artifact(evidence, evidence)
+    for raw, digest in [
+        (artifact.payload, "0" * 64),
+        (
+            artifact.payload + b" ",
+            importlib.import_module("hashlib").sha256(artifact.payload + b" ").hexdigest(),
+        ),
+        (b"{" + b"x" * 50, "0" * 64),
+    ]:
+        with pytest.raises(binding.BindingError, match="^staging drift binding rejected$"):
+            binding.verify_detached_drift_artifact(evidence, evidence, raw, expected_sha256=digest)
+
+
+def test_offline_binding_cold_cache_fail_closed_without_loader(
+    binding, evidence, modules, monkeypatch
+):
+    p, _ = modules
+
+    def fail(*args, **kwargs):
+        pytest.fail("binding triggered a runtime inventory loader")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(p, "_FIXED_INVENTORY_MODULE", None)
+        patch.setattr(p, "_fixed_inventory_module", fail)
+        with pytest.raises(binding.BindingError, match="^staging drift binding rejected$"):
+            binding.build_detached_drift_artifact(evidence, evidence)
+        assert p._FIXED_INVENTORY_MODULE is None
+
+
+def test_offline_binding_no_live_or_host_calls(
+    binding, evidence, later_snapshot, modules, monkeypatch
+):
+    p, _ = modules
+
+    def fail(*args, **kwargs):
+        pytest.fail("offline binding accessed host, process or actual incident")
+
+    artifact = binding.build_detached_drift_artifact(evidence, later_snapshot)
+    with monkeypatch.context() as patch:
+        for name in ("open", "stat", "scandir", "listdir", "kill", "fork", "system"):
+            if hasattr(os, name):
+                patch.setattr(os, name, fail)
+        patch.setattr(p, "_observe_detached_joint_preflight", fail)
+        patch.setattr(p, "_fixed_inventory_module", fail)
+        verified = binding.verify_detached_drift_artifact(
+            evidence, later_snapshot, artifact.payload, expected_sha256=artifact.sha256
+        )
+        assert verified.report.has_drift
+    for absent in ("receipt", "inspection", "workflow", "authority", "run_id"):
+        assert not hasattr(verified, absent)
+
+
+@pytest.mark.parametrize("field", ["marker_metadata", "parent", "selected"])
+def test_offline_binding_detects_changed_source_after_artifact_issuance(
+    binding, evidence, later_snapshot, field
+):
+    artifact = binding.build_detached_drift_artifact(evidence, later_snapshot)
+    if field == "marker_metadata":
+        modified = replace(
+            later_snapshot, marker_metadata=replace(later_snapshot.marker_metadata, ctime_ns=25)
+        )
+    elif field == "parent":
+        ancestors = list(later_snapshot.parent.ancestors)
+        ancestors[2] = replace(
+            ancestors[2],
+            metadata=replace(ancestors[2].metadata, inode=ancestors[2].metadata.inode + 1),
+        )
+        modified = replace(
+            later_snapshot, parent=replace(later_snapshot.parent, ancestors=tuple(ancestors))
+        )
+    else:
+        entries = list(later_snapshot.selected.inventory)
+        i = next(i for i, item in enumerate(entries) if item.path == "target.bundle")
+        entries[i] = replace(entries[i], mtime_ns=entries[i].mtime_ns + 5)
+        modified = replace(
+            later_snapshot, selected=replace(later_snapshot.selected, inventory=tuple(entries))
+        )
+    with pytest.raises(binding.BindingError, match="^staging drift binding rejected$"):
+        binding.verify_detached_drift_artifact(
+            evidence, modified, artifact.payload, expected_sha256=artifact.sha256
+        )
+
+
+def test_offline_binding_rejects_cross_incident_build(binding, evidence, modules):
+    p, _ = modules
+    alternate = p._select_incident("older-target")
+    entries = list(evidence.selected.inventory)
+    entries[0] = replace(entries[0], inode=alternate.inode)
+    before = evidence
+    after = replace(
+        evidence,
+        selected=replace(
+            evidence.selected,
+            selector="older-target",
+            basename=alternate.basename,
+            inode=alternate.inode,
+            expected_commit=alternate.expected_commit,
+            inventory=tuple(entries),
+        ),
+    )
+    with pytest.raises(binding.BindingError, match="^staging drift binding rejected$"):
+        binding.build_detached_drift_artifact(before, after)
+
+
+@pytest.mark.parametrize("bad", [None, True, 0, "a" * 64, bytearray(b"data")])
+def test_offline_binding_rejects_untyped_artifact_payload(binding, evidence, bad):
+    with pytest.raises(binding.BindingError, match="^staging drift binding rejected$") as failure:
+        binding.verify_detached_drift_artifact(evidence, evidence, bad, expected_sha256="0" * 64)
+    assert failure.value.__cause__ is None
+
+
+def test_offline_binding_artifact_flags_forged_with_correct_content_digest(
+    binding, evidence, later_snapshot
+):
+    codec = importlib.import_module("staging_drift_artifact")
+    original = binding.build_detached_drift_artifact(evidence, later_snapshot)
+    report = codec.decode_detached_drift(original.payload, expected_sha256=original.sha256)
+    forged = codec.encode_detached_drift(
+        replace(
+            report,
+            parent_changed=True,
+            selected_metadata_changed=True,
+        )
+    )
+    with pytest.raises(binding.BindingError, match="^staging drift binding rejected$"):
+        binding.verify_detached_drift_artifact(
+            evidence, later_snapshot, forged.payload, expected_sha256=forged.sha256
+        )
