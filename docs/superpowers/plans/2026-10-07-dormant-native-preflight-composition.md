@@ -444,3 +444,14 @@ RED/GREEN and complete 1,732-case local regression PASS; exact-head Ubuntu
 public dispute index is content-bound to the exact full interval SHA-256,
 not authenticated chronology or real provider disposition. No marker is
 changed and the native Level-3 gate remains distinct.
+
+## Public ranked dispute page follow-up (stacked after #190)
+
+A bounded ≤16-KiB public-only rank-page derives each selection from
+the complete original-source-verified #190 dispute index, with strict
+offset/limit types, full-index hash anchor and exact-byte independent
+verification. Pagination order is a navigation convenience, not a
+timestamp, incident priority, producer identity or approval. No new
+private path/field audit, host execution, UID-502, provider marker
+mutation, A1/B8 receipt, paused N1c/ADR 0011 or real native Level-3
+claim results. #190 CI and merge remain separate prerequisites.

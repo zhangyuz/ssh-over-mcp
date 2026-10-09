@@ -4235,3 +4235,150 @@ def test_dispute_index_oversize_fails_before_parser(dispute_index_module, monkey
         patch.setattr(m.json, "loads", forbidden)
         with pytest.raises(m.DisputeIndexError, match="^staging dispute index rejected$"):
             m._checked(huge, hashlib.sha256(huge).hexdigest())
+
+
+@pytest.fixture
+def dispute_page_module(dispute_index_module):
+    return importlib.import_module("staging_dispute_page")
+
+
+def test_dispute_page_ranked_source_bound_pagination(dispute_page_module, dispute_index_runs):
+    m = dispute_page_module
+    all_pages = [m.build_public_dispute_page(dispute_index_runs, offset, 1) for offset in (0, 1, 2)]
+    full_index = importlib.import_module("staging_dispute_index").build_public_dispute_index(
+        dispute_index_runs
+    )
+    records = [json.loads(page.payload) for page in all_pages]
+    assert all(r["source_dispute_index_sha256"] == full_index.sha256 for r in records)
+    assert all(r["schema_version"] == 1 and r["audience"] == "public" for r in records)
+    assert [r["offset"] for r in records] == [0, 1, 2]
+    assert [r["total_window_count"] for r in records] == [2, 2, 2]
+    assert [r["next_offset"] for r in records] == [1, None, None]
+    assert [len(r["ranked_windows"]) for r in records] == [1, 1, 0]
+    assert records[0]["ranked_windows"][0]["agreement_groups"] == [[0, 1], [2, 3]]
+    assert records[1]["ranked_windows"][0]["agreement_groups"] == [[0, 2], [1, 3]]
+    assert b"target.bundle" not in all_pages[0].payload
+    assert [
+        m.verify_public_dispute_page(
+            dispute_index_runs, offset, 1, page.payload, expected_sha256=page.sha256
+        ).ranked_ranges
+        for offset, page in enumerate(all_pages)
+    ] == [((0, 2),), ((2, 3),), ()]
+    assert m.build_public_dispute_page(dispute_index_runs, 0, 1) == all_pages[0]
+
+
+def test_dispute_page_multiwindow_page_and_empty_source(
+    dispute_page_module, dispute_index_runs, timeline_sources
+):
+    m = dispute_page_module
+    both = json.loads(m.build_public_dispute_page(dispute_index_runs, 0, 16).payload)
+    assert [w["length_hops"] for w in both["ranked_windows"]] == [2, 1]
+    assert both["next_offset"] is None
+    a, b, c = timeline_sources
+    same = ((a, b), (b, c))
+    empty = m.build_public_dispute_page((same, same, same), 0, 16)
+    assert json.loads(empty.payload)["ranked_windows"] == []
+    assert (
+        m.verify_public_dispute_page(
+            (same, same, same), 0, 16, empty.payload, expected_sha256=empty.sha256
+        ).total_windows
+        == 0
+    )
+
+
+@pytest.mark.parametrize("offset", [True, False, -1, 3, "0", None, 0.0, 2**128])
+def test_dispute_page_invalid_offset(dispute_page_module, dispute_index_runs, offset):
+    with pytest.raises(
+        dispute_page_module.DisputePageError, match="^staging dispute page rejected$"
+    ):
+        dispute_page_module.build_public_dispute_page(dispute_index_runs, offset, 1)
+
+
+@pytest.mark.parametrize("limit", [True, False, -1, 0, 17, "1", None, 1.0])
+def test_dispute_page_invalid_limit(dispute_page_module, dispute_index_runs, limit):
+    with pytest.raises(dispute_page_module.DisputePageError):
+        dispute_page_module.build_public_dispute_page(dispute_index_runs, 0, limit)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "source_dispute_index_sha256",
+        "offset",
+        "limit",
+        "total_window_count",
+        "next_offset",
+        "ranked_windows",
+    ],
+)
+def test_dispute_page_rejects_rehashed_forgery(dispute_page_module, dispute_index_runs, field):
+    m = dispute_page_module
+    valid = m.build_public_dispute_page(dispute_index_runs, 0, 1)
+    doc = json.loads(valid.payload)
+    if field == "source_dispute_index_sha256":
+        doc[field] = "f" * 64
+    elif field in ("offset", "limit", "total_window_count"):
+        doc[field] = 42
+    elif field == "next_offset":
+        doc[field] = None
+    else:
+        doc[field][0]["agreement_groups"] = [[0, 2], [1, 3]]
+    forged = json.dumps(doc, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode(
+        "ascii"
+    )
+    with pytest.raises(m.DisputePageError, match="^staging dispute page rejected$"):
+        m.verify_public_dispute_page(
+            dispute_index_runs, 0, 1, forged, expected_sha256=hashlib.sha256(forged).hexdigest()
+        )
+
+
+@pytest.mark.parametrize("raw", [b"", b"null", b"[]", b" {}", b'{"x":1,"x":2}', b"\xff"])
+def test_dispute_page_rejects_invalid_wire(dispute_page_module, dispute_index_runs, raw):
+    with pytest.raises(dispute_page_module.DisputePageError):
+        dispute_page_module.verify_public_dispute_page(
+            dispute_index_runs, 0, 1, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+
+
+def test_dispute_page_rejects_reordered_sources(dispute_page_module, dispute_index_runs):
+    m = dispute_page_module
+    valid = m.build_public_dispute_page(dispute_index_runs, 0, 1)
+    reordered = (
+        dispute_index_runs[0],
+        dispute_index_runs[3],
+        dispute_index_runs[2],
+        dispute_index_runs[1],
+    )
+    with pytest.raises(m.DisputePageError):
+        m.verify_public_dispute_page(reordered, 0, 1, valid.payload, expected_sha256=valid.sha256)
+
+
+def test_dispute_page_forbids_private_and_host_io(
+    dispute_page_module, dispute_index_runs, monkeypatch
+):
+    m = dispute_page_module
+    valid = m.build_public_dispute_page(dispute_index_runs, 0, 1)
+    private = importlib.import_module("staging_comparison_portfolio")
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("public dispute page accessed private builder or host IO")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(private, "build_private_portfolio", forbidden)
+        for name in ("open", "stat", "scandir", "listdir", "kill", "system", "fork"):
+            if hasattr(os, name):
+                patch.setattr(os, name, forbidden)
+        assert m.build_public_dispute_page(dispute_index_runs, 0, 1) == valid
+
+
+def test_dispute_page_oversize_rejected_before_parsing(dispute_page_module, monkeypatch):
+    m = dispute_page_module
+    huge = b'{"x":"' + b"x" * m.MAX_PUBLIC_DISPUTE_PAGE_BYTES + b'"}'
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversize page reached JSON parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.DisputePageError):
+            m._checked(huge, hashlib.sha256(huge).hexdigest())

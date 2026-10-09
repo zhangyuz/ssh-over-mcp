@@ -1125,6 +1125,18 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   semantics. Small RED/GREEN feature, separate full related regression,
   code/security/docs review and exact-head Ubuntu Python 3.13/3.14 CI
   required before marking next PR ready.
+- **Follow-up functional slice (stacked on #190; not yet merged)** —
+  bounded source-verified **public dispute navigation pages**. Accept
+  original caller-ordered 3–5 source cohorts and strict integer offset
+  and limit (1–16); rebuild the entire #190 index on every call.
+  Emit path-free canonical ASCII ≤16 KiB, anchor the complete source
+  index SHA-256, retain exact ranked disputed windows and stable
+  continuation offset (or null at the end). Independent verifier checks
+  wire canonicality, type/size/SHA and recomputes every byte against the
+  original ordered sources. Reject oversize before parsing, forged
+  pagination/groups/hash, changed source order and forbidden host/private
+  I/O. No cache, severity/chronology inference, A1/B8/N1c/UID-502,
+  native Level-3 authority or provider recovery.
 
 
 **Roadmap / global consistency:** These primitives are test fixtures and
