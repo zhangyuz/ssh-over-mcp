@@ -1270,3 +1270,20 @@ preflight; in particular it does **not** establish the exact checkout
 authority bytes, a pair of fixed ps captures, trusted workflow provenance,
 persistent-runner process quiescence, or namespace immutability after FD
 closure. Its partial evidence may not be used for recovery or Level-3/A1.
+
+
+The first independent PR #167 security reviewer also reproduced a late
+expected-commit TOCTOU: the third marker read could rewrite the fixed
+expected_commit leaf after its last content revalidation while the outer
+composition still accepted stale evidence. The new ordering keeps the
+single fixed payload FD held during the late marker read, validates
+expected-commit content/metadata again afterward, then closes the owned
+payload descriptor. A further fixed marker reread detects marker drift
+caused during that owned payload cleanup, and a **reject-only metadata**
+check of the fixed payload directory and expected_commit leaf (parent
+metadata before and after) rejects a leaf rewrite during the last marker
+read or payload close. The slash-separated stat is supplemental drift
+detection, not a no-follow proof for intermediate directories; original
+descriptor-relative `_pin_expected_commit` provides the content-read
+authority. Disposable fault injection demonstrates the reviewer case RED
+and the corrected code GREEN, without reading live incident state.

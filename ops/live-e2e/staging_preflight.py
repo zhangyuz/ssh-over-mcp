@@ -1655,9 +1655,44 @@ def _observe_joint_marker_staging(selector: str) -> _MarkerStagingEvidence:
             ) as expected:
                 if expected.first.metadata != observed.selected.expected_metadata:
                     raise PreflightError()
+                original_payload = expected._payload_chain.metadata[0]
                 expected.revalidate(incident.expected_commit, uid=incident.uid)
-            late_marker = _read_marker(cache._fds[-1], uid=_CACHE_ACCOUNT_UID)
-            if late_marker.metadata != observed.marker_metadata:
+                late_marker = _read_marker(cache._fds[-1], uid=_CACHE_ACCOUNT_UID)
+                if late_marker.metadata != observed.marker_metadata:
+                    raise PreflightError()
+                # Content is reread through the SAME pinned payload descriptor
+                # after the marker read, while it is still held.
+                expected.revalidate(incident.expected_commit, uid=incident.uid)
+            # The owned payload close may itself mutate the marker. Bind the
+            # fixed marker again *after* the payload descriptors are closed.
+            settled_marker = _read_marker(cache._fds[-1], uid=_CACHE_ACCOUNT_UID)
+            if settled_marker.metadata != observed.marker_metadata:
+                raise PreflightError()
+            # Descendant closure itself can mutate a name. After it completes,
+            # perform only a reject-only metadata drift check of the original
+            # fixed payload and expected-commit identities. The joined leaf
+            # stat is NOT a no-follow proof for intermediate components; the
+            # preceding descriptor-relative pin supplies that authority.
+            selected_fd = selected._fds[-1]
+            if (
+                _metadata(os.stat("payload-content", dir_fd=selected_fd, follow_symlinks=False))
+                != original_payload
+            ):
+                raise PreflightError()
+            late_leaf = os.stat(
+                "payload-content/expected_commit",
+                dir_fd=selected_fd,
+                follow_symlinks=False,
+            )
+            if (
+                _file_meta(late_leaf, incident.uid, None, 41, incident.device)
+                != observed.selected.expected_metadata
+            ):
+                raise PreflightError()
+            if (
+                _metadata(os.stat("payload-content", dir_fd=selected_fd, follow_symlinks=False))
+                != original_payload
+            ):
                 raise PreflightError()
             # Both content readers completed before this final common-root,
             # pinned-name-edge and ownership gate.

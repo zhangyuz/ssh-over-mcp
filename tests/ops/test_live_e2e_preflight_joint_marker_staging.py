@@ -272,3 +272,24 @@ def test_uncertain_marker_read_preserves_cleanup_flag(env, monkeypatch):
         p._observe_joint_marker_staging("stale-target")
     assert err.value.cleanup_uncertain is True
     assert err.value.__cause__ is None
+
+
+def test_expected_commit_rewrite_during_last_marker_read_refuses(env, monkeypatch):
+    """Independent P2: later marker read must not leave a stale commit leaf."""
+    p, _root, _cache, _marker, _temp, _selected, expected, _events = env
+    original = p._read_marker
+    calls = []
+
+    def rewrite(*args, **kwargs):
+        result = original(*args, **kwargs)
+        calls.append(True)
+        if len(calls) == 3:
+            expected.write_bytes(b"0" * 40 + b"\n")
+        return result
+
+    monkeypatch.setattr(p, "_read_marker", rewrite)
+    with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as err:
+        p._observe_joint_marker_staging("stale-target")
+    assert calls == [True] * 3
+    assert err.value.cleanup_uncertain is False
+    assert err.value.__cause__ is None
