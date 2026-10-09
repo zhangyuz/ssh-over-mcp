@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import stat
 import sys
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
@@ -602,3 +603,156 @@ def test_full_joint_secondary_traversal_failure_then_owned_close_uncertain(
     assert events.count("inventory") == 1
     assert marker.read_bytes() == MARKER
     assert expected.read_bytes() == (SHA + "\n").encode()
+
+
+def test_detached_joint_observation_is_complete_single_pass_and_immutable(env, monkeypatch):
+    p, _root, _cache, marker, _temp, selected, expected, events = env
+    _spy(env, monkeypatch)
+    report = p._observe_detached_joint_preflight("stale-target")
+    assert type(report) is p._DetachedJointPreflightObservation
+    assert type(report.parent) is p._TempAncestryEvidence
+    assert report.parent.path == "/private/var/folders/ab/runner_123/T"
+    assert tuple(item.path for item in report.parent.ancestors) == (
+        "/",
+        "/private",
+        "/private/var",
+        "/private/var/folders",
+        "/private/var/folders/ab",
+        "/private/var/folders/ab/runner_123",
+        "/private/var/folders/ab/runner_123/T",
+    )
+    assert all(type(item) is p._DirectoryAncestor for item in report.parent.ancestors)
+    assert all(type(item.metadata) is p.DirectoryMetadata for item in report.parent.ancestors)
+    assert report.parent.ancestors[-1].metadata.inode == (selected.parent).stat().st_ino
+    assert report.marker_target == SHA
+    assert report.marker_owner_pid == 38013
+    assert report.marker_metadata.inode == marker.stat().st_ino
+    assert report.selected.selector == "stale-target"
+    assert report.selected.inode == selected.stat().st_ino
+    assert report.selected.expected_metadata.inode == expected.stat().st_ino
+    assert type(report.selected.inventory) is tuple
+    assert events.count("getconf") == 1
+    assert events.count("ps") == 2
+    assert events.count("inventory") == 1
+    assert not any(
+        hasattr(report, field) for field in ("stdout", "child_pid", "fds", "receipt", "workflow")
+    )
+    with pytest.raises(FrozenInstanceError):
+        report.parent.path = "changed"
+    with pytest.raises(FrozenInstanceError):
+        report.parent.ancestors[0].metadata = None
+    with pytest.raises(FrozenInstanceError):
+        report.marker_owner_pid = 7
+
+
+def test_detached_joint_observation_cannot_take_arbitrary_authority_inputs(env, monkeypatch):
+    import inspect
+
+    p, *_other, events = env
+    assert tuple(inspect.signature(p._observe_detached_joint_preflight).parameters) == ("selector",)
+    with pytest.raises(TypeError):
+        p._observe_detached_joint_preflight("stale-target", "/tmp/untrusted")
+    for value in ("arbitrary", None, True, ""):
+        with pytest.raises(p.PreflightError, match="^staging preflight rejected$"):
+            p._observe_detached_joint_preflight(value)
+    assert events == []
+
+
+@pytest.mark.parametrize("phase", ["ps-a", "ps-b", "inventory"])
+def test_detached_joint_observation_cannot_escape_from_drift(env, monkeypatch, phase):
+    p, _root, _cache, marker, _temp, _selected, _expected, events = env
+    _spy(env, monkeypatch)
+    real_inventory = p._observe_selected_inventory
+
+    def ps():
+        events.append("ps")
+        if (phase == "ps-a" and events.count("ps") == 1) or (
+            phase == "ps-b" and events.count("ps") == 2
+        ):
+            marker.write_bytes(MARKER + b" ")
+
+    def inventory(*args, **kwargs):
+        result = real_inventory(*args, **kwargs)
+        if phase == "inventory":
+            marker.write_bytes(MARKER + b" ")
+        return result
+
+    monkeypatch.setattr(p, "_observe_fixed_process_snapshot", ps)
+    monkeypatch.setattr(p, "_observe_selected_inventory", inventory)
+    with pytest.raises(p.PreflightError, match="^staging preflight rejected$"):
+        p._observe_detached_joint_preflight("stale-target")
+    assert events.count("ps") in (1, 2)
+
+
+@pytest.mark.parametrize("stage", [1, 2])
+@pytest.mark.parametrize("uncertain", [False, True])
+def test_detached_joint_preserves_typed_snapshot_cleanup_status(env, monkeypatch, stage, uncertain):
+    p, *_rest, events = env
+    _spy(env, monkeypatch)
+
+    def ps():
+        events.append("ps")
+        if events.count("ps") == stage:
+            raise p.PreflightError(cleanup_uncertain=uncertain)
+
+    monkeypatch.setattr(p, "_observe_fixed_process_snapshot", ps)
+    with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as failure:
+        p._observe_detached_joint_preflight("stale-target")
+    assert failure.value.cleanup_uncertain is uncertain
+    assert events.count("ps") == stage
+
+
+def test_legacy_marker_pair_cannot_claim_temp_parent(env, monkeypatch):
+    p, *_ = env
+    _spy(env, monkeypatch)
+    jointly_observed = p._observe_joint_marker_paired_inventory("stale-target")
+    marker_only = p._MarkerStagingEvidence(
+        marker_target=jointly_observed.marker_target,
+        marker_owner_pid=jointly_observed.marker_owner_pid,
+        marker_metadata=jointly_observed.marker_metadata,
+        selected=jointly_observed.selected,
+    )
+    assert marker_only.temp_parent is None
+
+
+@pytest.mark.parametrize(
+    "parts",
+    [
+        ("private", "var", "folders", "ab", "runner_123", "wrong"),
+        ("private", "var", "folders", "ab", "..", "T"),
+        ("private", "var", "folders", "ab", "runner_123"),
+    ],
+)
+def test_detached_temp_snapshot_rejects_non_native_chain_shape(env, parts):
+    p, *_ = env
+    original = p._PinnedDirectoryChain(
+        _fds=(),
+        _parts=parts,
+        _initial=(p.DirectoryMetadata(1, 2, 0, 0, 0o755),) * (len(parts) + 1),
+    )
+    with pytest.raises(p.PreflightError, match="^staging preflight rejected$"):
+        p._snapshot_pinned_temp_ancestry(original)
+
+
+def test_detached_joint_preserves_post_ps_b_owned_cleanup_uncertainty(env, monkeypatch):
+    p, _root, _cache, _marker, _temp, selected, _expected, events = env
+    _spy(env, monkeypatch)
+    original_close = os.close
+    original_inode = (selected / "payload-content").stat().st_ino
+    triggered = []
+
+    def close(fd):
+        info = os.fstat(fd)
+        is_payload = info.st_ino == original_inode and stat.S_ISDIR(info.st_mode)
+        original_close(fd)
+        if is_payload and events.count("ps") == 2 and not triggered:
+            triggered.append("payload")
+            raise OSError("uncertain owned payload close")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "close", close)
+        with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as failure:
+            p._observe_detached_joint_preflight("stale-target")
+    assert triggered == ["payload"]
+    assert failure.value.cleanup_uncertain is True
+    assert events.count("ps") == 2

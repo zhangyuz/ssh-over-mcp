@@ -1507,3 +1507,37 @@ cleanup state must take precedence over a normally settled traversal error.
 None of these fixtures use a real UID-502 incident, provider cleanup,
 operator workflow, recovery authority or process signal. Level-3 is not
 activated by this evidence-only slice.
+
+
+### Dormant one-pass detached joint preflight observation
+
+The private `_observe_detached_joint_preflight("stale-target"|"older-target")`
+is now a **feature-complete detached evidence projection** for the existing
+disposable, read-only joint fixture. It delegates to
+`_observe_joint_marker_paired_inventory` exactly once, so it does not
+invoke additional getconf/ps captures, re-open incident data or combine
+two individually detached (race-prone) partial observations.
+
+The returned frozen/slotted `_DetachedJointPreflightObservation` contains
+the canonical, fixed-getconf-derived temp-parent path, an ordered tuple of
+root-to-T `_DirectoryAncestor(path, DirectoryMetadata)` snapshots, the
+validated fixed marker target/owner/metadata, and the existing frozen selected
+catalog/root/expected_commit metadata and complete inventory tuple. Only the
+jointly held observer creates the temp-parent projection; older partial
+marker/staging helpers leave their optional `temp_parent` unset. The output
+has no FDs, child PIDs, capture stdout, mutable mappings, workflow authority,
+envelope, receipt or recovery action.
+
+Tests cover a complete happy-path single invocation, exact detached ancestor
+paths and metadata, strict selector-only signature and malformed selector
+refusal before host effects, immutable records, stale marker at ps A,
+inventory and ps B, typed cleanup uncertainty from either snapshot, and
+post-ps-B ambiguous owned payload FD closure. A malformed proposed temp
+ancestor chain cannot be detached. All failures return only sanitized
+`PreflightError`; no partial record or newly authorized operation escapes.
+
+**Boundary:** This is still a private dormant fixture-only function, **not**
+a trusted UID-502 incident inspection, native A1/Level-3 certification,
+activated workflow, envelope conversion or receipt producer. The separately
+approved authority binding, live guest/provider-state recovery and native
+acceptance gates remain unchanged. No real incident state is touched.
