@@ -1431,3 +1431,23 @@ joint ancestry wrapper and new joint marker wrapper preserve uncertainty
 without returning partial inventory or new authority. There is no new
 workflow, receipt, live UID-502 inspection or stale provider mutation;
 the real Level-3, A1 and N1c acceptance gates remain pending.
+
+#### Inventory-owned close and iterator cancellation (review #6073077695)
+
+The dormant `staging_inventory.py` collector owns both duplicated directory
+descriptors and `os.scandir(fd)` iterators. Its `close_owned()` and iterator
+`close()` boundary now translate interruptions (`KeyboardInterrupt`,
+`SystemExit`, `GeneratorExit`) and unexpected typed runtime/OS close failures
+into a fixed `InventoryError(cleanup_uncertain=True)` **at the owner**.
+The preflight binder preserves that typed uncertainty through the older
+ps-A/inventory/ps-B adapter and the jointly pinned ancestry wrapper.
+Known-settled invalid metadata still yields the existing False status;
+no caller-supplied paths/PIDs, new subprocesses, retry, unlink or receipt.
+
+Disposable fault injection tracks the collector's actual `os.dup`-owned
+root descriptor; after a real successful close, injects cancellation,
+including a secondary cancellation following a failed traversal. Separate
+iterator-close injection tests the `scandir` duplicate. Both composed
+paired and joint callers must refuse with `cleanup_uncertain=True`, without
+ps B or partial inventory evidence. No live UID-502 incident is accessed,
+and Level-3/A1/N1c remain unverified.

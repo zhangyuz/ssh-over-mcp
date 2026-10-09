@@ -154,7 +154,16 @@ def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry
         finally:
             try:
                 iterator.close()
-            except (OSError, ValueError, TypeError, MemoryError):
+            except (
+                OSError,
+                ValueError,
+                TypeError,
+                RuntimeError,
+                MemoryError,
+                KeyboardInterrupt,
+                SystemExit,
+                GeneratorExit,
+            ):
                 raise InventoryError(cleanup_uncertain=True) from None
         check_deadline()
         return sorted(names, key=os.fsencode)
@@ -179,7 +188,16 @@ def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry
         """Refuse ambiguously closed collector-owned FDs without raw details."""
         try:
             os.close(fd)
-        except (OSError, ValueError, TypeError, MemoryError):
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            RuntimeError,
+            MemoryError,
+            KeyboardInterrupt,
+            SystemExit,
+            GeneratorExit,
+        ):
             raise InventoryError(cleanup_uncertain=True) from None
 
     def walk(fd: int, path: str, expected: InventoryEntry | None = None) -> None:

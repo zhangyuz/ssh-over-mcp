@@ -342,3 +342,45 @@ def test_typed_ps_failure_is_not_reclassified(stage, monkeypatch, which, uncerta
     with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as caught:
         p._observe_paired_process_inventory(chain, "stale-target")
     assert caught.value.cleanup_uncertain is uncertain
+
+
+@pytest.mark.parametrize("error_type", [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("secondary", [False, True])
+def test_paired_inventory_owned_root_close_cancellation_is_uncertain(
+    stage, monkeypatch, error_type, secondary
+):
+    p, _d, _root, _commit, chain, events, _calls = stage
+    actual_dup, actual_close, actual_stat = os.dup, os.close, os.stat
+    inventory_root = None
+    triggered = False
+
+    def dup(fd):
+        nonlocal inventory_root
+        result = actual_dup(fd)
+        if fd == chain._fds[-1] and events.count("ps") == 1 and "inventory" in events:
+            inventory_root = result
+        return result
+
+    def close(fd):
+        nonlocal triggered
+        actual_close(fd)
+        if fd == inventory_root and not triggered:
+            triggered = True
+            raise error_type("unknown collector FD close")
+
+    def stat(path, *args, **kwargs):
+        if secondary and path == "target.bundle" and kwargs.get("dir_fd") is not None:
+            raise OSError("traversal failure before secondary close")
+        return actual_stat(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "dup", dup)
+        patch.setattr(os, "close", close)
+        patch.setattr(os, "stat", stat)
+        with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as failure:
+            p._observe_paired_process_inventory(chain, "stale-target")
+    assert triggered
+    assert failure.value.cleanup_uncertain is True
+    assert events.count("ps") == 1
+    assert events.count("inventory") == 1
+    chain.revalidate()

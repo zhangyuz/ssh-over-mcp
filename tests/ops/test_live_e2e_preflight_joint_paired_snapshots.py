@@ -237,3 +237,48 @@ def test_joint_wrapper_typed_settled_ps_refusal_stays_false(env, monkeypatch, wh
     with pytest.raises(p.PreflightError) as caught:
         p._observe_joint_paired_inventory("stale-target")
     assert caught.value.cleanup_uncertain is False
+
+
+@pytest.mark.parametrize("error_type", [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("secondary", [False, True])
+def test_joint_inventory_owned_root_close_cancellation_is_uncertain(
+    env, monkeypatch, error_type, secondary
+):
+    p, _root, _cache, _temp, selected, _commit, events = env
+    actual_dup, actual_close, actual_stat = os.dup, os.close, os.stat
+    inventory_root = None
+    triggered = False
+
+    def dup(fd):
+        nonlocal inventory_root
+        result = actual_dup(fd)
+        if (
+            os.fstat(fd).st_ino == selected.stat().st_ino
+            and events.count("ps") == 1
+            and "inventory" in events
+        ):
+            inventory_root = result
+        return result
+
+    def close(fd):
+        nonlocal triggered
+        actual_close(fd)
+        if fd == inventory_root and not triggered:
+            triggered = True
+            raise error_type("unknown inventory-owned close")
+
+    def stat(path, *args, **kwargs):
+        if secondary and path == "target.bundle" and kwargs.get("dir_fd") is not None:
+            raise OSError("initial traversal failure")
+        return actual_stat(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "dup", dup)
+        patch.setattr(os, "close", close)
+        patch.setattr(os, "stat", stat)
+        with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as failure:
+            p._observe_joint_paired_inventory("stale-target")
+    assert triggered
+    assert failure.value.cleanup_uncertain is True
+    assert events.count("ps") == 1
+    assert events.count("inventory") == 1
