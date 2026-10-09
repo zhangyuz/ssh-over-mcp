@@ -1797,3 +1797,50 @@ private 128 KiB audit intentionally contains caller-provided inventory path
 strings and must not be published as a sanitized or low-trust report. Use
 the path-free summary where file paths must remain undisclosed. No automatic
 logging, host capture or model-facing tool output is added.
+
+
+### Offline audience-separated timeline casefiles (PR #183)
+
+`staging_timeline_casefiles` provides an end-to-end **pure in-memory**
+workflow from the same 2–17 caller-provided frozen observations. Unlike
+manually assembling the #180 manifest, #181 path-free summary and #182
+sensitive path-bearing audit, this exports one **canonical public casefile**
+and, only with explicit opt-in, a linked **private casefile**.
+
+- `build_public_casefile(snapshots)` emits a bounded **32 KiB** canonical v1
+  JSON envelope with the full ordered timeline manifest, **path-free**
+  summary, their SHA-256s and a new SHA-256 of the complete envelope.
+  No raw inventory path strings/modified field names/metadata values are
+  serialized in this public representation. It does generate and validate
+  sensitive intermediate drift data strictly in process, never exports it.
+- `verify_public_casefile(snapshots, raw, expected_sha256=...)` re-creates
+  the original sealed hops from the **exact supplied** source tuple, verifies
+  the manifest and summary independently, then rejects any noncanonical,
+  duplicate-key, oversized or forged public envelope by byte-for-byte match
+  even when the outer checksum was recomputed.
+- `build_private_casefile(snapshots, allow_sensitive_paths=True)` is the
+  separate explicit opt-in API. It exports up to **160 KiB** canonical JSON
+  with a full #182 path-bearing audit and its checksum, **bound to the exact
+  public casefile SHA-256**. Default/missing, non-boolean or false opt-in
+  fails closed; sensitive result types suppress ordinary `repr` content.
+- `verify_private_casefile(snapshots, public_raw, private_raw,
+  expected_public_sha256=..., expected_private_sha256=...,
+  allow_sensitive_paths=True)` validates **both** envelopes, original
+  sources, every paired seal, ordered manifest, public summary, private audit
+  and cross-casefile digest binding. Wrong sources, altered source order,
+  recomputed forged hashes, wrong audience, noncanonical bytes and spliced
+  public/private combinations fail closed with fixed sanitized errors.
+
+The two casefiles never embed a trusted event producer or capture time. The
+caller **must provide the original observations for verification**; the
+casefiles alone are not sufficient for authenticating or reconstructing a
+host incident. Content checksums are unkeyed and do not stop coherent
+replacement of the entire source tuple and all artifacts. A public casefile
+is *path-free*, not automatically approved for arbitrary distribution of
+incident selectors or source fingerprints; a private casefile exposes raw
+caller-provided paths. This feature performs no host I/O, UID-502 capture,
+trusted workflow receipt, provider cleanup, native recovery or Level-3 gate.
+A1/B8/paused N1c/Phase 7B1 and stale-provider disposition stay OPEN.
+
+The explicit private-path opt-in is a programming guard against accidental
+export, **not** caller authentication or an authorization policy.

@@ -984,18 +984,34 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   26.04 x86 Python 3.13/3.14 CI `37934952379` SUCCESS; PR-only
   Level-3 SKIPPED, not native acceptance. Merge-main validation and
   stale-provider disposition are separately gated.
-- **Next complete functional slice (#182)** — private bounded canonical
-  offline timeline audit with per-hop file/path/metadata drift,
-  unchanged-hop classification, exact first-to-last content comparison,
-  explicit **path-bearing private output** (unlike #181 path-free counts),
-  and detection of previously seen full snapshots after intermediate
-  changes. Both build and verify strictly revalidate all original source
-  hops plus the timeline manifest; independent SHA-256 covers deterministic
-  audit bytes. Acceptance includes RED/GREEN, forged-audit/source/hop
-  adversaries, 16-hop upper bound, cold-cache/no-I/O checks, full related
-  regression, fresh review and exact-head CI against merged #181 main.
-  Caller order is never authenticated chronology; hashes are not trusted
-  receipts or native Level-3 evidence.
+- **PR #182** — merged as `f130643b215f767de6565c18b886671f0a216e72`
+  from reviewed exact HEAD `44665e67c95d04fc956393f4f2ffebbfdef3fc6a`.
+  Delivered independently bounded private 128-KiB canonical path/field
+  timeline audit with net first-vs-last full-content change, stable/changed
+  hops and non-adjacent snapshot revisits; exact-source re-verification and
+  full path-bearing confidentiality boundary. Independent deep review
+  `6081989374`: 0 Critical / 0 Important / 1 Minor (PR metadata only,
+  corrected before merge), 1,522 related tests and hostile forgery fixture
+  PASS. Exact-head Ubuntu 26.04 Python 3.13/3.14 CI `37937065131`
+  SUCCESS; PR native Level-3 SKIPPED. Merge-main CI `37938218143`:
+  Ubuntu validation PASS, real no-network Level-3 FAIL-CLOSED on the
+  pre-existing stale provider state. No provider recovery or A1/B8
+  disposition claimed.
+- **Next complete functional slice (#183)** — end-to-end **audience-separated
+  offline timeline casefiles**, from 2–17 original caller-supplied snapshots
+  to one separately bounded canonical path-free **public** manifest+summary
+  envelope (32 KiB) and, only with explicit opt-in, a **private** path-bearing
+  audit envelope (160 KiB) cryptographically content-bound to the public
+  digest. Each output independently re-verifies every original source/pair
+  seal, manifest and relevant report; rejects malformed/noncanonical/oversized
+  bytes, forged summaries, substituted sources, recomputed hashes and swapped
+  public/private pairing. Sensitive results suppress ordinary repr, and the
+  public pathway does not construct or serialize the private audit.
+  Acceptance: adversarial test-first RED/GREEN; 16-hop maximal input,
+  no-host-I/O/cold-cache tests, independent global security review and
+  exact-head self-hosted Python 3.13/3.14 CI. Casefiles are content consistency,
+  not authenticated producer/timing, privileged incident work, receipts,
+  recovery permissions or native Level-3 evidence.
 
 
 **Roadmap / global consistency:** These primitives are test fixtures and

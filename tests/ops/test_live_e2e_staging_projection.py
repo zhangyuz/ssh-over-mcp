@@ -1896,3 +1896,362 @@ def test_timeline_audit_extreme_signed_metadata_without_global_guard_change(
     verified = _audit_verify(timeline, timeline_audit, sources, built, report)
     assert verified.changed_hops == (0, 1)
     assert sys.get_int_max_str_digits() == baseline
+
+
+@pytest.fixture
+def timeline_casefiles(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "ops/live-e2e"))
+    return importlib.import_module("staging_timeline_casefiles")
+
+
+def test_casefiles_end_to_end_public_and_private(timeline_casefiles, timeline_sources):
+    case = timeline_casefiles
+    public = case.build_public_casefile(timeline_sources)
+    private = case.build_private_casefile(timeline_sources, allow_sensitive_paths=True)
+    outer = json.loads(public.payload)
+    assert outer["schema_version"] == 1 and outer["audience"] == "public"
+    assert outer["timeline"]["schema_version"] == 1
+    assert outer["summary"]["schema_version"] == 1
+    assert outer["summary"]["changed_hops"] == [0, 1]
+    assert outer["timeline_sha256"] == outer["summary"]["timeline_sha256"]
+    assert len(public.payload) <= case.MAX_PUBLIC_CASEFILE_BYTES
+    assert b"target.bundle" not in public.payload
+    assert b"mtime_ns" not in public.payload
+    assert b"payload-content" not in public.payload
+    private_doc = json.loads(private.payload)
+    assert private_doc["audience"] == "private"
+    assert private_doc["public_casefile_sha256"] == public.sha256
+    assert private_doc["audit"]["changed_hops"] == [0, 1]
+    checked_public = case.verify_public_casefile(
+        timeline_sources, public.payload, expected_sha256=public.sha256
+    )
+    checked_private = case.verify_private_casefile(
+        timeline_sources,
+        public.payload,
+        private.payload,
+        expected_public_sha256=public.sha256,
+        expected_private_sha256=private.sha256,
+        allow_sensitive_paths=True,
+    )
+    assert checked_public.changed_hops == (0, 1)
+    assert checked_public.public_sha256 == public.sha256
+    assert checked_private.public == checked_public
+    assert checked_private.audit.audit_sha256 == private_doc["audit_sha256"]
+    assert case.build_public_casefile(timeline_sources) == public
+    assert case.build_private_casefile(timeline_sources, allow_sensitive_paths=True) == private
+    assert "mtime_ns" not in repr(private)
+
+
+def test_casefiles_private_contains_exact_sensitive_path(timeline_casefiles, evidence):
+    case = timeline_casefiles
+    entries = list(evidence.selected.inventory)
+    i = next(i for i, entry in enumerate(entries) if entry.path == "target.bundle")
+    entries[i] = replace(entries[i], size=entries[i].size + 8)
+    modified = replace(evidence, selected=replace(evidence.selected, inventory=tuple(entries)))
+    sources = (evidence, modified, evidence)
+    public = case.build_public_casefile(sources)
+    private = case.build_private_casefile(sources, allow_sensitive_paths=True)
+    assert b"target.bundle" not in public.payload
+    assert b"target.bundle" in private.payload
+    assert b"size" in private.payload
+    assert (
+        case.verify_private_casefile(
+            sources,
+            public.payload,
+            private.payload,
+            expected_public_sha256=public.sha256,
+            expected_private_sha256=private.sha256,
+            allow_sensitive_paths=True,
+        ).audit.net_changed
+        is False
+    )
+
+
+@pytest.mark.parametrize("permission", [False, 1, None, "", "yes"])
+def test_casefiles_explicit_sensitive_opt_in(timeline_casefiles, timeline_sources, permission):
+    with pytest.raises(
+        timeline_casefiles.CasefileError, match="^staging timeline casefile rejected$"
+    ):
+        timeline_casefiles.build_private_casefile(
+            timeline_sources, allow_sensitive_paths=permission
+        )
+    public = timeline_casefiles.build_public_casefile(timeline_sources)
+    with pytest.raises(
+        timeline_casefiles.CasefileError, match="^staging timeline casefile rejected$"
+    ):
+        timeline_casefiles.verify_private_casefile(
+            timeline_sources,
+            public.payload,
+            b"{}",
+            expected_public_sha256=public.sha256,
+            expected_private_sha256="0" * 64,
+            allow_sensitive_paths=permission,
+        )
+
+
+@pytest.mark.parametrize("kind", ["summary", "timeline", "timeline_sha256", "audience"])
+def test_casefiles_reject_forged_public_even_with_new_hash(
+    timeline_casefiles, timeline_sources, kind
+):
+    case = timeline_casefiles
+    original = case.build_public_casefile(timeline_sources)
+    document = json.loads(original.payload)
+    if kind == "summary":
+        document["summary"]["hops"][0]["added_count"] += 1
+    elif kind == "timeline":
+        document["timeline"]["snapshot_sha256s"][1] = "f" * 64
+    elif kind == "timeline_sha256":
+        document["timeline_sha256"] = "f" * 64
+    else:
+        document["audience"] = "private"
+    forged = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+        "ascii"
+    )
+    with pytest.raises(case.CasefileError, match="^staging timeline casefile rejected$") as error:
+        case.verify_public_casefile(
+            timeline_sources, forged, expected_sha256=hashlib.sha256(forged).hexdigest()
+        )
+    assert error.value.__cause__ is None
+
+
+def test_casefiles_reject_private_audit_or_link_forgery(timeline_casefiles, timeline_sources):
+    case = timeline_casefiles
+    public = case.build_public_casefile(timeline_sources)
+    private = case.build_private_casefile(timeline_sources, allow_sensitive_paths=True)
+    for change in ("audit", "link", "digest"):
+        document = json.loads(private.payload)
+        if change == "audit":
+            document["audit"]["net_changed"] = not document["audit"]["net_changed"]
+        elif change == "link":
+            document["public_casefile_sha256"] = "a" * 64
+        else:
+            document["audit_sha256"] = "b" * 64
+        forged = json.dumps(
+            document, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        ).encode("ascii")
+        with pytest.raises(case.CasefileError, match="^staging timeline casefile rejected$"):
+            case.verify_private_casefile(
+                timeline_sources,
+                public.payload,
+                forged,
+                expected_public_sha256=public.sha256,
+                expected_private_sha256=hashlib.sha256(forged).hexdigest(),
+                allow_sensitive_paths=True,
+            )
+
+
+def test_casefiles_reject_source_splice_and_reordering(timeline_casefiles, timeline_sources):
+    case = timeline_casefiles
+    public = case.build_public_casefile(timeline_sources)
+    private = case.build_private_casefile(timeline_sources, allow_sensitive_paths=True)
+    changed = list(timeline_sources)
+    changed[1] = replace(
+        changed[1], marker_metadata=replace(changed[1].marker_metadata, ctime_ns=123)
+    )
+    for sources in (tuple(changed), tuple(reversed(timeline_sources))):
+        with pytest.raises(case.CasefileError, match="^staging timeline casefile rejected$"):
+            case.verify_public_casefile(sources, public.payload, expected_sha256=public.sha256)
+        with pytest.raises(case.CasefileError, match="^staging timeline casefile rejected$"):
+            case.verify_private_casefile(
+                sources,
+                public.payload,
+                private.payload,
+                expected_public_sha256=public.sha256,
+                expected_private_sha256=private.sha256,
+                allow_sensitive_paths=True,
+            )
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"{}",
+        b"null",
+        b"[]",
+        b"\\xff",
+        b'{"a":1,"a":2}',
+        b'{"audience":"public","audience":"public"}',
+        b" " * 32769,
+    ],
+)
+def test_casefiles_reject_malformed_public(timeline_casefiles, timeline_sources, raw):
+    case = timeline_casefiles
+    with pytest.raises(case.CasefileError, match="^staging timeline casefile rejected$"):
+        case.verify_public_casefile(
+            timeline_sources, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+
+
+def test_casefiles_reject_noncanonical_private_public_and_wrong_digest(
+    timeline_casefiles, timeline_sources
+):
+    case = timeline_casefiles
+    public = case.build_public_casefile(timeline_sources)
+    private = case.build_private_casefile(timeline_sources, allow_sensitive_paths=True)
+    for raw in (public.payload + b" ", json.dumps(json.loads(public.payload), indent=2).encode()):
+        with pytest.raises(case.CasefileError, match="^staging timeline casefile rejected$"):
+            case.verify_public_casefile(
+                timeline_sources, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+            )
+    with pytest.raises(case.CasefileError, match="^staging timeline casefile rejected$"):
+        case.verify_public_casefile(timeline_sources, public.payload, expected_sha256="0" * 64)
+    for raw in (private.payload + b" ", b'{"a":1,"a":2}', b" " * (160 * 1024 + 1)):
+        with pytest.raises(case.CasefileError, match="^staging timeline casefile rejected$"):
+            case.verify_private_casefile(
+                timeline_sources,
+                public.payload,
+                raw,
+                expected_public_sha256=public.sha256,
+                expected_private_sha256=hashlib.sha256(raw).hexdigest(),
+                allow_sensitive_paths=True,
+            )
+
+
+def test_casefiles_max_sixteen_hops_and_revisits(timeline_casefiles, evidence):
+    case = timeline_casefiles
+    sources = (evidence,) * 17
+    public = case.build_public_casefile(sources)
+    private = case.build_private_casefile(sources, allow_sensitive_paths=True)
+    assert len(json.loads(public.payload)["summary"]["hops"]) == 16
+    assert len(json.loads(private.payload)["audit"]["stable_hops"]) == 16
+    assert (
+        case.verify_public_casefile(
+            sources, public.payload, expected_sha256=public.sha256
+        ).changed_hops
+        == ()
+    )
+    with pytest.raises(case.CasefileError, match="^staging timeline casefile rejected$"):
+        case.build_public_casefile((evidence,) * 18)
+    with pytest.raises(case.CasefileError, match="^staging timeline casefile rejected$"):
+        case.build_private_casefile((evidence,), allow_sensitive_paths=True)
+
+
+def test_casefiles_no_host_io_and_cold_cache(
+    timeline_casefiles, timeline_sources, modules, monkeypatch
+):
+    p, _ = modules
+    case = timeline_casefiles
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("offline casefile touched host or dynamic inventory loader")
+
+    with monkeypatch.context() as patch:
+        for name in ("open", "stat", "scandir", "listdir", "fork", "kill", "system"):
+            if hasattr(os, name):
+                patch.setattr(os, name, forbidden)
+        patch.setattr(p, "_observe_detached_joint_preflight", forbidden)
+        patch.setattr(p, "_fixed_inventory_module", forbidden)
+        public = case.build_public_casefile(timeline_sources)
+        private = case.build_private_casefile(timeline_sources, allow_sensitive_paths=True)
+        assert (
+            case.verify_public_casefile(
+                timeline_sources, public.payload, expected_sha256=public.sha256
+            ).public_sha256
+            == public.sha256
+        )
+        assert (
+            case.verify_private_casefile(
+                timeline_sources,
+                public.payload,
+                private.payload,
+                expected_public_sha256=public.sha256,
+                expected_private_sha256=private.sha256,
+                allow_sensitive_paths=True,
+            ).audit.audit_sha256
+            == json.loads(private.payload)["audit_sha256"]
+        )
+    with monkeypatch.context() as patch:
+        patch.setattr(p, "_FIXED_INVENTORY_MODULE", None)
+        patch.setattr(p, "_fixed_inventory_module", forbidden)
+        with pytest.raises(case.CasefileError, match="^staging timeline casefile rejected$"):
+            case.build_public_casefile(timeline_sources)
+        with pytest.raises(case.CasefileError, match="^staging timeline casefile rejected$"):
+            case.build_private_casefile(timeline_sources, allow_sensitive_paths=True)
+
+
+def test_casefiles_extreme_signed_timestamp(timeline_casefiles, timeline_sources):
+    case = timeline_casefiles
+    changed = replace(
+        timeline_sources[1],
+        marker_metadata=replace(timeline_sources[1].marker_metadata, mtime_ns=-(10**5000)),
+    )
+    sources = (timeline_sources[0], changed, timeline_sources[2])
+    public = case.build_public_casefile(sources)
+    private = case.build_private_casefile(sources, allow_sensitive_paths=True)
+    assert case.verify_private_casefile(
+        sources,
+        public.payload,
+        private.payload,
+        expected_public_sha256=public.sha256,
+        expected_private_sha256=private.sha256,
+        allow_sensitive_paths=True,
+    ).audit.changed_hops == (0, 1)
+
+
+def test_casefiles_reject_genuine_private_public_cross_pair(timeline_casefiles, timeline_sources):
+    case = timeline_casefiles
+    first_public = case.build_public_casefile(timeline_sources)
+    first_private = case.build_private_casefile(timeline_sources, allow_sensitive_paths=True)
+    changed = list(timeline_sources)
+    changed[1] = replace(
+        changed[1],
+        marker_metadata=replace(changed[1].marker_metadata, mtime_ns=117),
+    )
+    second_sources = tuple(changed)
+    second_public = case.build_public_casefile(second_sources)
+    second_private = case.build_private_casefile(second_sources, allow_sensitive_paths=True)
+    assert first_public.sha256 != second_public.sha256
+    assert first_private.sha256 != second_private.sha256
+    for public, private in (
+        (first_public, second_private),
+        (second_public, first_private),
+    ):
+        with pytest.raises(
+            case.CasefileError, match="^staging timeline casefile rejected$"
+        ) as error:
+            case.verify_private_casefile(
+                timeline_sources,
+                public.payload,
+                private.payload,
+                expected_public_sha256=public.sha256,
+                expected_private_sha256=private.sha256,
+                allow_sensitive_paths=True,
+            )
+        assert error.value.__cause__ is None
+
+
+def test_casefiles_reject_nonbyte_and_nondigest_inputs(timeline_casefiles, timeline_sources):
+    case = timeline_casefiles
+    public = case.build_public_casefile(timeline_sources)
+    private = case.build_private_casefile(timeline_sources, allow_sensitive_paths=True)
+    for raw in (None, "{}", bytearray(public.payload), True):
+        with pytest.raises(case.CasefileError, match="^staging timeline casefile rejected$"):
+            case.verify_public_casefile(timeline_sources, raw, expected_sha256=public.sha256)
+    for digest in (None, b"0" * 64, "Z" * 64, "0" * 63, True):
+        with pytest.raises(case.CasefileError, match="^staging timeline casefile rejected$"):
+            case.verify_private_casefile(
+                timeline_sources,
+                public.payload,
+                private.payload,
+                expected_public_sha256=public.sha256,
+                expected_private_sha256=digest,
+                allow_sensitive_paths=True,
+            )
+
+
+def test_casefile_public_never_invokes_path_bearing_audit(
+    timeline_casefiles, timeline_sources, monkeypatch
+):
+    case = timeline_casefiles
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("public casefile built private path audit")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(case, "build_timeline_audit", forbidden)
+        patch.setattr(case, "verify_timeline_audit", forbidden)
+        public = case.build_public_casefile(timeline_sources)
+        assert b"target.bundle" not in public.payload
+        assert case.verify_public_casefile(
+            timeline_sources, public.payload, expected_sha256=public.sha256
+        ).changed_hops == (0, 1)
