@@ -224,3 +224,17 @@ not trust evidence. A1 authority-byte-before-capture tests, UID-502
 native proof, B8 trusted workflow provenance/receipts, recovery/A1
 before resumed native-input N1c, and real Level-3 remain independent,
 uncompleted gates. No incident/provider access is authorized.
+
+## Offline ordered timeline feature — 2026-10-09 (separate data milestone)
+
+Following snapshot-pair content sealing, another dormant-only feature
+checks **a bounded sequence of multiple caller-provided snapshots**
+rather than isolated pairs. It builds and independently verifies every
+adjacent canonical drift artifact and exact full-metadata pair seal,
+then produces a compact deterministic manifest of ordered per-snapshot
+and per-hop content digests and detected drift indices. It rejects
+spliced/reordered/forged intermediate transitions and malformed wire,
+but no trusted producer identity or chronology is conferred by a
+checksum. All original native incident authority, A1/B8, and paused
+N1c acceptance gates remain uncompleted; a multi-hop offline match
+is explicitly not a recovery/Level-3 permission.

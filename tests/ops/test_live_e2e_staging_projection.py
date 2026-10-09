@@ -1093,3 +1093,256 @@ def test_snapshot_seal_rejects_forged_huge_signed_marker_value(seal, binding, ev
         seal.verify_snapshot_pair_seal(
             evidence, forged, artifact.payload, artifact.sha256, pair.payload, pair.sha256
         )
+
+
+@pytest.fixture
+def timeline(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "ops/live-e2e"))
+    return importlib.import_module("staging_snapshot_timeline")
+
+
+@pytest.fixture
+def timeline_sources(evidence):
+    return (
+        replace(evidence, marker_metadata=replace(evidence.marker_metadata, mtime_ns=1)),
+        replace(evidence, marker_metadata=replace(evidence.marker_metadata, mtime_ns=42)),
+        replace(evidence, marker_metadata=replace(evidence.marker_metadata, mtime_ns=99)),
+    )
+
+
+def test_snapshot_timeline_three_step_complete_build_verify(timeline, timeline_sources):
+    assembled = timeline.build_snapshot_timeline(timeline_sources)
+    assert len(assembled.hops) == 2
+    assert 0 < len(assembled.manifest.payload) < timeline.MAX_MANIFEST_BYTES
+    verified = timeline.verify_snapshot_timeline(
+        timeline_sources,
+        assembled.hops,
+        assembled.manifest.payload,
+        expected_sha256=assembled.manifest.sha256,
+    )
+    assert verified.incident == "stale-target"
+    assert len(verified.snapshot_sha256s) == 3
+    assert len(verified.seal_sha256s) == 2
+    assert verified.snapshot_sha256s[0] != verified.snapshot_sha256s[1]
+    assert verified.snapshot_sha256s[1] != verified.snapshot_sha256s[2]
+    assert verified.changed_hops == (0, 1)
+    assert verified.timeline_sha256 == assembled.manifest.sha256
+    assert timeline.build_snapshot_timeline(timeline_sources) == assembled
+    with pytest.raises(FrozenInstanceError):
+        verified.incident = "older-target"
+
+
+def test_snapshot_timeline_unchanged_snapshots_are_deterministic(timeline, evidence):
+    same = (evidence, evidence, evidence)
+    assembled = timeline.build_snapshot_timeline(same)
+    verified = timeline.verify_snapshot_timeline(
+        same,
+        assembled.hops,
+        assembled.manifest.payload,
+        expected_sha256=assembled.manifest.sha256,
+    )
+    assert verified.changed_hops == ()
+    assert len(set(verified.snapshot_sha256s)) == 1
+
+
+def test_snapshot_timeline_detects_intermediate_value_splice(timeline, timeline_sources):
+    built = timeline.build_snapshot_timeline(timeline_sources)
+    manipulated = list(timeline_sources)
+    manipulated[1] = replace(
+        manipulated[1],
+        marker_metadata=replace(manipulated[1].marker_metadata, mtime_ns=43),
+    )
+    with pytest.raises(timeline.TimelineError, match="^staging snapshot timeline rejected$"):
+        timeline.verify_snapshot_timeline(
+            tuple(manipulated),
+            built.hops,
+            built.manifest.payload,
+            expected_sha256=built.manifest.sha256,
+        )
+
+
+def test_snapshot_timeline_rejects_hop_swap(timeline, timeline_sources):
+    built = timeline.build_snapshot_timeline(timeline_sources)
+    with pytest.raises(timeline.TimelineError, match="^staging snapshot timeline rejected$"):
+        timeline.verify_snapshot_timeline(
+            timeline_sources,
+            tuple(reversed(built.hops)),
+            built.manifest.payload,
+            expected_sha256=built.manifest.sha256,
+        )
+
+
+def test_snapshot_timeline_rejects_changed_terminal_timestamp_and_reversal(
+    timeline,
+    timeline_sources,
+):
+    built = timeline.build_snapshot_timeline(timeline_sources)
+    swapped = (timeline_sources[2], timeline_sources[1], timeline_sources[0])
+    with pytest.raises(timeline.TimelineError, match="^staging snapshot timeline rejected$"):
+        timeline.verify_snapshot_timeline(
+            swapped, built.hops, built.manifest.payload, expected_sha256=built.manifest.sha256
+        )
+
+
+def test_snapshot_timeline_rejects_forged_canonical_manifest_with_recomputed_sha(
+    timeline,
+    timeline_sources,
+):
+    import hashlib
+
+    built = timeline.build_snapshot_timeline(timeline_sources)
+    obj = json.loads(built.manifest.payload)
+    obj["snapshot_sha256s"][1] = "f" * 64
+    forged = json.dumps(obj, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode(
+        "ascii"
+    )
+    with pytest.raises(timeline.TimelineError, match="^staging snapshot timeline rejected$"):
+        timeline.verify_snapshot_timeline(
+            timeline_sources, built.hops, forged, expected_sha256=hashlib.sha256(forged).hexdigest()
+        )
+
+
+@pytest.mark.parametrize("raw", [b"{}", b"null", b"[]", b"\xff", b'{"a":1,"a":2}', b"X" * 9000])
+def test_snapshot_timeline_rejects_malformed_manifest(timeline, timeline_sources, raw):
+    import hashlib
+
+    built = timeline.build_snapshot_timeline(timeline_sources)
+    with pytest.raises(timeline.TimelineError, match="^staging snapshot timeline rejected$"):
+        timeline.verify_snapshot_timeline(
+            timeline_sources,
+            built.hops,
+            raw,
+            expected_sha256=hashlib.sha256(raw).hexdigest(),
+        )
+
+
+@pytest.mark.parametrize("count", [0, 1, 18, 19])
+def test_snapshot_timeline_strict_source_count(timeline, evidence, count):
+    with pytest.raises(timeline.TimelineError, match="^staging snapshot timeline rejected$"):
+        timeline.build_snapshot_timeline((evidence,) * count)
+
+
+def test_snapshot_timeline_refuses_forged_hop_types(timeline, timeline_sources):
+    assembled = timeline.build_snapshot_timeline(timeline_sources)
+    forged = (None, assembled.hops[1])
+    with pytest.raises(timeline.TimelineError, match="^staging snapshot timeline rejected$"):
+        timeline.verify_snapshot_timeline(
+            timeline_sources,
+            forged,
+            assembled.manifest.payload,
+            expected_sha256=assembled.manifest.sha256,
+        )
+
+
+def test_snapshot_timeline_no_host_calls_and_cold_cache(
+    timeline, timeline_sources, modules, monkeypatch
+):
+    p, _ = modules
+    assembled = timeline.build_snapshot_timeline(timeline_sources)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("timeline touched host or dynamically loaded module")
+
+    with monkeypatch.context() as patch:
+        for name in ("open", "stat", "scandir", "listdir", "fork", "kill", "system"):
+            if hasattr(os, name):
+                patch.setattr(os, name, forbidden)
+        patch.setattr(p, "_observe_detached_joint_preflight", forbidden)
+        patch.setattr(p, "_fixed_inventory_module", forbidden)
+        assert (
+            timeline.verify_snapshot_timeline(
+                timeline_sources,
+                assembled.hops,
+                assembled.manifest.payload,
+                expected_sha256=assembled.manifest.sha256,
+            ).timeline_sha256
+            == assembled.manifest.sha256
+        )
+
+    with monkeypatch.context() as patch:
+        patch.setattr(p, "_FIXED_INVENTORY_MODULE", None)
+        patch.setattr(p, "_fixed_inventory_module", forbidden)
+        with pytest.raises(timeline.TimelineError, match="^staging snapshot timeline rejected$"):
+            timeline.build_snapshot_timeline(timeline_sources)
+
+
+def test_snapshot_timeline_allows_sixteen_bounded_hops(timeline, evidence):
+    maximal = (evidence,) * 17
+    built = timeline.build_snapshot_timeline(maximal)
+    report = timeline.verify_snapshot_timeline(
+        maximal,
+        built.hops,
+        built.manifest.payload,
+        expected_sha256=built.manifest.sha256,
+    )
+    assert len(report.snapshot_sha256s) == 17
+    assert len(report.seal_sha256s) == 16
+    assert report.changed_hops == ()
+
+
+def test_snapshot_timeline_supports_extreme_negative_nonwire_value(timeline, timeline_sources):
+    middle = replace(
+        timeline_sources[1],
+        marker_metadata=replace(timeline_sources[1].marker_metadata, mtime_ns=-(10**5000)),
+    )
+    chain = (timeline_sources[0], middle, timeline_sources[2])
+    built = timeline.build_snapshot_timeline(chain)
+    verified = timeline.verify_snapshot_timeline(
+        chain,
+        built.hops,
+        built.manifest.payload,
+        expected_sha256=built.manifest.sha256,
+    )
+    assert verified.changed_hops == (0, 1)
+    with pytest.raises(timeline.TimelineError, match="^staging snapshot timeline rejected$"):
+        timeline.verify_snapshot_timeline(
+            timeline_sources,
+            built.hops,
+            built.manifest.payload,
+            expected_sha256=built.manifest.sha256,
+        )
+
+
+def test_snapshot_timeline_refuses_wrong_container_type_and_hop_count(
+    timeline, evidence, timeline_sources
+):
+    with pytest.raises(timeline.TimelineError, match="^staging snapshot timeline rejected$"):
+        timeline.build_snapshot_timeline([evidence, evidence])
+    built = timeline.build_snapshot_timeline(timeline_sources)
+    with pytest.raises(timeline.TimelineError, match="^staging snapshot timeline rejected$"):
+        timeline.verify_snapshot_timeline(
+            timeline_sources,
+            built.hops[:-1],
+            built.manifest.payload,
+            expected_sha256=built.manifest.sha256,
+        )
+    with pytest.raises(timeline.TimelineError, match="^staging snapshot timeline rejected$"):
+        timeline.verify_snapshot_timeline(
+            timeline_sources,
+            list(built.hops),
+            built.manifest.payload,
+            expected_sha256=built.manifest.sha256,
+        )
+
+
+def test_snapshot_timeline_rejects_correct_hash_noncanonical_json(
+    timeline,
+    timeline_sources,
+):
+    import hashlib
+
+    built = timeline.build_snapshot_timeline(timeline_sources)
+    raw = json.dumps(
+        json.loads(built.manifest.payload),
+        sort_keys=False,
+        indent=1,
+        ensure_ascii=True,
+    ).encode("ascii")
+    assert raw != built.manifest.payload
+    with pytest.raises(timeline.TimelineError, match="^staging snapshot timeline rejected$"):
+        timeline.verify_snapshot_timeline(
+            timeline_sources,
+            built.hops,
+            raw,
+            expected_sha256=hashlib.sha256(raw).hexdigest(),
+        )
