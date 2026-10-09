@@ -119,6 +119,17 @@ The deployment also does not mount:
 The runner's job workspace lives only in the container filesystem. In
 ephemeral mode the container is removed after its one assigned job.
 
+The primary CI validates Python 3.13 and 3.14 in **separate matrix
+jobs**, each on a fresh hardened Ubuntu 26.04 x86 ephemeral runner with
+its own **20-minute** timeout. Both jobs run the entire unfiltered test
+suite, lint, compilation and cgroup probe; `fail-fast: false` ensures
+one version cannot cancel the other. A single available x86 runner may
+execute these jobs sequentially. The merge-main no-network Level-3 job
+still depends on **both** validation jobs succeeding; a skipped native
+PR job is not evidence of native acceptance. This split avoids the old
+combined 20-minute budget exceeding its limit without skipping tests,
+weakening sandbox rules or increasing either individual job timeout.
+
 The self-hosted CI workflow itself:
 
 - is defined by trusted base-branch workflow code;

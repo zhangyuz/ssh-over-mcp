@@ -1075,7 +1075,11 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   construction call; no cross-call caches or removed checks. Timed CI:
   #187 8m08s/9m05s → #188 8m24s/8m51s (3.13/3.14), not a demonstrated
   total CI speedup. CI emits the 15 slowest pytest durations on trusted
-  main with unchanged two full version suites and 20-minute job budget.
+  main. In the subsequent CI resilience slice, separate Python 3.13/3.14
+  matrix jobs each retain a 20-minute hard limit, full unfiltered tests,
+  non-root hardened ephemeral Ubuntu x86 runners and the native Level-3
+  dependency on all validation jobs. The earlier combined single-job
+  budget frequently exhausted before the second version completed.
   #188 merge-main CI `37980323392`: Ubuntu Python 3.13/3.14 full
   validation PASS; real no-network Level-3 FAIL-CLOSED on the existing
   stale E2E provider state (exit 70). No provider marker altered and no
