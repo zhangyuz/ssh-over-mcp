@@ -1761,3 +1761,39 @@ chronology, UID-502 inspection, provenance signature, receipt,
 native Level-3 PASS, marker cleanup or recovery permission.
 A1, B8, paused N1c, native Phase 7B1 and provider disposition
 remain independently blocked and open.
+
+### Canonical offline multi-hop change audit (separate complete capability)
+
+The private `staging_timeline_audit` module consumes an existing **exact**
+caller-supplied tuple of 2–17 frozen observations, its 1–16 typed timeline
+hops and canonical timeline manifest/checksum. `build_timeline_audit(...,
+expected_timeline_sha256=...)` emits a new canonical v1 JSON audit with an
+independent SHA-256; `verify_timeline_audit(...,
+expected_timeline_sha256=..., expected_audit_sha256=...)` strictly regenerates
+it and returns an immutable `VerifiedTimelineAudit`. A fixed **128 KiB**
+audit budget, strict ASCII canonical encoding and duplicate-key refusal
+limit input and output; every rejection is sanitized `AuditError`.
+
+The audit includes each hop's ordered full-content snapshot digests, drift
+artifact checksum, changed/unchanged state, marker/parent/selected-metadata
+flags, added/removed paths and per-file changed fields. It also records all
+changed and stable hop indices, whether the **first and last exact full
+content fingerprints** differ, and `revisited_snapshots`: an index matching
+a previous exact fingerprint **after a different immediately preceding
+fingerprint**, with its first matching index. These are caller tuple positions,
+not capture timestamps. Even when net change is false, the report preserves
+intermediate changes and evidence of a content return.
+
+Both functions reverify the original timeline and every adjacent pair against
+caller-supplied snapshots; canonical audit reconstruction rejects forged
+classification, spliced sources/hops and mutated audit content **even when the
+attacker recomputes an unkeyed SHA-256**. This is a pure offline diagnostic,
+not a source-attested log, timeline of real events, provider inspection,
+recovery authorization, B8 workflow receipt, paused N1c input authentication
+or native Level-3 completion. No new v1 drift/timeline wire fields or host I/O.
+
+**Data disclosure boundary:** Unlike the #181 path-free count summary, this
+private 128 KiB audit intentionally contains caller-provided inventory path
+strings and must not be published as a sanitized or low-trust report. Use
+the path-free summary where file paths must remain undisclosed. No automatic
+logging, host capture or model-facing tool output is added.
