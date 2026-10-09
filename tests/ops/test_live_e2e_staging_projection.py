@@ -3247,3 +3247,361 @@ def test_dossier_single_pass_verified_builders_reject_broken_continuity(
         private_module.PrivateSeriesError, match="^staging private series rejected$"
     ):
         private_module.build_verified_private_casefile_series(invalid, allow_sensitive_paths=True)
+
+
+@pytest.fixture
+def comparison_portfolio(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "ops/live-e2e"))
+    return importlib.import_module("staging_comparison_portfolio")
+
+
+@pytest.fixture
+def portfolio_sources(timeline_sources):
+    a, b, c = timeline_sources
+    changed_b = replace(b, marker_metadata=replace(b.marker_metadata, ctime_ns=919))
+    baseline = ((a, b), (b, c))
+    matching = ((a, b), (b, c))
+    diverged = ((a, b), (b, b))
+    modified = ((a, changed_b), (changed_b, c))
+    return (baseline, matching, diverged, modified)
+
+
+def test_portfolio_public_cohort_clusters_and_hop_frequencies(
+    comparison_portfolio, portfolio_sources
+):
+    m = comparison_portfolio
+    result = m.build_public_portfolio(portfolio_sources)
+    doc = json.loads(result.payload)
+    assert doc["schema_version"] == 1
+    assert doc["audience"] == "public"
+    assert doc["incident"] == "stale-target"
+    assert doc["run_count"] == 4
+    assert doc["candidate_count"] == 3
+    assert doc["baseline_series_sha256"] == doc["members"][0]["series_sha256"]
+    assert doc["members"][0]["index"] == 0
+    assert [x["index"] for x in doc["members"]] == [0, 1, 2, 3]
+    assert doc["members"][0]["comparison"] is None
+    assert [x["comparison"]["right_hop_count"] for x in doc["members"][1:]] == [2, 2, 2]
+    assert [x["different_members"] for x in doc["hop_frequency"]] == [[3], [2, 3]]
+    assert [x["missing_members"] for x in doc["hop_frequency"]] == [[], []]
+    assert doc["series_clusters"][0]["member_indices"] == [0, 1]
+    assert doc["distinct_series_count"] == 3
+    assert b"target.bundle" not in result.payload
+    assert b"mtime_ns" not in result.payload
+    assert len(result.payload) <= m.MAX_PUBLIC_PORTFOLIO_BYTES
+    verified = m.verify_public_portfolio(
+        portfolio_sources, result.payload, expected_sha256=result.sha256
+    )
+    assert verified.public_sha256 == result.sha256
+    assert verified.run_count == 4
+    assert verified.different_member_counts == (0, 1, 2)
+    assert m.build_public_portfolio(portfolio_sources) == result
+
+
+def test_portfolio_private_full_cohort_verifiable_and_sensitive(
+    comparison_portfolio, portfolio_sources
+):
+    m = comparison_portfolio
+    public, private = m.build_private_portfolio(portfolio_sources, allow_sensitive_paths=True)
+    assert public == m.build_public_portfolio(portfolio_sources)
+    doc = json.loads(private.payload)
+    assert doc["audience"] == "private"
+    assert doc["public_portfolio_sha256"] == public.sha256
+    assert len(doc["members"]) == 3
+    for index, member in enumerate(doc["members"], 1):
+        assert member["index"] == index
+        assert member["private_comparison"]["audience"] == "private"
+        assert (
+            member["private_comparison"]["public_comparison_sha256"]
+            == json.loads(public.payload)["members"][index]["comparison_sha256"]
+        )
+    checked = m.verify_private_portfolio(
+        portfolio_sources,
+        public.payload,
+        private.payload,
+        expected_public_sha256=public.sha256,
+        expected_private_sha256=private.sha256,
+        allow_sensitive_paths=True,
+    )
+    assert checked.public.public_sha256 == public.sha256
+    assert checked.private_sha256 == private.sha256
+    assert "payload" not in repr(private)
+    assert "payload" not in repr(checked)
+
+
+def test_portfolio_path_isolated_and_private_difference_visible(comparison_portfolio, evidence):
+    items = list(evidence.selected.inventory)
+    i = next(i for i, item in enumerate(items) if item.path == "target.bundle")
+    items[i] = replace(items[i], size=items[i].size + 11)
+    changed = replace(evidence, selected=replace(evidence.selected, inventory=tuple(items)))
+    original = ((evidence, evidence), (evidence, evidence))
+    diff = ((evidence, changed), (changed, evidence))
+    cohort = (original, original, diff)
+    pub, private = comparison_portfolio.build_private_portfolio(cohort, allow_sensitive_paths=True)
+    assert b"target.bundle" not in pub.payload
+    assert b"target.bundle" in private.payload
+    assert b"modified" in private.payload
+    assert (
+        comparison_portfolio.verify_private_portfolio(
+            cohort,
+            pub.payload,
+            private.payload,
+            expected_public_sha256=pub.sha256,
+            expected_private_sha256=private.sha256,
+            allow_sensitive_paths=True,
+        ).private_sha256
+        == private.sha256
+    )
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        None,
+        [],
+        {},
+        (),
+        ((),),
+        tuple(() for _ in range(6)),
+        "wrong",
+    ],
+)
+def test_portfolio_rejects_invalid_cohort_before_build(comparison_portfolio, bad):
+    with pytest.raises(comparison_portfolio.PortfolioError, match="^staging portfolio rejected$"):
+        comparison_portfolio.build_public_portfolio(bad)
+    with pytest.raises(comparison_portfolio.PortfolioError, match="^staging portfolio rejected$"):
+        comparison_portfolio.build_private_portfolio(bad, allow_sensitive_paths=True)
+
+
+@pytest.mark.parametrize("opt_in", [False, None, 1, 0, "true", [], {}])
+def test_portfolio_private_requires_exact_true(comparison_portfolio, portfolio_sources, opt_in):
+    m = comparison_portfolio
+    with pytest.raises(m.PortfolioError, match="^staging portfolio rejected$"):
+        m.build_private_portfolio(portfolio_sources, allow_sensitive_paths=opt_in)
+    with pytest.raises(m.PortfolioError, match="^staging portfolio rejected$"):
+        m.verify_private_portfolio(
+            portfolio_sources,
+            b"{}",
+            b"{}",
+            expected_public_sha256="0" * 64,
+            expected_private_sha256="0" * 64,
+            allow_sensitive_paths=opt_in,
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "incident",
+        "baseline_series_sha256",
+        "run_count",
+        "members",
+        "hop_frequency",
+        "series_clusters",
+        "distinct_series_count",
+    ],
+)
+def test_portfolio_rejects_rehashed_public_forgery(comparison_portfolio, portfolio_sources, field):
+    m = comparison_portfolio
+    public = m.build_public_portfolio(portfolio_sources)
+    document = json.loads(public.payload)
+    if field == "incident":
+        document[field] = "tampered"
+    elif field == "baseline_series_sha256":
+        document[field] = "f" * 64
+    elif field in ("run_count", "distinct_series_count"):
+        document[field] += 1
+    elif field == "members":
+        document[field][2]["index"] = 4
+    elif field == "hop_frequency":
+        document[field][1]["different_members"] = []
+    elif field == "series_clusters":
+        document[field][0]["member_indices"] = [0]
+    forged = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+        "ascii"
+    )
+    assert forged != public.payload
+    with pytest.raises(m.PortfolioError, match="^staging portfolio rejected$"):
+        m.verify_public_portfolio(
+            portfolio_sources, forged, expected_sha256=hashlib.sha256(forged).hexdigest()
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "public_portfolio_sha256",
+        "members",
+        "candidate_count",
+    ],
+)
+def test_portfolio_rejects_rehashed_private_forgery(comparison_portfolio, portfolio_sources, field):
+    m = comparison_portfolio
+    pub, priv = m.build_private_portfolio(portfolio_sources, allow_sensitive_paths=True)
+    doc = json.loads(priv.payload)
+    if field == "public_portfolio_sha256":
+        doc[field] = "f" * 64
+    elif field == "members":
+        doc[field][0]["private_comparison"]["hops"][0]["index"] = 5
+    else:
+        doc[field] += 1
+    forged = json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+        "ascii"
+    )
+    with pytest.raises(m.PortfolioError, match="^staging portfolio rejected$"):
+        m.verify_private_portfolio(
+            portfolio_sources,
+            pub.payload,
+            forged,
+            expected_public_sha256=pub.sha256,
+            expected_private_sha256=hashlib.sha256(forged).hexdigest(),
+            allow_sensitive_paths=True,
+        )
+
+
+def test_portfolio_rejects_mismatched_genuine_pair_and_sources(
+    comparison_portfolio, portfolio_sources
+):
+    m = comparison_portfolio
+    public, private = m.build_private_portfolio(portfolio_sources, allow_sensitive_paths=True)
+    other = (portfolio_sources[0], portfolio_sources[1], portfolio_sources[3])
+    other_public, other_private = m.build_private_portfolio(other, allow_sensitive_paths=True)
+    for a, b in ((public, other_private), (other_public, private)):
+        with pytest.raises(m.PortfolioError):
+            m.verify_private_portfolio(
+                portfolio_sources,
+                a.payload,
+                b.payload,
+                expected_public_sha256=a.sha256,
+                expected_private_sha256=b.sha256,
+                allow_sensitive_paths=True,
+            )
+    with pytest.raises(m.PortfolioError):
+        m.verify_public_portfolio(other, public.payload, expected_sha256=public.sha256)
+
+
+@pytest.mark.parametrize(
+    "bad_raw",
+    [
+        b"",
+        b"null",
+        b"[]",
+        b'{"x":1,"x":2}',
+        b" {}",
+        b"\xff",
+        b" " * (1024 * 1024 + 1),
+    ],
+)
+def test_portfolio_rejects_noncanonical_or_oversized_wire(
+    comparison_portfolio, portfolio_sources, bad_raw
+):
+    m = comparison_portfolio
+    with pytest.raises(m.PortfolioError, match="^staging portfolio rejected$"):
+        m.verify_public_portfolio(
+            portfolio_sources,
+            bad_raw,
+            expected_sha256=hashlib.sha256(bad_raw).hexdigest(),
+        )
+
+
+def test_portfolio_public_never_uses_private_or_host_io(
+    comparison_portfolio, portfolio_sources, modules, monkeypatch
+):
+    m = comparison_portfolio
+    preflight, _ = modules
+    private_module = importlib.import_module("staging_comparison_dossier")
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("public portfolio constructed private output or used host I/O")
+
+    with monkeypatch.context() as patch:
+        for name in ("open", "stat", "scandir", "listdir", "kill", "system", "fork"):
+            if hasattr(os, name):
+                patch.setattr(os, name, forbidden)
+        patch.setattr(preflight, "_observe_detached_joint_preflight", forbidden)
+        patch.setattr(private_module, "build_private_comparison", forbidden)
+        public = m.build_public_portfolio(portfolio_sources)
+        assert (
+            m.verify_public_portfolio(
+                portfolio_sources,
+                public.payload,
+                expected_sha256=public.sha256,
+            ).public_sha256
+            == public.sha256
+        )
+
+
+def test_portfolio_five_runs_boundary_and_cluster_determinism(
+    comparison_portfolio, portfolio_sources
+):
+    m = comparison_portfolio
+    runs = portfolio_sources + (portfolio_sources[0],)
+    public = m.build_public_portfolio(runs)
+    doc = json.loads(public.payload)
+    assert doc["run_count"] == 5
+    assert doc["candidate_count"] == 4
+    assert doc["distinct_series_count"] == 3
+    assert doc["series_clusters"][0]["member_indices"] == [0, 1, 4]
+    assert doc["hop_frequency"][0]["identical_members"] == [1, 2, 4]
+    assert (
+        m.verify_public_portfolio(runs, public.payload, expected_sha256=public.sha256).run_count
+        == 5
+    )
+
+
+def test_portfolio_missing_and_extra_positional_hops(comparison_portfolio, timeline_sources):
+    m = comparison_portfolio
+    a, b, c = timeline_sources
+    baseline = ((a, b), (b, c))
+    short = ((a, a), (a, b))
+    long = ((a, b, c), (c, a, b))
+    public = m.build_public_portfolio((baseline, short, long))
+    doc = json.loads(public.payload)
+    assert doc["hop_frequency"][2]["missing_members"] == []
+    assert doc["hop_frequency"][2]["extra_members"] == [2]
+    assert doc["hop_frequency"][2]["absent_members"] == [1]
+    # Candidate 1 has both baseline hops; all comparisons are positional.
+    assert all(item["index"] == index for index, item in enumerate(doc["hop_frequency"]))
+
+
+def test_portfolio_rehashed_nested_casefile_and_cohort_reorder_rejected(
+    comparison_portfolio, portfolio_sources
+):
+    m = comparison_portfolio
+    public = m.build_public_portfolio(portfolio_sources)
+    forged = json.loads(public.payload)
+    forged["members"][2]["comparison"]["hops"][0]["classification"] = "different"
+    raw = json.dumps(forged, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+        "ascii"
+    )
+    with pytest.raises(m.PortfolioError):
+        m.verify_public_portfolio(
+            portfolio_sources, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+    reordered = (
+        portfolio_sources[0],
+        portfolio_sources[3],
+        portfolio_sources[1],
+        portfolio_sources[2],
+    )
+    with pytest.raises(m.PortfolioError):
+        m.verify_public_portfolio(reordered, public.payload, expected_sha256=public.sha256)
+
+
+def test_portfolio_private_wire_is_bounded_before_json_parser(
+    comparison_portfolio, portfolio_sources, monkeypatch
+):
+    m = comparison_portfolio
+    oversized = b'{"x":"' + b"x" * m.MAX_PRIVATE_PORTFOLIO_BYTES + b'"}'
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversized wire input reached JSON parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.PortfolioError, match="^staging portfolio rejected$"):
+            m._checked(
+                oversized,
+                hashlib.sha256(oversized).hexdigest(),
+                max_bytes=m.MAX_PRIVATE_PORTFOLIO_BYTES,
+            )
