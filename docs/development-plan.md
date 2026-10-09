@@ -1101,8 +1101,10 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   **1,732/1,732** complete local related regressions PASS; exact-head
   Ubuntu 26.04 Python 3.13/3.14 CI `37984107600` SUCCESS. PR-only
   native Level-3 SKIPPED; no provider state or marker changed.
-  Merge-main run `37986652267` must be independently assessed for
-  exact real native Level-3 disposition.
+  Merge-main run `37986652267` was CANCELLED at the 20-minute
+  Ubuntu validation job limit during Python 3.14 after Python 3.13
+  passed; dependent real no-network native Level-3 was SKIPPED.
+  Neither native acceptance nor a provider disposition was established.
 - **Next smaller complete functional slice (#190)** — bounded
   **public-only ranked disputed interval navigation index**.
   Independently recompute the just-merged #189 source-verified intervals

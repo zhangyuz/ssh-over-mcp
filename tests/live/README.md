@@ -2172,5 +2172,7 @@ from source-verified head `69a0c1b750924008fe9ff2b398c077767c7fa3a1`.
 Its disputed-member partition defect was corrected with source-derived
 `agreement_groups`, 1,732 local related tests PASS and exact-head Ubuntu
 CI `37984107600` Python 3.13/3.14 SUCCESS. PR Level-3 SKIPPED.
-Real merge-main provider disposition is separately checked from run
-`37986652267`, not inferred from detached consistency.
+#189 merge-main run `37986652267` was CANCELLED when the 20-minute
+Ubuntu validation job limit interrupted Python 3.14; Python 3.13 had
+passed, but the dependent real native Level-3 job was SKIPPED.
+This provides no native acceptance or actual provider disposition.
