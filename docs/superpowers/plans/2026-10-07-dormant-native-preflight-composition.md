@@ -290,3 +290,18 @@ passed but no-network Level-3 failed closed on the prior stale provider state.
 
 The explicit private-path opt-in is a programming guard against accidental
 export, **not** caller authentication or an authorization policy.
+
+
+## Contiguous offline public casefile series — 2026-10-09
+
+PR #184 adds independent source-regenerated consistency verification for
+2–8 path-free #183 casefiles, each with 2–17 exact original observations,
+and enforces equal incident selectors plus exact full-content fingerprint
+continuity at every cross-casefile boundary. One bounded canonical 64-KiB
+report summarizes up to 128 changed/stable transitions and 129 distinct
+positions (overlap counted once), net first/last drift, non-adjacent exact
+fingerprint revisits and inventory change **counts only**. Rehashing a
+forged aggregate cannot bypass independent re-generation from sources.
+No path-bearing audit is called or exported; no authenticated chronology,
+trusted UID-502 inspection, A1/B8 receipt, N1c approval, native Level-3
+acceptance, provider inspection or recovery action is acquired.

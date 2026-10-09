@@ -2255,3 +2255,244 @@ def test_casefile_public_never_invokes_path_bearing_audit(
         assert case.verify_public_casefile(
             timeline_sources, public.payload, expected_sha256=public.sha256
         ).changed_hops == (0, 1)
+
+
+@pytest.fixture
+def casefile_series(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "ops/live-e2e"))
+    return importlib.import_module("staging_casefile_series")
+
+
+@pytest.fixture
+def series_sources(timeline_sources):
+    a, b, c = timeline_sources
+    return ((a, b, c), (c, c, a), (a, b, c))
+
+
+def test_series_full_multisegment_roundtrip_and_revisits(casefile_series, series_sources):
+    series = casefile_series
+    record = series.build_public_casefile_series(series_sources)
+    report = json.loads(record.payload)
+    assert report["audience"] == "public"
+    assert report["schema_version"] == 1
+    assert report["incident"] == "stale-target"
+    assert report["segment_count"] == 3
+    assert report["hop_count"] == 6
+    assert report["changed_hops"] == [0, 1, 3, 4, 5]
+    assert report["stable_hops"] == [2]
+    assert report["net_changed"]
+    assert report["revisited_snapshots"] == [
+        {"snapshot_index": 4, "first_matching_index": 0},
+        {"snapshot_index": 5, "first_matching_index": 1},
+        {"snapshot_index": 6, "first_matching_index": 2},
+    ]
+    assert len(report["snapshot_sha256s"]) == 7
+    assert len(report["segments"]) == 3
+    assert all(s["public_casefile_sha256"] for s in report["segments"])
+    assert sum(s["hop_count"] for s in report["segments"]) == 6
+    assert b"target.bundle" not in record.payload
+    assert b"mtime_ns" not in record.payload
+    verified = series.verify_public_casefile_series(
+        series_sources, record.payload, expected_sha256=record.sha256
+    )
+    assert verified.hop_count == 6
+    assert verified.changed_hops == (0, 1, 3, 4, 5)
+    assert verified.revisited_snapshots == ((4, 0), (5, 1), (6, 2))
+    assert verified.series_sha256 == record.sha256
+    assert series.build_public_casefile_series(series_sources) == record
+    with pytest.raises(FrozenInstanceError):
+        verified.hop_count = 42
+
+
+def test_series_rejects_gap_between_individually_valid_casefiles(casefile_series, timeline_sources):
+    a, b, c = timeline_sources
+    # Each segment is valid, but its shared boundary differs.
+    for gaps in (((a, b), (c, a)), ((a, b), (a, b))):
+        with pytest.raises(
+            casefile_series.SeriesError, match="^staging casefile series rejected$"
+        ) as failure:
+            casefile_series.build_public_casefile_series(gaps)
+        assert failure.value.__cause__ is None
+
+
+def test_series_rejects_source_splice_or_segment_reorder(casefile_series, series_sources):
+    series = casefile_series
+    built = series.build_public_casefile_series(series_sources)
+    left = list(series_sources)
+    left[0] = (
+        left[0][0],
+        replace(left[0][1], marker_metadata=replace(left[0][1].marker_metadata, mtime_ns=7)),
+        left[0][2],
+    )
+    for sources in (tuple(left), (series_sources[1], series_sources[0], series_sources[2])):
+        with pytest.raises(series.SeriesError, match="^staging casefile series rejected$"):
+            series.verify_public_casefile_series(
+                sources, built.payload, expected_sha256=built.sha256
+            )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "changed_hops",
+        "stable_hops",
+        "snapshot_sha256s",
+        "segments",
+        "aggregate",
+        "incident",
+        "revisited_snapshots",
+    ],
+)
+def test_series_rejects_forged_canonical_report_with_recomputed_hash(
+    casefile_series, series_sources, field
+):
+    series = casefile_series
+    built = series.build_public_casefile_series(series_sources)
+    content = json.loads(built.payload)
+    if field == "changed_hops":
+        content[field].pop()
+    elif field == "stable_hops":
+        content[field].append(0)
+    elif field == "snapshot_sha256s":
+        content[field][1] = "f" * 64
+    elif field == "segments":
+        content[field][0]["public_casefile_sha256"] = "0" * 64
+    elif field == "aggregate":
+        content[field]["modified_count"] += 1
+    elif field == "incident":
+        content[field] = "forged"
+    else:
+        content[field].clear()
+    raw = json.dumps(content, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode(
+        "ascii"
+    )
+    with pytest.raises(series.SeriesError, match="^staging casefile series rejected$"):
+        series.verify_public_casefile_series(
+            series_sources, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"",
+        b"{}",
+        b"null",
+        b"[]",
+        b"\xff",
+        b'{"a":1,"a":2}',
+        b" " * (64 * 1024 + 1),
+    ],
+)
+def test_series_rejects_noncanonical_malformed_oversize(casefile_series, series_sources, raw):
+    with pytest.raises(casefile_series.SeriesError, match="^staging casefile series rejected$"):
+        casefile_series.verify_public_casefile_series(
+            series_sources, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+
+
+def test_series_refuses_wrong_inputs_and_wrong_digest(casefile_series, series_sources):
+    series = casefile_series
+    for source in ([], {}, None, (), (series_sources[0],), (series_sources[0],) * 9):
+        with pytest.raises(series.SeriesError, match="^staging casefile series rejected$"):
+            series.build_public_casefile_series(source)
+    built = series.build_public_casefile_series(series_sources)
+    for digest in (True, None, b"0" * 64, "Z" * 64, "0" * 63):
+        with pytest.raises(series.SeriesError, match="^staging casefile series rejected$"):
+            series.verify_public_casefile_series(
+                series_sources, built.payload, expected_sha256=digest
+            )
+
+
+def test_series_max_eight_segments_128_hops(casefile_series, evidence):
+    segment = (evidence,) * 17
+    sources = (segment,) * 8
+    built = casefile_series.build_public_casefile_series(sources)
+    content = json.loads(built.payload)
+    assert content["segment_count"] == 8
+    assert content["hop_count"] == 128
+    assert content["changed_hops"] == []
+    assert len(content["snapshot_sha256s"]) == 129
+    assert len(built.payload) <= casefile_series.MAX_SERIES_BYTES
+    checked = casefile_series.verify_public_casefile_series(
+        sources, built.payload, expected_sha256=built.sha256
+    )
+    assert checked.hop_count == 128
+    with pytest.raises(casefile_series.SeriesError):
+        casefile_series.build_public_casefile_series(sources + (segment,))
+
+
+def test_series_no_host_io_and_never_constructs_private_report(
+    casefile_series, series_sources, modules, monkeypatch
+):
+    p, _ = modules
+    case = importlib.import_module("staging_timeline_casefiles")
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("series reached host, loader or private auditor")
+
+    with monkeypatch.context() as patch:
+        for name in ("open", "stat", "scandir", "listdir", "fork", "kill", "system"):
+            if hasattr(os, name):
+                patch.setattr(os, name, forbidden)
+        patch.setattr(p, "_observe_detached_joint_preflight", forbidden)
+        patch.setattr(p, "_fixed_inventory_module", forbidden)
+        patch.setattr(case, "build_private_casefile", forbidden)
+        patch.setattr(case, "build_timeline_audit", forbidden)
+        built = casefile_series.build_public_casefile_series(series_sources)
+        assert (
+            casefile_series.verify_public_casefile_series(
+                series_sources, built.payload, expected_sha256=built.sha256
+            ).hop_count
+            == 6
+        )
+
+    with monkeypatch.context() as patch:
+        patch.setattr(p, "_FIXED_INVENTORY_MODULE", None)
+        patch.setattr(p, "_fixed_inventory_module", forbidden)
+        with pytest.raises(casefile_series.SeriesError):
+            casefile_series.build_public_casefile_series(series_sources)
+
+
+def test_series_huge_negative_timestamp_and_unchanged_global_digit_guard(
+    casefile_series, timeline_sources
+):
+    import sys
+
+    before = sys.get_int_max_str_digits()
+    a, b, c = timeline_sources
+    long = replace(b, marker_metadata=replace(b.marker_metadata, ctime_ns=-(10**5000)))
+    sources = ((a, long), (long, c))
+    built = casefile_series.build_public_casefile_series(sources)
+    checked = casefile_series.verify_public_casefile_series(
+        sources, built.payload, expected_sha256=built.sha256
+    )
+    assert checked.hop_count == 2
+    assert sys.get_int_max_str_digits() == before
+
+
+def test_series_rejects_correct_hash_noncanonical_json(casefile_series, series_sources):
+    built = casefile_series.build_public_casefile_series(series_sources)
+    raw = json.dumps(json.loads(built.payload), indent=2).encode("ascii")
+    assert raw != built.payload
+    with pytest.raises(casefile_series.SeriesError, match="^staging casefile series rejected$"):
+        casefile_series.verify_public_casefile_series(
+            series_sources, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+
+
+def test_series_rejects_overbound_valid_json_before_parsing(
+    casefile_series, series_sources, monkeypatch
+):
+    raw = b'{"padding":"' + b"x" * (casefile_series.MAX_SERIES_BYTES) + b'"}'
+    assert len(raw) > casefile_series.MAX_SERIES_BYTES
+
+    def fail(*_args, **_kwargs):
+        pytest.fail("oversized series reached JSON parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(casefile_series.json, "loads", fail)
+        with pytest.raises(casefile_series.SeriesError, match="^staging casefile series rejected$"):
+            casefile_series.verify_public_casefile_series(
+                series_sources, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+            )
