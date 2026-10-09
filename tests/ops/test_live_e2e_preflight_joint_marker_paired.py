@@ -390,3 +390,74 @@ def test_post_ps_b_payload_directory_close_rewrite_refuses(env, monkeypatch):
     assert len(observed) == 1
     assert observed[0].count("ps") == 2
     assert observed[0].count("inventory") == 1
+
+
+@pytest.mark.parametrize("acquire", ["dup", "scandir", "child-open"])
+@pytest.mark.parametrize("error_type", [OSError, RuntimeError, KeyboardInterrupt])
+def test_full_joint_observer_uncertain_inventory_acquisition_blocks_ps_b(
+    env, monkeypatch, acquire, error_type
+):
+    p, _root, _cache, marker, _temp, selected, expected, events = env
+    _spy(env, monkeypatch)
+    actual_dup, actual_scan, actual_open, actual_close = (os.dup, os.scandir, os.open, os.close)
+    triggered = []
+
+    def dup(fd):
+        if (
+            acquire == "dup"
+            and not triggered
+            and sys._getframe(1).f_code.co_name == "collect_staging_inventory"
+            and os.fstat(fd).st_ino == selected.stat().st_ino
+        ):
+            owned = actual_dup(fd)
+            actual_close(owned)
+            triggered.append("dup")
+            raise error_type("private acquisition ambiguity")
+        return actual_dup(fd)
+
+    def scandir(fd):
+        if acquire == "scandir" and not triggered and sys._getframe(1).f_code.co_name == "names_at":
+            owned = actual_scan(fd)
+            owned.close()
+            triggered.append("scandir")
+            raise error_type("private iterator acquisition ambiguity")
+        return actual_scan(fd)
+
+    def open_child(name, flags, *args, **kwargs):
+        if (
+            acquire == "child-open"
+            and not triggered
+            and name == "payload-content"
+            and kwargs.get("dir_fd") is not None
+            and sys._getframe(1).f_code.co_name == "walk"
+        ):
+            owned = actual_open(name, flags, *args, **kwargs)
+            actual_close(owned)
+            triggered.append("child-open")
+            raise error_type("private child-directory acquisition ambiguity")
+        return actual_open(name, flags, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "dup", dup)
+        patch.setattr(os, "scandir", scandir)
+        patch.setattr(os, "open", open_child)
+        with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as failure:
+            p._observe_joint_marker_paired_inventory("stale-target")
+    assert triggered == [acquire]
+    assert failure.value.cleanup_uncertain is True
+    assert failure.value.__cause__ is None
+    assert events.count("ps") == 1
+    assert events.count("inventory") == 1
+    assert marker.read_bytes() == MARKER
+    assert expected.read_bytes() == (SHA + "\n").encode()
+
+
+def test_full_joint_observer_settled_inventory_mismatch_is_not_uncertain(env, monkeypatch):
+    p, _root, _cache, _marker, _temp, selected, _expected, events = env
+    _spy(env, monkeypatch)
+    (selected / "target.bundle").chmod(0o622)
+    with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as failure:
+        p._observe_joint_marker_paired_inventory("stale-target")
+    assert failure.value.cleanup_uncertain is False
+    assert events.count("ps") == 1
+    assert events.count("inventory") == 1
