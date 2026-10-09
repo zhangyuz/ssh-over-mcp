@@ -1541,3 +1541,36 @@ a trusted UID-502 incident inspection, native A1/Level-3 certification,
 activated workflow, envelope conversion or receipt producer. The separately
 approved authority binding, live guest/provider-state recovery and native
 acceptance gates remain unchanged. No real incident state is touched.
+
+
+### Pure detached preflight → canonical inventory projection
+
+The private `staging_projection.project_detached_inventory(observation)`
+is a complete offline **data conversion** feature. It consumes only an
+already-detached `_DetachedJointPreflightObservation` from the dormant
+one-pass observer, validates exact typed/frozen structures and selected
+catalog/marker/expected_commit cross-field identities, then projects the
+native-getconf canonical root-to-T ancestor snapshots, marker, staging and
+the entire metadata-only inventory into the reviewed **inventory v1** wire
+shape. It uses the existing `staging_envelope._inventory_valid` domain
+predicate and `staging_wire.encode_inventory_payload` canonical bounded
+serializer, not a permissive JSON codec.
+
+Output is only frozen `ProjectedInventory(payload: bytes, sha256: str)`.
+Fixture golden inventory bytes/digest must match exactly; both incident
+selectors, malformed/forged records, wrong ancestor paths, root/inventory
+catalog mismatches, wrong expected_commit metadata, unsafe marker modes,
+entry order/duplicates, scalar-type misuse (including deceptive `str` subclasses on discarded
+ancestor paths), immutability and projection determinism have explicit tests. Host-access traps prove the converter
+does not call `os.open/stat/scandir/kill/fork` or the preflight observer.
+When the fixed inventory-entry module cache is uninitialized, it refuses
+without loading/compiling a file; normal jointly pinned observation has
+already initialized that fixed inventory type during collection.
+
+This feature **does not authenticate provenance** of a supplied detached
+record. It neither accepts `inspection` authority/run ID/attempt nor
+creates envelopes/receipts, writes data, invokes a process, accesses the
+UID-502 staging incident, clears a provider marker, or enables recovery.
+Its checksum certifies output bytes only, never a trusted workflow or a
+real Level-3/A1/N1c result. Production conversion/activation requires
+the separately authorized trusted-workflow and host-provenance gates.
