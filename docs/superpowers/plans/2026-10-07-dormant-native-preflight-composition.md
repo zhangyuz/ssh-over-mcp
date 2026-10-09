@@ -422,3 +422,16 @@ path-free and does not reveal raw before/after fingerprints, raw
 inventory paths, chronological authority or access rights. New real
 3-hop four-member source-built and rehashed-tamper regressions protect
 this invariant; the wire remains ≤64 KiB, canonical and source-bound.
+
+## Bounded public dispute navigation index — PR #190
+
+After the source-verified #189 member-partition fix, the next small
+offline feature ranks only **disputed public hop intervals** by length
+descending, with starting hop ascending as a stable tie. It binds to
+the complete original-source #189 interval SHA-256, retains canonical
+member agreement and absences, and has an independent exact-source
+verifier and a strict 32-KiB public wire limit. Ranked window length
+is not risk severity, chronology or approval. No private path audit,
+host execution, UID-502, provider recovery, A1/B8 receipt or paused
+N1c/ADR 0011 condition is modified. Actual native Level-3 remains
+separate and fail-closed until authorized provider recovery.

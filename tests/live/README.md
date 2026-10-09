@@ -2139,3 +2139,30 @@ path-free and does not reveal raw before/after fingerprints, raw
 inventory paths, chronological authority or access rights. New real
 3-hop four-member source-built and rehashed-tamper regressions protect
 this invariant; the wire remains ≤64 KiB, canonical and source-bound.
+
+### Source-verified public dispute navigation index (next smaller slice, PR #190)
+
+`staging_dispute_index.build_public_dispute_index(runs)` accepts the
+**original** ordered 3–5 cohort series source tuples; it does not accept
+a purportedly verified caller-produced #189 report. It rebuilds #189
+path-free consensus intervals with their full source-seal, segment and
+member-partition validation. The result is deterministic canonical ASCII
+JSON bounded to **32 KiB**, with the incident selector, cohort size, hop
+count, full source interval SHA-256, disputed hop count and an ordered
+array of only the disputed windows. Each window retains half-open bounds,
+length in hops, source-verified `agreement_groups` and absent member
+indices; **no untrusted private path or changed-field records** appear.
+
+The index is ranked by **descending disputed interval length** with
+**ascending start-hop** as the deterministic tie-breaker. This is a
+navigation order, **not** an incident priority, severity or chronology
+judgment. An entirely unanimous/majority-only cohort produces a valid
+empty dispute index (zero total disputed hops, zero windows).
+
+`verify_public_dispute_index(runs, raw, expected_sha256=...)` checks
+canonical duplicate-free bytes, exact type, size and SHA-256, then
+recomputes the entire original-source-bounded interval construction and
+requires byte-for-byte equality. Swapped member order and rehashed
+partitions or counts fail closed. No host I/O, UID-502, private export,
+provider marker changes, trusted producer identity, A1/B8 workflow
+receipts or real native Level-3 authority are implied.
