@@ -997,21 +997,31 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   Ubuntu validation PASS, real no-network Level-3 FAIL-CLOSED on the
   pre-existing stale provider state. No provider recovery or A1/B8
   disposition claimed.
-- **Next complete functional slice (#183)** — end-to-end **audience-separated
-  offline timeline casefiles**, from 2–17 original caller-supplied snapshots
-  to one separately bounded canonical path-free **public** manifest+summary
-  envelope (32 KiB) and, only with explicit opt-in, a **private** path-bearing
-  audit envelope (160 KiB) cryptographically content-bound to the public
-  digest. Each output independently re-verifies every original source/pair
-  seal, manifest and relevant report; rejects malformed/noncanonical/oversized
-  bytes, forged summaries, substituted sources, recomputed hashes and swapped
-  public/private pairing. Sensitive results suppress ordinary repr, and the
-  public pathway does not construct or serialize the private audit.
-  Acceptance: adversarial test-first RED/GREEN; 16-hop maximal input,
-  no-host-I/O/cold-cache tests, independent global security review and
-  exact-head self-hosted Python 3.13/3.14 CI. Casefiles are content consistency,
-  not authenticated producer/timing, privileged incident work, receipts,
-  recovery permissions or native Level-3 evidence.
+- **PR #183** — merged as `6f0d9deefc912965cf5e5908c2ea33c17e170f81`
+  from exact HEAD `4f47b190fd579f07b2d93352c371c051ce5f74cc`.
+  One-call path-free **public** manifest+count-summary casefile capped at
+  32 KiB; separately opt-in private raw-path audit casefile capped at
+  160 KiB and content-bound to the public SHA-256. Independent deep
+  review `6082589824` found zero Critical/Important/Minor; 1,549 related
+  tests and exact-head self-hosted Ubuntu 26.04 Python 3.13/3.14 CI
+  `37939594908` PASS. PR Level-3 SKIPPED. Merge-main CI
+  `37942814022` Python 3.13/3.14 PASS, but native Level-3 FAIL-CLOSED
+  (exit 70: pre-existing stale E2E provider state). The privacy opt-in is
+  intentional export handling, never trusted caller authorization.
+- **Next complete functional slice (#184)** — independently verifiable
+  **contiguous public casefile series** (2–8 casefiles, each 2–17 supplied
+  snapshots; at most 128 global transitions/129 snapshot positions).
+  Rebuilds and validates each source-bound #183 public casefile, enforcing
+  identical incident selector and exact full-content digest equality at
+  every shared segment endpoint. Emits canonical bounded 64-KiB path-free
+  multi-segment report with public casefile digests, per-segment change
+  counts, global changed/stable indices, aggregate path **counts**,
+  first-to-last net content change and prior-fingerprint revisits.
+  Source splice, segment reorder/gap and rehashed forged global summaries
+  must fail closed on exact original caller-supplied tuples. Acceptance:
+  RED/GREEN adversaries, 8x16-hop maximum, no-private/no-host-I/O and
+  cold-cache fail-close, full regression, self-review and exact-head CI.
+  The input ordering is caller-supplied, **not** authenticated chronology.
 
 
 **Roadmap / global consistency:** These primitives are test fixtures and

@@ -1844,3 +1844,45 @@ A1/B8/paused N1c/Phase 7B1 and stale-provider disposition stay OPEN.
 
 The explicit private-path opt-in is a programming guard against accidental
 export, **not** caller authentication or an authorization policy.
+
+
+### Contiguous path-free public casefile series (PR #184)
+
+`staging_casefile_series` assembles a **complete 2–8-segment offline
+verification report** for a longer caller-supplied chain. Each segment is
+an exact tuple of **2–17 original frozen observations** accepted by #183's
+public casefile exporter and verifier. Each segment is rebuilt and verified
+independently with its #180 timeline and #181 path-free counts; the last
+full-content snapshot SHA-256 of one segment MUST match the first of the
+next segment. The same incident selector is required across the series.
+
+`build_public_casefile_series(segments)` exports one **64-KiB maximum**
+canonical ASCII JSON v1 report with ordered public-casefile SHA-256s, each
+segment's timeline/summary digests, first/last snapshot fingerprints and
+added/removed/modified inventory **counts**, a de-duplicated global ordered
+sequence of up to **129 snapshot fingerprints / 128 hops**, global changed
+and stable hop indices, first-to-last content net-change and non-adjacent
+full-content revisits. Shared segment endpoints count only once. Reports
+contain **no raw paths, modified-field names or raw metadata values**.
+
+`verify_public_casefile_series(segments, raw, expected_sha256=...)` rejects
+invalid input containers, noncanonical/duplicate-key/non-ASCII/oversized
+report bytes, stale digests, reordered or spliced segments, a missing shared
+endpoint, wrong incident and forged counters/revisit indices **even with a
+recomputed unkeyed SHA-256**, by regenerating the entire casefile series
+from the exact original observations. All failures are fixed sanitized
+`SeriesError` without chained exceptions.
+
+**Security:** Like #180–#183, all supplied ordering is *caller order*, not
+capture chronology or producer authentication. A fully replaced coherent
+tuple and accompanying regenerated report can still verify. Path-free
+output still discloses incident selectors and content fingerprints; public
+means *no raw inventory paths*, not unconditional release approval. The
+series path never invokes #182's private audit. No host/process/UID-502
+observation, network access, staging mutation, trusted receipt, stale-provider
+recovery or native Level-3 permission is introduced. A1/B8/paused N1c,
+Phase 7B1 and real E2E validation remain separate OPEN gates.
+
+Post-#183 merge-main workflow `37942814022`: Ubuntu Python 3.13/3.14
+validation PASS; no-network Level-3 FAIL-CLOSED (pre-existing stale
+provider state, exit 70). Nothing in #184 restores provider authority.
