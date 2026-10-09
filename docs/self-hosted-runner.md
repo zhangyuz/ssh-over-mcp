@@ -119,8 +119,8 @@ The deployment also does not mount:
 The runner's job workspace lives only in the container filesystem. In
 ephemeral mode the container is removed after its one assigned job.
 
-The primary CI validates Python 3.13 and 3.14 in **separate matrix
-jobs**, each on a fresh hardened Ubuntu 26.04 x86 ephemeral runner with
+Both primary CI and the explicit trusted-main security workflow validate
+Python 3.13 and 3.14 in **separate matrix jobs**, each on a fresh hardened Ubuntu 26.04 x86 ephemeral runner with
 its own **20-minute** timeout. Both jobs run the entire unfiltered test
 suite, lint, compilation and cgroup probe; `fail-fast: false` ensures
 one version cannot cancel the other. A single available x86 runner may
