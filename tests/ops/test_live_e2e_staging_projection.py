@@ -2842,3 +2842,355 @@ def test_private_series_extreme_negative_nonwire_metadata(
     )
     assert checked.public.hop_count == 2
     assert sys.get_int_max_str_digits() == initial_digit_guard
+
+
+@pytest.fixture
+def comparison_dossier(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "ops/live-e2e"))
+    return importlib.import_module("staging_comparison_dossier")
+
+
+@pytest.fixture
+def dossier_sources(series_sources):
+    left = series_sources
+    right = list(left)
+    altered = list(right[1])
+    altered[1] = replace(
+        altered[1],
+        marker_metadata=replace(altered[1].marker_metadata, ctime_ns=818),
+    )
+    right[1] = tuple(altered)
+    return left, tuple(right)
+
+
+def test_dossier_complete_public_and_private_comparison(comparison_dossier, dossier_sources):
+    dossier = comparison_dossier
+    left, right = dossier_sources
+    public = dossier.build_public_comparison(left, right)
+    report = json.loads(public.payload)
+    assert report["schema_version"] == 1
+    assert report["audience"] == "public"
+    assert report["incident"] == "stale-target"
+    assert report["left_series_sha256"] != report["right_series_sha256"]
+    assert report["left_hop_count"] == report["right_hop_count"] == 6
+    assert report["shared_prefix_snapshots"] == 3
+    assert report["different_snapshot_indices"] == [3]
+    assert report["identical_hops"] == [0, 1, 4, 5]
+    assert report["different_hops"] == [2, 3]
+    assert report["left_only_hops"] == report["right_only_hops"] == []
+    assert len(report["hops"]) == 6
+    assert b"target.bundle" not in public.payload
+    assert b"mtime_ns" not in public.payload
+    assert len(public.payload) <= dossier.MAX_PUBLIC_COMPARISON_BYTES
+    checked = dossier.verify_public_comparison(
+        left, right, public.payload, expected_sha256=public.sha256
+    )
+    assert checked.different_hops == (2, 3)
+    assert checked.public_sha256 == public.sha256
+    assert dossier.build_public_comparison(left, right) == public
+
+    paired_public, private = dossier.build_private_comparison(
+        left, right, allow_sensitive_paths=True
+    )
+    assert paired_public == public
+    private_doc = json.loads(private.payload)
+    assert private_doc["audience"] == "private"
+    assert private_doc["public_comparison_sha256"] == public.sha256
+    assert private_doc["left_private_series_sha256"] != private_doc["right_private_series_sha256"]
+    assert len(private_doc["hops"]) == 6
+    private_checked = dossier.verify_private_comparison(
+        left,
+        right,
+        public.payload,
+        private.payload,
+        expected_public_sha256=public.sha256,
+        expected_private_sha256=private.sha256,
+        allow_sensitive_paths=True,
+    )
+    assert private_checked.public == checked
+    assert private_checked.private_sha256 == private.sha256
+    assert "audit" not in repr(private)
+    assert "audit" not in repr(private_checked)
+
+
+def test_dossier_identical_runs_and_changed_path_separation(comparison_dossier, evidence):
+    entries = list(evidence.selected.inventory)
+    index = next(i for i, item in enumerate(entries) if item.path == "target.bundle")
+    entries[index] = replace(entries[index], size=entries[index].size + 9)
+    changed = replace(evidence, selected=replace(evidence.selected, inventory=tuple(entries)))
+    left = ((evidence, changed), (changed, evidence))
+    right = ((evidence, evidence), (evidence, evidence))
+    pub = comparison_dossier.build_public_comparison(left, right)
+    priv_pub, private = comparison_dossier.build_private_comparison(
+        left, right, allow_sensitive_paths=True
+    )
+    assert priv_pub == pub
+    raw = json.loads(private.payload)
+    assert b"target.bundle" not in pub.payload
+    assert b"target.bundle" in private.payload
+    assert raw["hops"][0]["left_only_effects"] == [
+        {"effect": "modified", "path": "target.bundle", "fields": ["size"]}
+    ]
+    assert raw["hops"][0]["right_only_effects"] == []
+    same = comparison_dossier.build_public_comparison(left, left)
+    assert json.loads(same.payload)["different_hops"] == []
+    assert len(json.loads(same.payload)["identical_hops"]) == 2
+
+
+def test_dossier_handles_different_hop_lengths(comparison_dossier, series_sources):
+    a, b, c = series_sources[0]
+    left = series_sources
+    right = ((a, b), (b, c))
+    pub = comparison_dossier.build_public_comparison(left, right)
+    raw = json.loads(pub.payload)
+    assert raw["left_hop_count"] == 6
+    assert raw["right_hop_count"] == 2
+    assert raw["left_only_hops"] == [2, 3, 4, 5]
+    assert raw["right_only_hops"] == []
+    assert raw["identical_hops"] == [0, 1]
+    assert comparison_dossier.verify_public_comparison(
+        left, right, pub.payload, expected_sha256=pub.sha256
+    ).left_only_hops == (2, 3, 4, 5)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "left_series_sha256",
+        "right_series_sha256",
+        "different_snapshot_indices",
+        "different_hops",
+        "identical_hops",
+        "shared_prefix_snapshots",
+        "counts_delta",
+        "hops",
+        "incident",
+    ],
+)
+def test_dossier_refuses_public_rehashed_forgery(comparison_dossier, dossier_sources, field):
+    left, right = dossier_sources
+    built = comparison_dossier.build_public_comparison(left, right)
+    doc = json.loads(built.payload)
+    if field.endswith("sha256"):
+        doc[field] = "f" * 64
+    elif field in ("different_snapshot_indices", "different_hops", "identical_hops"):
+        doc[field].clear()
+    elif field == "shared_prefix_snapshots":
+        doc[field] += 1
+    elif field == "counts_delta":
+        doc[field]["modified_count"] += 1
+    elif field == "hops":
+        doc[field][0]["classification"] = "different"
+    else:
+        doc[field] = "forged"
+    forged = json.dumps(doc, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode(
+        "ascii"
+    )
+    with pytest.raises(comparison_dossier.ComparisonError, match="^staging comparison rejected$"):
+        comparison_dossier.verify_public_comparison(
+            left, right, forged, expected_sha256=hashlib.sha256(forged).hexdigest()
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "public_comparison_sha256",
+        "left_private_series_sha256",
+        "right_private_series_sha256",
+        "hops",
+        "left_only_effects",
+        "right_only_effects",
+    ],
+)
+def test_dossier_refuses_private_rehashed_forgery(comparison_dossier, dossier_sources, field):
+    left, right = dossier_sources
+    public, private = comparison_dossier.build_private_comparison(
+        left, right, allow_sensitive_paths=True
+    )
+    doc = json.loads(private.payload)
+    if field.endswith("sha256"):
+        doc[field] = "f" * 64
+    elif field == "hops":
+        doc[field][0]["index"] += 1
+    else:
+        doc["hops"][0][field].append({"effect": "added", "path": "forged", "fields": []})
+    forged = json.dumps(doc, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode(
+        "ascii"
+    )
+    with pytest.raises(comparison_dossier.ComparisonError, match="^staging comparison rejected$"):
+        comparison_dossier.verify_private_comparison(
+            left,
+            right,
+            public.payload,
+            forged,
+            expected_public_sha256=public.sha256,
+            expected_private_sha256=hashlib.sha256(forged).hexdigest(),
+            allow_sensitive_paths=True,
+        )
+
+
+@pytest.mark.parametrize("opt_in", [False, None, 0, 1, "yes", (), {}])
+def test_dossier_requires_exact_opt_in(comparison_dossier, dossier_sources, opt_in):
+    left, right = dossier_sources
+    with pytest.raises(comparison_dossier.ComparisonError, match="^staging comparison rejected$"):
+        comparison_dossier.build_private_comparison(left, right, allow_sensitive_paths=opt_in)
+    with pytest.raises(comparison_dossier.ComparisonError, match="^staging comparison rejected$"):
+        comparison_dossier.verify_private_comparison(
+            left,
+            right,
+            b"{}",
+            b"{}",
+            expected_public_sha256="0" * 64,
+            expected_private_sha256="0" * 64,
+            allow_sensitive_paths=opt_in,
+        )
+
+
+def test_dossier_rejects_genuine_mismatched_pair_and_source_splice(
+    comparison_dossier, dossier_sources
+):
+    left, right = dossier_sources
+    public, private = comparison_dossier.build_private_comparison(
+        left, right, allow_sensitive_paths=True
+    )
+    different = list(right)
+    middle = list(different[1])
+    middle[1] = replace(middle[1], marker_metadata=replace(middle[1].marker_metadata, ctime_ns=916))
+    different[1] = tuple(middle)
+    other_public, other_private = comparison_dossier.build_private_comparison(
+        left, tuple(different), allow_sensitive_paths=True
+    )
+    assert public.sha256 != other_public.sha256
+    for p, q in ((public, other_private), (other_public, private)):
+        with pytest.raises(comparison_dossier.ComparisonError):
+            comparison_dossier.verify_private_comparison(
+                left,
+                right,
+                p.payload,
+                q.payload,
+                expected_public_sha256=p.sha256,
+                expected_private_sha256=q.sha256,
+                allow_sensitive_paths=True,
+            )
+    with pytest.raises(comparison_dossier.ComparisonError):
+        comparison_dossier.verify_public_comparison(
+            left, tuple(different), public.payload, expected_sha256=public.sha256
+        )
+
+
+@pytest.mark.parametrize(
+    "raw", [b"{}", b"null", b"[]", bytes([255]), b'{"x":1,"x":2}', b" " * (128 * 1024 + 1)]
+)
+def test_dossier_refuses_invalid_public_wire(comparison_dossier, dossier_sources, raw):
+    left, right = dossier_sources
+    with pytest.raises(comparison_dossier.ComparisonError, match="^staging comparison rejected$"):
+        comparison_dossier.verify_public_comparison(
+            left, right, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+
+
+def test_dossier_no_host_io_private_never_called_in_public(
+    comparison_dossier, dossier_sources, modules, monkeypatch
+):
+    p, _ = modules
+    comp = comparison_dossier
+    private_module = importlib.import_module("staging_private_casefile_series")
+
+    def fail(*_args, **_kwargs):
+        pytest.fail("comparison acquired host I/O or constructed private audit")
+
+    with monkeypatch.context() as patch:
+        for name in ("open", "stat", "scandir", "listdir", "kill", "fork", "system"):
+            if hasattr(os, name):
+                patch.setattr(os, name, fail)
+        patch.setattr(p, "_observe_detached_joint_preflight", fail)
+        patch.setattr(p, "_fixed_inventory_module", fail)
+        patch.setattr(private_module, "build_private_casefile_series", fail)
+        left, right = dossier_sources
+        public = comp.build_public_comparison(left, right)
+        assert comp.verify_public_comparison(
+            left, right, public.payload, expected_sha256=public.sha256
+        ).different_hops == (2, 3)
+    with monkeypatch.context() as patch:
+        patch.setattr(p, "_FIXED_INVENTORY_MODULE", None)
+        patch.setattr(p, "_fixed_inventory_module", fail)
+        with pytest.raises(comp.ComparisonError):
+            comp.build_public_comparison(*dossier_sources)
+
+
+def test_dossier_public_maximum_8x16_on_both_sides(comparison_dossier, evidence):
+    maximal = ((evidence,) * 17,) * 8
+    public = comparison_dossier.build_public_comparison(maximal, maximal)
+    report = json.loads(public.payload)
+    assert report["left_hop_count"] == report["right_hop_count"] == 128
+    assert report["identical_hops"] == list(range(128))
+    assert not report["different_hops"]
+    assert len(public.payload) <= comparison_dossier.MAX_PUBLIC_COMPARISON_BYTES
+    assert comparison_dossier.verify_public_comparison(
+        maximal, maximal, public.payload, expected_sha256=public.sha256
+    ).identical_hops == tuple(range(128))
+    with pytest.raises(comparison_dossier.ComparisonError):
+        comparison_dossier.build_public_comparison(maximal + (maximal[0],), maximal)
+
+
+def test_dossier_extreme_negative_metadata_preserves_global_guard(
+    comparison_dossier, timeline_sources
+):
+    import sys
+
+    guard = sys.get_int_max_str_digits()
+    a, b, c = timeline_sources
+    enormous = replace(b, marker_metadata=replace(b.marker_metadata, ctime_ns=-(10**5000)))
+    left = ((a, enormous), (enormous, c))
+    right = ((a, b), (b, c))
+    public = comparison_dossier.build_public_comparison(left, right)
+    assert comparison_dossier.verify_public_comparison(
+        left, right, public.payload, expected_sha256=public.sha256
+    ).different_hops == (0, 1)
+    assert sys.get_int_max_str_digits() == guard
+
+
+def test_dossier_private_cold_cache_fail_closed(
+    comparison_dossier, dossier_sources, modules, monkeypatch
+):
+    preflight, _ = modules
+
+    def fail(*_args, **_kwargs):
+        pytest.fail("private comparison used cold-cache loader")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(preflight, "_FIXED_INVENTORY_MODULE", None)
+        patch.setattr(preflight, "_fixed_inventory_module", fail)
+        with pytest.raises(
+            comparison_dossier.ComparisonError,
+            match="^staging comparison rejected$",
+        ) as error:
+            comparison_dossier.build_private_comparison(
+                *dossier_sources, allow_sensitive_paths=True
+            )
+        assert error.value.__cause__ is None
+
+
+def test_dossier_invalid_digest_and_noncanonical_private(comparison_dossier, dossier_sources):
+    left, right = dossier_sources
+    public, private = comparison_dossier.build_private_comparison(
+        left, right, allow_sensitive_paths=True
+    )
+    for digest in (None, True, b"0" * 64, "f" * 63, "F" * 64):
+        with pytest.raises(comparison_dossier.ComparisonError):
+            comparison_dossier.verify_public_comparison(
+                left, right, public.payload, expected_sha256=digest
+            )
+    raw = json.dumps(json.loads(private.payload), indent=2, ensure_ascii=True).encode("ascii")
+    assert raw != private.payload
+    with pytest.raises(comparison_dossier.ComparisonError):
+        comparison_dossier.verify_private_comparison(
+            left,
+            right,
+            public.payload,
+            raw,
+            expected_public_sha256=public.sha256,
+            expected_private_sha256=hashlib.sha256(raw).hexdigest(),
+            allow_sensitive_paths=True,
+        )
