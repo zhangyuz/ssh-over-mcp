@@ -446,3 +446,37 @@ def test_failed_borrowed_root_fstat_before_acquisition_remains_settled(case, mon
         assert failure.value.cleanup_uncertain is False
         assert attempted == []
         chain.revalidate()
+
+
+@pytest.mark.parametrize("error_type", [OSError, RuntimeError, KeyboardInterrupt])
+def test_child_directory_open_acquisition_unknown_cleanup_is_true(case, monkeypatch, error_type):
+    preflight, root, borrowed = case
+    original_open, original_close = os.open, os.close
+    injected = []
+
+    def ambiguous_open(name, flags, *args, **kwargs):
+        if (
+            name == "payload-content"
+            and kwargs.get("dir_fd") is not None
+            and sys._getframe(1).f_code.co_name == "walk"
+            and not injected
+        ):
+            owned = original_open(name, flags, *args, **kwargs)
+            original_close(owned)  # Fixture disposes its own post-syscall FD.
+            injected.append("child")
+            raise error_type("ambiguous child acquisition")
+        return original_open(name, flags, *args, **kwargs)
+
+    with preflight._pin_fixed_incident_root(borrowed, "stale-target") as chain:
+        with monkeypatch.context() as patch:
+            patch.setattr(os, "open", ambiguous_open)
+            with pytest.raises(
+                preflight.PreflightError, match="^staging preflight rejected$"
+            ) as failure:
+                preflight._observe_selected_inventory(chain, "stale-target")
+        assert injected == ["child"]
+        assert failure.value.cleanup_uncertain is True
+        assert failure.value.__cause__ is None
+        chain.revalidate()
+    assert root.is_dir()
+    assert os.fstat(borrowed).st_ino == root.parent.stat().st_ino

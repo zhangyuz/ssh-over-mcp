@@ -321,3 +321,32 @@ def test_joint_uncertain_owned_acquire_blocks_ps_b(env, monkeypatch, boundary):
     assert failure.value.cleanup_uncertain is True
     assert events.count("ps") == 1
     assert events.count("inventory") == 1
+
+
+@pytest.mark.parametrize("error_type", [OSError, KeyboardInterrupt])
+def test_joint_child_directory_open_ambiguity_blocks_ps_b(env, monkeypatch, error_type):
+    p, _root, _cache, _temp, _selected, _commit, events = env
+    original_open, original_close = os.open, os.close
+    injected = []
+
+    def ambiguous_open(name, flags, *args, **kwargs):
+        if (
+            name == "payload-content"
+            and kwargs.get("dir_fd") is not None
+            and sys._getframe(1).f_code.co_name == "walk"
+            and not injected
+        ):
+            owned = original_open(name, flags, *args, **kwargs)
+            original_close(owned)
+            injected.append("child")
+            raise error_type("unknown directory FD acquisition")
+        return original_open(name, flags, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "open", ambiguous_open)
+        with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as failure:
+            p._observe_joint_paired_inventory("stale-target")
+    assert injected == ["child"]
+    assert failure.value.cleanup_uncertain is True
+    assert events.count("ps") == 1
+    assert events.count("inventory") == 1

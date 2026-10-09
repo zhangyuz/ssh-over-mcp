@@ -224,7 +224,13 @@ def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry
             if path == "." and snapshot.kind != _LAYOUT[name]:
                 raise InventoryError(_FAILURE)
             if stat.S_ISDIR(info.st_mode):
-                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                try:
+                    child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):  # noqa: BLE001
+                    # The child descriptor may have been allocated before
+                    # failure without an owned handle being returned. Never
+                    # retry or report such cleanup as conclusively settled.
+                    raise InventoryError(cleanup_uncertain=True) from None
                 try:
                     walk(child, relative, snapshot)
                 finally:

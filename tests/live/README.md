@@ -1455,15 +1455,16 @@ and Level-3/A1/N1c remain unverified.
 ### Dormant collector-owned descriptor and iterator acquisition uncertainty
 
 The metadata-only staging collector obtains a private root clone with
-`os.dup(root_fd)` and private iteration handles with `os.scandir(fd)`.
-Failure of either acquisition can occur after allocating the underlying
+`os.dup(root_fd)` private iteration handles with `os.scandir(fd)`, and owned child
+directory FDs via no-follow `os.open(name, ..., dir_fd=fd)`.
+Failure of any of these acquisitions can occur after allocating the underlying
 resource without returning a usable owned handle. Such a failure now
 returns only the sanitized `InventoryError(cleanup_uncertain=True)`
 instead of claiming conclusively settled cleanup or leaking cancellation.
 The borrowed root remains owned by the caller and is never closed here.
 
 Disposable acquisition fault fixtures trigger only at the collector-owned
-dup/scandir invocation, perform a real allocation, dispose their own test
+dup/scandir/child-directory open invocation, perform a real allocation, dispose their own test
 clone, then raise untyped errors/cancellation. The collector and both
 paired-ps and jointly pinned ancestry callers must refuse as uncertain
 before ps B. A control fixture proves ordinary failure on a borrowed

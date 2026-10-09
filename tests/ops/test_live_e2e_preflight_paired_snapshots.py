@@ -424,3 +424,33 @@ def test_paired_uncertain_owned_acquire_blocks_ps_b(stage, monkeypatch, boundary
     assert events.count("ps") == 1
     assert events.count("inventory") == 1
     chain.revalidate()
+
+
+@pytest.mark.parametrize("error_type", [OSError, KeyboardInterrupt])
+def test_paired_child_directory_open_ambiguity_blocks_ps_b(stage, monkeypatch, error_type):
+    p, _d, _root, _commit, chain, events, _calls = stage
+    original_open, original_close = os.open, os.close
+    injected = []
+
+    def ambiguous_open(name, flags, *args, **kwargs):
+        if (
+            name == "payload-content"
+            and kwargs.get("dir_fd") is not None
+            and sys._getframe(1).f_code.co_name == "walk"
+            and not injected
+        ):
+            owned = original_open(name, flags, *args, **kwargs)
+            original_close(owned)
+            injected.append("child")
+            raise error_type("unknown owned child acquisition")
+        return original_open(name, flags, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "open", ambiguous_open)
+        with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as failure:
+            p._observe_paired_process_inventory(chain, "stale-target")
+    assert injected == ["child"]
+    assert failure.value.cleanup_uncertain is True
+    assert events.count("ps") == 1
+    assert events.count("inventory") == 1
+    chain.revalidate()
