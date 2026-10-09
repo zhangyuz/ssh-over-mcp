@@ -1316,3 +1316,61 @@ the uncertain close. All fault injections operate on disposable fixture
 FDs only. This is a bounded end-of-reader marker-name binding, not a
 promise of permanent post-context namespace stability or full preflight
 authority, and does not authorize any real UID-502 inspection or cleanup.
+
+
+### Dormant fixed paired process snapshots within jointly pinned ancestry
+
+The private `_observe_joint_paired_inventory(selector)` composes the
+previously reviewed catalog-bound cache, native-temp and selected-staging
+descriptor contexts with the existing fixed `_observe_paired_process_inventory`
+routine. The fixed getconf observation precedes all namespace opens. Both
+literal-root objects, the native T directory and the selected basename stay
+held simultaneously while **two distinct invocations** of the bounded
+fixed `ps` capture bracket metadata-only selected inventory.
+
+The helper revalidates all three held name edges and the explicit shared
+root/T identities before and after the paired observations. A ps failure,
+unexpected process, selected-content drift or namespace replacement must
+fail closed; any typed `cleanup_uncertain=True` propagates. The return is
+only existing frozen `_SelectedInventoryEvidence` without raw stdout,
+child identity, borrowed FD, receipt or cleanup authority. Catalog
+selectors are fixed; there is no caller-selected PID, command, UID or
+path. Tests use disposable fixture directories and substituted child
+observations, never actual UID-502 incident state.
+
+This is still a **partial, unactivated** composition. It does **not**
+authenticate `active-run.json`, prove marker-versus-ps atomicity or
+fixed checkout authority bytes, yield a full native preflight envelope,
+establish post-close permanent namespace stability, change a workflow,
+or authorize provider recovery. Those are separate review gates; PR-only
+Level-3 SKIPPED is not acceptance.
+
+
+### Dormant jointly pinned two-ps selected inventory (next narrow slice)
+
+Private `_observe_joint_paired_inventory(selector)` borrows the already
+reviewed fixed native-temp, literal-root cache and catalog-selected T→stage
+descriptor chains **concurrently**. It checks the common literal-root and
+duplicated selected T identities before and after invoking the existing
+`_observe_paired_process_inventory(selected, selector)`, which runs two
+independent fixed `ps` capture operations around the selected
+metadata-only staging inventory and revalidates the fixed
+`payload-content/expected_commit` contents and metadata after ps B.
+The three still-held name edges, root identities and T parent binding
+are checked before success evidence is detached.
+
+The result is **only the already existing frozen
+`_SelectedInventoryEvidence`**. No raw ps output, child PID, FD, marker
+bytes, receipt, activation, operator-selected command/UID/path/PID,
+provider cleanup or workflow authority is returned. The cache chain is
+held but `active-run.json` is **not read** in this intermediate. This
+slice cannot claim marker authentication or complete native preflight
+and is not a Level-3/A1/N1c completion. No real UID-502 host/incident
+state is inspected or changed.
+
+Disposable tests check ps-A→inventory→ps-B order inside the joint
+ancestry, selector strictness, rejection of cache/temp/selected
+replacement during ps B, expected_commit changes during ps B,
+sticky cleanup uncertainty on either snapshot failure, unsafe cache
+mode refusal before ps, split-root refusal, and explicit absence of
+marker/provider actions. No fixture substitutes a real runner capture.

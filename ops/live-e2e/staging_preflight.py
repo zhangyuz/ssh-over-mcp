@@ -1749,3 +1749,49 @@ def _observe_joint_marker_staging(selector: str) -> _MarkerStagingEvidence:
         GeneratorExit,
     ):
         raise PreflightError() from None
+
+
+def _observe_joint_paired_inventory(selector: str) -> _SelectedInventoryEvidence:
+    """Dormant ps-A/inventory/ps-B under jointly pinned native ancestry.
+
+    Private fixture-only composition: no marker contents, workflow, receipt,
+    recovery/cleanup authority or actual UID-502 host invocation.
+    Returns only the existing partial, immutable selected-inventory evidence.
+    """
+    _select_incident(selector)
+    try:
+        with _pin_observed_incident_ancestry(selector) as (cache, temp, selected):
+            _require_shared_incident_ancestry(cache, temp, selected)
+            selected.revalidate()
+            cache.revalidate()
+            temp.revalidate()
+            # Existing fixed helper invokes the approved bounded ps capture
+            # twice, surrounding the selected metadata-only inventory. It
+            # rechecks catalog expected_commit content/metadata after ps B.
+            observed = _observe_paired_process_inventory(selected, selector)
+            # No success evidence may escape if a ps/inventory callback changed
+            # a held cache/temp/staging name edge or split the common roots.
+            selected.revalidate()
+            cache.revalidate()
+            temp.revalidate()
+            _require_shared_incident_ancestry(cache, temp, selected)
+        return observed
+    except PreflightError:
+        raise
+    except (
+        ImportError,
+        SyntaxError,
+        OSError,
+        TypeError,
+        ValueError,
+        OverflowError,
+        AttributeError,
+        RuntimeError,
+        MemoryError,
+        KeyError,
+        IndexError,
+        KeyboardInterrupt,
+        SystemExit,
+        GeneratorExit,
+    ):
+        raise PreflightError() from None
