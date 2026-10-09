@@ -308,3 +308,37 @@ def test_final_payload_close_normal_settled_path_keeps_success(stage, monkeypatc
         result = p._observe_paired_process_inventory(chain, "stale-target")
     assert type(result) is p._SelectedInventoryEvidence
     assert seen
+
+
+@pytest.mark.parametrize("which", [1, 2])
+@pytest.mark.parametrize("error", [OSError, RuntimeError, ValueError, KeyboardInterrupt])
+def test_untyped_ps_boundary_failure_is_cleanup_uncertain(stage, monkeypatch, which, error):
+    p, _diagnostics, _root, _commit, chain, events, _calls = stage
+
+    def fail():
+        events.append("ps")
+        if events.count("ps") == which:
+            raise error("unconfirmed child ownership")
+
+    monkeypatch.setattr(p, "_observe_fixed_process_snapshot", fail)
+    with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as caught:
+        p._observe_paired_process_inventory(chain, "stale-target")
+    assert caught.value.cleanup_uncertain is True
+    assert caught.value.__cause__ is None
+    assert events.count("ps") == which
+
+
+@pytest.mark.parametrize("which", [1, 2])
+@pytest.mark.parametrize("uncertain", [False, True])
+def test_typed_ps_failure_is_not_reclassified(stage, monkeypatch, which, uncertain):
+    p, _d, _root, _commit, chain, events, _calls = stage
+
+    def fail():
+        events.append("ps")
+        if events.count("ps") == which:
+            raise p.PreflightError(cleanup_uncertain=uncertain)
+
+    monkeypatch.setattr(p, "_observe_fixed_process_snapshot", fail)
+    with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as caught:
+        p._observe_paired_process_inventory(chain, "stale-target")
+    assert caught.value.cleanup_uncertain is uncertain

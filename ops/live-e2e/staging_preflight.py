@@ -1375,6 +1375,19 @@ def _pin_observed_native_temp_chain() -> Iterator[_PinnedDirectoryChain]:
                 raise PreflightError(cleanup_uncertain=True) from None
 
 
+def _observe_fixed_process_snapshot_checked() -> None:
+    """Keep unknown owned-child cleanup uncertain at every ps composition call."""
+    try:
+        _observe_fixed_process_snapshot()
+    except PreflightError:
+        # A typed settled/uncertain result is authoritative for this call.
+        raise
+    except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):  # noqa: BLE001
+        # An untyped error at the capture boundary cannot prove the child
+        # was reaped and its descriptors closed; classify before FD unwinding.
+        raise PreflightError(cleanup_uncertain=True) from None
+
+
 def _observe_paired_process_inventory(
     selected_chain: _PinnedDirectoryChain, selector: str
 ) -> _SelectedInventoryEvidence:
@@ -1404,9 +1417,9 @@ def _observe_paired_process_inventory(
         selected_chain.revalidate()
         # Real child freshness is two invocations of the reviewed fixed
         # capture; equal stdout/rows or kernel-reused ps PIDs are permitted.
-        _observe_fixed_process_snapshot()
+        _observe_fixed_process_snapshot_checked()
         selected = _observe_selected_inventory(selected_chain, selector)
-        _observe_fixed_process_snapshot()
+        _observe_fixed_process_snapshot_checked()
         # The second child has now been reaped. Recheck the *content* and
         # immutable metadata of expected_commit, not just its held root FD.
         with _pin_expected_commit(
@@ -1807,19 +1820,6 @@ def _observe_joint_marker_paired_inventory(selector: str) -> _MarkerStagingEvide
     """
     incident = _select_incident(selector)
 
-    def checked_snapshot() -> None:
-        try:
-            _observe_fixed_process_snapshot()
-        except PreflightError:
-            # An explicit typed/settled refusal remains distinguishable.
-            raise
-        except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):  # noqa: BLE001
-            # Any untyped failure from a snapshot invocation, including
-            # unexpected OS/metadata/programming errors, cannot prove that
-            # its owned diagnostic child/FD cleanup settled. Preserve typed
-            # PreflightError separately and normalize BEFORE FD unwinding.
-            raise PreflightError(cleanup_uncertain=True) from None
-
     try:
         with _pin_observed_incident_ancestry(selector) as (cache, temp, selected):
             _require_shared_incident_ancestry(cache, temp, selected)
@@ -1845,11 +1845,11 @@ def _observe_joint_marker_paired_inventory(selector: str) -> _MarkerStagingEvide
                 # This helper checks the trusted authority/UID and owns/reaps
                 # its fixed child; the two invocations are independent, even
                 # if the OS legitimately reuses a child PID/output.
-                checked_snapshot()
+                _observe_fixed_process_snapshot_checked()
                 inventory = _observe_selected_inventory(selected, selector)
                 if inventory.expected_metadata != original_commit:
                     raise PreflightError()
-                checked_snapshot()
+                _observe_fixed_process_snapshot_checked()
 
                 # ps B is fully reaped before either content revalidation.
                 expected.revalidate(incident.expected_commit, uid=incident.uid)

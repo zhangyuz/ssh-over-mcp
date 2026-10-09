@@ -204,3 +204,36 @@ def test_selected_chain_provenance_cannot_be_cross_root(env, monkeypatch):
     with pytest.raises(p.PreflightError):
         p._observe_joint_paired_inventory("stale-target")
     assert opened == [root, other]
+
+
+@pytest.mark.parametrize("which", [1, 2])
+@pytest.mark.parametrize("error", [OSError, RuntimeError, ValueError])
+def test_joint_wrapper_untyped_ps_boundary_cannot_downgrade_cleanup(env, monkeypatch, which, error):
+    p, *_rest, events = env
+
+    def ps():
+        events.append("ps")
+        if events.count("ps") == which:
+            raise error("unknown capture/reap outcome")
+
+    monkeypatch.setattr(p, "_observe_fixed_process_snapshot", ps)
+    with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as caught:
+        p._observe_joint_paired_inventory("stale-target")
+    assert caught.value.cleanup_uncertain is True
+    assert events.count("ps") == which
+    assert events.count("inventory") == which - 1
+
+
+@pytest.mark.parametrize("which", [1, 2])
+def test_joint_wrapper_typed_settled_ps_refusal_stays_false(env, monkeypatch, which):
+    p, *_rest, events = env
+
+    def ps():
+        events.append("ps")
+        if events.count("ps") == which:
+            raise p.PreflightError(cleanup_uncertain=False)
+
+    monkeypatch.setattr(p, "_observe_fixed_process_snapshot", ps)
+    with pytest.raises(p.PreflightError) as caught:
+        p._observe_joint_paired_inventory("stale-target")
+    assert caught.value.cleanup_uncertain is False
