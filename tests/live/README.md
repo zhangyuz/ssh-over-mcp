@@ -2086,3 +2086,56 @@ no-network Level-3 FAIL-CLOSED, with unchanged stale E2E provider marker
 (exit 70). No source comparison or consensus report authorizes a
 provider marker change. Slow-test workflow output is activated after
 merge to trusted main (PR `pull_request_target` uses the base workflow).
+
+
+### Offline consensus interval navigation — PR #189
+
+`staging_consensus_intervals` is a smaller, public-only offline
+projection above the source-verified #188 consensus. The caller passes
+the **original tuple of 3–5 ordered cohort source series**, never an
+untrusted already-computed consensus report.
+
+`build_public_intervals(runs)` emits canonical ASCII JSON (≤64 KiB),
+with the incident selector, number of members, original #188 public
+consensus SHA-256 and ordered, contiguous, **half-open hop intervals**.
+Hop classes are `unanimous` if all runs have the same full-content
+before/after SHA-256 and changed flag, `majority` if at least floor(N/2)+1
+of all runs match, and `disputed` otherwise. Adjacent hops are merged
+only when class **and exact supporting-member/absent-member sets agree**,
+so a change in which runs support the majority never disappears from
+the summary. Each interval lists its original zero-based member indices.
+Class counts and the longest disputed interval length provide concise
+navigation; these are not timeline timestamps or severity assessments.
+
+`verify_public_intervals(runs, raw, expected_sha256=...)` first rejects
+wrong types, malformed/oversized bytes, unkeyed-hash mismatches, duplicate
+JSON keys and noncanonical encodings. It then **rebuilds all bytes from
+the exact original caller source tuples** and rejects even an otherwise
+well-formed attacker-modified payload with recalculated SHA-256. The
+module never enters private audit code, sees raw inventory paths, touches
+UID-502/provider state, accesses host/process/network resources or claims
+A1/B8/N1c/Phase7B1/no-network native Level-3 acceptance. SHA-256 means
+content consistency only, not trusted capture chronology or identity.
+
+#188 was merged as `ca382de725956252eeafba49d2c7c67806a5b896`,
+exact-head Python 3.13/3.14 CI `37975594044` SUCCESS. Its PR native
+Level-3 was SKIPPED, not real provider success. Main Level-3 disposition
+remains subject to actual merge-main run evidence.
+
+#188 merge-main `37980323392`: Ubuntu 26.04 Python 3.13/3.14 full
+validation PASS, actual no-network native Level-3 FAIL-CLOSED on the
+existing stale provider state (exit 70). Neither #188 nor #189 changes
+the real provider marker or permits native workflow acceptance.
+
+
+**#189 review correction (2026-10-09):** Exact source-derived public
+agreement partitions `agreement_groups` (canonical member-index lists)
+are included in each interval. Adjacent intervals merge only if their
+classification, supporters, absent-members **and full member agreement
+partition** remain the same. Thus changing disputed camps, such as
+`[0,1]/[2,3]` to `[0,2]/[1,3]`, cannot be silently hidden even
+though both hops have an empty strict-quorum support list. This is
+path-free and does not reveal raw before/after fingerprints, raw
+inventory paths, chronological authority or access rights. New real
+3-hop four-member source-built and rehashed-tamper regressions protect
+this invariant; the wire remains ≤64 KiB, canonical and source-bound.

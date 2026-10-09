@@ -1061,39 +1061,41 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   Merge-main CI `37973343853`: Ubuntu Python 3.13/3.14 validation PASS,
   real no-network Level-3 FAIL-CLOSED (stale E2E provider state, exit 70).
   Nothing cleared or changed in the real provider state.
-- **Next larger complete functional slice (#188)** — **verified 3–5-run
-  cohort consensus dossier** and bounded CI-runtime cost correction.
-  Compose a path-free canonical ≤256-KiB public strict-majority comparison:
-  for each zero-based hop, group exact full-content before/after SHA-256 and
-  changed flag across members, classify absent members, mark unanimity only
-  when every run carries the same hop, and strict quorum only at
-  floor(run_count/2)+1 (never a majority of merely present members).
-  A distinct exact-True opt-in ≤24-MiB private consensus compares raw
-  path/modified-field structural effects and enumerates their member
-  support, bound to the exact public consensus and privately verified
-  #187 source portfolio. Public mode never builds private effects.
-  Both verifiers reject duplicate/noncanonical/oversized/rehashed forged
-  reports and wrong original source cohort by byte-for-byte regeneration.
-  Preserve no-host-I/O, sanitized failures and no trusted capture
-  chronology/provenance/authorization assumptions. Performance: #187
-  exact-head Ubuntu CI `37967107396` took 8m08s Python 3.13 tests and
-  9m05s Python 3.14 tests, up from #186's 6m13s/7m16s in `37962020041`;
-  installation and compile contribute seconds, not the growth. Refactor
-  #187 public portfolio construction to source-validate each positional
-  member only **once per invocation**, reusing privately scoped verified
-  immutable source facts for internal pair composition. Existing public
-  untrusted-input verifiers remain exact-source rebuilding; no global
-  cache, no skipped assertion or increased CI timeout. CI now prints
-  slowest test durations for performance evidence. This branch's
-  `pull_request_target` CI uses the trusted base workflow; slow-test
-  logging changes start on post-merge main, not as untrusted PR YAML.
-  On 2026-10-09, 30 exactly matched, merged, clean local worktrees
-  and corresponding local/remote branches were removed only after
-  per-ref ancestry and clean status checks; divergence, dirty and
-  recovery/paused worktrees were retained. Work requires
-  test-first RED/GREEN, strict long/short/quorum/private adversarial tests,
-  full regression, code/docs/security review and exact-head self-hosted
-  Python 3.13/3.14 CI before review-ready.
+- **PR #188** — merged as `ca382de725956252eeafba49d2c7c67806a5b896`
+  from exact review HEAD `9444fe2263546c69011c5fda19b8830d37141b98`.
+  Delivered bounded ≤256-KiB path-free quorum consensus from verified
+  3–5-run source cohorts, strict floor(N/2)+1 of all runs and true
+  unanimity, and distinct exact-True opt-in ≤24-MiB private effect-support
+  report bound to original verified series and source portfolio. Exact
+  source/wire rebuild rejection, 1,711 related local tests PASS, 65
+  portfolio+consensus focused tests PASS. Independent global review
+  `6087754626` found 0 Critical/Important/Minor; exact-head self-hosted
+  Ubuntu Python 3.13/3.14 CI `37975594044` SUCCESS. PR Level-3 SKIPPED.
+  Source verification now runs once per cohort member within a single
+  construction call; no cross-call caches or removed checks. Timed CI:
+  #187 8m08s/9m05s → #188 8m24s/8m51s (3.13/3.14), not a demonstrated
+  total CI speedup. CI emits the 15 slowest pytest durations on trusted
+  main with unchanged two full version suites and 20-minute job budget.
+  #188 merge-main CI `37980323392`: Ubuntu Python 3.13/3.14 full
+  validation PASS; real no-network Level-3 FAIL-CLOSED on the existing
+  stale E2E provider state (exit 70). No provider marker altered and no
+  native acceptance or recovery implied.
+- **Next smaller complete functional slice (#189)** — **path-free
+  source-verified consensus interval report**, no private interface.
+  Compose bounded canonical ≤64-KiB public ASCII bytes from a newly
+  source-verified #188 public consensus for exactly the original
+  3–5 ordered caller source cohorts. For each zero-based hop classify
+  `unanimous`, `majority`, or `disputed`, then run-length encode contiguous
+  intervals only if **classification, complete supporting member list and
+  absent member list all match**. Record half-open hop bounds, counts
+  for each class, longest disputed window, and original full public
+  consensus SHA-256. Independent untrusted-input verifier validates
+  bytes/digest/canonical duplicate-free encoding and exactly rebuilds
+  all output from the original source tuples (rehashed forged windows,
+  swapped cohorts or invalid input fail closed). No raw paths, private
+  effects, host I/O or chronology/provenance/authorization inference.
+  Test-first RED/GREEN, full related regression, global code/docs review
+  and exact-head self-hosted Ubuntu Python 3.13/3.14 CI required.
 
 
 **Roadmap / global consistency:** These primitives are test fixtures and
@@ -1107,3 +1109,16 @@ subtask; ADR 0011 requires recovery/A1 closure before N1c resumes.** These
 acceptance criteria remain **open**, irrespective of PR-only Level-3 SKIPPED.
 No real incident, provider cleanup, marker clear, process signal, or unknown
 recovery workspace action has been authorized by this progress.
+
+
+**#189 review correction (2026-10-09):** Exact source-derived public
+agreement partitions `agreement_groups` (canonical member-index lists)
+are included in each interval. Adjacent intervals merge only if their
+classification, supporters, absent-members **and full member agreement
+partition** remain the same. Thus changing disputed camps, such as
+`[0,1]/[2,3]` to `[0,2]/[1,3]`, cannot be silently hidden even
+though both hops have an empty strict-quorum support list. This is
+path-free and does not reveal raw before/after fingerprints, raw
+inventory paths, chronological authority or access rights. New real
+3-hop four-member source-built and rehashed-tamper regressions protect
+this invariant; the wire remains ≤64 KiB, canonical and source-bound.

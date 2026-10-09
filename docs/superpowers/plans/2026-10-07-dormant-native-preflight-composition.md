@@ -388,3 +388,37 @@ stale provider marker, exit 70. This does not authorize cleanup.
 The housekeeping request removed only 30 clean fully-merged exactly
 remote-matched historical branches/worktrees; recovery, dirty,
 diverged and paused native worktrees remain preserved.
+
+
+## Public-only consensus interval projection — PR #189
+
+#188 merged as `ca382de725956252eeafba49d2c7c67806a5b896`
+with independent reviewed exact-head Ubuntu 26.04 Python 3.13/3.14
+validation PASS. #189 is intentionally smaller: one **public-only**
+≤64-KiB canonical consensus interval projector and independently
+original-source verifying API. It coalesces adjacent identical
+classification/supporter/absent-member states into half-open hop
+windows, retains exact #188 source consensus SHA-256 and summary counts,
+and fails closed on forged, swapped or malformed detached inputs.
+Private raw path audit scope, native provider mutation, UI, A1/B8
+receipt authority, N1c recovery/ADR 0011 and UID-502 acceptance
+are **not** touched or newly authorized. Merge-main native Level-3
+must be assessed separately from PR-only SKIPPED status.
+
+#188 merge-main workflow `37980323392`: Python 3.13/3.14 complete
+Ubuntu validation PASS; real no-network native Level-3 FAIL-CLOSED on
+pre-existing stale provider state, exit 70. Offline interval analysis
+does not authorize marker clear or provider recovery.
+
+
+**#189 review correction (2026-10-09):** Exact source-derived public
+agreement partitions `agreement_groups` (canonical member-index lists)
+are included in each interval. Adjacent intervals merge only if their
+classification, supporters, absent-members **and full member agreement
+partition** remain the same. Thus changing disputed camps, such as
+`[0,1]/[2,3]` to `[0,2]/[1,3]`, cannot be silently hidden even
+though both hops have an empty strict-quorum support list. This is
+path-free and does not reveal raw before/after fingerprints, raw
+inventory paths, chronological authority or access rights. New real
+3-hop four-member source-built and rehashed-tamper regressions protect
+this invariant; the wire remains ≤64 KiB, canonical and source-bound.
