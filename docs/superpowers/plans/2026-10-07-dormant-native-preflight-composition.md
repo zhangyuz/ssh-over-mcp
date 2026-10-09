@@ -165,3 +165,20 @@ Even complete Slice A+B does not prove:
 - successful current-main Level-3 after stale state is removed.
 
 Those require later independently reviewed gates. Only already-main code may run on the persistent orchestrator.
+
+## Implementation progress note — 2026-10-09 (does not close plan gates)
+
+The component-level dormant work has delivered an immutable joint fixture
+observation (PR #174, merged) and a pure canonical inventory-v1 projection
+(PR #175, merged; review follow-up explicitly fixed deceptive ancestor paths
+and forbidden cold-cache load). The adjacent offline drift-report slice only
+compares **two already detached and independently validated records**; it
+does not authorize an additional capture or offer freshness/provenance proof.
+
+This progress must not be mistaken for completing Slice A1 authority-file
+mutation-before-capture acceptance, trusted-main workflow integration, UID-502
+host evidence, provenance/receipt emission, or final Level-3. Those items
+remain unchecked above and require the exact reviewed authority context and
+native acceptance prescribed by this plan. All drift/projection comparisons
+are deterministic data operations against disposable fixtures, with no actual
+stale provider or unknown recovery workspace touch.

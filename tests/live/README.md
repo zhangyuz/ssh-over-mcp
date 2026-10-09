@@ -1574,3 +1574,28 @@ UID-502 staging incident, clears a provider marker, or enables recovery.
 Its checksum certifies output bytes only, never a trusted workflow or a
 real Level-3/A1/N1c result. Production conversion/activation requires
 the separately authorized trusted-workflow and host-provenance gates.
+
+### Offline canonical inventory drift report (dormant, data-only)
+
+`staging_drift.compare_detached_observations(before, after)` compares two
+supplied frozen joint observations for the **same fixed incident selector**.
+It independently passes **both** inputs through the strict canonical inventory
+projection, then returns an immutable `DetachedDriftReport`: before/after
+canonical payload SHA-256, entry paths newly added/removed, ordered
+`ChangedEntry(path, changed_fields)` metadata changes, marker metadata
+changes (including fields omitted from the wire payload), native temp-parent
+ancestry differences, selected expected-file metadata changes, and an overall
+`has_drift` data flag. Record and changed-field ordering is deterministic.
+
+Disposable tests cover exact equality, one regular-file metadata drift,
+an expected_commit metadata change that also updates its inventory entry,
+allowed nested add/remove, native ancestor metadata change, non-wire marker
+timestamp drift even when both output SHA-256 digests remain identical, mixed
+selector refusal, forged source records, cold-cache fail-closed, frozen output
+and absence of any host observation, file/process operation or workflow call.
+
+**Not an acceptance gate:** The comparator receives supplied offline data.
+Neither a matching digest nor `has_drift=False` proves trusted provenance,
+freshness, safe recovery, UID-502 state, absence of unseen changes or Level-3
+completion. It does not create an envelope, receipt, workflow binding, signal
+or deletion eligibility, and it never reads the actual provider/incident.

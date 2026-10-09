@@ -909,3 +909,36 @@ A v1 release must demonstrate:
 8. audit trail for allow/deny/execution/approval;
 9. private Cloudflare Portal deployment without public origin port;
 10. adversarial tests for common policy bypasses.
+
+### Phase 7 — dormant read-only evidence feature progress (2026-10-09)
+
+The following **offline/dormant** capabilities have progressed on main,
+independent of the blocked Phase 7B1 native toolchain and provider gates:
+
+- **PR #174** — complete frozen one-pass joint observation from disposable
+  pinned getconf/marker/ps A/inventory/ps B fixtures, with canonical temp
+  ancestry, selected staging metadata and inventory; exact-head self-hosted
+  Python 3.13/3.14 CI passed. This is a private fixture-only observation,
+  **not** an authenticated UID-502 host inspection.
+- **PR #175** — pure typed observation-to-canonical-inventory-v1 projection,
+  byte-exact golden output, bounded validation and SHA-256. Its post-review
+  fixes reject deceptive ancestor-path `str` subclasses and **fail closed on
+  an uninitialized fixed inventory module cache without file loading**.
+  Exact reviewed head `f7acb88743a934319090d17c6c3597915b5544ae`
+  passed self-hosted CI `37916736461` and merged as
+  `e241fee43fdebe56f42d8c6540fb4baf1328fce1`.
+- **Current next functional slice** — private, deterministic comparison of
+  *two supplied* canonical detached inventory observations: immutable
+  content-digest/metadata drift report; no third capture, I/O or authority.
+  Acceptance requires real golden and adversarial fixtures, independent
+  review, full related regression and exact-head self-hosted CI.
+
+**Roadmap / global consistency:** These primitives are test fixtures and
+offline data transformations. The original Phase 7B1 Task 3 / N1 native
+toolchain prerequisite remains blocked, as do the separately reviewed
+trusted-main authority-file binding (A1), actual dedicated UID-502 read-only
+preflight, authenticated workflow provenance/receipt integration (N1c), and
+real no-network Level-3 after stale provider disposition. Their acceptance
+criteria remain **open**, irrespective of the PR-only Level-3 SKIPPED status.
+No real incident, provider cleanup, marker clear, process signal, or unknown
+recovery workspace action has been authorized by this progress.
