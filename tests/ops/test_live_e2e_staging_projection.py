@@ -1625,3 +1625,274 @@ def test_timeline_summary_oversized_valid_json_rejected_before_parse(
                 expected_timeline_sha256=chain.manifest.sha256,
                 expected_summary_sha256=hashlib.sha256(raw).hexdigest(),
             )
+
+
+@pytest.fixture
+def timeline_audit(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "ops/live-e2e"))
+    return importlib.import_module("staging_timeline_audit")
+
+
+def _audit_build(timeline, audit, sources):
+    built = timeline.build_snapshot_timeline(sources)
+    report = audit.build_timeline_audit(
+        sources,
+        built.hops,
+        built.manifest.payload,
+        expected_timeline_sha256=built.manifest.sha256,
+    )
+    return built, report
+
+
+def _audit_verify(timeline, audit, sources, built, report):
+    return audit.verify_timeline_audit(
+        sources,
+        built.hops,
+        built.manifest.payload,
+        report.payload,
+        expected_timeline_sha256=built.manifest.sha256,
+        expected_audit_sha256=report.sha256,
+    )
+
+
+def test_timeline_audit_full_transition_and_net_change(timeline, timeline_audit, timeline_sources):
+    built, report = _audit_build(timeline, timeline_audit, timeline_sources)
+    verified = _audit_verify(timeline, timeline_audit, timeline_sources, built, report)
+    assert verified.incident == "stale-target"
+    assert verified.timeline_sha256 == built.manifest.sha256
+    assert verified.audit_sha256 == report.sha256
+    assert verified.net_changed is True
+    assert verified.changed_hops == (0, 1)
+    assert verified.stable_hops == ()
+    assert verified.revisited_snapshots == ()
+    assert len(verified.hops) == 2
+    assert all(hop.marker_changed for hop in verified.hops)
+    assert all(hop.has_drift for hop in verified.hops)
+    assert report == timeline_audit.build_timeline_audit(
+        timeline_sources,
+        built.hops,
+        built.manifest.payload,
+        expected_timeline_sha256=built.manifest.sha256,
+    )
+    with pytest.raises(FrozenInstanceError):
+        verified.net_changed = False
+
+
+def test_timeline_audit_revisit_and_stable_hops(timeline, timeline_audit, timeline_sources):
+    a, b, _ = timeline_sources
+    sources = (a, b, a, a)
+    built, report = _audit_build(timeline, timeline_audit, sources)
+    verified = _audit_verify(timeline, timeline_audit, sources, built, report)
+    assert verified.net_changed is False
+    assert verified.changed_hops == (0, 1)
+    assert verified.stable_hops == (2,)
+    assert verified.revisited_snapshots == ((2, 0),)
+    assert verified.hops[2].has_drift is False
+    assert len(verified.hops) == 3
+
+
+def test_timeline_audit_rejects_forged_content_even_with_new_digest(
+    timeline, timeline_audit, timeline_sources
+):
+    import hashlib
+
+    built, report = _audit_build(timeline, timeline_audit, timeline_sources)
+    for field, replacement in (
+        ("net_changed", False),
+        ("changed_hops", []),
+        ("timeline_sha256", "0" * 64),
+    ):
+        forged = json.loads(report.payload)
+        forged[field] = replacement
+        raw = json.dumps(forged, sort_keys=True, separators=(",", ":")).encode("ascii")
+        with pytest.raises(timeline_audit.AuditError):
+            timeline_audit.verify_timeline_audit(
+                timeline_sources,
+                built.hops,
+                built.manifest.payload,
+                raw,
+                expected_timeline_sha256=built.manifest.sha256,
+                expected_audit_sha256=hashlib.sha256(raw).hexdigest(),
+            )
+
+
+def test_timeline_audit_rejects_invalid_json_and_types(timeline, timeline_audit, timeline_sources):
+    import hashlib
+
+    built, report = _audit_build(timeline, timeline_audit, timeline_sources)
+    mutated = (
+        report.payload + b" ",
+        b"{}",
+        b'{"schema_version":1,"schema_version":1}',
+        b"\xff",
+        b"x" * (timeline_audit.MAX_AUDIT_BYTES + 1),
+    )
+    for raw in mutated:
+        with pytest.raises(timeline_audit.AuditError) as error:
+            timeline_audit.verify_timeline_audit(
+                timeline_sources,
+                built.hops,
+                built.manifest.payload,
+                raw,
+                expected_timeline_sha256=built.manifest.sha256,
+                expected_audit_sha256=hashlib.sha256(raw).hexdigest(),
+            )
+        assert str(error.value) == "staging timeline audit rejected"
+        assert error.value.__cause__ is None
+    for bad in ("bytes", bytearray(report.payload), None):
+        with pytest.raises(timeline_audit.AuditError):
+            timeline_audit.verify_timeline_audit(
+                timeline_sources,
+                built.hops,
+                built.manifest.payload,
+                bad,
+                expected_timeline_sha256=built.manifest.sha256,
+                expected_audit_sha256=report.sha256,
+            )
+
+
+def test_timeline_audit_rejects_source_splice_and_hop_swap(
+    timeline, timeline_audit, timeline_sources
+):
+    built, report = _audit_build(timeline, timeline_audit, timeline_sources)
+    changed = list(timeline_sources)
+    changed[1] = replace(
+        changed[1], marker_metadata=replace(changed[1].marker_metadata, mtime_ns=43)
+    )
+    with pytest.raises(timeline_audit.AuditError):
+        _audit_verify(timeline, timeline_audit, tuple(changed), built, report)
+    bad = replace(built, hops=tuple(reversed(built.hops)))
+    with pytest.raises(timeline_audit.AuditError):
+        _audit_verify(timeline, timeline_audit, timeline_sources, bad, report)
+
+
+def test_timeline_audit_sixteen_hops_and_rejects_bad_counts(
+    timeline, timeline_audit, timeline_sources
+):
+    a, b, _ = timeline_sources
+    sources = tuple(a if i % 2 == 0 else b for i in range(17))
+    built, report = _audit_build(timeline, timeline_audit, sources)
+    verified = _audit_verify(timeline, timeline_audit, sources, built, report)
+    assert len(verified.hops) == 16
+    assert len(verified.changed_hops) == 16
+    assert len(verified.revisited_snapshots) == 15
+    with pytest.raises(timeline_audit.AuditError):
+        timeline_audit.build_timeline_audit(
+            sources + (a,),
+            built.hops,
+            built.manifest.payload,
+            expected_timeline_sha256=built.manifest.sha256,
+        )
+    with pytest.raises(timeline_audit.AuditError):
+        timeline_audit.build_timeline_audit(
+            list(sources),
+            built.hops,
+            built.manifest.payload,
+            expected_timeline_sha256=built.manifest.sha256,
+        )
+
+
+def test_timeline_audit_exact_file_field_detail(timeline, timeline_audit, evidence):
+    entries = list(evidence.selected.inventory)
+    index = next(i for i, entry in enumerate(entries) if entry.path == "target.bundle")
+    entries[index] = replace(entries[index], size=entries[index].size + 1)
+    modified = replace(evidence, selected=replace(evidence.selected, inventory=tuple(entries)))
+    sources = (evidence, modified, evidence)
+    built, report = _audit_build(timeline, timeline_audit, sources)
+    verified = _audit_verify(timeline, timeline_audit, sources, built, report)
+    assert verified.net_changed is False
+    assert verified.revisited_snapshots == ((2, 0),)
+    assert verified.hops[0].modified_entries == (("target.bundle", ("size",)),)
+    assert verified.hops[1].modified_entries == (("target.bundle", ("size",)),)
+    assert verified.hops[0].added_paths == verified.hops[0].removed_paths == ()
+    assert not verified.hops[0].marker_changed
+
+
+def test_timeline_audit_rejects_extra_fields_and_wrong_digest(
+    timeline, timeline_audit, timeline_sources
+):
+    import hashlib
+
+    built, report = _audit_build(timeline, timeline_audit, timeline_sources)
+    extra = json.loads(report.payload)
+    extra["untrusted"] = True
+    raw = json.dumps(extra, separators=(",", ":"), sort_keys=True).encode("ascii")
+    with pytest.raises(timeline_audit.AuditError):
+        timeline_audit.verify_timeline_audit(
+            timeline_sources,
+            built.hops,
+            built.manifest.payload,
+            raw,
+            expected_timeline_sha256=built.manifest.sha256,
+            expected_audit_sha256=hashlib.sha256(raw).hexdigest(),
+        )
+    with pytest.raises(timeline_audit.AuditError):
+        timeline_audit.verify_timeline_audit(
+            timeline_sources,
+            built.hops,
+            built.manifest.payload,
+            report.payload,
+            expected_timeline_sha256=built.manifest.sha256,
+            expected_audit_sha256=report.sha256.upper(),
+        )
+    with pytest.raises(timeline_audit.AuditError):
+        timeline_audit.verify_timeline_audit(
+            timeline_sources,
+            built.hops,
+            built.manifest.payload,
+            report.payload,
+            expected_timeline_sha256="0" * 64,
+            expected_audit_sha256=report.sha256,
+        )
+
+
+def test_timeline_audit_offline_only_and_cold_cache(
+    timeline, timeline_audit, timeline_sources, modules, monkeypatch
+):
+    p, _projector = modules
+    built, report = _audit_build(timeline, timeline_audit, timeline_sources)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("offline timeline audit attempted host I/O or dynamic inventory loading")
+
+    with monkeypatch.context() as patch:
+        for name in ("open", "stat", "scandir", "listdir", "fork", "kill", "system"):
+            if hasattr(os, name):
+                patch.setattr(os, name, forbidden)
+        patch.setattr(p, "_observe_detached_joint_preflight", forbidden)
+        patch.setattr(p, "_fixed_inventory_module", forbidden)
+        assert (
+            _audit_verify(timeline, timeline_audit, timeline_sources, built, report).audit_sha256
+            == report.sha256
+        )
+
+    with monkeypatch.context() as patch:
+        patch.setattr(p, "_FIXED_INVENTORY_MODULE", None)
+        patch.setattr(p, "_fixed_inventory_module", forbidden)
+        with pytest.raises(timeline_audit.AuditError):
+            timeline_audit.build_timeline_audit(
+                timeline_sources,
+                built.hops,
+                built.manifest.payload,
+                expected_timeline_sha256=built.manifest.sha256,
+            )
+
+
+def test_timeline_audit_extreme_signed_metadata_without_global_guard_change(
+    timeline, timeline_audit, timeline_sources, monkeypatch
+):
+    import sys
+
+    baseline = sys.get_int_max_str_digits()
+    source = timeline_sources[1]
+    source = replace(source, marker_metadata=replace(source.marker_metadata, mtime_ns=-(10**5000)))
+
+    def forbidden(*_args):
+        pytest.fail("audit modified process-wide integer conversion guard")
+
+    monkeypatch.setattr(sys, "set_int_max_str_digits", forbidden)
+    sources = (timeline_sources[0], source, timeline_sources[2])
+    built, report = _audit_build(timeline, timeline_audit, sources)
+    verified = _audit_verify(timeline, timeline_audit, sources, built, report)
+    assert verified.changed_hops == (0, 1)
+    assert sys.get_int_max_str_digits() == baseline

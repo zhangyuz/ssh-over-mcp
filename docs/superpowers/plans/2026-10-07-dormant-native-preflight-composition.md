@@ -250,3 +250,25 @@ reports. No actual file paths, timestamps, producer identity,
 chronology, A1/B8 authority, UID-502 host access, or provider/Level-3
 recovery entitlement comes from this diagnostic. All native
 preflight/incident gates remain blocked, including paused N1c.
+
+## Offline timeline audit report — 2026-10-09 (separate feature)
+
+This dormant feature consumes exactly the validated #180 ordered snapshot
+tuple, typed hops and manifest. It emits an independent canonical v1 JSON
+audit capped at 128 KiB, then supports strict re-verification against the
+same original source tuple. The report adds per-hop added/removed/modified
+path details and flags, full first-versus-last content change, stable versus
+changed hop indices, and non-adjacent repeats of exact snapshot fingerprints.
+An intermediate change is not hidden when first and last match.
+
+Every build/verification rechecks the complete #180 timeline and all paired
+seals, rejects altered or reordered evidence and forged audit bytes (including
+freshly recomputed content hashes), and performs no host/process I/O. This
+is not a trusted event chronology, signature, producer attestation, receipt,
+UID-502 capture, A1/B8/N1c authority, or recovery/Level-3 permission. Main
+merge #180 reached Python CI PASS but the no-network Level-3 push gate failed
+closed due to pre-existing stale provider state. No cleanup was authorized.
+
+This detailed #182 audit is deliberately separate from the #181 path-free
+count summary. Its raw caller-supplied paths are potentially sensitive and
+are not approved for broader dissemination or automated logging.

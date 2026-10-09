@@ -974,17 +974,29 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   PASS, but merge-main Level-3 FAIL (exit 70: stale E2E provider
   state; cleanup absence gate also failed). Overall workflow FAIL,
   leaving provider disposition/native acceptance separately blocked.
-- **Next functional slice (#181)** — detached, path-free bounded
-  **timeline change summary**. From one independently verified
-  #180 timeline, export a deterministic canonical v1 JSON summary
-  of per-hop changed flags and inventory/path change **counts**,
-  source/hop content checksums and drift indices. Reverify source,
-  seal, timeline, and summary bytes against the exact supplied
-  snapshot tuple; fail closed even on a forged summary with a
-  recomputed checksum. Neither raw paths/metadata nor trusted
-  workflow authority is exposed. Acceptance: adversarial RED/GREEN,
-  16-hop bounds, full related regression, code/docs global review,
-  exact-head self-hosted Python 3.13/3.14 CI.
+- **PR #181** — merged as `13f1f9c91874ef4f8e22e01652064c88712ce647`
+  from reviewed exact HEAD `053e9f379020fa6f227e4be71038e4fa03064efe`.
+  Delivered a separate, path-free canonical v1 JSON timeline change summary
+  (up to 16 KiB / 16 hops): ordered source/hop/seal fingerprints, changed
+  categories and inventory path **counts** only. Independent fresh final
+  review found zero actionable issues; the corrected >16-KiB input rejection
+  adversary and related regression passed. Exact-head self-hosted Ubuntu
+  26.04 x86 Python 3.13/3.14 CI `37934952379` SUCCESS; PR-only
+  Level-3 SKIPPED, not native acceptance. Merge-main validation and
+  stale-provider disposition are separately gated.
+- **Next complete functional slice (#182)** — private bounded canonical
+  offline timeline audit with per-hop file/path/metadata drift,
+  unchanged-hop classification, exact first-to-last content comparison,
+  explicit **path-bearing private output** (unlike #181 path-free counts),
+  and detection of previously seen full snapshots after intermediate
+  changes. Both build and verify strictly revalidate all original source
+  hops plus the timeline manifest; independent SHA-256 covers deterministic
+  audit bytes. Acceptance includes RED/GREEN, forged-audit/source/hop
+  adversaries, 16-hop upper bound, cold-cache/no-I/O checks, full related
+  regression, fresh review and exact-head CI against merged #181 main.
+  Caller order is never authenticated chronology; hashes are not trusted
+  receipts or native Level-3 evidence.
+
 
 **Roadmap / global consistency:** These primitives are test fixtures and
 offline data transformations. The original Phase 7B1 Task 3 / N1 native
