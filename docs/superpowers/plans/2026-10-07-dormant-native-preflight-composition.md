@@ -238,3 +238,15 @@ but no trusted producer identity or chronology is conferred by a
 checksum. All original native incident authority, A1/B8, and paused
 N1c acceptance gates remain uncompleted; a multi-hop offline match
 is explicitly not a recovery/Level-3 permission.
+
+
+## Offline path-free timeline change report — 2026-10-09
+
+Separate from native N1c, the #181 detached-only feature derives a
+bounded canonical per-hop change classification and path **counts**
+from the verified #180 multi-snapshot source tuple and linked pair
+seals. Exact summary-byte reconstruction rejects rehashed forged
+reports. No actual file paths, timestamps, producer identity,
+chronology, A1/B8 authority, UID-502 host access, or provider/Level-3
+recovery entitlement comes from this diagnostic. All native
+preflight/incident gates remain blocked, including paused N1c.

@@ -1735,3 +1735,29 @@ The feature performs no host/process I/O, UID-502 capture, provider
 mutation, trusted workflow/receipt issuance, or native Level-3
 authorization. Existing v1 drift and snapshot-seal wire formats are
 unchanged. A green offline timeline never closes A1/B8/N1c/Level-3.
+
+### Offline verified timeline change summary — path-free diagnostic output
+
+Private `staging_timeline_summary` composes the merged bounded
+`staging_snapshot_timeline` feature into deterministic canonical v1
+JSON reporting each adjacent hop's full-content source/artifact/seal
+SHA-256s, change flags, and **counts only** for added, removed and
+modified inventory paths. Raw inventory paths, raw metadata values and
+host capture inputs are not serialized in this new summary. A separate
+16-KiB maximum and immutable frozen result types bound the output.
+`build_timeline_change_summary(snapshots, hops, manifest_raw,
+expected_timeline_sha256=...)` requires the already reviewed strict
+per-hop source/seal/timeline verification.
+`verify_timeline_change_summary(..., summary_raw,
+expected_timeline_sha256=..., expected_summary_sha256=...)`
+rejects malformed/duplicate/noncanonical/oversized summary bytes,
+incorrect checksums, swapped hops, and forged change flags even if
+a self-consistent unkeyed digest is recomputed. Report labels are
+classified offline observations, not an authenticated root cause.
+
+This remains a **private offline diagnostic transformation only**,
+not a new authority-bearing wire/API, trusted host observation,
+chronology, UID-502 inspection, provenance signature, receipt,
+native Level-3 PASS, marker cleanup or recovery permission.
+A1, B8, paused N1c, native Phase 7B1 and provider disposition
+remain independently blocked and open.
