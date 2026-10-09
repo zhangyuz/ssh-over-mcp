@@ -2166,3 +2166,11 @@ requires byte-for-byte equality. Swapped member order and rehashed
 partitions or counts fail closed. No host I/O, UID-502, private export,
 provider marker changes, trusted producer identity, A1/B8 workflow
 receipts or real native Level-3 authority are implied.
+
+#189 merged as `9b9cc330441126001f4869d0d0f26cbc6d9ec294`,
+from source-verified head `69a0c1b750924008fe9ff2b398c077767c7fa3a1`.
+Its disputed-member partition defect was corrected with source-derived
+`agreement_groups`, 1,732 local related tests PASS and exact-head Ubuntu
+CI `37984107600` Python 3.13/3.14 SUCCESS. PR Level-3 SKIPPED.
+Real merge-main provider disposition is separately checked from run
+`37986652267`, not inferred from detached consistency.

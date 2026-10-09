@@ -435,3 +435,12 @@ is not risk severity, chronology or approval. No private path audit,
 host execution, UID-502, provider recovery, A1/B8 receipt or paused
 N1c/ADR 0011 condition is modified. Actual native Level-3 remains
 separate and fail-closed until authorized provider recovery.
+
+#189 merged as `9b9cc330441126001f4869d0d0f26cbc6d9ec294`.
+The review-identified disputed-member agreement change is now explicitly
+represented by `agreement_groups`, with source-built adversarial
+RED/GREEN and complete 1,732-case local regression PASS; exact-head Ubuntu
+`37984107600` passed both Python versions. #190's downstream sorted
+public dispute index is content-bound to the exact full interval SHA-256,
+not authenticated chronology or real provider disposition. No marker is
+changed and the native Level-3 gate remains distinct.
