@@ -1630,3 +1630,58 @@ def _require_shared_incident_ancestry(
         or _metadata(os.fstat(selected._fds[0])) != tail
     ):
         raise PreflightError()
+
+
+def _observe_joint_marker_staging(selector: str) -> _MarkerStagingEvidence:
+    """Private dormant marker/staging observation under jointly pinned roots.
+
+    No ps, trusted-runner invocation, receipt, workflow or recovery action.
+    This detached *partial* evidence does not prove complete native preflight.
+    """
+    incident = _select_incident(selector)
+    try:
+        with _pin_observed_incident_ancestry(selector) as (cache, temp, selected):
+            _require_shared_incident_ancestry(cache, temp, selected)
+            observed = _observe_marker_staging(cache, selected, selector)
+            # The inventory can change after its inner helper returns.
+            # Rebind only the catalog's fixed expected_commit through the
+            # still-held selected FD, then confirm the marker's fixed schema
+            # and immutable metadata once again after that bounded read.
+            with _pin_expected_commit(
+                selected._fds[-1],
+                incident.expected_commit,
+                uid=incident.uid,
+                device=incident.device,
+            ) as expected:
+                if expected.first.metadata != observed.selected.expected_metadata:
+                    raise PreflightError()
+                expected.revalidate(incident.expected_commit, uid=incident.uid)
+            late_marker = _read_marker(cache._fds[-1], uid=_CACHE_ACCOUNT_UID)
+            if late_marker.metadata != observed.marker_metadata:
+                raise PreflightError()
+            # Both content readers completed before this final common-root,
+            # pinned-name-edge and ownership gate.
+            selected.revalidate()
+            cache.revalidate()
+            temp.revalidate()
+            _require_shared_incident_ancestry(cache, temp, selected)
+        return observed
+    except PreflightError:
+        raise
+    except (
+        ImportError,
+        SyntaxError,
+        OSError,
+        TypeError,
+        ValueError,
+        AttributeError,
+        RuntimeError,
+        OverflowError,
+        MemoryError,
+        IndexError,
+        KeyError,
+        KeyboardInterrupt,
+        SystemExit,
+        GeneratorExit,
+    ):
+        raise PreflightError() from None

@@ -1245,3 +1245,28 @@ simulated A→B→A changes, normal common-root acceptance and forged T
 baseline rejection. No real incident marker/selected staging is read;
 this is still a dormant borrowed-context intermediate, not full
 preflight evidence.
+
+
+### Dormant jointly rooted marker + selected inventory observation
+
+Private `_observe_joint_marker_staging(selector)` applies the previously
+reviewed fixed marker/selected-staging observation inside the concurrently
+pinned cache, native-temp and catalog-selected staging ownership context.
+The fixed two-item selector is validated before any getconf or filesystem
+open. The shared literal-root and borrowed selected T identity are checked
+before and after observing the fixed `active-run.json` marker and
+metadata-only staging inventory. The existing strict descriptor-relative
+marker parser and selected inventory are unchanged; only fixed
+`payload-content/expected_commit` content is additionally reread under
+the held selected FD and compared with the frozen inventory metadata.
+The marker is also re-read after that bounded expected-commit operation
+and its immutable metadata must match the earlier observation.
+
+The result is only existing immutable `_MarkerStagingEvidence`; it contains
+no FD, raw marker bytes, process stdout, child identity, PID argument, receipt,
+workflow or recovery capability. All new test reads are confined to
+disposable fixture trees. This helper is dormant and not a complete native
+preflight; in particular it does **not** establish the exact checkout
+authority bytes, a pair of fixed ps captures, trusted workflow provenance,
+persistent-runner process quiescence, or namespace immutability after FD
+closure. Its partial evidence may not be used for recovery or Level-3/A1.
