@@ -906,9 +906,67 @@ def _observe_selected_inventory(
 
 
 @dataclass(frozen=True, slots=True)
+class _DirectoryAncestor:
+    """Detached canonical native-temp ancestor; never a live directory FD."""
+
+    path: str
+    metadata: DirectoryMetadata
+
+
+@dataclass(frozen=True, slots=True)
+class _TempAncestryEvidence:
+    """Native getconf-derived, pinned temp-parent evidence; no caller path."""
+
+    path: str
+    ancestors: tuple[_DirectoryAncestor, ...]
+
+
+def _snapshot_pinned_temp_ancestry(chain: _PinnedDirectoryChain) -> _TempAncestryEvidence:
+    """Copy only already-pinned native temp ancestry into immutable records."""
+    if (
+        type(chain) is not _PinnedDirectoryChain
+        or type(chain._parts) is not tuple
+        or len(chain._parts) != 6
+        or chain._parts[:3] != ("private", "var", "folders")
+        or chain._parts[-1] != "T"
+        or len(chain._initial) != len(chain._parts) + 1
+        or any(type(part) is not str for part in chain._parts)
+        or any(type(item) is not DirectoryMetadata for item in chain._initial)
+    ):
+        raise PreflightError()
+    shard, token = chain._parts[3:5]
+    if (
+        len(shard) != 2
+        or any(char not in _TEMP_ALNUM for char in shard)
+        or not 1 <= len(token) <= 255
+        or any(char not in _TEMP_ALNUM + "_" for char in token)
+    ):
+        raise PreflightError()
+    ancestors = (_DirectoryAncestor("/", chain._initial[0]),)
+    for index in range(1, len(chain._initial)):
+        prefix = "/" + "/".join(chain._parts[:index])
+        ancestors += (_DirectoryAncestor(prefix, chain._initial[index]),)
+    return _TempAncestryEvidence(path=ancestors[-1].path, ancestors=ancestors)
+
+
+@dataclass(frozen=True, slots=True)
 class _MarkerStagingEvidence:
     """Detached fixture-only marker/staging pair; not a full preflight."""
 
+    marker_target: str
+    marker_owner_pid: int
+    marker_metadata: _RegularMetadata
+    selected: _SelectedInventoryEvidence
+    # Only the jointly pinned ps-A/inventory/ps-B helper fills this.
+    # Weaker legacy marker/staging callers never claim temp provenance.
+    temp_parent: _TempAncestryEvidence | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _DetachedJointPreflightObservation:
+    """Complete detached *dormant* fixture evidence, not trusted activation."""
+
+    parent: _TempAncestryEvidence
     marker_target: str
     marker_owner_pid: int
     marker_metadata: _RegularMetadata
@@ -1912,6 +1970,7 @@ def _observe_joint_marker_paired_inventory(selector: str) -> _MarkerStagingEvide
                 marker_owner_pid=38013,
                 marker_metadata=marker.metadata,
                 selected=inventory,
+                temp_parent=_snapshot_pinned_temp_ancestry(temp),
             )
         return observation
     except PreflightError:
@@ -1933,3 +1992,29 @@ def _observe_joint_marker_paired_inventory(selector: str) -> _MarkerStagingEvide
         IndexError,
     ):
         raise PreflightError() from None
+
+
+def _observe_detached_joint_preflight(selector: str) -> _DetachedJointPreflightObservation:
+    """One-pass detached dormant evidence, never an incident workflow/receipt.
+
+    Reuse the fully pinned marker/ps-A/inventory/ps-B observer ONCE. No
+    arbitrary path, PID, UID or captured-output inputs; no extra host reads,
+    diagnostic children, marker mutation, envelope or operator capability.
+    The private disposable fixture seam is not approval for live UID-502 use.
+    """
+    _select_incident(selector)
+    observed = _observe_joint_marker_paired_inventory(selector)
+    if (
+        type(observed) is not _MarkerStagingEvidence
+        or type(observed.temp_parent) is not _TempAncestryEvidence
+        or type(observed.selected) is not _SelectedInventoryEvidence
+        or observed.selected.selector != selector
+    ):
+        raise PreflightError()
+    return _DetachedJointPreflightObservation(
+        parent=observed.temp_parent,
+        marker_target=observed.marker_target,
+        marker_owner_pid=observed.marker_owner_pid,
+        marker_metadata=observed.marker_metadata,
+        selected=observed.selected,
+    )
