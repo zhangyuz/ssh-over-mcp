@@ -1661,3 +1661,45 @@ controlled by the caller. A matching result is **NOT an authenticated
 inspection or freshness claim**, cryptographic signature, trusted receipt,
 workflow permission or recovery/Level-3 decision. There is no real UID-502
 capture, provider read/clear, marker mutation, or unknown-workspace access.
+
+### Offline ordered snapshot-pair content seal (v1, no host provenance)
+
+`staging_snapshot_seal.build_snapshot_pair_seal(before, after,
+artifact_raw, artifact_sha256)` produces a small, byte-stable,
+SHA-256-checksummed canonical v1 JSON content seal for the *ordered*
+pair of supplied frozen observations **and** their previously validated
+canonical drift artifact. `verify_snapshot_pair_seal(..., seal_raw,
+seal_sha256)` checks exact keys/version, a bounded canonical JSON
+encoding, lowercase SHA-256, duplicate-key refusal, strictly revalidates
+the drift artifact against both supplied observations, independently
+fingerprints each full supplied snapshot, then requires exact byte/digest
+equality with the seal.
+
+The snapshot fingerprint is domain-separated SHA-256 over canonical
+inventory-v1 bytes **plus every strictly checked scalar field of the
+full marker and selected expected-file regular metadata records**.
+The supplementary metadata integers reuse the fixed wire codec's **locally
+bounded decimal encoder**, retaining the legacy canonical JSON bytes for
+ordinary values while accepting already-valid signed timestamps beyond
+CPython's 4300-decimal-digit conversion guard (including 5001/10001-digit
+positive and negative values). It never disables or mutates that global guard.
+The extra metadata encoding uses a fixed 2 MiB byte budget; failure is
+sanitized and does not open a host access path.
+This includes marker fields omitted from inventory wire bytes, such as
+the actual before/after `mtime_ns` and `ctime_ns` values. Unlike the
+lossy v1 drift report's `marker_changed` boolean, this separate
+ordered-pair seal refuses replacing a post-marker timestamp 42 with
+99 or reversing the only-marker-drift pair, even though the original
+v1 drift artifact and its checksum would still verify successfully.
+
+Independent adversarial tests pin the above v1 collision, reject
+altered sidecar fields/direction, malformed/reordered/duplicate JSON,
+correctly recomputed forged content checksums, unsupported sources,
+cold inventory cache and any host/process/observer I/O.
+
+**Important:** The seal is an *unkeyed content fingerprint* of **supplied**
+data. It is not an HMAC/signature, authorized producer claim, native
+read-only UID-502 inspection, fresh trusted workflow provenance, receipt,
+Level-3 acceptance, marker clearing or recovery permission. Someone
+who controls both observations and their artifact/seal can replace the
+entire coherent tuple. Existing v1 drift artifact wire schema is unchanged.
