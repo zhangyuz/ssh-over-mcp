@@ -1109,3 +1109,16 @@ subtask; ADR 0011 requires recovery/A1 closure before N1c resumes.** These
 acceptance criteria remain **open**, irrespective of PR-only Level-3 SKIPPED.
 No real incident, provider cleanup, marker clear, process signal, or unknown
 recovery workspace action has been authorized by this progress.
+
+
+**#189 review correction (2026-10-09):** Exact source-derived public
+agreement partitions `agreement_groups` (canonical member-index lists)
+are included in each interval. Adjacent intervals merge only if their
+classification, supporters, absent-members **and full member agreement
+partition** remain the same. Thus changing disputed camps, such as
+`[0,1]/[2,3]` to `[0,2]/[1,3]`, cannot be silently hidden even
+though both hops have an empty strict-quorum support list. This is
+path-free and does not reveal raw before/after fingerprints, raw
+inventory paths, chronological authority or access rights. New real
+3-hop four-member source-built and rehashed-tamper regressions protect
+this invariant; the wire remains ≤64 KiB, canonical and source-bound.

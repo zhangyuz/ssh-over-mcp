@@ -86,12 +86,21 @@ def _compute(
         counts[classification] += 1
         supporters = list(hop["quorum_members"])
         absent = list(hop["absent_members"])
+        # Group by MEMBER AGREEMENT, not unkeyed hop fingerprints; this
+        # preserves which runs agree without disclosing content or paths.
+        # In particular, disputed hops have no quorum members, so merging
+        # solely by supporters would erase transitions between split camps.
+        agreement_groups = sorted(
+            (list(group["member_indices"]) for group in hop["groups"]),
+            key=lambda indices: tuple(indices),
+        )
         previous = intervals[-1] if intervals else None
         if (
             previous is not None
             and previous["classification"] == classification
             and previous["supporting_members"] == supporters
             and previous["absent_members"] == absent
+            and previous["agreement_groups"] == agreement_groups
         ):
             previous["end_hop_exclusive"] += 1
         else:
@@ -102,6 +111,7 @@ def _compute(
                     "classification": classification,
                     "supporting_members": supporters,
                     "absent_members": absent,
+                    "agreement_groups": agreement_groups,
                 }
             )
     disputed = tuple(

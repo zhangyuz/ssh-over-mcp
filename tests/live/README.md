@@ -2126,3 +2126,16 @@ remains subject to actual merge-main run evidence.
 validation PASS, actual no-network native Level-3 FAIL-CLOSED on the
 existing stale provider state (exit 70). Neither #188 nor #189 changes
 the real provider marker or permits native workflow acceptance.
+
+
+**#189 review correction (2026-10-09):** Exact source-derived public
+agreement partitions `agreement_groups` (canonical member-index lists)
+are included in each interval. Adjacent intervals merge only if their
+classification, supporters, absent-members **and full member agreement
+partition** remain the same. Thus changing disputed camps, such as
+`[0,1]/[2,3]` to `[0,2]/[1,3]`, cannot be silently hidden even
+though both hops have an empty strict-quorum support list. This is
+path-free and does not reveal raw before/after fingerprints, raw
+inventory paths, chronological authority or access rights. New real
+3-hop four-member source-built and rehashed-tamper regressions protect
+this invariant; the wire remains ≤64 KiB, canonical and source-bound.

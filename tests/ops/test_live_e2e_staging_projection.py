@@ -4036,3 +4036,64 @@ def test_consensus_intervals_oversize_before_json_parse(consensus_intervals, mon
         patch.setattr(m.json, "loads", forbidden)
         with pytest.raises(m.IntervalsError, match="^staging intervals rejected$"):
             m._checked(oversized, hashlib.sha256(oversized).hexdigest())
+
+
+def test_consensus_intervals_preserve_disputed_partition_changes(
+    consensus_intervals, timeline_sources
+):
+    """Real sealed 4-run sources: [0,1]/[2,3] turns into [0,2]/[1,3]."""
+    a, b, c = timeline_sources
+    runs = tuple(
+        ((a, first, second), (second, third))
+        for first, second, third in (
+            (a, a, b),
+            (a, a, c),
+            (b, a, b),
+            (b, a, c),
+        )
+    )
+    consensus = importlib.import_module("staging_cohort_consensus")
+    original = json.loads(consensus.build_public_consensus(runs).payload)
+    assert len(original["hops"]) == 3
+    assert all(not hop["quorum_members"] for hop in original["hops"])
+    assert [
+        sorted(sorted(group["member_indices"]) for group in hop["groups"])
+        for hop in original["hops"]
+    ] == [
+        [[0, 1], [2, 3]],
+        [[0, 1], [2, 3]],
+        [[0, 2], [1, 3]],
+    ]
+
+    public = consensus_intervals.build_public_intervals(runs)
+    report = json.loads(public.payload)
+    assert report["counts"] == {"unanimous": 0, "majority": 0, "disputed": 3}
+    assert [
+        (row["start_hop"], row["end_hop_exclusive"], row["agreement_groups"])
+        for row in report["intervals"]
+    ] == [
+        (0, 2, [[0, 1], [2, 3]]),
+        (2, 3, [[0, 2], [1, 3]]),
+    ]
+    assert report["longest_disputed_length"] == 2
+    assert consensus_intervals.verify_public_intervals(
+        runs, public.payload, expected_sha256=public.sha256
+    ).disputed_ranges == ((0, 2), (2, 3))
+    assert b"target.bundle" not in public.payload
+
+
+def test_consensus_intervals_reject_rehashed_partition_forgery(
+    consensus_intervals, timeline_sources
+):
+    a, b, c = timeline_sources
+    runs = tuple(((a, first, a), (a, last)) for first, last in ((a, b), (a, c), (b, b), (b, c)))
+    public = consensus_intervals.build_public_intervals(runs)
+    document = json.loads(public.payload)
+    document["intervals"][0]["agreement_groups"] = [[0, 2], [1, 3]]
+    forged = json.dumps(document, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode(
+        "ascii"
+    )
+    with pytest.raises(consensus_intervals.IntervalsError, match="^staging intervals rejected$"):
+        consensus_intervals.verify_public_intervals(
+            runs, forged, expected_sha256=hashlib.sha256(forged).hexdigest()
+        )
