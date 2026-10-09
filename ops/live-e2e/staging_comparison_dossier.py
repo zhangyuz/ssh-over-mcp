@@ -112,13 +112,14 @@ def _hop_rows(public_doc: dict) -> list[dict]:
     return result
 
 
-def _compute_public(
-    left: object, right: object
+def _compute_public_from_verified(
+    left_series: object, lv: object, right_series: object, rv: object
 ) -> tuple[PublicComparison, VerifiedPublicComparison, dict, dict]:
-    # Each builder already seals and independently verifies every source
-    # and segment. Avoid redoing the entire chain just to retrieve facts.
-    left_series, lv = build_verified_public_casefile_series(left)
-    right_series, rv = build_verified_public_casefile_series(right)
+    """Compose a pair only from two *already independently source-verified* builds.
+
+    Internal trusted caller contract: NEVER use for external raw reports or
+    bypass source validation. Public entry points still verify both inputs.
+    """
     if lv.incident != rv.incident:
         raise ComparisonError(_FAILURE)
     left_doc = json.loads(left_series.payload.decode("ascii"))
@@ -196,6 +197,15 @@ def _compute_public(
         left_doc,
         right_doc,
     )
+
+
+def _compute_public(
+    left: object, right: object
+) -> tuple[PublicComparison, VerifiedPublicComparison, dict, dict]:
+    # The source-sealed builders validate every original snapshot/segment.
+    left_series, lv = build_verified_public_casefile_series(left)
+    right_series, rv = build_verified_public_casefile_series(right)
+    return _compute_public_from_verified(left_series, lv, right_series, rv)
 
 
 def _effects_for(private_doc: dict) -> list[list[dict]]:

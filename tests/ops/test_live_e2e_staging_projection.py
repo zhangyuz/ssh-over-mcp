@@ -3605,3 +3605,269 @@ def test_portfolio_private_wire_is_bounded_before_json_parser(
                 hashlib.sha256(oversized).hexdigest(),
                 max_bytes=m.MAX_PRIVATE_PORTFOLIO_BYTES,
             )
+
+
+@pytest.fixture
+def consensus_module(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "ops/live-e2e"))
+    return importlib.import_module("staging_cohort_consensus")
+
+
+def test_consensus_public_strict_quorum_and_split_hops(consensus_module, portfolio_sources):
+    module = consensus_module
+    public = module.build_public_consensus(portfolio_sources)
+    doc = json.loads(public.payload)
+    assert doc["schema_version"] == 1
+    assert doc["audience"] == "public"
+    assert doc["incident"] == "stale-target"
+    assert doc["run_count"] == 4
+    assert doc["quorum_threshold"] == 3
+    assert (
+        doc["source_portfolio_sha256"]
+        == importlib.import_module("staging_comparison_portfolio")
+        .build_public_portfolio(portfolio_sources)
+        .sha256
+    )
+    assert doc["hops"][0]["quorum_members"] == [0, 1, 2]
+    assert doc["hops"][1]["quorum_members"] == []
+    assert not doc["hops"][0]["unanimous"]
+    assert len(doc["hops"][0]["groups"]) == 2
+    assert b"target.bundle" not in public.payload
+    assert b"mtime_ns" not in public.payload
+    assert module.verify_public_consensus(
+        portfolio_sources, public.payload, expected_sha256=public.sha256
+    ).quorum_hops == (0,)
+    assert module.build_public_consensus(portfolio_sources) == public
+
+
+def test_consensus_unanimous_and_absent_after_source_end(consensus_module, timeline_sources):
+    a, b, c = timeline_sources
+    short = ((a, b), (b, c))
+    long = ((a, b, c), (c, a, b))
+    sources = (short, short, long, short, short)
+    record = consensus_module.build_public_consensus(sources)
+    doc = json.loads(record.payload)
+    assert doc["run_count"] == 5
+    assert doc["quorum_threshold"] == 3
+    assert doc["hops"][0]["unanimous"]
+    assert doc["hops"][2]["absent_members"] == [0, 1, 3, 4]
+    assert doc["hops"][2]["quorum_members"] == []
+    assert not doc["hops"][2]["unanimous"]
+
+
+def test_consensus_reuses_one_verified_source_pass_per_member(
+    comparison_portfolio, portfolio_sources, monkeypatch
+):
+    original = comparison_portfolio.build_verified_public_casefile_series
+    counts = []
+
+    def traced(sources):
+        counts.append(id(sources))
+        return original(sources)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(comparison_portfolio, "build_verified_public_casefile_series", traced)
+        public = comparison_portfolio.build_public_portfolio(portfolio_sources)
+    assert counts == [id(source) for source in portfolio_sources]
+    dossier = importlib.import_module("staging_comparison_dossier")
+    body = json.loads(public.payload)
+    for i, candidate in enumerate(portfolio_sources[1:], 1):
+        previous = dossier.build_public_comparison(portfolio_sources[0], candidate)
+        assert body["members"][i]["comparison_sha256"] == previous.sha256
+        assert body["members"][i]["comparison"] == json.loads(previous.payload)
+
+
+def test_consensus_private_opt_in_path_frequency_and_roundtrip(consensus_module, evidence):
+    members = list(evidence.selected.inventory)
+    i = next(i for i, item in enumerate(members) if item.path == "target.bundle")
+    same = replace(
+        evidence,
+        selected=replace(
+            evidence.selected,
+            inventory=tuple(
+                replace(x, size=x.size + 77) if j == i else x for j, x in enumerate(members)
+            ),
+        ),
+    )
+    alternate = replace(
+        evidence,
+        selected=replace(
+            evidence.selected,
+            inventory=tuple(
+                replace(x, mtime_ns=x.mtime_ns + 99) if j == i else x for j, x in enumerate(members)
+            ),
+        ),
+    )
+    baseline = ((evidence, evidence), (evidence, evidence))
+    changed = ((evidence, same), (same, evidence))
+    other = ((evidence, alternate), (alternate, evidence))
+    sources = (baseline, changed, changed, other)
+    public, private = consensus_module.build_private_consensus(sources, allow_sensitive_paths=True)
+    assert b"target.bundle" not in public.payload
+    assert b"target.bundle" in private.payload
+    assert "payload" not in repr(private)
+    content = json.loads(private.payload)
+    assert content["audience"] == "private"
+    assert content["public_consensus_sha256"] == public.sha256
+    assert content["run_count"] == 4
+    assert content["hops"][0]["effects"]
+    effect = next(
+        x
+        for x in content["hops"][0]["effects"]
+        if x["effect"] == "modified" and x["path"] == "target.bundle" and x["fields"] == ["size"]
+    )
+    assert effect["member_indices"] == [1, 2]
+    checked = consensus_module.verify_private_consensus(
+        sources,
+        public.payload,
+        private.payload,
+        expected_public_sha256=public.sha256,
+        expected_private_sha256=private.sha256,
+        allow_sensitive_paths=True,
+    )
+    assert checked.public.public_sha256 == public.sha256
+    assert checked.private_sha256 == private.sha256
+    assert "payload" not in repr(checked)
+
+
+@pytest.mark.parametrize("bad_opt_in", [False, None, 0, 1, "true", [], {}])
+def test_consensus_private_requires_exact_true(consensus_module, portfolio_sources, bad_opt_in):
+    with pytest.raises(consensus_module.ConsensusError, match="^staging consensus rejected$"):
+        consensus_module.build_private_consensus(
+            portfolio_sources, allow_sensitive_paths=bad_opt_in
+        )
+    with pytest.raises(consensus_module.ConsensusError, match="^staging consensus rejected$"):
+        consensus_module.verify_private_consensus(
+            portfolio_sources,
+            b"{}",
+            b"{}",
+            expected_public_sha256="0" * 64,
+            expected_private_sha256="0" * 64,
+            allow_sensitive_paths=bad_opt_in,
+        )
+
+
+@pytest.mark.parametrize("field", ["quorum_threshold", "hops", "source_portfolio_sha256"])
+def test_consensus_rejects_rehashed_public_forgery(consensus_module, portfolio_sources, field):
+    module = consensus_module
+    public = module.build_public_consensus(portfolio_sources)
+    doc = json.loads(public.payload)
+    if field == "quorum_threshold":
+        doc[field] = 2
+    elif field == "hops":
+        doc[field][0]["quorum_members"] = [0]
+    else:
+        doc[field] = "f" * 64
+    forged = json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+        "ascii"
+    )
+    with pytest.raises(module.ConsensusError, match="^staging consensus rejected$"):
+        module.verify_public_consensus(
+            portfolio_sources,
+            forged,
+            expected_sha256=hashlib.sha256(forged).hexdigest(),
+        )
+
+
+@pytest.mark.parametrize("raw", [b"", b"null", b"[]", b'{"x":1,"x":2}', b" {}", b"\xff"])
+def test_consensus_wire_format_rejected(consensus_module, portfolio_sources, raw):
+    with pytest.raises(consensus_module.ConsensusError, match="^staging consensus rejected$"):
+        consensus_module.verify_public_consensus(
+            portfolio_sources, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+
+
+def test_consensus_rejects_cohort_source_reorder_and_public_private_mismatch(
+    consensus_module, portfolio_sources
+):
+    module = consensus_module
+    public, private = module.build_private_consensus(portfolio_sources, allow_sensitive_paths=True)
+    reordered = (
+        portfolio_sources[0],
+        portfolio_sources[3],
+        portfolio_sources[1],
+        portfolio_sources[2],
+    )
+    with pytest.raises(module.ConsensusError):
+        module.verify_public_consensus(reordered, public.payload, expected_sha256=public.sha256)
+    forged_public = json.loads(public.payload)
+    forged_public["hops"][0]["unanimous"] = True
+    raw = json.dumps(
+        forged_public, sort_keys=True, ensure_ascii=True, separators=(",", ":")
+    ).encode("ascii")
+    with pytest.raises(module.ConsensusError):
+        module.verify_private_consensus(
+            portfolio_sources,
+            raw,
+            private.payload,
+            expected_public_sha256=hashlib.sha256(raw).hexdigest(),
+            expected_private_sha256=private.sha256,
+            allow_sensitive_paths=True,
+        )
+
+
+def test_consensus_public_never_constructs_private_or_reads_host(
+    consensus_module, portfolio_sources, monkeypatch
+):
+    module = consensus_module
+    pmod = importlib.import_module("staging_comparison_portfolio")
+
+    def forbidden(*_a, **_kw):
+        pytest.fail("public consensus used private source or host IO")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(pmod, "build_private_portfolio", forbidden)
+        for method in ("open", "stat", "scandir", "listdir", "kill", "system", "fork"):
+            if hasattr(os, method):
+                patch.setattr(os, method, forbidden)
+        result = module.build_public_consensus(portfolio_sources)
+        assert (
+            module.verify_public_consensus(
+                portfolio_sources, result.payload, expected_sha256=result.sha256
+            ).public_sha256
+            == result.sha256
+        )
+
+
+@pytest.mark.parametrize("field", ["source_private_portfolio_sha256", "hops"])
+def test_consensus_rejects_rehashed_private_effect_forgery(
+    consensus_module, portfolio_sources, field
+):
+    module = consensus_module
+    public, private = module.build_private_consensus(portfolio_sources, allow_sensitive_paths=True)
+    doc = json.loads(private.payload)
+    if field == "source_private_portfolio_sha256":
+        doc[field] = "0" * 64
+    else:
+        doc[field][0]["absent_members"] = [0]
+    forged = json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+        "ascii"
+    )
+    with pytest.raises(module.ConsensusError, match="^staging consensus rejected$"):
+        module.verify_private_consensus(
+            portfolio_sources,
+            public.payload,
+            forged,
+            expected_public_sha256=public.sha256,
+            expected_private_sha256=hashlib.sha256(forged).hexdigest(),
+            allow_sensitive_paths=True,
+        )
+
+
+def test_consensus_bounded_untrusted_private_input_rejects_before_parser(
+    consensus_module, portfolio_sources, monkeypatch
+):
+    module = consensus_module
+    malicious = b'{"a":"' + b"x" * module.MAX_PRIVATE_CONSENSUS_BYTES + b'"}'
+
+    def forbidden(*_a, **_kw):
+        pytest.fail("oversized private consensus reached JSON parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(module.json, "loads", forbidden)
+        with pytest.raises(module.ConsensusError, match="^staging consensus rejected$"):
+            module._checked(
+                malicious,
+                hashlib.sha256(malicious).hexdigest(),
+                max_bytes=module.MAX_PRIVATE_CONSENSUS_BYTES,
+            )

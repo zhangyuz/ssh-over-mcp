@@ -13,6 +13,7 @@ import json
 from dataclasses import dataclass
 
 import staging_comparison_dossier as dossier
+from staging_casefile_series import build_verified_public_casefile_series
 
 MIN_RUNS = 3
 MAX_RUNS = 5
@@ -105,9 +106,15 @@ def _compute_public(
     pair_docs: list[dict] = []
     baseline_sha: str | None = None
     incident: str | None = None
-    # Pair comparison verifies original tuples and every source-bound segment.
-    for index, candidate in enumerate(sources[1:], 1):
-        pair = dossier.build_public_comparison(sources[0], candidate)
+    # Fully validate each distinct positional source *once per call*, then
+    # assemble pairwise public comparisons from those source-verified facts.
+    # No cross-call cache, trusted chronology or unverified report reuse.
+    verified_series = tuple(build_verified_public_casefile_series(run) for run in sources)
+    first_record, first_facts = verified_series[0]
+    for index, (candidate_record, candidate_facts) in enumerate(verified_series[1:], 1):
+        pair, _checked, _left_doc, _right_doc = dossier._compute_public_from_verified(
+            first_record, first_facts, candidate_record, candidate_facts
+        )
         doc = json.loads(pair.payload.decode("ascii"))
         if index == 1:
             baseline_sha = doc["left_series_sha256"]

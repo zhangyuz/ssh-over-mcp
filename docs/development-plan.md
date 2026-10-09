@@ -1047,28 +1047,53 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   acceptance. Merge-main `37965175659`: Ubuntu 26.04 Python 3.13/3.14
   PASS; real no-network Level-3 FAIL-CLOSED on pre-existing stale E2E
   provider state (exit 70). No marker or provider state changed.
-- **Next larger complete functional slice (#187)** — bounded **multi-series
-  investigation comparison portfolio** with one positional baseline and 2–4
-  independent candidates (exact 3–5 caller-provided complete #184/#185
-  series), each with its own 2–8 validated contiguous segments / ≤128 hops.
-  Build a canonical path-free **768-KiB public portfolio** combining the
-  verified per-member #186 comparisons with source digest clusters across
-  all members and zero-based hop-frequency membership: identical, divergent,
-  candidate-missing, candidate-extra and absent-on-both classifications. No fabricated
-  chronology, ranking or per-hop path counts. A separate **24-MiB explicit
-  exact-True opt-in private portfolio** includes each source-rebuilt #186
-  private pair dossier with raw path and changed-field differences, bound
-  to the exact public portfolio and original pair hashes. Pair/public/private
-  contents, cohort size, positions, candidate source order, cluster/frequency
-  classifications and digest associations must regenerate exactly from the
-  original caller-supplied tuples. Forged reports despite recalculated hashes,
-  cross-cohort swaps, invalid/noncanonical/duplicate-key/oversized bytes,
-  opt-in bypass and host/provider I/O fail closed. Test-first RED/GREEN,
-  complete related regressions, global code/docs/security consistency and
-  exact-head self-hosted Ubuntu 26.04 Python 3.13/3.14 CI are required.
-  Full private path content is never embedded in the public portfolio.
-  These checks do not authorize private access or attest real incident
-  chronology, A1/B8 workflow provenance or native provider recovery.
+- **PR #187** — merged as `d12f19e6c352bcecd864485a852b67f9f4b8e22b`
+  from reviewed exact HEAD `d1736b3a78d5226c53393b34c8ad747e606e3816`.
+  Delivered canonical, independently original-source-verified **3–5-run
+  cohort investigation portfolio**, one baseline plus 2–4 members, each
+  with bounded 2–8 series segments (≤128 hops). Source clusters, the
+  five-case hop-frequency partition (including absent-on-both), 768-KiB
+  path-free public bundle and separate exact-True opt-in 24-MiB private
+  path/field audit bundle. Independent full-diff reviews `6086065429`,
+  `6086703132`: zero confirmed Critical/Important/Minor. 675 local relevant
+  tests and adversarial five-run boundaries PASS, exact-head Ubuntu 26.04
+  Python 3.13/3.14 CI `37967107396` SUCCESS. PR-native Level-3 SKIPPED.
+  Merge-main CI `37973343853`: Ubuntu Python 3.13/3.14 validation PASS,
+  real no-network Level-3 FAIL-CLOSED (stale E2E provider state, exit 70).
+  Nothing cleared or changed in the real provider state.
+- **Next larger complete functional slice (#188)** — **verified 3–5-run
+  cohort consensus dossier** and bounded CI-runtime cost correction.
+  Compose a path-free canonical ≤256-KiB public strict-majority comparison:
+  for each zero-based hop, group exact full-content before/after SHA-256 and
+  changed flag across members, classify absent members, mark unanimity only
+  when every run carries the same hop, and strict quorum only at
+  floor(run_count/2)+1 (never a majority of merely present members).
+  A distinct exact-True opt-in ≤24-MiB private consensus compares raw
+  path/modified-field structural effects and enumerates their member
+  support, bound to the exact public consensus and privately verified
+  #187 source portfolio. Public mode never builds private effects.
+  Both verifiers reject duplicate/noncanonical/oversized/rehashed forged
+  reports and wrong original source cohort by byte-for-byte regeneration.
+  Preserve no-host-I/O, sanitized failures and no trusted capture
+  chronology/provenance/authorization assumptions. Performance: #187
+  exact-head Ubuntu CI `37967107396` took 8m08s Python 3.13 tests and
+  9m05s Python 3.14 tests, up from #186's 6m13s/7m16s in `37962020041`;
+  installation and compile contribute seconds, not the growth. Refactor
+  #187 public portfolio construction to source-validate each positional
+  member only **once per invocation**, reusing privately scoped verified
+  immutable source facts for internal pair composition. Existing public
+  untrusted-input verifiers remain exact-source rebuilding; no global
+  cache, no skipped assertion or increased CI timeout. CI now prints
+  slowest test durations for performance evidence. This branch's
+  `pull_request_target` CI uses the trusted base workflow; slow-test
+  logging changes start on post-merge main, not as untrusted PR YAML.
+  On 2026-10-09, 30 exactly matched, merged, clean local worktrees
+  and corresponding local/remote branches were removed only after
+  per-ref ancestry and clean status checks; divergence, dirty and
+  recovery/paused worktrees were retained. Work requires
+  test-first RED/GREEN, strict long/short/quorum/private adversarial tests,
+  full regression, code/docs/security review and exact-head self-hosted
+  Python 3.13/3.14 CI before review-ready.
 
 
 **Roadmap / global consistency:** These primitives are test fixtures and

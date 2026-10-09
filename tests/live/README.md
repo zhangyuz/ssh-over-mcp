@@ -2040,3 +2040,49 @@ after its independently reviewed exact-head Ubuntu Python 3.13/3.14 CI
 PASS, real no-network native Level-3 FAIL-CLOSED on the unchanged stale
 E2E provider marker (exit 70). No provider-state disposition is implied
 by #187's offline cohort tests.
+
+
+### Offline multi-member quorum & sensitive effect support (PR #188)
+
+`staging_cohort_consensus` takes exactly the same independently
+source-bound 3–5 caller-ordered casefile series tuples as #187.
+**Public** `build_public_consensus(runs)` returns ≤256-KiB canonical
+path-free ASCII bytes and unkeyed SHA-256. Each hop lists exact
+structural full-content before/after fingerprint + changed-flag
+**groups**, their original run indices, missing/absent run indices, and
+strict-majority membership requiring **floor(N/2)+1 of ALL runs**.
+Unanimity is true only when all 3–5 runs have an identical hop.
+`verify_public_consensus` independently recomputes the entire public
+portfolio and exactly verifies every byte and digest from the original
+source tuples. Rehashed forged quorum, groups and source binding fail.
+
+**Private** `build_private_consensus(runs, allow_sensitive_paths=True)`
+requires exact Boolean `True`, independently reconstructs #187 private
+source portfolio (including original private path audits), and emits
+separate ≤24-MiB canonical raw path/field **effect-support groups**
+with member indices and the exact SHA-256 of both the public consensus
+and sensitive source portfolio. `verify_private_consensus` requires
+original caller source tuples, both raw reports and expected digests;
+rejects forged, mixed or noncanonical reports. Private records suppress
+ordinary `repr`; raw paths cannot enter the public report. An unkeyed
+hash is content-consistency only; cohort order/majority does **not**
+authenticate time, producer identity, trusted incident severity,
+workflow A1/B8 receipts, user authorization or provider remediation.
+No UID-502, host/process/network access or native Level-3 state changes.
+
+**CI runtime control:** Compared GitHub step timestamps in #186
+`37962020041` and #187 `37967107396` (3.13 6m13s→8m08s;
+3.14 7m16s→9m05s). Each #188 public cohort construction now
+source-validates each positional member **once within the invocation**,
+then assembles all pairwise comparisons from source-verified facts.
+This is not cross-call memoization and never accepts caller-provided
+preverified reports. Standalone untrusted-input verifiers retain
+complete validation. Both full Python CI tests are retained with the
+unchanged 20-minute job limit; `pytest --durations=15` displays slow
+test diagnostics to prevent unnoticed regressions.
+
+#187 merge-main `37973343853`: Ubuntu Python 3.13/3.14 PASS; actual
+no-network Level-3 FAIL-CLOSED, with unchanged stale E2E provider marker
+(exit 70). No source comparison or consensus report authorizes a
+provider marker change. Slow-test workflow output is activated after
+merge to trusted main (PR `pull_request_target` uses the base workflow).
