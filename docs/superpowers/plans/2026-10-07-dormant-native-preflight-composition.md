@@ -340,3 +340,20 @@ full source re-traversal while keeping every original seal, private path
 count, canonical content and cross-segment boundary verification intact.
 Original standalone byte-exact verification functions remain available
 for untrusted input. No native host/provider security gate is relaxed.
+
+
+## Cohort offline casefile comparison — PR #187
+
+#186 merged at `459cb6622f609e8cb4f1eb9d094a0f22f317edab`,
+independently reviewed and exact-head Ubuntu 3.13/3.14 PASS. Its source
+validation, private opt-in and digest pairing are kept intact. #187 now
+bundles positional 1-baseline/2–4-candidate casefile comparisons as one
+cohesive investigator cohort workflow: a bounded **public path-free**
+source clustering and divergence-frequency matrix, and a distinct exact-True
+opt-in **private** per-candidate path/modified-field audit portfolio. Every
+original source tuple and original pairwise verifier remains authoritative
+for offline consistency; entire canonical public and private portfolios
+regenerate byte-for-byte from those original caller snapshots. Caller
+ordering is **not** authenticated capture chronology. A1/B8 receipts,
+paused ADR 0011/N1c, UID-502, stale provider marker/recovery and native
+no-network Level-3 remain separately open; no host state is touched.

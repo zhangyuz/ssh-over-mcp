@@ -1989,3 +1989,49 @@ validation of its own newly created inputs. New tests compare the exact
 outputs and verified results with the previous full separate-verifier
 sequence and reject broken cross-segment boundaries. Host I/O, trusted
 receipt or recovery authority are still prohibited.
+
+
+### Offline multi-series investigator comparison portfolio (PR #187)
+
+`staging_comparison_portfolio` accepts an **exact tuple of 3–5 ordered
+source-series tuples** (index 0 is the baseline, indices 1–4 are independent
+candidates). All series must use the same independently checked incident
+selector. Each pair is independently reconstructed by #186 from 2–8
+contiguous #184/#185 casefile segments, ≤128 hops per series. No true
+execution time, trusted provenance, producer identity or host authority is
+inferred from the caller-provided order. A repeated valid member is allowed
+and appears in the correct digest cluster.
+
+**Public:** `build_public_portfolio(runs)` emits deterministic, canonical
+ASCII JSON, size ≤768 KiB, containing baseline digest, per-candidate
+path-free #186 canonical comparison, digests and stable member indices,
+exact-source digest clusters, and per-zero-based-hop lists of identical,
+different, missing, extra and absent-on-both candidate member indices. This is count-only
+and full-content fingerprint comparison; the source reports do not expose
+raw inventory path strings or modified field names. Classification means
+**positional comparison to the same baseline**, not authoritative change
+chronology or action severity. `verify_public_portfolio` independently
+recomputes all series/pairs/labels/clusters and rejects any forged bytes,
+even after an attacker recomputes the unkeyed SHA-256.
+
+**Private:** `build_private_portfolio(runs, allow_sensitive_paths=True)`
+requires exactly the Boolean singleton `True` before any sensitive work,
+returning the same verified public report and a separate canonical ≤24 MiB
+private payload with every source-verified #186 pairwise path/modified-field
+audit, exact public portfolio SHA-256 and pairwise public/private hashes.
+`verify_private_portfolio` requires original caller source tuples and both
+expected digests, validates type, size, hash and canonical duplicate-free
+wire encoding before reconstructing all private reports, and refuses source
+replacement, genuine cross-cohort mispairing and rehashed forged fields.
+Sensitive records suppress ordinary `repr` output. Exact-True opt-in is
+**not authentication/authorization**; raw paths must not leave their private
+audience. No host, UID-502, process, provider or network I/O is performed.
+
+The portfolio uses ordinary unkeyed content hashes, never source signatures,
+verified chronology, trusted A1/B8 receipts, paused N1c activation or
+native Phase 7B1/Level-3 acceptance. The stale-provider marker is not read
+or modified. Independent native recovery and disposition remain blocked.
+
+#186 was merged as `459cb6622f609e8cb4f1eb9d094a0f22f317edab`
+after its independently reviewed exact-head Ubuntu Python 3.13/3.14 CI
+`37962020041` PASS; PR Level-3 was SKIPPED. No native acceptance claimed.

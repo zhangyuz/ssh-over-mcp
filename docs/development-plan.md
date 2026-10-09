@@ -1031,40 +1031,42 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   PR-only native Level-3 SKIPPED, not E2E approval. Merge-main CI
   `37951075646` Ubuntu validation PASS, but native no-network Level-3
   FAIL-CLOSED (exit 70: pre-existing stale E2E provider state).
-- **Next larger complete functional slice (#186)** — **two-series offline
-  investigation comparison dossier**, not another small primitive.
-  Accepts TWO independently verified, source-bound, contiguous #184
-  series, each with 2–8 segments and ≤128 transitions, requiring identical
-  incident selector but permitting different length and content. Builds
-  an independently verifiable **path-free 128-KiB public comparison**:
-  source-series digests, exact full-content snapshot mismatch positions,
-  common-prefix classification, identical/different/left-only/right-only
-  zero-based hop indices, per-hop source fingerprints and changed flags,
-  aggregate added/removed/modified count deltas and net-change context.
-  A second **explicit-opt-in private 6-MiB comparison** incorporates BOTH
-  #185 sensitive source-bound private series, separately verifies every
-  original snapshot/pair/audit and provides path and modified-field level
-  left-only/right-only forensic differences for aligned hops, strictly
-  bound to the public comparison digest. Source splices, forged classifications
-  with recomputed hashes, genuinely mismatched public/private comparisons,
-  wrong same-selector case, oversized/noncanonical duplicate JSON, cold-cache
-  and host-I/O attempts must fail closed. Opt-in is not caller authentication.
-  Both export a canonical reproducible report and verify byte-for-byte
-  using the original source tuple. To keep this larger capability inside
-  the unchanged 20-minute hardened CI job, public/private casefile series
-  expose **one-pass verified builders**. They return the same exact sealed
-  canonical report and source-verified facts as the previous separate
-  build+verify calls, avoiding redundant full-segment re-traversal, without
-  omitting any source/seal/audit/count/continuity checks. Equivalence and
-  invalid-source fail-close are covered by dedicated regression tests.
-  Exact-head CI `37952154503` and `37959090921` were CANCELLED in the
-  Python 3.14 full test step at the original 20-minute limit (3.13 PASS);
-  these runs are **not** successful acceptance. Work includes RED/GREEN
-  adversarial tests,
-  full related regression, code/docs/security review and exact-head
-  Ubuntu 26.04 x86 Python 3.13/3.14 CI. This is **offline comparison of
-  caller-supplied order only**, never trusted capture chronology or
-  authoritative incident triage/recovery approval.
+- **PR #186** — merged as `459cb6622f609e8cb4f1eb9d094a0f22f317edab`
+  from exact reviewed HEAD `df4c7ba756e074b1f63434fb2f0862aa6c5b1f38`.
+  Delivered complete **two-series detached investigation comparison dossier**:
+  128-KiB canonical path-free source/hop divergence and count summaries,
+  separately opt-in 6-MiB raw path/field difference reports, independent
+  source-bound public/private rebuild verifiers, 128-hop support and sanitized
+  fail-closed rejection. Exact-head independent deep review `6085679812`
+  found 0 Critical/Important/Minor; 1,646 relevant tests PASS and exact-head
+  self-hosted Ubuntu 26.04 Python 3.13/3.14 CI `37962020041` SUCCESS.
+  Prior CI attempts `37952154503` and `37959090921` were CANCELLED by the
+  unchanged 20-minute job limit; source-validated **single-pass verified
+  builders** removed redundant traversal without dropping any input, seal,
+  continuity, audit or count checks. PR-only Level-3 SKIPPED, not native
+  acceptance. Merge-main native outcome must be independently recorded.
+- **Next larger complete functional slice (#187)** — bounded **multi-series
+  investigation comparison portfolio** with one positional baseline and 2–4
+  independent candidates (exact 3–5 caller-provided complete #184/#185
+  series), each with its own 2–8 validated contiguous segments / ≤128 hops.
+  Build a canonical path-free **768-KiB public portfolio** combining the
+  verified per-member #186 comparisons with source digest clusters across
+  all members and zero-based hop-frequency membership: identical, divergent,
+  candidate-missing, candidate-extra and absent-on-both classifications. No fabricated
+  chronology, ranking or per-hop path counts. A separate **24-MiB explicit
+  exact-True opt-in private portfolio** includes each source-rebuilt #186
+  private pair dossier with raw path and changed-field differences, bound
+  to the exact public portfolio and original pair hashes. Pair/public/private
+  contents, cohort size, positions, candidate source order, cluster/frequency
+  classifications and digest associations must regenerate exactly from the
+  original caller-supplied tuples. Forged reports despite recalculated hashes,
+  cross-cohort swaps, invalid/noncanonical/duplicate-key/oversized bytes,
+  opt-in bypass and host/provider I/O fail closed. Test-first RED/GREEN,
+  complete related regressions, global code/docs/security consistency and
+  exact-head self-hosted Ubuntu 26.04 Python 3.13/3.14 CI are required.
+  Full private path content is never embedded in the public portfolio.
+  These checks do not authorize private access or attest real incident
+  chronology, A1/B8 workflow provenance or native provider recovery.
 
 
 **Roadmap / global consistency:** These primitives are test fixtures and
