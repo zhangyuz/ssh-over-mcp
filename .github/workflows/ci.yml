@@ -110,7 +110,7 @@ jobs:
         run: python -m compileall -q src tests ops/systemd ops/live-e2e
 
       - name: Test on Python 3.13
-        run: python -m pytest -q
+        run: python -m pytest -q --durations=15
 
       - name: Set up Python 3.14
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -127,7 +127,7 @@ jobs:
         run: python -m compileall -q src tests ops/systemd ops/live-e2e
 
       - name: Test on Python 3.14
-        run: python -m pytest -q
+        run: python -m pytest -q --durations=15
 
   live-local-e2e:
     name: Merge-main no-network Level-3

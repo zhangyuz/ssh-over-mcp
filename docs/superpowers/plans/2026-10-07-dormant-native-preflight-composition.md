@@ -362,3 +362,29 @@ no-network Level-3 remain separately open; no host state is touched.
 Python 3.13/3.14 PASS and real no-network Level-3 FAIL-CLOSED on
 pre-existing stale E2E provider state (exit 70). #187 performs no
 recovery or marker modification.
+
+
+## Offline cohort quorum and verified source reuse — PR #188
+
+#187 merged `d12f19e6c352bcecd864485a852b67f9f4b8e22b`, with
+independent exact-head reviews and Ubuntu Python 3.13/3.14 PASS. Its
+public/private 3–5-run bound, independent #184/#185/#186 original
+source verifiers and exact-True path confidentiality constraints
+remain unchanged. #188 adds a path-free strict-majority/quorum and
+unanimity full-content fingerprint grouping, plus a separately opt-in
+private per-path/changed-field cohort effect-support report. All
+public consensus bytes rebuild from #187's original source-bound
+portfolio; private report rebuilds from all original sensitive audits,
+never from caller-authored trust assertions. Runtime growth is
+controlled by strictly *intra-call* reuse of source-validated member
+series before pairwise public comparisons and pytest slow-test
+diagnostics, while preserving two complete Python CI suites and
+all security gates. No trusted A1/B8 receipts, paused N1c, UID-502
+privilege, real provider cleanup or no-network native Level-3 acceptance.
+
+#187 merge-main workflow `37973343853`: Ubuntu Python 3.13/3.14
+validation PASS, real no-network Level-3 FAIL-CLOSED on the pre-existing
+stale provider marker, exit 70. This does not authorize cleanup.
+The housekeeping request removed only 30 clean fully-merged exactly
+remote-matched historical branches/worktrees; recovery, dirty,
+diverged and paused native worktrees remain preserved.
