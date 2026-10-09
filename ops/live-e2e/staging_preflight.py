@@ -1802,7 +1802,7 @@ def _observe_joint_marker_paired_inventory(selector: str) -> _MarkerStagingEvide
 
     This is private partial evidence for disposable fixtures, not an approved
     UID-502 inspection, envelope, receipt, workflow or recovery authority.
-    The marker, original payload and all three namespace chains overlap both
+    The marker, held payload-directory FD and three namespace chains overlap both
     independent fixed process observations. No arbitrary path/PID/command.
     """
     incident = _select_incident(selector)
@@ -1810,10 +1810,14 @@ def _observe_joint_marker_paired_inventory(selector: str) -> _MarkerStagingEvide
     def checked_snapshot() -> None:
         try:
             _observe_fixed_process_snapshot()
-        except (MemoryError, KeyboardInterrupt, SystemExit, GeneratorExit):
-            # Normalize BEFORE unwinding pinned contexts, which cannot
-            # otherwise distinguish interrupted child cleanup from a
-            # settled metadata-only namespace failure.
+        except PreflightError:
+            # An explicit typed/settled refusal remains distinguishable.
+            raise
+        except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):  # noqa: BLE001
+            # Any untyped failure from a snapshot invocation, including
+            # unexpected OS/metadata/programming errors, cannot prove that
+            # its owned diagnostic child/FD cleanup settled. Preserve typed
+            # PreflightError separately and normalize BEFORE FD unwinding.
             raise PreflightError(cleanup_uncertain=True) from None
 
     try:
@@ -1824,9 +1828,9 @@ def _observe_joint_marker_paired_inventory(selector: str) -> _MarkerStagingEvide
             temp.revalidate()
 
             marker = _read_marker(cache._fds[-1], uid=_CACHE_ACCOUNT_UID)
-            # Retain the original no-follow expected-commit FD through BOTH
-            # snapshots, the selected metadata inventory, and the final
-            # in-context marker/expected-content revalidations.
+            # Retain the original no-follow payload-content DIRECTORY FD
+            # through both snapshots and the inventory; the fixed commit
+            # FILE is opened/read/closed on each bounded revalidation.
             with _pin_expected_commit(
                 selected._fds[-1],
                 incident.expected_commit,

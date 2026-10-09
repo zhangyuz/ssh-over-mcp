@@ -239,7 +239,7 @@ def test_marker_replaced_by_symlink_during_final_marker_close_refuses(env, monke
     assert marker.is_symlink()
 
 
-def test_expected_commit_rewrite_after_payload_close_refuses(env, monkeypatch):
+def test_expected_commit_rewrite_on_initial_file_close_refuses(env, monkeypatch):
     p, _root, _cache, _marker, _temp, _selected, expected, _events = env
     _spy(env, monkeypatch)
     real_close = os.close
@@ -258,6 +258,9 @@ def test_expected_commit_rewrite_after_payload_close_refuses(env, monkeypatch):
     with pytest.raises(p.PreflightError):
         p._observe_joint_marker_paired_inventory("stale-target")
     assert fired
+    # This injection fires on the first regular-file read close,
+    # BEFORE ps A, not on the later payload-directory close.
+    assert _events.count("ps") == 0
 
 
 @pytest.mark.parametrize("which", [1, 2])
@@ -329,3 +332,61 @@ def test_unexpected_capture_cancellation_never_claims_settled_cleanup(
         p._observe_joint_marker_paired_inventory("stale-target")
     assert failure.value.cleanup_uncertain is True
     assert events.count("ps") == position
+
+
+@pytest.mark.parametrize("position", [1, 2])
+@pytest.mark.parametrize("error", [RuntimeError, OSError, ValueError, AssertionError])
+def test_untyped_snapshot_failure_must_preserve_unknown_cleanup(env, monkeypatch, position, error):
+    p, *_rest, events = env
+    _spy(env, monkeypatch)
+
+    def snapshot():
+        events.append("ps")
+        if events.count("ps") == position:
+            raise error("unconfirmed owned diagnostic cleanup")
+
+    monkeypatch.setattr(p, "_observe_fixed_process_snapshot", snapshot)
+    with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as failure:
+        p._observe_joint_marker_paired_inventory("stale-target")
+    assert failure.value.cleanup_uncertain is True
+    assert events.count("ps") == position
+
+
+@pytest.mark.parametrize("position", [1, 2])
+def test_typed_settled_snapshot_rejection_remains_false(env, monkeypatch, position):
+    p, *_rest, events = env
+    _spy(env, monkeypatch)
+
+    def snapshot():
+        events.append("ps")
+        if events.count("ps") == position:
+            raise p.PreflightError(cleanup_uncertain=False)
+
+    monkeypatch.setattr(p, "_observe_fixed_process_snapshot", snapshot)
+    with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as failure:
+        p._observe_joint_marker_paired_inventory("stale-target")
+    assert failure.value.cleanup_uncertain is False
+
+
+def test_post_ps_b_payload_directory_close_rewrite_refuses(env, monkeypatch):
+    p, _root, _cache, _marker, _temp, selected, expected, events = env
+    _spy(env, monkeypatch)
+    actual_payload_inode = (selected / "payload-content").stat().st_ino
+    real_close = os.close
+    observed = []
+
+    def close(fd):
+        is_payload_directory = os.fstat(fd).st_ino == actual_payload_inode and __import__(
+            "stat"
+        ).S_ISDIR(os.fstat(fd).st_mode)
+        real_close(fd)
+        if is_payload_directory and events.count("ps") == 2 and not observed:
+            observed.append(tuple(events))
+            expected.write_bytes(b"0" * 40 + b"\n")
+
+    monkeypatch.setattr(os, "close", close)
+    with pytest.raises(p.PreflightError, match="^staging preflight rejected$"):
+        p._observe_joint_marker_paired_inventory("stale-target")
+    assert len(observed) == 1
+    assert observed[0].count("ps") == 2
+    assert observed[0].count("inventory") == 1

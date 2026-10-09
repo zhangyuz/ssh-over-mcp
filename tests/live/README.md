@@ -1385,10 +1385,11 @@ calling `_observe_joint_marker_staging()` and
 helpers independently borrow and close their ancestry, which cannot establish
 one continuous observation.
 
-In this slice the initial fixed marker read and fixed expected_commit FD pin
+In this slice the initial fixed marker read and fixed payload-content directory FD pin
 precede `ps A`; two independent owned/reaped fixed `ps` observations bracket
 the metadata-only inventory under simultaneously held root/T/cache/selected
-and original expected_commit descriptors. After `ps B`, both marker and
+and the original payload directory descriptor. The expected_commit file
+is opened/read/closed separately on each check. After `ps B`, both marker and
 expected_commit contents and original metadata are revalidated. The payload
 FD is closed before the final fixed marker reread, followed by the no-follow
 single-component marker-leaf check, reject-only expected-commit leaf/parent
@@ -1399,7 +1400,8 @@ with no process stdout/PID, owned FD, receipt or mutation authority.
 
 Disposable fixture adversaries cover early marker symlinks; mutation during
 ps A, inventory or ps B; late cache/temp/staging renames; expected_commit
-revisions after ps B and after a file close; final marker FD-close symlink
+revisions after ps B, on early commit-file close and after the
+post-ps-B payload-directory close; final marker FD-close symlink
 replacement; missing/invalid selector; and uncertain failure of either
 process capture. No actual UID-502 incident access or provider operation
 occurs.
