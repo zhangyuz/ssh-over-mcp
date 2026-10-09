@@ -1599,3 +1599,29 @@ def test_timeline_summary_rejects_cold_fixed_inventory_cache(
             chain.manifest.payload,
             expected_timeline_sha256=chain.manifest.sha256,
         )
+
+
+def test_timeline_summary_oversized_valid_json_rejected_before_parse(
+    timeline, timeline_summary, timeline_sources, monkeypatch
+):
+    chain = timeline.build_snapshot_timeline(timeline_sources)
+    raw = b'{"pad":"' + (b"x" * timeline_summary.MAX_SUMMARY_BYTES) + b'"}'
+    assert len(raw) > timeline_summary.MAX_SUMMARY_BYTES
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversize summary reached JSON parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(timeline_summary.json, "loads", forbidden)
+        with pytest.raises(
+            timeline_summary.TimelineSummaryError,
+            match="^staging timeline summary rejected$",
+        ):
+            timeline_summary.verify_timeline_change_summary(
+                timeline_sources,
+                chain.hops,
+                chain.manifest.payload,
+                raw,
+                expected_timeline_sha256=chain.manifest.sha256,
+                expected_summary_sha256=hashlib.sha256(raw).hexdigest(),
+            )
