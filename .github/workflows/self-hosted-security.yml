@@ -121,4 +121,4 @@ jobs:
         run: python -m compileall -q src tests
 
       - name: Test on Python ${{ matrix.python-version }}
-        run: python -m pytest -q
+        run: python -m pytest -q -n 2 --dist loadfile

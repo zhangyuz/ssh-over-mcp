@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shlex
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -71,13 +72,22 @@ def test_both_python_versions_run_complete_isolated_hardened_matrix(filename: st
     test_step = next(
         step for step in steps if step.get("name") == "Test on Python ${{ matrix.python-version }}"
     )
-    assert shlex.split(test_step["run"]) == (
+    expected = (
         ["python", "-m", "pytest", "-q", "--durations=15"]
         if filename == "ci.yml"
         else ["python", "-m", "pytest", "-q"]
     )
+    assert shlex.split(test_step["run"]) == expected + ["-n", "2", "--dist", "loadfile"]
     if filename == "ci.yml":
         assert workflow["jobs"]["live-local-e2e"]["needs"] == "validate"
         assert workflow["jobs"]["live-local-e2e"]["if"] == (
             "github.event_name == 'push' && github.ref == 'refs/heads/main'"
         )
+
+
+def test_two_worker_dependency_is_declared_for_both_ci_matrix_jobs() -> None:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert any(
+        dep.startswith("pytest-xdist>=3.6,")
+        for dep in project["project"]["optional-dependencies"]["dev"]
+    )

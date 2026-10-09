@@ -119,6 +119,14 @@ The deployment also does not mount:
 The runner's job workspace lives only in the container filesystem. In
 ephemeral mode the container is removed after its one assigned job.
 
+The full pytest suite uses `pytest-xdist` with exactly **two** workers and
+`--dist loadfile` within each language-version matrix job. The existing
+`--cpus 2` runner quota bounds the worker count; grouping by test file
+reduces cross-worker interference for module-level test fixtures. Every
+test remains in the run. Treat this as a CI optimization candidate until
+exact-head self-hosted tests on **both** Python versions pass; record
+measured duration instead of assuming an improvement.
+
 Both primary CI and the explicit trusted-main security workflow validate
 Python 3.13 and 3.14 in **separate matrix jobs**, each on a fresh hardened Ubuntu 26.04 x86 ephemeral runner with
 its own **20-minute** timeout. Both jobs run the entire unfiltered test

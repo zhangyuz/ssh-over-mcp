@@ -28,6 +28,7 @@ ssh-over-mcp-approvalctl = "ssh_over_mcp.approvals.cli:main"
 dev = [
   "pytest>=8.3,<9",
   "pytest-asyncio>=1.4,<2",
+  "pytest-xdist>=3.6,<4",
   "ruff>=0.8",
   "httpx>=0.28,<1",
 ]
