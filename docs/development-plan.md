@@ -927,11 +927,20 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   Exact reviewed head `f7acb88743a934319090d17c6c3597915b5544ae`
   passed self-hosted CI `37916736461` and merged as
   `e241fee43fdebe56f42d8c6540fb4baf1328fce1`.
-- **Current next functional slice** — private, deterministic comparison of
-  *two supplied* canonical detached inventory observations: immutable
-  content-digest/metadata drift report; no third capture, I/O or authority.
-  Acceptance requires real golden and adversarial fixtures, independent
-  review, full related regression and exact-head self-hosted CI.
+- **PR #176** — merged as `5610d94507a8120a68965878a755f33a5075e35e`
+  after independent code/docs review corrected the distinction between
+  paused native-input N1c and incident-workflow receipt integration
+  (preflight plan B8). Delivered deterministic immutable *offline* drift
+  reports comparing two separately projected, fixed-selector observations:
+  added/removed paths, changed metadata, getconf ancestry/marker changes,
+  payload digests, and strict fail-closed input behavior. Exact-head self-hosted
+  Ubuntu Python 3.13/3.14 CI `37919751648` PASS; PR Level-3 SKIPPED.
+- **Next functional slice (#177)** — canonical bounded offline drift artifact
+  export/import, including exact schema/version, stable JSON bytes,
+  SHA-256 checksum verification, rejection of forged and noncanonical bytes,
+  a real comparator-to-artifact round-trip and negative security tests.
+  It must pass review and exact-head self-hosted CI before being treated as
+  delivered. A checksum is not a trusted workflow provenance or receipt.
 
 **Roadmap / global consistency:** These primitives are test fixtures and
 offline data transformations. The original Phase 7B1 Task 3 / N1 native

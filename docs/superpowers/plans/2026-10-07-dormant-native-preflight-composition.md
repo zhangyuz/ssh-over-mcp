@@ -182,3 +182,16 @@ remain unchecked above and require the exact reviewed authority context and
 native acceptance prescribed by this plan. All drift/projection comparisons
 are deterministic data operations against disposable fixtures, with no actual
 stale provider or unknown recovery workspace touch.
+
+## Follow-on offline exchange slice — 2026-10-09
+
+After the merged canonical projection (#175) and data-only comparator
+(#176), a separate *dormant and non-authorizing* functional slice adds
+a bounded canonical drift-report artifact encoder/decoder (v1), strict
+byte validation, and a SHA-256 content check. This codec consumes a
+supplied already-frozen offline report. It does **not** attest the
+preflight capture, authenticate workflow provenance, substitute for
+incident receipt integration in B8, or resume paused N1c. N1c remains
+a distinct native-input authentication subtask deferred until
+recovery/A1 closure per ADR 0011. Existing trusted-main and native
+acceptance checkboxes in this plan remain open.

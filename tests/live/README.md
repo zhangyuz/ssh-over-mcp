@@ -1599,3 +1599,32 @@ Neither a matching digest nor `has_drift=False` proves trusted provenance,
 freshness, safe recovery, UID-502 state, absence of unseen changes or Level-3
 completion. It does not create an envelope, receipt, workflow binding, signal
 or deletion eligibility, and it never reads the actual provider/incident.
+
+### Canonical bounded offline drift artifact (v1, no provenance)
+
+The private `staging_drift_artifact` module provides a complete offline
+export-and-import function for already computed immutable drift reports:
+`encode_detached_drift(report) -> DriftArtifact(payload, sha256)` and
+`decode_detached_drift(raw, expected_sha256=...) -> DetachedDriftReport`.
+The encoder accepts only the strict `DetachedDriftReport` and
+`ChangedEntry` dataclass types, exact incident selector, lowercase
+64-character SHA-256 digests, strict boolean flags and consistent
+`has_drift`. Added, removed and modified paths must be distinct and
+filesystem-byte ordered, canonical, depth/length bounded; changed-field
+names must be from the fixed record schema, unique and in schema order.
+
+The exchanged artifact is canonical compact, ASCII-escaped, sorted-key
+JSON with an exact `schema_version: 1` schema and 2 MiB upper byte bound.
+Decoding rejects duplicate keys, unknown/missing fields, incorrect
+types, noncanonical JSON (including alternate ordering/escaping), invalid
+paths, impossible flags, checksum mismatch, and oversized bytes; it
+re-encodes and requires byte-for-byte equality. Tests verify exact
+golden-shaped bytes, checksum, round-trip including a real offline
+comparator output, malformed inputs and no filesystem/process/observer
+syscalls.
+
+**Security boundary:** The SHA-256 is a *content checksum*, not a signature
+or trusted evidence. Someone who controls both artifact bytes and the
+expected digest can substitute both. The codec never accepts or grants
+inspection authority, trusted source provenance, workflow IDs,
+UID-502 access, receipt, recovery, deletion or Level-3 acceptance.
