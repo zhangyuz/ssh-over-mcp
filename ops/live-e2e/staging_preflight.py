@@ -1795,3 +1795,141 @@ def _observe_joint_paired_inventory(selector: str) -> _SelectedInventoryEvidence
         GeneratorExit,
     ):
         raise PreflightError() from None
+
+
+def _observe_joint_marker_paired_inventory(selector: str) -> _MarkerStagingEvidence:
+    """Dormant fixed marker/ps-A/inventory/ps-B under ONE owned ancestry.
+
+    This is private partial evidence for disposable fixtures, not an approved
+    UID-502 inspection, envelope, receipt, workflow or recovery authority.
+    The marker, held payload-directory FD and three namespace chains overlap both
+    independent fixed process observations. No arbitrary path/PID/command.
+    """
+    incident = _select_incident(selector)
+
+    def checked_snapshot() -> None:
+        try:
+            _observe_fixed_process_snapshot()
+        except PreflightError:
+            # An explicit typed/settled refusal remains distinguishable.
+            raise
+        except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):  # noqa: BLE001
+            # Any untyped failure from a snapshot invocation, including
+            # unexpected OS/metadata/programming errors, cannot prove that
+            # its owned diagnostic child/FD cleanup settled. Preserve typed
+            # PreflightError separately and normalize BEFORE FD unwinding.
+            raise PreflightError(cleanup_uncertain=True) from None
+
+    try:
+        with _pin_observed_incident_ancestry(selector) as (cache, temp, selected):
+            _require_shared_incident_ancestry(cache, temp, selected)
+            selected.revalidate()
+            cache.revalidate()
+            temp.revalidate()
+
+            marker = _read_marker(cache._fds[-1], uid=_CACHE_ACCOUNT_UID)
+            # Retain the original no-follow payload-content DIRECTORY FD
+            # through both snapshots and the inventory; the fixed commit
+            # FILE is opened/read/closed on each bounded revalidation.
+            with _pin_expected_commit(
+                selected._fds[-1],
+                incident.expected_commit,
+                uid=incident.uid,
+                device=incident.device,
+            ) as expected:
+                original_payload = expected._payload_chain.metadata[0]
+                original_commit = expected.first.metadata
+                expected.revalidate(incident.expected_commit, uid=incident.uid)
+                _revalidate_marker(cache._fds[-1], marker, uid=_CACHE_ACCOUNT_UID)
+
+                # This helper checks the trusted authority/UID and owns/reaps
+                # its fixed child; the two invocations are independent, even
+                # if the OS legitimately reuses a child PID/output.
+                checked_snapshot()
+                inventory = _observe_selected_inventory(selected, selector)
+                if inventory.expected_metadata != original_commit:
+                    raise PreflightError()
+                checked_snapshot()
+
+                # ps B is fully reaped before either content revalidation.
+                expected.revalidate(incident.expected_commit, uid=incident.uid)
+                _revalidate_marker(cache._fds[-1], marker, uid=_CACHE_ACCOUNT_UID)
+                late_marker = _read_marker(cache._fds[-1], uid=_CACHE_ACCOUNT_UID)
+                if late_marker.metadata != marker.metadata:
+                    raise PreflightError()
+                expected.revalidate(incident.expected_commit, uid=incident.uid)
+
+            # Successful release of the pinned payload can itself change
+            # names. A further marker read happens only AFTER that release.
+            settled_marker = _read_marker(cache._fds[-1], uid=_CACHE_ACCOUNT_UID)
+            if settled_marker.metadata != marker.metadata:
+                raise PreflightError()
+            # A final marker FD close may replace its own name; the fixed
+            # single-component leaf stat is relative to the retained cache FD.
+            if (
+                _file_meta(
+                    os.stat(
+                        "active-run.json",
+                        dir_fd=cache._fds[-1],
+                        follow_symlinks=False,
+                    ),
+                    _CACHE_ACCOUNT_UID,
+                    0o600,
+                    4096,
+                    None,
+                )
+                != marker.metadata
+            ):
+                raise PreflightError()
+            # A fixed, reject-only post-payload-close stat cannot establish
+            # intermediate no-follow authority; the original pinned chain
+            # above did, and its file bytes were revalidated after ps B.
+            selected_fd = selected._fds[-1]
+            if (
+                _metadata(os.stat("payload-content", dir_fd=selected_fd, follow_symlinks=False))
+                != original_payload
+            ):
+                raise PreflightError()
+            leaf = os.stat(
+                "payload-content/expected_commit",
+                dir_fd=selected_fd,
+                follow_symlinks=False,
+            )
+            if _file_meta(leaf, incident.uid, None, 41, incident.device) != original_commit:
+                raise PreflightError()
+            if (
+                _metadata(os.stat("payload-content", dir_fd=selected_fd, follow_symlinks=False))
+                != original_payload
+            ):
+                raise PreflightError()
+
+            selected.revalidate()
+            cache.revalidate()
+            temp.revalidate()
+            _require_shared_incident_ancestry(cache, temp, selected)
+            observation = _MarkerStagingEvidence(
+                marker_target=_MARKER_TARGET,
+                marker_owner_pid=38013,
+                marker_metadata=marker.metadata,
+                selected=inventory,
+            )
+        return observation
+    except PreflightError:
+        raise
+    except (MemoryError, KeyboardInterrupt, SystemExit, GeneratorExit):
+        # An unexpected interruption at a fixed capture boundary is not
+        # proof that the diagnostic child's release/reap fully settled.
+        raise PreflightError(cleanup_uncertain=True) from None
+    except (
+        ImportError,
+        SyntaxError,
+        OSError,
+        TypeError,
+        ValueError,
+        OverflowError,
+        AttributeError,
+        RuntimeError,
+        KeyError,
+        IndexError,
+    ):
+        raise PreflightError() from None
