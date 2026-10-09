@@ -189,13 +189,23 @@ def _compute(
     )
 
 
-def build_public_casefile_series(segments: object) -> PublicCasefileSeries:
-    """Stitch 2–8 public casefiles with exact shared endpoint fingerprints."""
+def build_verified_public_casefile_series(
+    segments: object,
+) -> tuple[PublicCasefileSeries, VerifiedPublicCasefileSeries]:
+    """Build one source-sealed public casefile series and its verified facts.
+
+    This is one complete validation pass, not a shortcut around verification.
+    Every source snapshot, pair seal, incident selector and segment is checked.
+    """
     try:
-        record, _verified = _compute(segments)
-        return record
+        return _compute(segments)
     except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):  # noqa: BLE001
         raise SeriesError(_FAILURE) from None
+
+
+def build_public_casefile_series(segments: object) -> PublicCasefileSeries:
+    """Stitch 2–8 public casefiles with exact shared endpoint fingerprints."""
+    return build_verified_public_casefile_series(segments)[0]
 
 
 def verify_public_casefile_series(

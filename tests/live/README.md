@@ -1974,3 +1974,18 @@ by the workflow's 20-minute job budget; **not a passing CI run**. The
 128-hop comparison limit remains exercised in the public build, while
 byte-exact verification is covered by separate adversarial end-to-end tests
 instead of recomputing the entire maximal pair a second time in one test.
+
+Second exact-head #186 CI `37959090921` was also cancelled during
+Python 3.14 after 3.13 PASS. Root cause: repeated full-series source
+validation by separate builder and verifier calls in the new dossier.
+To preserve the **20-minute CI timeout and all security checks**,
+`build_verified_public_casefile_series` and
+`build_verified_private_casefile_series(..., allow_sensitive_paths=True)`
+now expose the already independently sealed and checked canonical record
+**together with** the verified facts from its original full construction.
+Existing build and verify APIs remain unchanged; the dossier uses these
+one-pass verified builders so it does not perform a second redundant
+validation of its own newly created inputs. New tests compare the exact
+outputs and verified results with the previous full separate-verifier
+sequence and reject broken cross-segment boundaries. Host I/O, trusted
+receipt or recovery authority are still prohibited.

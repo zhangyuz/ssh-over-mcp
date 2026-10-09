@@ -15,8 +15,7 @@ from dataclasses import dataclass
 from staging_casefile_series import (
     PublicCasefileSeries,
     VerifiedPublicCasefileSeries,
-    build_public_casefile_series,
-    verify_public_casefile_series,
+    build_verified_public_casefile_series,
 )
 from staging_timeline_casefiles import (
     build_private_casefile,
@@ -87,10 +86,7 @@ def _compute(
 ) -> tuple[PublicCasefileSeries, PrivateCasefileSeries, VerifiedPrivateCasefileSeries]:
     # Public cross-segment verifier enforces 2–8 segments, 2–17 source
     # snapshots each, equal incident and exact shared full-content endpoint.
-    public = build_public_casefile_series(segments)
-    verified_public = verify_public_casefile_series(
-        segments, public.payload, expected_sha256=public.sha256
-    )
+    public, verified_public = build_verified_public_casefile_series(segments)
     public_doc = json.loads(public.payload.decode("ascii"))
     records = []
     digests = []
@@ -172,20 +168,30 @@ def _compute(
     )
 
 
-def build_private_casefile_series(
+def build_verified_private_casefile_series(
     segments: object, *, allow_sensitive_paths: object = False
-) -> tuple[PublicCasefileSeries, PrivateCasefileSeries]:
-    """Return exact matching public and private series; explicit opt-in only.
+) -> tuple[PublicCasefileSeries, PrivateCasefileSeries, VerifiedPrivateCasefileSeries]:
+    """Build one source-verified public/private pair and verified facts.
 
-    Opt-in prevents accidental path export, NOT caller authorization.
+    Exact-True opt-in prevents accidental export, NOT caller authorization.
+    Every source, full-content seal, private audit and count is verified.
     """
     try:
         if allow_sensitive_paths is not True:
             raise PrivateSeriesError(_FAILURE)
-        public, private, _verified = _compute(segments)
-        return public, private
+        return _compute(segments)
     except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):  # noqa: BLE001
         raise PrivateSeriesError(_FAILURE) from None
+
+
+def build_private_casefile_series(
+    segments: object, *, allow_sensitive_paths: object = False
+) -> tuple[PublicCasefileSeries, PrivateCasefileSeries]:
+    """Return exact matching public and private series; explicit opt-in only."""
+    public, private, _verified = build_verified_private_casefile_series(
+        segments, allow_sensitive_paths=allow_sensitive_paths
+    )
+    return public, private
 
 
 def verify_private_casefile_series(

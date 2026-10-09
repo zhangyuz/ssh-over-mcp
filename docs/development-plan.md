@@ -1050,7 +1050,17 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   wrong same-selector case, oversized/noncanonical duplicate JSON, cold-cache
   and host-I/O attempts must fail closed. Opt-in is not caller authentication.
   Both export a canonical reproducible report and verify byte-for-byte
-  using the original source tuple. Work includes RED/GREEN adversarial tests,
+  using the original source tuple. To keep this larger capability inside
+  the unchanged 20-minute hardened CI job, public/private casefile series
+  expose **one-pass verified builders**. They return the same exact sealed
+  canonical report and source-verified facts as the previous separate
+  build+verify calls, avoiding redundant full-segment re-traversal, without
+  omitting any source/seal/audit/count/continuity checks. Equivalence and
+  invalid-source fail-close are covered by dedicated regression tests.
+  Exact-head CI `37952154503` and `37959090921` were CANCELLED in the
+  Python 3.14 full test step at the original 20-minute limit (3.13 PASS);
+  these runs are **not** successful acceptance. Work includes RED/GREEN
+  adversarial tests,
   full related regression, code/docs/security review and exact-head
   Ubuntu 26.04 x86 Python 3.13/3.14 CI. This is **offline comparison of
   caller-supplied order only**, never trusted capture chronology or

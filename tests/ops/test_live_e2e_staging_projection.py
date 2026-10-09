@@ -3195,3 +3195,55 @@ def test_dossier_invalid_digest_and_noncanonical_private(comparison_dossier, dos
             expected_private_sha256=hashlib.sha256(raw).hexdigest(),
             allow_sensitive_paths=True,
         )
+
+
+def test_dossier_single_pass_verified_builders_equivalent_to_full_verification(
+    comparison_dossier, timeline_sources
+):
+    """Fast builders must return exactly the facts checked by old full verifiers."""
+    a, b, c = timeline_sources
+    source = ((a, b), (b, c))
+    public_module = importlib.import_module("staging_casefile_series")
+    private_module = importlib.import_module("staging_private_casefile_series")
+
+    public, checked_public = public_module.build_verified_public_casefile_series(source)
+    assert public == public_module.build_public_casefile_series(source)
+    assert checked_public == public_module.verify_public_casefile_series(
+        source, public.payload, expected_sha256=public.sha256
+    )
+
+    paired_public, private, checked_private = private_module.build_verified_private_casefile_series(
+        source, allow_sensitive_paths=True
+    )
+    assert paired_public == public
+    assert (paired_public, private) == private_module.build_private_casefile_series(
+        source, allow_sensitive_paths=True
+    )
+    assert checked_private == private_module.verify_private_casefile_series(
+        source,
+        paired_public.payload,
+        private.payload,
+        expected_public_sha256=paired_public.sha256,
+        expected_private_sha256=private.sha256,
+        allow_sensitive_paths=True,
+    )
+    for opt_in in (False, None, 1, "true"):
+        with pytest.raises(private_module.PrivateSeriesError):
+            private_module.build_verified_private_casefile_series(
+                source, allow_sensitive_paths=opt_in
+            )
+
+
+def test_dossier_single_pass_verified_builders_reject_broken_continuity(
+    comparison_dossier, timeline_sources
+):
+    a, b, c = timeline_sources
+    public_module = importlib.import_module("staging_casefile_series")
+    private_module = importlib.import_module("staging_private_casefile_series")
+    invalid = ((a, b), (c, a))
+    with pytest.raises(public_module.SeriesError, match="^staging casefile series rejected$"):
+        public_module.build_verified_public_casefile_series(invalid)
+    with pytest.raises(
+        private_module.PrivateSeriesError, match="^staging private series rejected$"
+    ):
+        private_module.build_verified_private_casefile_series(invalid, allow_sensitive_paths=True)
