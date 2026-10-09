@@ -1374,3 +1374,40 @@ replacement during ps B, expected_commit changes during ps B,
 sticky cleanup uncertainty on either snapshot failure, unsafe cache
 mode refusal before ps, split-root refusal, and explicit absence of
 marker/provider actions. No fixture substitutes a real runner capture.
+
+### Dormant marker + paired fixed ps + selected inventory in one borrowed context
+
+The private `_observe_joint_marker_paired_inventory(selector)` is a single
+fixture-only composition over the already-reviewed cache, getconf-derived
+native-temp and catalog-selected staging descriptor chains. It differs from
+calling `_observe_joint_marker_staging()` and
+`_observe_joint_paired_inventory()` sequentially: those separate partial
+helpers independently borrow and close their ancestry, which cannot establish
+one continuous observation.
+
+In this slice the initial fixed marker read and fixed expected_commit FD pin
+precede `ps A`; two independent owned/reaped fixed `ps` observations bracket
+the metadata-only inventory under simultaneously held root/T/cache/selected
+and original expected_commit descriptors. After `ps B`, both marker and
+expected_commit contents and original metadata are revalidated. The payload
+FD is closed before the final fixed marker reread, followed by the no-follow
+single-component marker-leaf check, reject-only expected-commit leaf/parent
+checks, three held chain edge checks and root/T identity comparison.
+All failures reject with the fixed public error, and typed uncertain cleanup
+is sticky. The result is only the existing immutable `_MarkerStagingEvidence`,
+with no process stdout/PID, owned FD, receipt or mutation authority.
+
+Disposable fixture adversaries cover early marker symlinks; mutation during
+ps A, inventory or ps B; late cache/temp/staging renames; expected_commit
+revisions after ps B and after a file close; final marker FD-close symlink
+replacement; missing/invalid selector; and uncertain failure of either
+process capture. No actual UID-502 incident access or provider operation
+occurs.
+
+This is still a **partial, unactivated internal observation**, not an
+approved complete native preflight. It does not emit a complete canonical
+preflight object/envelope, confirm the trusted manual workflow origin,
+prove actual UID-502 live host state, grant staging apply/marker cleanup,
+or guarantee namespace stability after its finite final checks and FD closes.
+The exact PR-only Level-3 skip is not an E2E PASS; stale-provider E2E remains
+a separate, blocked acceptance gate.
