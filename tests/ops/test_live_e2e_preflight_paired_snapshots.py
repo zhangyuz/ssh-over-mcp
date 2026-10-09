@@ -308,3 +308,79 @@ def test_final_payload_close_normal_settled_path_keeps_success(stage, monkeypatc
         result = p._observe_paired_process_inventory(chain, "stale-target")
     assert type(result) is p._SelectedInventoryEvidence
     assert seen
+
+
+@pytest.mark.parametrize("which", [1, 2])
+@pytest.mark.parametrize("error", [OSError, RuntimeError, ValueError, KeyboardInterrupt])
+def test_untyped_ps_boundary_failure_is_cleanup_uncertain(stage, monkeypatch, which, error):
+    p, _diagnostics, _root, _commit, chain, events, _calls = stage
+
+    def fail():
+        events.append("ps")
+        if events.count("ps") == which:
+            raise error("unconfirmed child ownership")
+
+    monkeypatch.setattr(p, "_observe_fixed_process_snapshot", fail)
+    with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as caught:
+        p._observe_paired_process_inventory(chain, "stale-target")
+    assert caught.value.cleanup_uncertain is True
+    assert caught.value.__cause__ is None
+    assert events.count("ps") == which
+
+
+@pytest.mark.parametrize("which", [1, 2])
+@pytest.mark.parametrize("uncertain", [False, True])
+def test_typed_ps_failure_is_not_reclassified(stage, monkeypatch, which, uncertain):
+    p, _d, _root, _commit, chain, events, _calls = stage
+
+    def fail():
+        events.append("ps")
+        if events.count("ps") == which:
+            raise p.PreflightError(cleanup_uncertain=uncertain)
+
+    monkeypatch.setattr(p, "_observe_fixed_process_snapshot", fail)
+    with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as caught:
+        p._observe_paired_process_inventory(chain, "stale-target")
+    assert caught.value.cleanup_uncertain is uncertain
+
+
+@pytest.mark.parametrize("error_type", [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("secondary", [False, True])
+def test_paired_inventory_owned_root_close_cancellation_is_uncertain(
+    stage, monkeypatch, error_type, secondary
+):
+    p, _d, _root, _commit, chain, events, _calls = stage
+    actual_dup, actual_close, actual_stat = os.dup, os.close, os.stat
+    inventory_root = None
+    triggered = False
+
+    def dup(fd):
+        nonlocal inventory_root
+        result = actual_dup(fd)
+        if fd == chain._fds[-1] and events.count("ps") == 1 and "inventory" in events:
+            inventory_root = result
+        return result
+
+    def close(fd):
+        nonlocal triggered
+        actual_close(fd)
+        if fd == inventory_root and not triggered:
+            triggered = True
+            raise error_type("unknown collector FD close")
+
+    def stat(path, *args, **kwargs):
+        if secondary and path == "target.bundle" and kwargs.get("dir_fd") is not None:
+            raise OSError("traversal failure before secondary close")
+        return actual_stat(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "dup", dup)
+        patch.setattr(os, "close", close)
+        patch.setattr(os, "stat", stat)
+        with pytest.raises(p.PreflightError, match="^staging preflight rejected$") as failure:
+            p._observe_paired_process_inventory(chain, "stale-target")
+    assert triggered
+    assert failure.value.cleanup_uncertain is True
+    assert events.count("ps") == 1
+    assert events.count("inventory") == 1
+    chain.revalidate()

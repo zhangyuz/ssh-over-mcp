@@ -1413,3 +1413,41 @@ prove actual UID-502 live host state, grant staging apply/marker cleanup,
 or guarantee namespace stability after its finite final checks and FD closes.
 The exact PR-only Level-3 skip is not an E2E PASS; stale-provider E2E remains
 a separate, blocked acceptance gate.
+
+### Dormant paired-ps capture-boundary cleanup uncertainty
+
+The internal `_observe_fixed_process_snapshot_checked()` adapter now guards
+both fixed ps invocations in the older `_observe_paired_process_inventory()`
+and the single-context marker/paired-inventory wrapper. Typed `PreflightError`
+keeps its original strict `cleanup_uncertain` boolean. An untyped exception
+escaping an actual snapshot invocation (including OS failures, cancellation,
+or unexpected runtime errors) becomes the fixed sanitized refusal with
+`cleanup_uncertain=True` **before** descriptor contexts unwind. This does
+not reclassify a known-settled later namespace, metadata or payload failure,
+and does not retry or signal any foreign process.
+
+Disposable ps-A and ps-B fault injection verifies the old paired helper,
+joint ancestry wrapper and new joint marker wrapper preserve uncertainty
+without returning partial inventory or new authority. There is no new
+workflow, receipt, live UID-502 inspection or stale provider mutation;
+the real Level-3, A1 and N1c acceptance gates remain pending.
+
+#### Inventory-owned close and iterator cancellation (review #6073077695)
+
+The dormant `staging_inventory.py` collector owns both duplicated directory
+descriptors and `os.scandir(fd)` iterators. Its `close_owned()` and iterator
+`close()` boundary now translate interruptions (`KeyboardInterrupt`,
+`SystemExit`, `GeneratorExit`) and unexpected typed runtime/OS close failures
+into a fixed `InventoryError(cleanup_uncertain=True)` **at the owner**.
+The preflight binder preserves that typed uncertainty through the older
+ps-A/inventory/ps-B adapter and the jointly pinned ancestry wrapper.
+Known-settled invalid metadata still yields the existing False status;
+no caller-supplied paths/PIDs, new subprocesses, retry, unlink or receipt.
+
+Disposable fault injection tracks the collector's actual `os.dup`-owned
+root descriptor; after a real successful close, injects cancellation,
+including a secondary cancellation following a failed traversal. Separate
+iterator-close injection tests the `scandir` duplicate. Both composed
+paired and joint callers must refuse with `cleanup_uncertain=True`, without
+ps B or partial inventory evidence. No live UID-502 incident is accessed,
+and Level-3/A1/N1c remain unverified.

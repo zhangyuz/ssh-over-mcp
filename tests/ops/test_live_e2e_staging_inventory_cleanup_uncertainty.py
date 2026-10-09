@@ -282,3 +282,85 @@ def test_unreadable_inventory_cleanup_status_fails_uncertain(case, monkeypatch, 
     assert error.value.cleanup_uncertain is True
     assert "private" not in str(error.value)
     assert os.fstat(borrowed).st_ino == root.parent.stat().st_ino
+
+
+@pytest.mark.parametrize("error_type", [KeyboardInterrupt, SystemExit, GeneratorExit, RuntimeError])
+@pytest.mark.parametrize("secondary", [False, True])
+def test_collector_owned_root_close_cancellation_remains_uncertain(
+    case, monkeypatch, error_type, secondary
+):
+    preflight, _root, borrowed = case
+    real_dup, real_close, real_stat = os.dup, os.close, os.stat
+    duplicated_root = None
+    triggered = False
+
+    with preflight._pin_fixed_incident_root(borrowed, "stale-target") as chain:
+        selected_root = chain._fds[-1]
+
+        def track_dup(fd):
+            nonlocal duplicated_root
+            result = real_dup(fd)
+            if fd == selected_root:
+                duplicated_root = result
+            return result
+
+        def close_once(fd):
+            nonlocal triggered
+            real_close(fd)
+            if fd == duplicated_root and not triggered:
+                triggered = True
+                raise error_type("ambiguous owned FD close")
+
+        def fail_traversal(path, *args, **kwargs):
+            if secondary and path == "target.bundle" and kwargs.get("dir_fd") is not None:
+                raise OSError("original traversal failure")
+            return real_stat(path, *args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(os, "dup", track_dup)
+            patch.setattr(os, "close", close_once)
+            patch.setattr(os, "stat", fail_traversal)
+            with pytest.raises(
+                preflight.PreflightError, match="^staging preflight rejected$"
+            ) as failure:
+                preflight._observe_selected_inventory(chain, "stale-target")
+        assert triggered
+        assert failure.value.cleanup_uncertain is True
+        assert failure.value.__cause__ is None
+        chain.revalidate()
+
+
+@pytest.mark.parametrize("error_type", [KeyboardInterrupt, SystemExit, GeneratorExit, RuntimeError])
+def test_scandir_iterator_close_cancellation_remains_uncertain(case, monkeypatch, error_type):
+    preflight, _root, borrowed = case
+    original_scandir = os.scandir
+    triggered = False
+
+    class OwnedIterator:
+        def __init__(self, real):
+            self.real = real
+
+        def __iter__(self):
+            return iter(self.real)
+
+        def close(self):
+            nonlocal triggered
+            self.real.close()
+            if not triggered:
+                triggered = True
+                raise error_type("iterator close interrupted")
+
+    def replacement(fd):
+        return OwnedIterator(original_scandir(fd))
+
+    with preflight._pin_fixed_incident_root(borrowed, "stale-target") as chain:
+        with monkeypatch.context() as patch:
+            patch.setattr(os, "scandir", replacement)
+            with pytest.raises(
+                preflight.PreflightError, match="^staging preflight rejected$"
+            ) as failure:
+                preflight._observe_selected_inventory(chain, "stale-target")
+        assert triggered
+        assert failure.value.cleanup_uncertain is True
+        assert failure.value.__cause__ is None
+        chain.revalidate()
