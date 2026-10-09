@@ -1919,3 +1919,73 @@ Phase 7B1 prerequisite, provider recovery and native Level-3 are still OPEN.
 
 #184 merge-main CI `37946298917`: Ubuntu Python 3.13/3.14 PASS, native
 no-network Level-3 FAIL-CLOSED (stale provider state, exit 70).
+
+### Complete offline two-series investigation comparison dossier (PR #186)
+
+`staging_comparison_dossier` is an end-to-end offline comparison workflow for
+**two independently sealed and verified** #184 public series (each 2–8 segments,
+up to 128 zero-based hops) from the **original caller-supplied snapshot tuples**.
+Both must name the same incident selector, but can have different hop counts.
+There is no assertion that the two series are trusted workflow executions,
+chronological captures, observations of a real host, or authorized events.
+
+**Public path-free workflow:** `build_public_comparison(left, right)` emits a
+bounded **128 KiB** canonical ASCII v1 JSON report containing the exact source
+series hashes, aligned full-content before/after snapshot fingerprints and hop
+changed flags, identical/different/left-only/right-only hop indices, length
+mismatch, shared snapshot prefix, differing aligned snapshot positions,
+left/right original public aggregate path **counts**, their signed deltas and
+net first-to-last change for each side. There are no raw inventory paths or
+modified field names in the public output. Per-hop path counts are **not
+invented** from aggregate counts. `verify_public_comparison` fully rebuilds
+both original series and the byte-exact comparison from supplied observations,
+rejecting forged positions, source changes, rehashed classifications and bad
+canonical JSON with a fixed sanitized `ComparisonError`.
+
+**Private opt-in workflow:** `build_private_comparison(left, right,
+allow_sensitive_paths=True)` emits the same public report plus a separate,
+canonically bounded **6 MiB** path-bearing private report. It contains both
+independently verified #185 private source series and, for each zero-based
+aligned hop, the sensitive raw added/removed/modified path+field effects that
+exist only on one side, plus the number of identical effects. It embeds and
+verifies the exact public comparison SHA-256 and private series fingerprints.
+`verify_private_comparison` checks the original source tuple, each private
+series' full seals/audits, original public report, exact private JSON and
+both SHA-256 digests before accepting either side. Wrong source, mispaired
+reports, rehashed changed fields, wrong opt-in and invalid/noncanonical or
+oversized input fail closed. Normal `repr` of private results omits content.
+
+The exact-True opt-in guards accidental sensitive export; **it is not access
+control, user identity or approval**. An unkeyed digest cannot authenticate
+capture time, producer identity or source integrity against full coherent
+replacement. There is no host/process/network/UID-502/provider I/O, staging
+mutation, trusted A1/B8 receipt, paused N1c activation, native Phase 7B1
+acceptance or Level-3 recovery power. The native stale-provider state must be
+disposed separately and must not be silently cleared to make this test green.
+
+#185 merge-main workflow `37951075646`: Ubuntu Python 3.13/3.14 validation
+PASS; native no-network Level-3 FAIL-CLOSED on stale E2E provider state
+(exit 70). #186 never clears a provider marker or upgrades offline evidence
+into trusted A1/B8/native authority.
+
+The first exact-head #186 CI attempt `37952154503` ran Python 3.13 tests
+successfully but was CANCELLED during the expensive 3.14 full test step
+by the workflow's 20-minute job budget; **not a passing CI run**. The
+128-hop comparison limit remains exercised in the public build, while
+byte-exact verification is covered by separate adversarial end-to-end tests
+instead of recomputing the entire maximal pair a second time in one test.
+
+Second exact-head #186 CI `37959090921` was also cancelled during
+Python 3.14 after 3.13 PASS. Root cause: repeated full-series source
+validation by separate builder and verifier calls in the new dossier.
+To preserve the **20-minute CI timeout and all security checks**,
+`build_verified_public_casefile_series` and
+`build_verified_private_casefile_series(..., allow_sensitive_paths=True)`
+now expose the already independently sealed and checked canonical record
+**together with** the verified facts from its original full construction.
+Existing build and verify APIs remain unchanged; the dossier uses these
+one-pass verified builders so it does not perform a second redundant
+validation of its own newly created inputs. New tests compare the exact
+outputs and verified results with the previous full separate-verifier
+sequence and reject broken cross-segment boundaries. Host I/O, trusted
+receipt or recovery authority are still prohibited.

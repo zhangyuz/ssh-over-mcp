@@ -317,3 +317,26 @@ are validated against the #184 public report. It neither widens the public
 series with raw paths nor authenticates the caller. No privileged host read,
 UID-502 inspection, A1/B8 trusted workflow receipt, paused N1c input
 activation, provider remediation or native Level-3 acceptance is granted.
+
+## Larger offline investigation dossier — 2026-10-09
+
+After #185 merged, #186 develops both public (128-KiB path-free) and
+opt-in private (6-MiB path-bearing) **two-series comparison workflows** as
+one larger cohesive deliverable. Each side separately regenerates the entire
+#184/#185 contiguous source tuple, checks all seals/audit digests and verifies
+byte-exact canonical reports. Public comparisons classify snapshot and hop
+fingerprint divergences, different lengths and aggregate changed **counts**;
+private comparisons add per-hop raw path/modified-field effect differences,
+remain explicitly sensitive, and are bound to the exact public comparison
+hash. No live observation, privileged UID-502 access, trusted workflow
+attestation, A1/B8 closure, paused N1c activation, stale-provider cleanup
+or native Level-3 test completion is authorized by these offline semantics.
+
+#186 performance correction: both earlier exact-head CI attempts were
+cancelled after the unchanged 20-minute job budget, during Python 3.14.
+Use a one-pass source-validated build+verified-facts result for #184 public
+and #185 private series in the two-series dossier. This avoids duplicate
+full source re-traversal while keeping every original seal, private path
+count, canonical content and cross-segment boundary verification intact.
+Original standalone byte-exact verification functions remain available
+for untrusted input. No native host/provider security gate is relaxed.
