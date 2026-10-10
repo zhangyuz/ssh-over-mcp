@@ -4933,3 +4933,27 @@ def test_dispute_ranks_rejects_duplicate_key_and_noncanonical_wire(
             wire + b" ",
             expected_sha256=hashlib.sha256(wire + b" ").hexdigest(),
         )
+
+
+def test_dispute_ranks_real_noncontiguous_source_derived_selection(
+    dispute_ranks_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    runs = tuple(
+        ((a, first, a), (a, last, a), (a, third, a))
+        for first, last, third in ((a, b, c), (a, c, b), (b, b, a), (b, c, a))
+    )
+    m = dispute_ranks_module
+    full = json.loads(m.index.build_public_dispute_index(runs).payload)
+    assert full["window_count"] >= 3
+    public = m.build_public_dispute_ranks(runs, [0, 2])
+    doc = json.loads(public.payload)
+    assert doc["ranks"] == [0, 2]
+    assert [row["window"] for row in doc["results"]] == [
+        full["ranked_windows"][0],
+        full["ranked_windows"][2],
+    ]
+    facts = m.verify_public_dispute_ranks(
+        runs, [0, 2], public.payload, expected_sha256=public.sha256
+    )
+    assert facts.ranks == (0, 2)
