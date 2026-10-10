@@ -2274,5 +2274,7 @@ anchors the full index SHA-256, and includes exact selected windows.
 Independent `verify_public_dispute_ranks` rejects oversized bytes before
 parse, noncanonical/duplicate-key wire, rehashed rank/window/index
 forgeries and source reordering by exact original-source reconstruction.
+The upper bound is covered by a real four-member, two-segment
+source-derived 16-window build→verify regression (all 16 ranks).
 No host/provider I/O, private paths, recovery, trusted time, incident
 severity, authorization or native Level-3 acceptance is added.

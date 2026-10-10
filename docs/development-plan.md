@@ -1244,7 +1244,9 @@ public dispute index per build/verify. Return bounded canonical ≤16-KiB
 ASCII with full index digest and exact sparse selected windows; reject
 empty/out-of-range/duplicate/noncanonical/oversized/forged/rehashed
 input or changed source ordering. Distinct from contiguous page lookup
-and per-rank single lookup. Tests RED→GREEN, Ruff, full regression,
+and per-rank single lookup. Independent review Minor follow-up added a
+real four-member two-segment 16-disputed-window upper-bound build→verify
+test, and corrected #197 merged status/CI evidence. Tests RED→GREEN, Ruff, full regression,
 exact-head Python 3.13/3.14 CI and independent review remain merge
 gates. No host/provider/private I/O, native recovery or authority
 change. A1/B8/N1c/UID-502/provider disposition/real Level-3 remain OPEN.
