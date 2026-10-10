@@ -5013,3 +5013,87 @@ def test_dispute_ranks_real_sixteen_distinct_windows_upper_bound(
     assert verified.ranks == tuple(range(16))
     assert verified.ranked_ranges == tuple((i, i + 1) for i in range(16))
     assert m.build_public_dispute_ranks(runs, ranks) == built
+
+
+@pytest.fixture
+def dispute_range_module(dispute_rank_module):
+    return importlib.import_module("staging_dispute_range")
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "expected_rank"),
+    [(0, 2, 0), (2, 3, 1), (0, 1, None), (1, 3, None)],
+)
+def test_dispute_range_exact_source_match(
+    dispute_range_module, dispute_index_runs, start, end, expected_rank
+):
+    m = dispute_range_module
+    built = m.build_public_dispute_range(dispute_index_runs, start, end)
+    doc = json.loads(built.payload)
+    assert doc["query"] == {"start_hop": start, "end_hop_exclusive": end}
+    assert doc["rank"] == expected_rank
+    assert (doc["window"] is None) == (expected_rank is None)
+    assert len(built.payload) <= m.MAX_PUBLIC_DISPUTE_RANGE_BYTES
+    assert b"target.bundle" not in built.payload
+    facts = m.verify_public_dispute_range(
+        dispute_index_runs, start, end, built.payload, expected_sha256=built.sha256
+    )
+    assert facts.rank == expected_rank
+    assert m.build_public_dispute_range(dispute_index_runs, start, end) == built
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [(-1, 1), (0, 0), (2, 1), (0, 4), (True, 2), (0, False), (0.0, 2), ("0", 2), (None, 2)],
+)
+def test_dispute_range_invalid_bounds_fail_closed(
+    dispute_range_module, dispute_index_runs, start, end
+):
+    with pytest.raises(
+        dispute_range_module.DisputeRangeError, match="^staging dispute range rejected$"
+    ):
+        dispute_range_module.build_public_dispute_range(dispute_index_runs, start, end)
+
+
+def test_dispute_range_rehashed_forgery_rejected(dispute_range_module, dispute_index_runs):
+    m = dispute_range_module
+    valid = m.build_public_dispute_range(dispute_index_runs, 0, 2)
+    for field in ("query", "rank", "window", "source_dispute_index_sha256"):
+        body = json.loads(valid.payload)
+        if field == "query":
+            body[field]["start_hop"] = 1
+        elif field == "rank":
+            body[field] = 1
+        elif field == "window":
+            body[field]["end_hop_exclusive"] = 3
+        else:
+            body[field] = "f" * 64
+        raw = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+            "ascii"
+        )
+        with pytest.raises(m.DisputeRangeError):
+            m.verify_public_dispute_range(
+                dispute_index_runs, 0, 2, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+            )
+
+
+def test_dispute_range_changed_sources_rejected(dispute_range_module, dispute_index_runs):
+    m = dispute_range_module
+    valid = m.build_public_dispute_range(dispute_index_runs, 0, 2)
+    changed = (dispute_index_runs[1], dispute_index_runs[0], *dispute_index_runs[2:])
+    with pytest.raises(m.DisputeRangeError):
+        m.verify_public_dispute_range(changed, 0, 2, valid.payload, expected_sha256=valid.sha256)
+
+
+def test_dispute_range_rejects_noncanonical_and_oversize(dispute_range_module, dispute_index_runs):
+    m = dispute_range_module
+    valid = m.build_public_dispute_range(dispute_index_runs, 0, 2)
+    for raw in (
+        valid.payload + b" ",
+        valid.payload.replace(b'"audience":"public",', b'"audience":"public","audience":"public",'),
+        b"x" * (m.MAX_PUBLIC_DISPUTE_RANGE_BYTES + 1),
+    ):
+        with pytest.raises(m.DisputeRangeError):
+            m.verify_public_dispute_range(
+                dispute_index_runs, 0, 2, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+            )
