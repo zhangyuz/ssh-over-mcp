@@ -4957,3 +4957,59 @@ def test_dispute_ranks_real_noncontiguous_source_derived_selection(
         runs, [0, 2], public.payload, expected_sha256=public.sha256
     )
     assert facts.ranks == (0, 2)
+
+
+def test_dispute_ranks_real_sixteen_distinct_windows_upper_bound(
+    dispute_ranks_module, timeline_sources
+):
+    """Build and verify all 16 ranked windows from actual original source cohorts."""
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, c, c),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+        (c, c, a, a),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+        (c, c, a, a),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+        (c, c, a, a),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+    )
+    # Casefile-series input is two nine-snapshot source segments with one
+    # shared boundary, not one 17-snapshot casefile (which is out of bounds).
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:9]),
+            tuple(row[member] for row in snapshots[8:]),
+        )
+        for member in range(4)
+    )
+    m = dispute_ranks_module
+    original = m.index.build_public_dispute_index(runs)
+    full = json.loads(original.payload)
+    assert full["hop_count"] == 16
+    assert full["window_count"] == 16
+    assert [(w["start_hop"], w["end_hop_exclusive"]) for w in full["ranked_windows"]] == [
+        (i, i + 1) for i in range(16)
+    ]
+    ranks = list(range(m.MAX_DISPUTE_RANKS))
+    built = m.build_public_dispute_ranks(runs, ranks)
+    assert len(built.payload) <= m.MAX_PUBLIC_DISPUTE_RANKS_BYTES
+    wire = json.loads(built.payload)
+    assert wire["source_dispute_index_sha256"] == original.sha256
+    assert wire["ranks"] == ranks
+    assert [row["window"] for row in wire["results"]] == full["ranked_windows"]
+    verified = m.verify_public_dispute_ranks(
+        runs, ranks, built.payload, expected_sha256=built.sha256
+    )
+    assert verified.ranks == tuple(range(16))
+    assert verified.ranked_ranges == tuple((i, i + 1) for i in range(16))
+    assert m.build_public_dispute_ranks(runs, ranks) == built
