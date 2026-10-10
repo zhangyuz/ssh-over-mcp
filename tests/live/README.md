@@ -2196,5 +2196,5 @@ duplicate-free canonical JSON. Swapped cohorts, rehashed offsets,
 partitions or index anchors and invalid wire fail closed with a fixed
 nonsensitive error. The feature cannot create authenticated chronology,
 risk severity, private path audit, provider changes, A1/B8 receipts,
-N1c resumption or native Level-3 acceptance. #190 remains a prerequisite
-until reviewed, exact-head CI-green and merged.
+N1c resumption or native Level-3 acceptance. This slice requires the
+source-verified #190 dispute index and its own exact-head CI gates.

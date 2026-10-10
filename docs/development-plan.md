@@ -1125,7 +1125,7 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   semantics. Small RED/GREEN feature, separate full related regression,
   code/security/docs review and exact-head Ubuntu Python 3.13/3.14 CI
   required before marking next PR ready.
-- **Follow-up functional slice (stacked on #190; not yet merged)** —
+- **Follow-up functional slice (builds on #190)** —
   bounded source-verified **public dispute navigation pages**. Accept
   original caller-ordered 3–5 source cohorts and strict integer offset
   and limit (1–16); rebuild the entire #190 index on every call.
