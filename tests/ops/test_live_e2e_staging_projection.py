@@ -4793,3 +4793,143 @@ def test_dispute_rank_no_private_or_host_io(dispute_rank_module, dispute_index_r
             if hasattr(os, name):
                 patch.setattr(os, name, forbidden)
         assert m.build_public_dispute_rank(dispute_index_runs, 0) == valid
+
+
+@pytest.fixture
+def dispute_ranks_module(dispute_rank_module):
+    return importlib.import_module("staging_dispute_ranks")
+
+
+def test_dispute_ranks_sparse_exact_source_lookup(
+    dispute_ranks_module, dispute_rank_module, dispute_index_runs
+):
+    m = dispute_ranks_module
+    for ranks in ([0], [1], [0, 1]):
+        built = m.build_public_dispute_ranks(dispute_index_runs, ranks)
+        body = json.loads(built.payload)
+        assert body["ranks"] == ranks
+        assert [r["rank"] for r in body["results"]] == ranks
+        assert [r["window"] for r in body["results"]] == [
+            json.loads(
+                dispute_rank_module.build_public_dispute_rank(dispute_index_runs, i).payload
+            )["window"]
+            for i in ranks
+        ]
+        assert len(built.payload) <= m.MAX_PUBLIC_DISPUTE_RANKS_BYTES
+        assert b"target.bundle" not in built.payload
+        facts = m.verify_public_dispute_ranks(
+            dispute_index_runs, ranks, built.payload, expected_sha256=built.sha256
+        )
+        assert facts.ranks == tuple(ranks)
+        assert m.build_public_dispute_ranks(dispute_index_runs, ranks) == built
+
+
+@pytest.mark.parametrize(
+    "ranks", [[], [2], [-1], [True], ["0"], [0.0], [0, 0], [1, 0], None, (0,) * 17]
+)
+def test_dispute_ranks_invalid_rejected(dispute_ranks_module, dispute_index_runs, ranks):
+    with pytest.raises(
+        dispute_ranks_module.DisputeRanksError, match="^staging dispute ranks rejected$"
+    ):
+        dispute_ranks_module.build_public_dispute_ranks(dispute_index_runs, ranks)
+
+
+def test_dispute_ranks_rehashed_forgery_rejected(dispute_ranks_module, dispute_index_runs):
+    m = dispute_ranks_module
+    valid = m.build_public_dispute_ranks(dispute_index_runs, [0, 1])
+    for field in ("ranks", "results", "source_dispute_index_sha256"):
+        body = json.loads(valid.payload)
+        if field == "ranks":
+            body[field] = [1]
+        elif field == "results":
+            body[field][0]["window"]["start_hop"] = 1
+        else:
+            body[field] = "f" * 64
+        raw = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+            "ascii"
+        )
+        with pytest.raises(m.DisputeRanksError):
+            m.verify_public_dispute_ranks(
+                dispute_index_runs, [0, 1], raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+            )
+
+
+def test_dispute_ranks_reordered_sources_rejected(dispute_ranks_module, dispute_index_runs):
+    m = dispute_ranks_module
+    valid = m.build_public_dispute_ranks(dispute_index_runs, [0])
+    swapped = (
+        dispute_index_runs[0],
+        dispute_index_runs[3],
+        dispute_index_runs[2],
+        dispute_index_runs[1],
+    )
+    with pytest.raises(m.DisputeRanksError):
+        m.verify_public_dispute_ranks(swapped, [0], valid.payload, expected_sha256=valid.sha256)
+
+
+def test_dispute_ranks_snapshot_mutable_selection(
+    dispute_ranks_module, dispute_index_runs, monkeypatch
+):
+    m = dispute_ranks_module
+    selection = [0]
+    original = m.index.build_public_dispute_index
+
+    def mutate_during_rebuild(runs):
+        selection[:] = [1, 0]
+        return original(runs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.index, "build_public_dispute_index", mutate_during_rebuild)
+        result = m.build_public_dispute_ranks(dispute_index_runs, selection)
+        assert json.loads(result.payload)["ranks"] == [0]
+    assert selection == [1, 0]
+
+
+def test_dispute_ranks_oversize_before_parse(dispute_ranks_module, monkeypatch):
+    m = dispute_ranks_module
+    huge = b"x" * (m.MAX_PUBLIC_DISPUTE_RANKS_BYTES + 1)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversized rank batch reached parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.DisputeRanksError):
+            m._checked(huge, hashlib.sha256(huge).hexdigest())
+
+
+def test_dispute_ranks_no_private_or_host_io(dispute_ranks_module, dispute_index_runs, monkeypatch):
+    m = dispute_ranks_module
+    valid = m.build_public_dispute_ranks(dispute_index_runs, [0, 1])
+    private = importlib.import_module("staging_comparison_portfolio")
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("public sparse-rank lookup accessed private builder or host IO")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(private, "build_private_portfolio", forbidden)
+        for name in ("open", "stat", "scandir", "listdir", "kill", "system", "fork"):
+            if hasattr(os, name):
+                patch.setattr(os, name, forbidden)
+        assert m.build_public_dispute_ranks(dispute_index_runs, [0, 1]) == valid
+
+
+def test_dispute_ranks_rejects_duplicate_key_and_noncanonical_wire(
+    dispute_ranks_module, dispute_index_runs
+):
+    m = dispute_ranks_module
+    valid = m.build_public_dispute_ranks(dispute_index_runs, [0])
+    wire = valid.payload
+    forged = wire.replace(b'"audience":"public",', b'"audience":"public","audience":"public",')
+    assert forged != wire
+    with pytest.raises(m.DisputeRanksError):
+        m.verify_public_dispute_ranks(
+            dispute_index_runs, [0], forged, expected_sha256=hashlib.sha256(forged).hexdigest()
+        )
+    with pytest.raises(m.DisputeRanksError):
+        m.verify_public_dispute_ranks(
+            dispute_index_runs,
+            [0],
+            wire + b" ",
+            expected_sha256=hashlib.sha256(wire + b" ").hexdigest(),
+        )
