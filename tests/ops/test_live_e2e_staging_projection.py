@@ -5097,3 +5097,53 @@ def test_dispute_range_rejects_noncanonical_and_oversize(dispute_range_module, d
             m.verify_public_dispute_range(
                 dispute_index_runs, 0, 2, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
             )
+
+
+def test_dispute_range_empty_index_explicit_null(dispute_range_module, timeline_sources):
+    a, b, c = timeline_sources
+    same = ((a, b), (b, c))
+    runs = (same, same, same)
+    m = dispute_range_module
+    built = m.build_public_dispute_range(runs, 0, 1)
+    doc = json.loads(built.payload)
+    assert doc["window_count"] == 0
+    assert doc["rank"] is None and doc["window"] is None
+    assert (
+        m.verify_public_dispute_range(runs, 0, 1, built.payload, expected_sha256=built.sha256).rank
+        is None
+    )
+
+
+def test_dispute_range_no_private_or_host_io(dispute_range_module, dispute_index_runs, monkeypatch):
+    m = dispute_range_module
+    valid = m.build_public_dispute_range(dispute_index_runs, 0, 2)
+    private = importlib.import_module("staging_comparison_portfolio")
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("public exact range lookup accessed private builder or host IO")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(private, "build_private_portfolio", forbidden)
+        for name in ("open", "stat", "scandir", "listdir", "kill", "system", "fork"):
+            if hasattr(os, name):
+                patch.setattr(os, name, forbidden)
+        assert m.build_public_dispute_range(dispute_index_runs, 0, 2) == valid
+        assert (
+            m.verify_public_dispute_range(
+                dispute_index_runs, 0, 2, valid.payload, expected_sha256=valid.sha256
+            ).rank
+            == 0
+        )
+
+
+def test_dispute_range_oversize_rejected_before_parser(dispute_range_module, monkeypatch):
+    m = dispute_range_module
+    raw = b"x" * (m.MAX_PUBLIC_DISPUTE_RANGE_BYTES + 1)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversized exact-range wire reached JSON parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.DisputeRangeError):
+            m._checked(raw, hashlib.sha256(raw).hexdigest())
