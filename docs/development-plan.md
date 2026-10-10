@@ -1251,3 +1251,17 @@ exact-head Python 3.13/3.14 CI and independent review remain merge
 gates. No host/provider/private I/O, native recovery or authority
 change. A1/B8/N1c/UID-502/provider disposition/real Level-3 remain OPEN.
 PR #197 is merged; this branch targets main.
+
+**Next isolated public-only functional slice — exact disputed-window
+boundary lookup (branch `live-e2e-dispute-range`, temporarily stacked
+on #198 until merged):** Accept strict integer half-open hop bounds,
+rebuild the full source-verified public dispute index from original
+ordered 3–5 source cohorts, and return exact disputed window rank
+or explicit null for a valid nonmatching range. Reject invalid bounds,
+oversized/noncanonical/duplicate-key wire, rehashed forged
+query/rank/window/index digest and source reordering. Bounded canonical
+≤4-KiB public ASCII; no private paths, host/provider I/O, cache,
+trusted time, severity, authority or native acceptance. RED→GREEN
+tests, focused regression, Ruff, exact-head Python 3.13/3.14 CI and
+independent review required before merge. A1/B8/N1c/UID-502/native
+Level-3 and stale provider disposition remain OPEN.

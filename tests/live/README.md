@@ -2278,3 +2278,18 @@ The upper bound is covered by a real four-member, two-segment
 source-derived 16-window build→verify regression (all 16 ranks).
 No host/provider I/O, private paths, recovery, trusted time, incident
 severity, authorization or native Level-3 acceptance is added.
+
+### Exact source-verified disputed-window boundary lookup (next slice)
+
+`staging_dispute_range.build_public_dispute_range(runs, start_hop,
+end_hop_exclusive)` checks one exact zero-based half-open hop range
+against the complete ranked public dispute index rebuilt from original
+ordered 3–5 verified source cohorts. Both boundaries must be exact ints
+(not bool), with `0 <= start < end <= hop_count`. An exact disputed
+window returns its rank and full public window; a valid nonmatching
+range returns explicit null rank/window. The ≤4-KiB canonical ASCII
+wire binds the complete source index SHA-256; independent
+`verify_public_dispute_range` rejects noncanonical/duplicate-key,
+oversized, rehashed forged query/rank/window/hash and changed source
+ordering. No cache, detached index, host/provider/private I/O,
+trusted chronology, severity, provenance or authorization semantics.
