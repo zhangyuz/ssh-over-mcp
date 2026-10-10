@@ -1200,3 +1200,16 @@ index trust, cache, host/provider/private I/O, severity/chronology
 inference or native gate changes. RED→GREEN focused tests and exact-head
 Python 3.13/3.14 CI required before merge. #194 is a separate docs-only
 review-fix PR; do not conflate its CI with this functional slice.
+
+**Next incremental public-only functional slice — bounded dispute-hop
+batch (branch `live-e2e-dispute-hops`, stacked on #195 pending merge):**
+1–16 strictly increasing, unique, exact integer hop positions; rebuild
+the complete original-source public dispute index once per build/verify
+call, return ≤16-KiB canonical ASCII with full index digest, selected
+ranks/windows or explicit null for non-disputed hops. Fail closed on
+invalid/duplicate/out-of-order/out-of-range hops, forged/rehashed or
+noncanonical wire, changed source ordering, ambiguous overlap and
+oversized input. No host/provider/private I/O, authority, chronology or
+severity inference. New tests are RED-first; Python 3.13/3.14 exact-head
+CI and independent review remain merge gates. Native provider
+disposition, A1/B8/N1c/UID-502 and Level-3 acceptance remain OPEN.
