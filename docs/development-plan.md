@@ -1203,7 +1203,7 @@ PR-only native Level-3 SKIPPED. #194 is a separately merged
 docs-only review-fix PR; neither PR CI run establishes native acceptance.
 
 **Next incremental public-only functional slice — bounded dispute-hop
-batch (PR #196, rebased onto main after #195 merged; under review):**
+batch (PR #196 merged as `fb2dc8d`):**
 1–16 strictly increasing, unique, exact integer hop positions,
 snapshotted once before validation and index reconstruction; rebuild
 the complete original-source public dispute index once per build/verify
@@ -1212,11 +1212,12 @@ ranks/windows or explicit null for non-disputed hops. Fail closed on
 invalid/duplicate/out-of-order/out-of-range hops, forged/rehashed or
 noncanonical wire, changed source ordering, ambiguous overlap and
 oversized input. No host/provider/private I/O, authority, chronology or
-severity inference. New tests are RED-first; Python 3.13/3.14 exact-head
-CI and independent review remain merge gates. Independent review
-identified a mutable-list snapshot Minor; fixed with one tuple snapshot
-before validation/reconstruction, with RED→GREEN mutation and real
-16-hop source-derived boundary tests. Native provider
+severity inference. New tests are RED-first; exact-head Python 3.13/3.14
+CI `38065810745` SUCCESS and full staging regression 460/460 PASS.
+Independent review identified a mutable-list snapshot Minor; fixed
+with one tuple snapshot before validation/reconstruction, with
+RED→GREEN mutation and real 16-hop source-derived boundary tests.
+PR-only native Level-3 SKIPPED. Native provider
 disposition, A1/B8/N1c/UID-502 and Level-3 acceptance remain OPEN.
 
 **Next isolated public-only functional slice — ranked dispute window
@@ -1230,5 +1231,4 @@ changed source order. Tests RED-first; Ruff, full regression,
 self-hosted exact-head Python 3.13/3.14 CI and independent review
 remain gates. No trusted time, severity, private path, host/provider
 I/O or native authority; provider disposition, A1/B8/N1c/UID-502 and
-real Level-3 remain OPEN. PR #196 must merge before this branch
-retargets to main.
+real Level-3 remain OPEN. PR #196 merged; this branch targets main for final gates.
