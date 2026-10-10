@@ -1218,3 +1218,17 @@ identified a mutable-list snapshot Minor; fixed with one tuple snapshot
 before validation/reconstruction, with RED→GREEN mutation and real
 16-hop source-derived boundary tests. Native provider
 disposition, A1/B8/N1c/UID-502 and Level-3 acceptance remain OPEN.
+
+**Next isolated public-only functional slice — ranked dispute window
+lookup (branch `live-e2e-dispute-rank`, stacked on PR #196):**
+Given original ordered 3–5 verified source cohorts and strict integer
+rank, rebuild the complete ranked dispute index, select its exact
+ranked window or fail closed on empty/out-of-range index. Emit canonical
+≤4-KiB path-free ASCII with full index SHA-256; independent verifier
+rejects duplicate/noncanonical/oversized/rehashed/forged wire and
+changed source order. Tests RED-first; Ruff, full regression,
+self-hosted exact-head Python 3.13/3.14 CI and independent review
+remain gates. No trusted time, severity, private path, host/provider
+I/O or native authority; provider disposition, A1/B8/N1c/UID-502 and
+real Level-3 remain OPEN. PR #196 must merge before this branch
+retargets to main.
