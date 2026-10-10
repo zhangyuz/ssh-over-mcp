@@ -1105,7 +1105,15 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   Ubuntu validation job limit during Python 3.14 after Python 3.13
   passed; dependent real no-network native Level-3 was SKIPPED.
   Neither native acceptance nor a provider disposition was established.
-- **Next smaller complete functional slice (#190)** — bounded
+- **PR #191** — merged as `b4338153e9248256593605a333deca838ceb9453`;
+  independent Python 3.13/3.14 complete-suite matrix jobs with
+  `fail-fast: false`, each on a hardened ephemeral Ubuntu 26.04 x86
+  runner with its own 20-minute limit. Exact-head CI `38008595926`
+  SUCCESS; first trusted-main matrix CI `38010018993` validated both
+  Python versions PASS, while dependent native Level-3 FAIL-CLOSED on
+  stale provider state (exit 70). Matrix success is not E2E acceptance.
+
+- **PR #190** — merged as `b7d7f86155fcacf8a8d1c57b7305de548c856ded`; bounded
   **public-only ranked disputed interval navigation index**.
   Independently recompute the just-merged #189 source-verified intervals
   from original caller tuples (3–5 source-series members, ≤128 hops).
@@ -1122,11 +1130,13 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   Protect against oversized wire before parsing, private path/field
   disclosure and forbidden host/provider I/O. No authority upgrades,
   cross-request cache, UID-502, N1c/A1/B8 receipt or native recovery
-  semantics. Small RED/GREEN feature, separate full related regression,
-  code/security/docs review and exact-head Ubuntu Python 3.13/3.14 CI
-  required before marking next PR ready.
-- **Follow-up functional slice (builds on #190)** —
-  bounded source-verified **public dispute navigation pages**. Accept
+  semantics. Exact-head Python 3.13/3.14 CI `38010044401` SUCCESS,
+  focused dispute-index tests 14/14 PASS; PR-only Level-3 SKIPPED.
+  Merge-main CI `38014354645` validated both full Python versions,
+  but native Level-3 FAIL-CLOSED on stale provider state (exit 70).
+- **PR #193** — merged as `9e5b94d7bfa74a533d5351fc2993c3793dae5478`;
+  follow-up functional slice with bounded source-verified
+  **public dispute navigation pages**. Accept
   original caller-ordered 3–5 source cohorts and strict integer offset
   and limit (1–16); rebuild the entire #190 index on every call.
   Emit path-free canonical ASCII ≤16 KiB, anchor the complete source
@@ -1137,7 +1147,21 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   pagination/groups/hash, changed source order and forbidden host/private
   I/O. No cache, severity/chronology inference, A1/B8/N1c/UID-502,
   native Level-3 authority or provider recovery.
+  Focused pagination tests 33/33 PASS, Ruff/format PASS; exact-head
+  self-hosted Python 3.13/3.14 CI `38014380038` SUCCESS. PR-only
+  native Level-3 SKIPPED, not native acceptance.
 
+
+**Native provider disposition evidence (2026-10-09):** trusted-main
+[CI `38015831978`](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38015831978)
+completed both full Python 3.13/3.14 matrix jobs PASS; native Level-3
+FAIL-CLOSED on stale provider state (exit 70), **no native acceptance**.
+Trusted-main manual [inspect-only `38017034795`](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38017034795)
+confirmed marker target `47531dadb58d365f74089dd5f52ce1b61bb0fdd1`,
+owner PID `38013`, and three remaining UID-502 temp directories. No
+cleanup or marker recovery was authorized or performed. The evidence,
+per-directory classification and hard-stop criteria are documented in
+[`docs/plans/2026-10-09-native-provider-disposition.md`](plans/2026-10-09-native-provider-disposition.md).
 
 **Roadmap / global consistency:** These primitives are test fixtures and
 offline data transformations. The original Phase 7B1 Task 3 / N1 native
