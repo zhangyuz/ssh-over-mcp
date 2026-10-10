@@ -1152,6 +1152,17 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   native Level-3 SKIPPED, not native acceptance.
 
 
+**Native provider disposition evidence (2026-10-09):** trusted-main
+[CI `38015831978`](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38015831978)
+completed both full Python 3.13/3.14 matrix jobs PASS; native Level-3
+FAIL-CLOSED on stale provider state (exit 70), **no native acceptance**.
+Trusted-main manual [inspect-only `38017034795`](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38017034795)
+confirmed marker target `47531dadb58d365f74089dd5f52ce1b61bb0fdd1`,
+owner PID `38013`, and three remaining UID-502 temp directories. No
+cleanup or marker recovery was authorized or performed. The evidence,
+per-directory classification and hard-stop criteria are documented in
+[`docs/plans/2026-10-09-native-provider-disposition.md`](plans/2026-10-09-native-provider-disposition.md).
+
 **Roadmap / global consistency:** These primitives are test fixtures and
 offline data transformations. The original Phase 7B1 Task 3 / N1 native
 toolchain prerequisite remains blocked, as do the separately reviewed
