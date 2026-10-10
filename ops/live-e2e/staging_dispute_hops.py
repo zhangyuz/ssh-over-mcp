@@ -68,11 +68,15 @@ def _checked(raw: object, expected_sha256: object) -> dict:
 
 
 def _compute(runs: object, hops: object) -> tuple[PublicDisputeHops, VerifiedPublicDisputeHops]:
+    if type(hops) not in (tuple, list):
+        raise DisputeHopsError(_FAILURE)
+    # Freeze the caller's mutable list once, before validation or expensive
+    # source reconstruction. Never reread it after this boundary.
+    selected = tuple(hops)
     if (
-        type(hops) not in (tuple, list)
-        or not 1 <= len(hops) <= MAX_DISPUTE_HOPS
-        or any(type(hop) is not int or hop < 0 for hop in hops)
-        or any(a >= b for a, b in pairwise(hops))
+        not 1 <= len(selected) <= MAX_DISPUTE_HOPS
+        or any(type(hop) is not int or hop < 0 for hop in selected)
+        or any(a >= b for a, b in pairwise(selected))
     ):
         raise DisputeHopsError(_FAILURE)
 
@@ -80,11 +84,11 @@ def _compute(runs: object, hops: object) -> tuple[PublicDisputeHops, VerifiedPub
     # detached index, private portfolio, host or provider access.
     original = index.build_public_dispute_index(runs)
     source = json.loads(original.payload.decode("ascii"))
-    if hops[-1] >= source["hop_count"]:
+    if selected[-1] >= source["hop_count"]:
         raise DisputeHopsError(_FAILURE)
 
     rows = []
-    for hop in hops:
+    for hop in selected:
         matches = [
             (rank, window)
             for rank, window in enumerate(source["ranked_windows"])
@@ -100,7 +104,7 @@ def _compute(runs: object, hops: object) -> tuple[PublicDisputeHops, VerifiedPub
         "incident": source["incident"],
         "source_dispute_index_sha256": original.sha256,
         "hop_count": source["hop_count"],
-        "hops": list(hops),
+        "hops": list(selected),
         "results": rows,
     }
     raw = _canonical(body)
@@ -112,7 +116,7 @@ def _compute(runs: object, hops: object) -> tuple[PublicDisputeHops, VerifiedPub
         VerifiedPublicDisputeHops(
             public_sha256=digest,
             source_index_sha256=original.sha256,
-            hops=tuple(hops),
+            hops=selected,
             ranks=tuple(row["rank"] for row in rows),
         ),
     )

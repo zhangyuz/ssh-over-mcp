@@ -1203,7 +1203,8 @@ review-fix PR; do not conflate its CI with this functional slice.
 
 **Next incremental public-only functional slice — bounded dispute-hop
 batch (branch `live-e2e-dispute-hops`, stacked on #195 pending merge):**
-1–16 strictly increasing, unique, exact integer hop positions; rebuild
+1–16 strictly increasing, unique, exact integer hop positions,
+snapshotted once before validation and index reconstruction; rebuild
 the complete original-source public dispute index once per build/verify
 call, return ≤16-KiB canonical ASCII with full index digest, selected
 ranks/windows or explicit null for non-disputed hops. Fail closed on

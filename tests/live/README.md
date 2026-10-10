@@ -2226,7 +2226,9 @@ A1/B8/N1c receipt, recovery, or native Level-3 acceptance.
 
 `staging_dispute_hops.build_public_dispute_hops(runs, hops)` accepts a
 strict `tuple` or `list` of **1–16 unique, strictly increasing** zero-based
-integer hops (booleans and out-of-range values rejected). It rebuilds
+integer hops (booleans and out-of-range values rejected). The selection
+is copied to one immutable tuple **before** validation and source-index
+reconstruction; subsequent reads cannot observe caller list mutations. It rebuilds
 the complete public ranked dispute index **once per call** from the
 original ordered 3–5 source cohorts, never trusting a detached index.
 The canonical ASCII output is ≤16 KiB, bound to the complete source
