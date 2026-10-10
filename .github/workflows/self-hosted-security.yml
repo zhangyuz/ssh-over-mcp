@@ -18,10 +18,14 @@ concurrency:
 
 jobs:
   validate:
-    name: Ubuntu 26.04 x86 Docker validation
+    name: Ubuntu 26.04 x86 Docker / Python ${{ matrix.python-version }}
     if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, linux, x64, ssh-over-mcp-mac-x86]
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
 
     steps:
       - name: Verify hardened Ubuntu 26.04 x86 runner container
@@ -87,13 +91,13 @@ jobs:
           clean: true
           fetch-depth: 0
 
-      - name: Set up Python 3.13
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: '3.13'
+          python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Install test dependencies on Python 3.13
+      - name: Install test dependencies
         run: |
           python -m pip install -U pip
           python -m pip install -e '.[dev]'
@@ -104,34 +108,17 @@ jobs:
       - name: Verify project cgroup-v2 read-only probe
         shell: bash
         run: |
-          python - <<'PY'
+          python - <<'PYCODE'
           from ssh_over_mcp.host_agent.containment import probe_cgroup_v2
 
           probe = probe_cgroup_v2("/sys/fs/cgroup")
           print(probe)
           if not probe.ready_for_containment:
               raise SystemExit("project cgroup-v2 probe failed")
-          PY
+          PYCODE
 
-      - name: Compile on Python 3.13
+      - name: Compile on Python ${{ matrix.python-version }}
         run: python -m compileall -q src tests
 
-      - name: Test on Python 3.13
-        run: python -m pytest -q
-
-      - name: Set up Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
-        with:
-          python-version: '3.14'
-          cache: pip
-
-      - name: Install test dependencies on Python 3.14
-        run: |
-          python -m pip install -U pip
-          python -m pip install -e '.[dev]'
-
-      - name: Compile on Python 3.14
-        run: python -m compileall -q src tests
-
-      - name: Test on Python 3.14
+      - name: Test on Python ${{ matrix.python-version }}
         run: python -m pytest -q
