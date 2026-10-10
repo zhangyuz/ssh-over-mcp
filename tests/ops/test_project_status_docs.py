@@ -41,3 +41,13 @@ def test_roadmap_records_merged_dispute_slices_and_open_native_gate() -> None:
     )
     assert "FAIL-CLOSED" in text
     assert "**Next smaller complete functional slice (#190)**" not in text
+
+
+def test_authoritative_audit_doc_reports_phase_5e_filesystem_approvals() -> None:
+    text = (_ROOT / "docs" / "audit-and-approvals.md").read_text(encoding="utf-8")
+    status = text.split("## Current implementation status\n", 1)[1].split("\n## ", 1)[0]
+    assert "Phase 5E" in status
+    assert "Ledger" in status and "single-use" in status
+    for tool in ("fs_stat", "fs_read", "fs_mkdir", "fs_write"):
+        assert tool in status
+    assert "Filesystem approvals remain fail-closed until Phase 5E" not in text
