@@ -1220,18 +1220,21 @@ RED→GREEN mutation and real 16-hop source-derived boundary tests.
 PR-only native Level-3 SKIPPED. Native provider
 disposition, A1/B8/N1c/UID-502 and Level-3 acceptance remain OPEN.
 
-**Next isolated public-only functional slice — ranked dispute window
-lookup (PR #197, based on main with PR #196 already merged):**
+**Completed public-only functional slice — ranked dispute window
+lookup (PR #197 merged as `39fca38357deb816202a429793fd4f4633165873`):**
 Given original ordered 3–5 verified source cohorts and strict integer
 rank, rebuild the complete ranked dispute index, select its exact
 ranked window or fail closed on empty/out-of-range index. Emit canonical
 ≤4-KiB path-free ASCII with full index SHA-256; independent verifier
 rejects duplicate/noncanonical/oversized/rehashed/forged wire and
-changed source order. Tests RED-first; Ruff, full regression,
-self-hosted exact-head Python 3.13/3.14 CI and independent review
-remain gates. No trusted time, severity, private path, host/provider
-I/O or native authority; provider disposition, A1/B8/N1c/UID-502 and
-real Level-3 remain OPEN. PR #196 merged; this branch targets main for final gates.
+changed source order. RED-first 16 new rank tests and focused
+dispute regression PASS; independent review found only a roadmap-state
+Minor, corrected in commit `2b4b0da`. Exact-head self-hosted Ubuntu
+26.04 Python 3.13/3.14 CI `38093223210` PASS, and PR #197 merged
+into main as `39fca38357de`. PR-only Level-3 SKIPPED, not native
+acceptance. No trusted time, severity, private path, host/provider I/O
+or native authority; provider disposition, A1/B8/N1c/UID-502 and
+real Level-3 remain OPEN.
 
 **Next small public-only slice — sparse dispute-rank batch (branch
 `live-e2e-dispute-ranks`, based on main after PR #197 merged):**
