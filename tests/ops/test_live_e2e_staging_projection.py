@@ -4500,3 +4500,141 @@ def test_dispute_hop_no_private_or_host_io(dispute_hop_module, dispute_index_run
             if hasattr(os, name):
                 patch.setattr(os, name, forbidden)
         assert m.build_public_dispute_hop(dispute_index_runs, 1) == valid
+
+
+@pytest.fixture
+def dispute_hops_module(dispute_index_module):
+    return importlib.import_module("staging_dispute_hops")
+
+
+def test_dispute_hops_bounded_source_bound_batch(dispute_hops_module, dispute_index_runs):
+    m = dispute_hops_module
+    result = m.build_public_dispute_hops(dispute_index_runs, (0, 1, 2))
+    body = json.loads(result.payload)
+    index = importlib.import_module("staging_dispute_index").build_public_dispute_index(
+        dispute_index_runs
+    )
+    assert body["source_dispute_index_sha256"] == index.sha256
+    assert body["hops"] == [0, 1, 2]
+    assert [r["rank"] for r in body["results"]] == [0, 0, 1]
+    assert [r["window"]["start_hop"] for r in body["results"]] == [0, 0, 2]
+    assert [r["window"]["end_hop_exclusive"] for r in body["results"]] == [2, 2, 3]
+    assert len(result.payload) <= m.MAX_PUBLIC_DISPUTE_HOPS_BYTES
+    assert b"target.bundle" not in result.payload
+    facts = m.verify_public_dispute_hops(
+        dispute_index_runs, (0, 1, 2), result.payload, expected_sha256=result.sha256
+    )
+    assert facts.hops == (0, 1, 2)
+    assert facts.ranks == (0, 0, 1)
+    assert m.build_public_dispute_hops(dispute_index_runs, (0, 1, 2)) == result
+
+
+def test_dispute_hops_null_for_nondispute(dispute_hops_module, timeline_sources):
+    a, b, c = timeline_sources
+    same = ((a, b), (b, c))
+    result = dispute_hops_module.build_public_dispute_hops((same, same, same), (0, 1))
+    assert json.loads(result.payload)["results"] == [
+        {"hop": 0, "rank": None, "window": None},
+        {"hop": 1, "rank": None, "window": None},
+    ]
+
+
+@pytest.mark.parametrize(
+    "hops",
+    [
+        (),
+        [],
+        (True,),
+        (False,),
+        (-1,),
+        (3,),
+        ("0",),
+        (0.0,),
+        (None,),
+        (2**128,),
+        (0, 0),
+        (2, 1),
+        (0, True),
+        (0, 1, 2, 3),
+        tuple(range(17)),
+        "01",
+        iter((0, 1)),
+    ],
+)
+def test_dispute_hops_rejects_invalid_selection(dispute_hops_module, dispute_index_runs, hops):
+    with pytest.raises(
+        dispute_hops_module.DisputeHopsError, match="^staging dispute hops rejected$"
+    ):
+        dispute_hops_module.build_public_dispute_hops(dispute_index_runs, hops)
+
+
+@pytest.mark.parametrize("field", ["hops", "results", "source_dispute_index_sha256"])
+def test_dispute_hops_rejects_rehashed_forgery(dispute_hops_module, dispute_index_runs, field):
+    m = dispute_hops_module
+    valid = m.build_public_dispute_hops(dispute_index_runs, (0, 2))
+    body = json.loads(valid.payload)
+    if field == "hops":
+        body[field] = [0, 1]
+    elif field == "results":
+        body[field][0]["rank"] = 1
+    else:
+        body[field] = "f" * 64
+    forged = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+        "ascii"
+    )
+    with pytest.raises(m.DisputeHopsError, match="^staging dispute hops rejected$"):
+        m.verify_public_dispute_hops(
+            dispute_index_runs,
+            (0, 2),
+            forged,
+            expected_sha256=hashlib.sha256(forged).hexdigest(),
+        )
+
+
+def test_dispute_hops_rejects_reordered_sources_and_bad_wire(
+    dispute_hops_module, dispute_index_runs
+):
+    m = dispute_hops_module
+    valid = m.build_public_dispute_hops(dispute_index_runs, (0, 2))
+    reordered = (
+        dispute_index_runs[0],
+        dispute_index_runs[3],
+        dispute_index_runs[2],
+        dispute_index_runs[1],
+    )
+    with pytest.raises(m.DisputeHopsError):
+        m.verify_public_dispute_hops(reordered, (0, 2), valid.payload, expected_sha256=valid.sha256)
+    for raw in (b"", b"null", b"[]", b" {}", b'{"x":1,"x":2}', b"\xff"):
+        with pytest.raises(m.DisputeHopsError):
+            m.verify_public_dispute_hops(
+                dispute_index_runs, (0, 2), raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+            )
+
+
+def test_dispute_hops_oversize_before_parse(dispute_hops_module, monkeypatch):
+    m = dispute_hops_module
+    huge = b'{"x":"' + b"x" * m.MAX_PUBLIC_DISPUTE_HOPS_BYTES + b'"}'
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversized batch reached parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.DisputeHopsError):
+            m._checked(huge, hashlib.sha256(huge).hexdigest())
+
+
+def test_dispute_hops_no_private_or_host_io(dispute_hops_module, dispute_index_runs, monkeypatch):
+    m = dispute_hops_module
+    valid = m.build_public_dispute_hops(dispute_index_runs, (0, 2))
+    private = importlib.import_module("staging_comparison_portfolio")
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("public batch lookup accessed private builder or host IO")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(private, "build_private_portfolio", forbidden)
+        for name in ("open", "stat", "scandir", "listdir", "kill", "system", "fork"):
+            if hasattr(os, name):
+                patch.setattr(os, name, forbidden)
+        assert m.build_public_dispute_hops(dispute_index_runs, (0, 2)) == valid
