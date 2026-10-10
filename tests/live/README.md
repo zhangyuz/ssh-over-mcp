@@ -2244,3 +2244,18 @@ offline public-only analysis: no private paths, host/provider I/O,
 trusted chronology/severity, recovery, authorization, UID-502, A1/B8/N1c
 or native Level-3 acceptance. The batch bounds are not a substitute
 for host-side safety controls.
+
+### Source-verified public disputed-window lookup by rank (next slice)
+
+`staging_dispute_rank.build_public_dispute_rank(runs, rank)` accepts a
+strict zero-based integer rank (not bool) into the fully rebuilt public
+ranked dispute index from original ordered 3–5 source cohorts. It returns
+exactly the ranked window and its original index SHA-256 in canonical
+ASCII ≤4 KiB; empty indexes and out-of-range ranks reject rather than
+inventing a window. Ranking is length/start-position navigation only,
+**not** incident severity or trusted chronology. The independent
+`verify_public_dispute_rank` rejects oversized input before JSON parsing,
+noncanonical/duplicate-key wire, forged/rehashed window/rank/index
+content, and reordered source cohorts by exact original-source rebuild.
+This read-only public transformation has no host/provider I/O, private
+paths, authority, recovery, or native Level-3 acceptance.
