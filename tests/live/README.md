@@ -2176,3 +2176,25 @@ CI `37984107600` Python 3.13/3.14 SUCCESS. PR Level-3 SKIPPED.
 Ubuntu validation job limit interrupted Python 3.14; Python 3.13 had
 passed, but the dependent real native Level-3 job was SKIPPED.
 This provides no native acceptance or actual provider disposition.
+
+### Original-source-verified ranked dispute pages (follow-up to #190)
+
+`staging_dispute_page.build_public_dispute_page(runs, offset, limit)`
+rebuilds the **entire** #190 public disputed-interval index from the
+original caller-ordered 3–5 source cohorts on every call. It never
+accepts a detached index as authority. Offset is a zero-based index
+in ranked-window navigation order, not a hop number or time; limit
+is a strict integer 1–16 (booleans rejected). Offset may equal
+the total window count to produce an empty terminal page; larger
+values are rejected. Each ASCII canonical page is ≤16 KiB and includes
+the source full index SHA-256, total window count, selection parameters,
+stable next offset (null at end), and only the selected public windows.
+
+`verify_public_dispute_page` independently reconstructs the exact bytes
+from the same original sources after checking size, digest and
+duplicate-free canonical JSON. Swapped cohorts, rehashed offsets,
+partitions or index anchors and invalid wire fail closed with a fixed
+nonsensitive error. The feature cannot create authenticated chronology,
+risk severity, private path audit, provider changes, A1/B8 receipts,
+N1c resumption or native Level-3 acceptance. This slice requires the
+source-verified #190 dispute index and its own exact-head CI gates.
