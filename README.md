@@ -8,30 +8,34 @@ The project is intentionally **not** a thin wrapper around `/bin/bash`. Every op
 
 ## Current status
 
-**Phase 5C — mandatory audit lifecycle integration.**
+**Phase 5 approvals, Phase 6 reference deployment, and Phase 7A foundation are implemented. Phase 7B native validation remains open.**
 
-The merged Phase 4 MCP surface provides discovery/policy explanation,
-policy-gated structured `ssh_exec`, read-only `fs_stat/fs_read`, and
-create-only `fs_mkdir/fs_write`. Raw shell and destructive filesystem
-namespace mutation remain absent.
+The Phase 4 MCP surface includes discovery/policy explanation, policy-gated
+structured `ssh_exec`, read-only `fs_stat/fs_read`, and create-only
+`fs_mkdir/fs_write`. Raw shell and destructive filesystem namespace mutation
+remain absent.
 
-Phase 5A/B add trusted operation identity plus a dedicated local Security Ledger
-service with peer-authenticated execution/admin Unix sockets, SQLite
-persistence, ledger-owned approval state, and the local `approvalctl` operator
-CLI. Phase 5C makes that ledger mandatory for the MCP runtime:
+Phase 5A–5C establish the mandatory peer-authenticated local Security Ledger,
+server-owned request identity, persisted audit-before-transport decisions,
+fail-closed audit handling, and the separate operator `approvalctl` path.
+**Phase 5D** implements Ledger-owned, exact-binding, single-use approvals for
+`ssh_exec`; **Phase 5E** extends them to all four filesystem tools. An
+approval-required operation without an authorized, exact matching grant still
+fails closed before SSH transport. Only the separately authenticated Ledger
+admin interface can grant or deny; MCP clients cannot grant themselves access.
 
-- readiness requires an authenticated local ledger ping;
-- every MCP call gets one server-owned request ID and a persisted
-  `request_received` event;
-- policy decisions and `execution_started` are persisted before structured SSH
-  transport can begin;
-- execution outcome events retain bounded secret-safe metadata only;
-- required audit failure is fail-closed, and lost post-attempt audit persistence
-  cannot be reported as ordinary side-effecting success.
+**Phase 6** closes the private Cloudflare reference deployment; account
+provisioning remains an operator action. **Phase 7A** closes the disposable
+no-network guest E2E foundation, but **Phase 7B1** native prerequisites and
+fresh native **Level-3** acceptance are not complete. Recent merge-main E2E
+runs fail closed on stale provider state; passing Python 3.13/3.14 CI or a
+skipped PR-level E2E job does **not** establish native acceptance. The A1,
+B8, N1c, UID-502, native N1/Task 3, and provider-disposition gates remain open.
 
-Approval consumption is intentionally not enabled yet. An
-`APPROVAL_REQUIRED` policy decision still fails closed before network access;
-Phase 5D/5E add exact single-use approval-aware execution.
+The origin currently uses one operator-configured **static principal/profile**
+per deployment, not per-user OAuth-claim-to-role mapping. Use separate origins
+and credentials for materially different privilege profiles. See the
+[roadmap](docs/development-plan.md) for exact merge/CI evidence and open gates.
 
 ## Documentation is the source of truth
 

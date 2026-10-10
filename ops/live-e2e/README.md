@@ -177,6 +177,8 @@ is dead, no runner-owned QEMU exists, the fixed marker identity/schema/mode are
 unchanged, and **no E2E temp directories remain**. The workflow only unlinks the
 fixed marker; it has no sudo, process-kill, recursive-delete, arbitrary-path or
 provider-restart authority. Any remaining temp state requires renewed review.
+Current blocked-provider evidence and the non-destructive operator review
+sequence are in [the native provider disposition plan](../../docs/plans/2026-10-09-native-provider-disposition.md).
 
 Temp diagnostics read only the fixed `payload-content/expected_commit` binding
 relative to pinned directory descriptors. Both components prohibit symlink
