@@ -1188,8 +1188,8 @@ inventory paths, chronological authority or access rights. New real
 3-hop four-member source-built and rehashed-tamper regressions protect
 this invariant; the wire remains ≤64 KiB, canonical and source-bound.
 
-**Next isolated offline functional slice — source-verified public dispute
-hop lookup (branch `live-e2e-dispute-hop`, pending PR/review):**
+**Completed offline functional slice — source-verified public dispute
+hop lookup (PR #195 merged as `5185b61`):**
 Given the original caller-ordered 3–5 source cohorts and one strict
 zero-based hop index, independently rebuild the complete ranked public
 dispute index and return a canonical ≤4-KiB path-free exact-match
@@ -1198,11 +1198,12 @@ window rank, public member agreement groups and hop range; verify
 size/digest/canonicality and exact source-derived bytes. No detached
 index trust, cache, host/provider/private I/O, severity/chronology
 inference or native gate changes. RED→GREEN focused tests and exact-head
-Python 3.13/3.14 CI required before merge. #194 is a separate docs-only
-review-fix PR; do not conflate its CI with this functional slice.
+Python 3.13/3.14 exact-head CI `38062107045` SUCCESS;
+PR-only native Level-3 SKIPPED. #194 is a separately merged
+docs-only review-fix PR; neither PR CI run establishes native acceptance.
 
 **Next incremental public-only functional slice — bounded dispute-hop
-batch (branch `live-e2e-dispute-hops`, stacked on #195 pending merge):**
+batch (PR #196, rebased onto main after #195 merged; under review):**
 1–16 strictly increasing, unique, exact integer hop positions,
 snapshotted once before validation and index reconstruction; rebuild
 the complete original-source public dispute index once per build/verify
@@ -1212,5 +1213,8 @@ invalid/duplicate/out-of-order/out-of-range hops, forged/rehashed or
 noncanonical wire, changed source ordering, ambiguous overlap and
 oversized input. No host/provider/private I/O, authority, chronology or
 severity inference. New tests are RED-first; Python 3.13/3.14 exact-head
-CI and independent review remain merge gates. Native provider
+CI and independent review remain merge gates. Independent review
+identified a mutable-list snapshot Minor; fixed with one tuple snapshot
+before validation/reconstruction, with RED→GREEN mutation and real
+16-hop source-derived boundary tests. Native provider
 disposition, A1/B8/N1c/UID-502 and Level-3 acceptance remain OPEN.
