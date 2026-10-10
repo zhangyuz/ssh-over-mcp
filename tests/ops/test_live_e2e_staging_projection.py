@@ -4638,3 +4638,50 @@ def test_dispute_hops_no_private_or_host_io(dispute_hops_module, dispute_index_r
             if hasattr(os, name):
                 patch.setattr(os, name, forbidden)
         assert m.build_public_dispute_hops(dispute_index_runs, (0, 2)) == valid
+
+
+def test_dispute_hops_accepts_full_sixteen_hop_bound(dispute_hops_module, timeline_sources):
+    a, _b, _c = timeline_sources
+    # Two verified contiguous nine-snapshot segments yield 16 actual hops.
+    segment = (a,) * 9
+    series = (segment, segment)
+    runs = (series, series, series)
+    hops = tuple(range(16))
+    result = dispute_hops_module.build_public_dispute_hops(runs, list(hops))
+    body = json.loads(result.payload)
+    assert body["hop_count"] == 16
+    assert body["hops"] == list(hops)
+    assert [row["hop"] for row in body["results"]] == list(hops)
+    assert all(row["rank"] is None and row["window"] is None for row in body["results"])
+    assert len(result.payload) <= dispute_hops_module.MAX_PUBLIC_DISPUTE_HOPS_BYTES
+    facts = dispute_hops_module.verify_public_dispute_hops(
+        runs, list(hops), result.payload, expected_sha256=result.sha256
+    )
+    assert facts.hops == hops
+    assert facts.ranks == (None,) * 16
+
+
+@pytest.mark.parametrize("verify", [False, True])
+def test_dispute_hops_snapshots_mutable_selection_before_index_rebuild(
+    dispute_hops_module, dispute_index_runs, monkeypatch, verify
+):
+    m = dispute_hops_module
+    selected = [0, 1]
+    original = m.index.build_public_dispute_index
+    valid = m.build_public_dispute_hops(dispute_index_runs, tuple(selected))
+
+    def mutate_during_source_rebuild(runs):
+        selected[:] = [2, 1]
+        return original(runs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.index, "build_public_dispute_index", mutate_during_source_rebuild)
+        if verify:
+            facts = m.verify_public_dispute_hops(
+                dispute_index_runs, selected, valid.payload, expected_sha256=valid.sha256
+            )
+            assert facts.hops == (0, 1)
+        else:
+            result = m.build_public_dispute_hops(dispute_index_runs, selected)
+            assert result == valid
+    assert selected == [2, 1]
