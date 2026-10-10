@@ -305,8 +305,10 @@ The preflight verifies:
 
 Only then is the selected ref checked out.
 
-The full test suite runs sequentially on Python 3.13 and 3.14 in the same job,
-which is compatible with one-job ephemeral runners.
+The complete Python 3.13 and 3.14 test suites run in separate matrix jobs.
+Each job uses its own hardened ephemeral runner and 20-minute timeout.
+With only one available runner, the jobs queue and execute sequentially;
+this does not combine their time budgets or skip either suite.
 
 ## Updating the runner bootstrap version
 
