@@ -2198,3 +2198,26 @@ nonsensitive error. The feature cannot create authenticated chronology,
 risk severity, private path audit, provider changes, A1/B8 receipts,
 N1c resumption or native Level-3 acceptance. This slice requires the
 source-verified #190 dispute index and its own exact-head CI gates.
+
+### Source-verified public dispute lookup by hop (follow-up to #193)
+
+`staging_dispute_hop.build_public_dispute_hop(runs, hop)` rebuilds the
+entire ranked #190 public dispute index from the **original** ordered
+3–5 caller-supplied source cohorts for each call. `hop` is a strict
+zero-based integer less than the source hop count (booleans rejected);
+it is not a page offset, timestamp, incident priority, or trusted
+chronology. The canonical ASCII result is bounded to 4 KiB, anchors
+the complete source index SHA-256 and reports either the single
+disputed window containing the hop with its navigation rank and
+public agreement partition, or explicit `null` rank/window if the
+hop is not disputed. Windows are disjoint; ambiguous overlaps fail
+closed. An empty hop range cannot be queried.
+
+`verify_public_dispute_hop(runs, hop, raw, expected_sha256=...)`
+checks size and SHA-256 before parsing, rejects duplicate/noncanonical
+JSON and independently reconstructs exact bytes from original sources.
+Rehashed forgeries, changed source ordering, invalid hop and oversized
+wire fail closed with one fixed nonsensitive error. Public-only,
+read-only offline fixture analysis: no private path/field audit,
+host/provider I/O, approval/authority upgrade, UID-502 inspection,
+A1/B8/N1c receipt, recovery, or native Level-3 acceptance.

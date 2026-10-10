@@ -1187,3 +1187,16 @@ path-free and does not reveal raw before/after fingerprints, raw
 inventory paths, chronological authority or access rights. New real
 3-hop four-member source-built and rehashed-tamper regressions protect
 this invariant; the wire remains ≤64 KiB, canonical and source-bound.
+
+**Next isolated offline functional slice — source-verified public dispute
+hop lookup (branch `live-e2e-dispute-hop`, pending PR/review):**
+Given the original caller-ordered 3–5 source cohorts and one strict
+zero-based hop index, independently rebuild the complete ranked public
+dispute index and return a canonical ≤4-KiB path-free exact-match
+window (or explicit no-dispute result). Bind the source index SHA-256,
+window rank, public member agreement groups and hop range; verify
+size/digest/canonicality and exact source-derived bytes. No detached
+index trust, cache, host/provider/private I/O, severity/chronology
+inference or native gate changes. RED→GREEN focused tests and exact-head
+Python 3.13/3.14 CI required before merge. #194 is a separate docs-only
+review-fix PR; do not conflate its CI with this functional slice.
