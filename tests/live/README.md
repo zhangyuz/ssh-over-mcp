@@ -2221,3 +2221,26 @@ wire fail closed with one fixed nonsensitive error. Public-only,
 read-only offline fixture analysis: no private path/field audit,
 host/provider I/O, approval/authority upgrade, UID-502 inspection,
 A1/B8/N1c receipt, recovery, or native Level-3 acceptance.
+
+### Bounded source-verified public dispute batch by hop (next slice)
+
+`staging_dispute_hops.build_public_dispute_hops(runs, hops)` accepts a
+strict `tuple` or `list` of **1–16 unique, strictly increasing** zero-based
+integer hops (booleans and out-of-range values rejected). The selection
+is copied to one immutable tuple **before** validation and source-index
+reconstruction; subsequent reads cannot observe caller list mutations. It rebuilds
+the complete public ranked dispute index **once per call** from the
+original ordered 3–5 source cohorts, never trusting a detached index.
+The canonical ASCII output is ≤16 KiB, bound to the complete source
+index SHA-256 and ordered selection, with each hop mapped to its unique
+disputed window and navigation rank, or `null` for no dispute.
+A source with zero hops cannot be queried. Overlapping matches fail closed.
+
+`verify_public_dispute_hops` checks bounded raw bytes and digest before
+parsing, rejects duplicate/noncanonical JSON, and independently rebuilds
+exact expected bytes from original sources. Rehashed forgeries and
+source-order changes fail with a fixed nonsensitive error. This is
+offline public-only analysis: no private paths, host/provider I/O,
+trusted chronology/severity, recovery, authorization, UID-502, A1/B8/N1c
+or native Level-3 acceptance. The batch bounds are not a substitute
+for host-side safety controls.
