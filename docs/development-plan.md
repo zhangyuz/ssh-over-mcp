@@ -1221,7 +1221,7 @@ PR-only native Level-3 SKIPPED. Native provider
 disposition, A1/B8/N1c/UID-502 and Level-3 acceptance remain OPEN.
 
 **Next isolated public-only functional slice — ranked dispute window
-lookup (branch `live-e2e-dispute-rank`, stacked on PR #196):**
+lookup (PR #197, based on main with PR #196 already merged):**
 Given original ordered 3–5 verified source cohorts and strict integer
 rank, rebuild the complete ranked dispute index, select its exact
 ranked window or fail closed on empty/out-of-range index. Emit canonical
