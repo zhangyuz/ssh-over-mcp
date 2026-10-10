@@ -1085,22 +1085,46 @@ independent of the blocked Phase 7B1 native toolchain and provider gates:
   validation PASS; real no-network Level-3 FAIL-CLOSED on the existing
   stale E2E provider state (exit 70). No provider marker altered and no
   native acceptance or recovery implied.
-- **Next smaller complete functional slice (#189)** — **path-free
-  source-verified consensus interval report**, no private interface.
-  Compose bounded canonical ≤64-KiB public ASCII bytes from a newly
-  source-verified #188 public consensus for exactly the original
-  3–5 ordered caller source cohorts. For each zero-based hop classify
-  `unanimous`, `majority`, or `disputed`, then run-length encode contiguous
-  intervals only if **classification, complete supporting member list and
-  absent member list all match**. Record half-open hop bounds, counts
-  for each class, longest disputed window, and original full public
-  consensus SHA-256. Independent untrusted-input verifier validates
-  bytes/digest/canonical duplicate-free encoding and exactly rebuilds
-  all output from the original source tuples (rehashed forged windows,
-  swapped cohorts or invalid input fail closed). No raw paths, private
-  effects, host I/O or chronology/provenance/authorization inference.
-  Test-first RED/GREEN, full related regression, global code/docs review
-  and exact-head self-hosted Ubuntu Python 3.13/3.14 CI required.
+- **PR #189** — merged as `9b9cc330441126001f4869d0d0f26cbc6d9ec294`
+  from exact reviewed HEAD `69a0c1b750924008fe9ff2b398c077767c7fa3a1`.
+  Delivered independently source-verified path-free canonical ≤64-KiB
+  public consensus intervals, 3–5 caller-ordered series and source SHA
+  anchor, per-hop unanimous/majority/disputed classification and half-open
+  windows. Independent deep review `6088208724` found one Important
+  **real disputed-partition information-loss bug**, fixed with canonical
+  source-derived `agreement_groups` in the wire and interval merge key.
+  Exact four-run/three-hop RED→GREEN proves disputed group transition
+  `[0,1]/[2,3]` → `[0,2]/[1,3]` is preserved, rehashed forged
+  partition rejected. Final author review `6088636090`: no outstanding
+  actionable blockers; post-fix external Codex review rate-limited
+  (**not** claimed independently completed). 21/21 focused and
+  **1,732/1,732** complete local related regressions PASS; exact-head
+  Ubuntu 26.04 Python 3.13/3.14 CI `37984107600` SUCCESS. PR-only
+  native Level-3 SKIPPED; no provider state or marker changed.
+  Merge-main run `37986652267` was CANCELLED at the 20-minute
+  Ubuntu validation job limit during Python 3.14 after Python 3.13
+  passed; dependent real no-network native Level-3 was SKIPPED.
+  Neither native acceptance nor a provider disposition was established.
+- **Next smaller complete functional slice (#190)** — bounded
+  **public-only ranked disputed interval navigation index**.
+  Independently recompute the just-merged #189 source-verified intervals
+  from original caller tuples (3–5 source-series members, ≤128 hops).
+  Keep only `disputed` windows with their half-open range, length,
+  member agreement partitions and absent member indices. Rank by
+  **length descending, start-hop ascending** for reproducible review;
+  length is a navigation statistic, **not severity or chronology**.
+  Emit canonical path-free ≤32-KiB ASCII with exact full original
+  interval SHA-256, run/hop/window and total-disputed-hop counts.
+  Standalone verifier validates type, size, SHA-256, canonical no-duplicate
+  JSON and independently exact-rebuilds all bytes from source tuples,
+  rejecting switched cohorts, rehashed modified rankings or member
+  partitions. Empty fully agreed cohorts produce a valid empty index.
+  Protect against oversized wire before parsing, private path/field
+  disclosure and forbidden host/provider I/O. No authority upgrades,
+  cross-request cache, UID-502, N1c/A1/B8 receipt or native recovery
+  semantics. Small RED/GREEN feature, separate full related regression,
+  code/security/docs review and exact-head Ubuntu Python 3.13/3.14 CI
+  required before marking next PR ready.
 
 
 **Roadmap / global consistency:** These primitives are test fixtures and

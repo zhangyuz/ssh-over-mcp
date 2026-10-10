@@ -2139,3 +2139,40 @@ path-free and does not reveal raw before/after fingerprints, raw
 inventory paths, chronological authority or access rights. New real
 3-hop four-member source-built and rehashed-tamper regressions protect
 this invariant; the wire remains ≤64 KiB, canonical and source-bound.
+
+### Source-verified public dispute navigation index (next smaller slice, PR #190)
+
+`staging_dispute_index.build_public_dispute_index(runs)` accepts the
+**original** ordered 3–5 cohort series source tuples; it does not accept
+a purportedly verified caller-produced #189 report. It rebuilds #189
+path-free consensus intervals with their full source-seal, segment and
+member-partition validation. The result is deterministic canonical ASCII
+JSON bounded to **32 KiB**, with the incident selector, cohort size, hop
+count, full source interval SHA-256, disputed hop count and an ordered
+array of only the disputed windows. Each window retains half-open bounds,
+length in hops, source-verified `agreement_groups` and absent member
+indices; **no untrusted private path or changed-field records** appear.
+
+The index is ranked by **descending disputed interval length** with
+**ascending start-hop** as the deterministic tie-breaker. This is a
+navigation order, **not** an incident priority, severity or chronology
+judgment. An entirely unanimous/majority-only cohort produces a valid
+empty dispute index (zero total disputed hops, zero windows).
+
+`verify_public_dispute_index(runs, raw, expected_sha256=...)` checks
+canonical duplicate-free bytes, exact type, size and SHA-256, then
+recomputes the entire original-source-bounded interval construction and
+requires byte-for-byte equality. Swapped member order and rehashed
+partitions or counts fail closed. No host I/O, UID-502, private export,
+provider marker changes, trusted producer identity, A1/B8 workflow
+receipts or real native Level-3 authority are implied.
+
+#189 merged as `9b9cc330441126001f4869d0d0f26cbc6d9ec294`,
+from source-verified head `69a0c1b750924008fe9ff2b398c077767c7fa3a1`.
+Its disputed-member partition defect was corrected with source-derived
+`agreement_groups`, 1,732 local related tests PASS and exact-head Ubuntu
+CI `37984107600` Python 3.13/3.14 SUCCESS. PR Level-3 SKIPPED.
+#189 merge-main run `37986652267` was CANCELLED when the 20-minute
+Ubuntu validation job limit interrupted Python 3.14; Python 3.13 had
+passed, but the dependent real native Level-3 job was SKIPPED.
+This provides no native acceptance or actual provider disposition.
