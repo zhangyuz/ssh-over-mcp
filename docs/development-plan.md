@@ -1234,7 +1234,7 @@ I/O or native authority; provider disposition, A1/B8/N1c/UID-502 and
 real Level-3 remain OPEN. PR #196 merged; this branch targets main for final gates.
 
 **Next small public-only slice — sparse dispute-rank batch (branch
-`live-e2e-dispute-ranks`, stacked temporarily on PR #197):**
+`live-e2e-dispute-ranks`, based on main after PR #197 merged):**
 1–16 strict, unique, ascending exact-integer navigation ranks, with one
 snapshot of caller input and one complete rebuild of the original-source
 public dispute index per build/verify. Return bounded canonical ≤16-KiB
@@ -1245,4 +1245,4 @@ and per-rank single lookup. Tests RED→GREEN, Ruff, full regression,
 exact-head Python 3.13/3.14 CI and independent review remain merge
 gates. No host/provider/private I/O, native recovery or authority
 change. A1/B8/N1c/UID-502/provider disposition/real Level-3 remain OPEN.
-Retarget to main only after PR #197 merges.
+PR #197 is merged; this branch targets main.
