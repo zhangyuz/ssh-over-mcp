@@ -87,11 +87,24 @@ Phase 5A-C provide the local audit foundation:
 - existing mutation-outcome-uncertain and fs_write committed/durability-
   uncertain outcomes remain more specific if their audit append also fails.
 
-Phase 5D now consumes exact single-use approvals for `ssh_exec`. An
-approval-required call without a usable grant remains pre-network and
-creates/reuses a ledger-owned approval; an exact granted retry is atomically
-consumed before `execution_started` and before any SSH connection is acquired.
-Filesystem approvals remain fail-closed until Phase 5E.
+Phase 5D implements Ledger-owned exact single-use approvals for
+`ssh_exec`. Phase 5E extends that model to the four implemented filesystem
+tools: `fs_stat`, `fs_read`, `fs_mkdir`, and `fs_write`. On an
+`approval_required` decision without a usable grant, each operation remains
+pre-network and creates/reuses a ledger-owned approval. Each retry re-evaluates
+current central policy; a matching granted approval is atomically consumed
+before `execution_started` and before structured SSH transport is acquired.
+A denied or unusable grant cannot bypass policy or reach the network.
+
+The filesystem grant is bound to the trusted principal/profile, host, tool,
+current policy version, normalized path, privilege and effective execution
+limits; `fs_read` additionally binds the requested/effective read bound, and
+`fs_write` binds decoded content length and SHA-256 fingerprint. Consumption
+authorizes only one attempt, not guaranteed success. Existing host-agent path
+pinning, root policy, create-only semantics, byte ceilings, and uncertain
+mutation/durability outcomes remain authoritative; no grant widens those
+constraints. See [MCP API — Phase 5E filesystem approvals](mcp-api.md#phase-5e-filesystem-approvals)
+for exact per-tool binding and retry behavior.
 
 ## Audit event requirements
 
