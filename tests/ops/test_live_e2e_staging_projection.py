@@ -5297,3 +5297,65 @@ def test_dispute_overlap_noncanonical_and_oversize_rejected(
             m.verify_public_dispute_overlap(
                 dispute_index_runs, 0, 3, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
             )
+
+
+def test_dispute_overlap_keeps_index_rank_not_hop_order(dispute_overlap_module, timeline_sources):
+    a, b, c = timeline_sources
+    snapshots = (
+        (b, c, b, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (a, a, b, b),
+        (a, a, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:3]),
+            tuple(row[member] for row in snapshots[2:]),
+        )
+        for member in range(4)
+    )
+    m = dispute_overlap_module
+    built = m.build_public_dispute_overlap(runs, 0, 4)
+    body = json.loads(built.payload)
+    assert [row["rank"] for row in body["matches"]] == [0, 1]
+    assert [
+        (row["window"]["start_hop"], row["window"]["end_hop_exclusive"]) for row in body["matches"]
+    ] == [(2, 4), (0, 1)]
+    assert m.verify_public_dispute_overlap(
+        runs, 0, 4, built.payload, expected_sha256=built.sha256
+    ).ranks == (0, 1)
+
+
+def test_dispute_overlap_forbids_private_and_host_io(
+    dispute_overlap_module, dispute_index_runs, monkeypatch
+):
+    m = dispute_overlap_module
+    valid = m.build_public_dispute_overlap(dispute_index_runs, 0, 3)
+    private = importlib.import_module("staging_comparison_portfolio")
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("public overlap accessed private builder or host IO")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(private, "build_private_portfolio", forbidden)
+        for name in ("open", "stat", "scandir", "listdir", "kill", "system", "fork"):
+            if hasattr(os, name):
+                patch.setattr(os, name, forbidden)
+        assert m.build_public_dispute_overlap(dispute_index_runs, 0, 3) == valid
+        assert m.verify_public_dispute_overlap(
+            dispute_index_runs, 0, 3, valid.payload, expected_sha256=valid.sha256
+        ).ranks == (0, 1)
+
+
+def test_dispute_overlap_oversize_rejected_before_parse(dispute_overlap_module, monkeypatch):
+    m = dispute_overlap_module
+    raw = b"x" * (m.MAX_PUBLIC_DISPUTE_OVERLAP_BYTES + 1)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversized overlap wire reached JSON parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.DisputeOverlapError):
+            m._checked(raw, hashlib.sha256(raw).hexdigest())
