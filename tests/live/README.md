@@ -2611,3 +2611,26 @@ filtering must preserve all eight identities and hop-order as distinct
 segments, with a legitimate limit=8 full page and complete
 limit=1 build→verify cursor traversal. Equal classification does
 not authorize merging original agreement-group boundaries.
+
+### Multi-class filtered public interval pages (next isolated slice)
+
+staging_classified_hop_multifilter_page.build_public_classified_hop_multifilter_page
+accepts 1–3 **distinct** caller-ordered public classes selected exactly
+from unanimous/majority/disputed (tuple/list bounded-snapshotted before
+source I/O), a strict exact-int half-open hop query, offset=0..total,
+and limit=1..8. It filters source intervals on the selected set
+**before** paging, preserving the original source hop order and
+agreement-group boundaries; category input order is echoed in the
+canonical ≤4-KiB ASCII wire but does not reorder source rows.
+An empty matching set gives a terminal empty page. Verification
+rebuilds original ordered 3–5 cohorts' complete consensus intervals
+independently on every call, binding full source-interval SHA-256 and
+byte-exact canonical output. Refuse repeated/invalid category inputs,
+malformed bool/query/cursor/limit, digest/oversize before parsing,
+duplicate keys/noncanonical/rehashed forgery and original source reorder
+using a fixed sanitized error. Deterministic worker mutations of the
+caller-owned category list during source rebuild may not alter output
+or verification. Valid original-source eight-segment page and
+independent class-count parity tests guard navigation.
+This is public navigation only, never trusted time, authenticated
+provenance, severity, host/provider/private I/O, safety or authority.

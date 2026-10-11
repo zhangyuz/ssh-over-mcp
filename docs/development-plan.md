@@ -1596,3 +1596,27 @@ limit=8 page and complete limit=1 cursor traversal without
 coalescing source identities. This is navigation evidence only,
 not provenance/safety/host authority. Exact-head 3.13/3.14 CI
 and upstream merges #205→#206→#207→#208→#209 remain gates.
+
+**New isolated public-only slice — source-verified multi-class filtered
+classified interval pages (branch live-e2e-classified-multifilter-page,
+stacked on PR #210):** Allow 1–3 distinct exact selected public classes
+(unanimous/majority/disputed), captured immutably from bounded
+caller-owned tuples/lists. Return original-source hop-ordered matching
+interval pages (offset=0..total, limit=1..8), preserving agreement-group
+boundaries rather than coalescing equal-class rows. Output is canonical
+≤4-KiB ASCII, binds full original source-interval SHA-256, and demands
+independent byte-exact rebuild of the entire ordered 3–5 cohort intervals
+once per build or verify. Strict exact-int query/cursor/limit and
+category duplicate/type/unknown input refusal, preparse size+digest,
+duplicate-key/noncanonical/rehashed forgery and source reordering
+must fail closed with fixed sanitized errors. TDD covers original
+mixed classes, selected category order and source order, full eight
+segments, empty terminal page, independent one-query class sum parity,
+invalid input/rehashed fraud/source reorder, and deterministic caller
+list mutation during rebuild for both build and verify. Navigation
+does not certify safety or privilege, chronology, severity, provenance
+or host/provider/private authority. After upstream
+#205→#206→#207→#208→#209→#210 merges, require retarget to main,
+exact-final-head Python 3.13+3.14 CI and independent comprehensive
+review. PR-only Level-3 SKIPPED is not native acceptance; A1/B8/N1c/
+UID-502/stale provider/native Level-3 remain OPEN.
