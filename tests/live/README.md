@@ -2259,3 +2259,22 @@ noncanonical/duplicate-key wire, forged/rehashed window/rank/index
 content, and reordered source cohorts by exact original-source rebuild.
 This read-only public transformation has no host/provider I/O, private
 paths, authority, recovery, or native Level-3 acceptance.
+
+### Source-verified sparse dispute-rank batch (next isolated slice)
+
+`staging_dispute_ranks.build_public_dispute_ranks(runs, ranks)` selects
+1–16 strictly increasing unique zero-based navigation ranks (exact ints,
+not bool) from the **complete** index rebuilt from original caller-ordered
+3–5 public source cohorts. Unlike contiguous offset/limit pages, this
+supports sparse rank selections without separately rebuilding the index
+for each rank. It snapshots mutable rank lists once before source rebuild.
+Every selected rank must exist; empty/out-of-range/duplicate/reordered
+selection rejects. The public-only canonical ASCII wire is ≤16 KiB,
+anchors the full index SHA-256, and includes exact selected windows.
+Independent `verify_public_dispute_ranks` rejects oversized bytes before
+parse, noncanonical/duplicate-key wire, rehashed rank/window/index
+forgeries and source reordering by exact original-source reconstruction.
+The upper bound is covered by a real four-member, two-segment
+source-derived 16-window build→verify regression (all 16 ranks).
+No host/provider I/O, private paths, recovery, trusted time, incident
+severity, authorization or native Level-3 acceptance is added.
