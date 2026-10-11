@@ -2495,3 +2495,11 @@ or duplicate-key/noncanonical/rehashed-forged wires, and source order
 changes. SHA is consistency, not authenticated provenance; no
 trusted time, host/provider/private I/O, severity, safety/authorization,
 detached source data, or cross-request cache.
+
+Independent PR #207 review addition: deterministic concurrent worker
+mutations during the original cohort-interval rebuild test both builder
+and independent verifier with exactly eight frozen input pairs. Appending
+a ninth outer query or changing an inner hop boundary after capture
+cannot change source-bound canonical query order, classification counts
+or verification facts. A single full intervals rebuild is asserted for
+each invocation. This is test coverage, not a production code change.

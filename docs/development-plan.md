@@ -1469,3 +1469,14 @@ reordering and parsing size cap. Independent security/docs review and
 have merged and this stacked branch retargets main are required.
 PR-only Level-3 skipped is not native acceptance; A1/B8/N1c/UID-502/
 stale provider/native Level-3 remain OPEN.
+
+Independent PR #207 review (exact initial HEAD `f1bd728`, 0 Critical,
+0 Important, 1 Minor) requested deterministic mutable-input snapshot
+regression. A synchronized worker thread now mutates either an outer
+8-pair list by appending a ninth query or one existing inner range's
+boundary *during* original-source rebuild. For both build and verify,
+the canonical payload and verified facts must stay bound to the eight
+original frozen pairs. Production logic already freezes before source
+I/O; this is a forward regression guard, not an observed runtime bug.
+#205 and #206 remain upstream merge gates; the final exact-HEAD/main
+Python 3.13/3.14 CI plus independent review remain required.

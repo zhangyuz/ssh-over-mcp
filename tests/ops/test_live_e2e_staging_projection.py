@@ -6940,3 +6940,68 @@ def test_classified_hop_coverages_rejects_oversize_before_parsing(
         patch.setattr(m.json, "loads", forbidden)
         with pytest.raises(m.ClassifiedHopCoveragesError):
             m._checked(raw, hashlib.sha256(raw).hexdigest())
+
+
+@pytest.mark.parametrize("mutation", ["append_ninth", "change_inner_boundary"])
+@pytest.mark.parametrize("action", ["build", "verify"])
+def test_classified_hop_coverages_freezes_caller_lists_before_source_rebuild(
+    classified_hop_coverages_module,
+    dispute_index_runs,
+    mutation,
+    action,
+    monkeypatch,
+):
+    """Deterministic worker mutation during source rebuilding cannot alter frozen queries."""
+    m = classified_hop_coverages_module
+    initial = tuple((0, 1) for _ in range(m.MAX_CLASSIFIED_HOP_COVERAGES))
+    expected = m.build_public_classified_hop_coverages(dispute_index_runs, initial)
+    expected_facts = m.verify_public_classified_hop_coverages(
+        dispute_index_runs, initial, expected.payload, expected_sha256=expected.sha256
+    )
+    queries = [[start, end] for start, end in initial]
+    ready = threading.Event()
+    mutated = threading.Event()
+
+    def worker():
+        if ready.wait(timeout=5):
+            if mutation == "append_ninth":
+                queries.append([2, 3])
+            else:
+                queries[0][1] = 2
+            mutated.set()
+
+    thread = threading.Thread(target=worker, daemon=True)
+    original_rebuild = m.intervals.build_public_intervals
+    rebuild_calls = []
+
+    def rebuild_with_concurrent_mutation(runs):
+        rebuild_calls.append(1)
+        ready.set()
+        assert mutated.wait(timeout=5), "worker did not modify caller data"
+        return original_rebuild(runs)
+
+    thread.start()
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(m.intervals, "build_public_intervals", rebuild_with_concurrent_mutation)
+            if action == "build":
+                actual = m.build_public_classified_hop_coverages(dispute_index_runs, queries)
+                assert actual == expected
+            else:
+                actual_facts = m.verify_public_classified_hop_coverages(
+                    dispute_index_runs,
+                    queries,
+                    expected.payload,
+                    expected_sha256=expected.sha256,
+                )
+                assert actual_facts == expected_facts
+    finally:
+        ready.set()
+        thread.join(timeout=5)
+    assert mutated.is_set() and not thread.is_alive()
+    assert rebuild_calls == [1]
+    assert len(queries) == (9 if mutation == "append_ninth" else 8)
+    assert queries[0][1] == (2 if mutation == "change_inner_boundary" else 1)
+    assert json.loads(expected.payload)["queries"] == [
+        {"start_hop": start, "end_hop_exclusive": end} for start, end in initial
+    ]
