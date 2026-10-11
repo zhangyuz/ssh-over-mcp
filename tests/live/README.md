@@ -2415,3 +2415,24 @@ build→verify. This guards against double-counting a window across disjoint
 queries. PR #201 merged as `d9273a0`; #202 merged as `5f340307`;
 #203 now targets main; #204 remains stacked on #203, with final
 exact-head CI/review gates still required.
+
+### Bounded public non-disputed gap pages (new isolated slice)
+
+`staging_dispute_gap_page.build_public_dispute_gap_page(runs, start, end,
+offset, limit)` returns canonical **≤4-KiB ASCII** pages of the complement
+of public disputed windows inside a strict exact-int half-open hop range.
+A gap means **non-disputed** (unanimous or majority), not a trusted safe
+interval. Builder and independent verifier each rebuild the complete
+public ranked index from the original ordered 3–5 source cohorts, then
+sort its disjoint windows by hop position to calculate gap bounds.
+Offset is a gap count from 0 through `total_gaps`; limit is **1–8**.
+Pages include complete nonempty `gaps`, `total_gaps` and an advancing
+`next_offset` or terminal null. Empty source index returns the full
+query as one gap; full disputed coverage returns none. The wire binds
+the complete source index SHA and fails closed on forged/duplicate/
+noncanonical/oversized payloads, invalid/bool bounds, cursor overrun,
+and source reorder. Verification requires exact rebuilt bytes.
+Tests cover a real original-source pair of separate non-disputed gaps
+across `limit=1` build→verify pages, distinct from index rank order.
+This is only public navigation, never time/severity/authentication/
+provenance/provider recovery, with no private/host/provider I/O or cache.

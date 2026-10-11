@@ -1391,3 +1391,25 @@ review and exact-head Ubuntu
 Python 3.13/3.14 CI after upstream PR #203 is merged
 and PR retargeted to main; PR-only Level-3 skip is not native approval.
 A1/B8/N1c/UID-502/provider disposition/native Level-3 remain OPEN.
+
+**New review-ready isolated public-only slice — source-verified
+non-disputed gap pages (branch `live-e2e-dispute-gap-page`, stacked on
+PR #204):** Add a separate bounded canonical ≤4-KiB ASCII API that
+returns complement spans of disputed windows inside one strict exact-int
+half-open hop query. The list is sorted by hop location, not by ranked
+window position. `offset` identifies matching gap number (0..total),
+`limit` is 1..8; each full-page gap has positive width and
+`next_offset` advances until terminal null, with empty terminal
+page when offset==total. Every build and independent verify rebuilds
+the original ordered 3–5 source cohorts' full public dispute index;
+no detached index, private I/O, cache or host/provider authority.
+Strict preparse ≤4-KiB/digest/canonical checks and byte-for-byte
+original-source verification refuse malformed/duplicated/oversized/
+rehashed-forged output, invalid/bool hop/cursor/limit or reorder.
+TDD includes mixed disputed/unanimous sources, real two-page gap cursor
+fixture, empty-source/all-disputed cases, invalid inputs, and forgery
+refusal. Gap=unanimous or majority, **not** certified safety or native
+observation. Independent review and final exact-head Ubuntu Python
+3.13/3.14 CI required after #204 merges and PR retargets main.
+A1/B8/N1c/UID-502/stale provider/native Level-3 remain OPEN;
+PR-only Level-3 skip does not certify native acceptance.

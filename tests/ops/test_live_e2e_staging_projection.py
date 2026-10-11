@@ -6280,3 +6280,180 @@ def test_dispute_overlap_union_one_long_window_across_disjoint_queries(
     assert facts.matched_windows == 1
     assert facts.matched_hops == 2
     assert facts.source_index_sha256 == source.sha256
+
+
+@pytest.fixture
+def dispute_gap_page_module(dispute_overlap_union_module):
+    return importlib.import_module("staging_dispute_gap_page")
+
+
+def test_dispute_gap_page_source_bound_disjoint_gaps_and_cursor(
+    dispute_gap_page_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    # Disputed intervals [0,1) and [2,4) leave precisely [1,2).
+    snapshots = ((b, c, b, c), (a, a, a, a), (b, b, b, b), (a, a, b, b), (a, a, b, b))
+    runs = tuple(
+        (tuple(row[member] for row in snapshots[:3]), tuple(row[member] for row in snapshots[2:]))
+        for member in range(4)
+    )
+    m = dispute_gap_page_module
+    source = m.index.build_public_dispute_index(runs)
+    built = m.build_public_dispute_gap_page(runs, 0, 4, 0, 1)
+    body = json.loads(built.payload)
+    assert body["query"] == {"start_hop": 0, "end_hop_exclusive": 4}
+    assert body["source_dispute_index_sha256"] == source.sha256
+    assert body["total_gaps"] == 1
+    assert body["gaps"] == [{"start_hop": 1, "end_hop_exclusive": 2}]
+    assert body["next_offset"] is None
+    assert body["offset"] == 0 and body["limit"] == 1
+    assert len(built.payload) <= m.MAX_PUBLIC_DISPUTE_GAP_PAGE_BYTES
+    facts = m.verify_public_dispute_gap_page(
+        runs, 0, 4, 0, 1, built.payload, expected_sha256=built.sha256
+    )
+    assert facts.source_index_sha256 == source.sha256
+    assert facts.gap_ranges == ((1, 2),)
+    empty = m.build_public_dispute_gap_page(runs, 0, 4, 1, 1)
+    assert json.loads(empty.payload)["gaps"] == []
+    assert json.loads(empty.payload)["next_offset"] is None
+
+
+def test_dispute_gap_page_single_middle_gap_from_mixed_source(
+    dispute_gap_page_module, dispute_index_runs
+):
+    # Source covers all disputed hops; zero gaps and terminal empty page.
+    m = dispute_gap_page_module
+    built = m.build_public_dispute_gap_page(dispute_index_runs, 0, 3, 0, 8)
+    body = json.loads(built.payload)
+    assert body["gaps"] == [] and body["total_gaps"] == 0
+    assert body["next_offset"] is None
+    assert (
+        m.verify_public_dispute_gap_page(
+            dispute_index_runs, 0, 3, 0, 8, built.payload, expected_sha256=built.sha256
+        ).gap_ranges
+        == ()
+    )
+
+
+def test_dispute_gap_page_empty_dispute_source(dispute_gap_page_module, timeline_sources):
+    a, b, c = timeline_sources
+    same = ((a, b), (b, c))
+    runs = (same, same, same)
+    m = dispute_gap_page_module
+    built = m.build_public_dispute_gap_page(runs, 0, 1, 0, 1)
+    body = json.loads(built.payload)
+    assert body["gaps"] == [{"start_hop": 0, "end_hop_exclusive": 1}]
+    assert body["total_gaps"] == 1
+    assert m.verify_public_dispute_gap_page(
+        runs, 0, 1, 0, 1, built.payload, expected_sha256=built.sha256
+    ).gap_ranges == ((0, 1),)
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "offset", "limit"),
+    [
+        (-1, 2, 0, 1),
+        (0, 0, 0, 1),
+        (2, 1, 0, 1),
+        (0, 4, 0, 1),
+        (True, 3, 0, 1),
+        (0, False, 0, 1),
+        (0, 3, True, 1),
+        (0, 3, -1, 1),
+        (0, 3, 0, 0),
+        (0, 3, 0, 9),
+        (0, 3, 0, True),
+        (0, 3, 1.0, 1),
+        (0, 3, 99, 1),
+    ],
+)
+def test_dispute_gap_page_rejects_invalid_inputs(
+    dispute_gap_page_module, dispute_index_runs, start, end, offset, limit
+):
+    m = dispute_gap_page_module
+    with pytest.raises(m.DisputeGapPageError, match="^staging dispute gap page rejected$"):
+        m.build_public_dispute_gap_page(dispute_index_runs, start, end, offset, limit)
+
+
+def test_dispute_gap_page_rejects_rehashed_tamper_and_reordered_source(
+    dispute_gap_page_module, dispute_index_runs
+):
+    m = dispute_gap_page_module
+    built = m.build_public_dispute_gap_page(dispute_index_runs, 0, 3, 0, 2)
+    forged = json.loads(built.payload)
+    forged["total_gaps"] = 99
+    raw = json.dumps(forged, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode(
+        "ascii"
+    )
+    with pytest.raises(m.DisputeGapPageError):
+        m.verify_public_dispute_gap_page(
+            dispute_index_runs, 0, 3, 0, 2, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+    swapped = (dispute_index_runs[1], dispute_index_runs[0], *dispute_index_runs[2:])
+    with pytest.raises(m.DisputeGapPageError):
+        m.verify_public_dispute_gap_page(
+            swapped, 0, 3, 0, 2, built.payload, expected_sha256=built.sha256
+        )
+    duplicate = b'{"audience":"public","audience":"public"}'
+    with pytest.raises(m.DisputeGapPageError):
+        m.verify_public_dispute_gap_page(
+            dispute_index_runs,
+            0,
+            3,
+            0,
+            2,
+            duplicate,
+            expected_sha256=hashlib.sha256(duplicate).hexdigest(),
+        )
+
+
+def test_dispute_gap_page_rejects_oversize_before_parse(dispute_gap_page_module, monkeypatch):
+    m = dispute_gap_page_module
+    raw = b"x" * (m.MAX_PUBLIC_DISPUTE_GAP_PAGE_BYTES + 1)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversized gap page reached JSON parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.DisputeGapPageError):
+            m._checked(raw, hashlib.sha256(raw).hexdigest())
+
+
+def test_dispute_gap_page_advances_across_two_real_source_gaps(
+    dispute_gap_page_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    snapshots = (
+        (b, c, b, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (a, a, b, b),
+        (b, b, b, b),
+        (a, a, a, a),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:4]),
+            tuple(row[member] for row in snapshots[3:]),
+        )
+        for member in range(4)
+    )
+    m = dispute_gap_page_module
+    source = m.index.build_public_dispute_index(runs)
+    expected_gap_ranges = ((1, 2), (4, 5))
+    for offset, gap in enumerate(expected_gap_ranges):
+        built = m.build_public_dispute_gap_page(runs, 0, 5, offset, 1)
+        body = json.loads(built.payload)
+        assert body["source_dispute_index_sha256"] == source.sha256
+        assert body["total_gaps"] == len(expected_gap_ranges), (
+            json.loads(source.payload)["ranked_windows"],
+            body["gaps"],
+        )
+        assert body["gaps"] == [{"start_hop": gap[0], "end_hop_exclusive": gap[1]}]
+        assert body["next_offset"] == (offset + 1 if offset == 0 else None)
+        facts = m.verify_public_dispute_gap_page(
+            runs, 0, 5, offset, 1, built.payload, expected_sha256=built.sha256
+        )
+        assert facts.gap_ranges == (gap,)
+        assert facts.next_offset == body["next_offset"]
