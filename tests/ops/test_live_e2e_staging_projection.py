@@ -5359,3 +5359,46 @@ def test_dispute_overlap_oversize_rejected_before_parse(dispute_overlap_module, 
         patch.setattr(m.json, "loads", forbidden)
         with pytest.raises(m.DisputeOverlapError):
             m._checked(raw, hashlib.sha256(raw).hexdigest())
+
+
+def test_dispute_overlap_full_sixteen_window_bound(dispute_overlap_module, timeline_sources):
+    """All 16 distinct source-derived disputed windows fit the public bound."""
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, c, c),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+        (c, c, a, a),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+        (c, c, a, a),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+        (c, c, a, a),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:9]),
+            tuple(row[member] for row in snapshots[8:]),
+        )
+        for member in range(4)
+    )
+    m = dispute_overlap_module
+    built = m.build_public_dispute_overlap(runs, 0, 16)
+    body = json.loads(built.payload)
+    assert len(body["matches"]) == 16
+    assert [row["rank"] for row in body["matches"]] == list(range(16))
+    assert [
+        (row["overlap_start_hop"], row["overlap_end_hop_exclusive"]) for row in body["matches"]
+    ] == [(i, i + 1) for i in range(16)]
+    assert len(built.payload) <= m.MAX_PUBLIC_DISPUTE_OVERLAP_BYTES
+    assert m.verify_public_dispute_overlap(
+        runs, 0, 16, built.payload, expected_sha256=built.sha256
+    ).ranks == tuple(range(16))
