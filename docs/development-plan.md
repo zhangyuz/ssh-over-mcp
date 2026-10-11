@@ -1318,7 +1318,7 @@ A1/B8/N1c/UID-502/provider disposition/native Level-3 remain OPEN.
 
 **Next isolated public-only functional slice — disputed-overlap coverage
 summary (PR #202, branch `live-e2e-dispute-overlap-coverage`,
-retargeted to main after #201 merged):**
+merged to main as `5f340307b50ed467a458ed230777b8067f1129c8`):**
 Provide a compact canonical ≤4-KiB ASCII source-verified coverage summary
 for strict integer half-open hop queries. Report clipped disputed-window
 intersection count, total disputed hops inside query and complementary
@@ -1336,15 +1336,16 @@ confirms the summary remains ≤4 KiB when full overlap output exceeds
 overlap bound or #201's paginated retrieval; it enables bounded counts.
 RED→GREEN focused regression, Ruff, docs consistency, independent review,
 and exact-head Python 3.13/3.14 CI required before integration.
-#201 merged; #202 now targets main with exact-head dual Python
-3.13/3.14 CI run `38141180265` PASS, final review/merge gate pending.
+#201 merged as `d9273a0`; #202 passed exact-head dual Python
+3.13/3.14 CI run `38141180265`, review Minor fixed, and merged
+as `5f340307b50ed467a458ed230777b8067f1129c8`.
 PR-only Level-3 SKIPPED is not native
 acceptance; A1/B8/N1c/UID-502/provider disposition/native Level-3
 remain OPEN.
 
 **In-review isolated public-only functional slice — batch dispute-overlap
 coverage (PR #203, branch `live-e2e-dispute-overlap-coverages`,
-stacked on open PR #202):**
+retargeted to main after #202 merged):**
 Add canonical ≤8-KiB summary of 1–8 caller-ordered strict exact-int
 half-open hop ranges. A single full index rebuild per build or verify
 from original 3–5 ordered source cohorts serves all independent clipped
@@ -1362,7 +1363,8 @@ build→verify and deterministic worker-thread mutation regressions. Production 
 boundary unchanged: no private/host/provider I/O, authority, chronology,
 severity or provenance. Run focused regression and Ruff, require an
 independent security/docs review and exact-head dual Python 3.13/3.14
-CI after PR #202 has merged and this branch retargeted to main. Native
+CI on the final main base; #202 merged and #203 now targets main.
+Native
 Level-3 remains OPEN (PR-only skip is not acceptance), alongside
 A1/B8/N1c/UID-502/provider disposition.
 
@@ -1383,9 +1385,9 @@ ranges, 8-range bound, malformed/oversized/duplicate/rehashed wire and
 changed source order. Independent PR #204 review found 0 Critical,
 0 Important, 2 Minor: added source-derived one long disputed window
 split by two non-touching query clips, which must count 1 distinct
-window/2 disputed hops, with build→verify; updated #201 merged status
-and current #202→#203→#204 stack and CI gates. Require independent
+window/2 disputed hops, with build→verify; updated #201 merged status, #202 now merged status, #203 main-base
+retarget and current #203→#204 stack and CI gates. Require independent
 review and exact-head Ubuntu
-Python 3.13/3.14 CI after upstream PRs #202–#203 are merged
+Python 3.13/3.14 CI after upstream PR #203 is merged
 and PR retargeted to main; PR-only Level-3 skip is not native approval.
 A1/B8/N1c/UID-502/provider disposition/native Level-3 remain OPEN.

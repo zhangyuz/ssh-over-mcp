@@ -2412,5 +2412,6 @@ clips [0,1) and [2,3). The union retains both separate merged ranges and
 returns 2 requested hops, **1 distinct window**, 2 disputed hops, 0
 unmatched hops, the original full index digest, and successful independent
 build→verify. This guards against double-counting a window across disjoint
-queries. PR #201 merged as `d9273a0`; #202 targets main; #203 and #204
-remain stacked and require their final exact-head CI/review gates.
+queries. PR #201 merged as `d9273a0`; #202 merged as `5f340307`;
+#203 now targets main; #204 remains stacked on #203, with final
+exact-head CI/review gates still required.
