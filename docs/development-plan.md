@@ -1254,18 +1254,39 @@ SKIPPED is not native acceptance. No host/provider/private I/O,
 native recovery or authority change. A1/B8/N1c/UID-502/provider
 disposition/real Level-3 remain OPEN.
 
-**Next isolated public-only functional slice — exact disputed-window
-boundary lookup (branch `live-e2e-dispute-range`, based on main
-after PR #198 merged):** Accept strict integer half-open hop bounds,
-rebuild the full source-verified public dispute index from original
-ordered 3–5 source cohorts, and return exact disputed window rank
-or explicit null for a valid nonmatching range. Reject invalid bounds,
+**Completed public-only slice — exact disputed-window boundary lookup
+(PR #199 merged as `383ad81193541962632e2a70c72b0384060ea5a2`):**
+Strict integer half-open hop bounds rebuild the source-verified public
+dispute index from original ordered 3–5 source cohorts, returning exact
+window rank or null for valid nonmatching ranges. Reject invalid bounds,
 oversized/noncanonical/duplicate-key wire, rehashed forged
-query/rank/window/index digest and source reordering. Independent review
-Minor addressed by a real-source build→verify regression proving a later
-longer disputed window ranks ahead of an earlier shorter window.
-Bounded canonical ≤4-KiB public ASCII; no private paths, host/provider I/O, cache,
-trusted time, severity, authority or native acceptance. RED→GREEN
-tests, focused regression, Ruff, exact-head Python 3.13/3.14 CI and
-independent review required before merge. A1/B8/N1c/UID-502/native
-Level-3 and stale provider disposition remain OPEN.
+query/rank/window/index digest and source reordering. Independent review's
+Minor was resolved by a real-source build→verify regression proving a
+later longer disputed window outranks an earlier shorter window.
+Bounded canonical ≤4-KiB public ASCII; no private paths, host/provider I/O,
+cache, trusted time, severity or native authority. RED→GREEN, focused
+regression and Ruff PASS; pre-merge exact-head self-hosted Python
+3.13/3.14 CI `38099287491` PASS and independent review cleared before
+merge. PR-only Level-3 SKIPPED is not native acceptance;
+A1/B8/N1c/UID-502/native Level-3 and stale provider disposition remain OPEN.
+
+**Next bounded public-only functional slice — dispute overlap navigation
+(PR #200, based on main after PR #199 merged as `383ad811`):**
+Given strict integer half-open hop bounds, rebuild the original-source
+full ranked dispute index once per build/verify, return every
+intersecting public disputed window in index rank order with its
+clipped intersection **when the complete result fits ≤8 KiB**.
+Larger complete results from otherwise valid original-source indexes
+raise `DisputeOverlapCapacityError` (fixed nonsensitive text), never
+silently truncate or return partial matches; callers can split the
+hop query into smaller half-open ranges. The 32-KiB source-index limit
+does not imply a global 16-window overlap ceiling; the 16-window sample
+is a success regression, not an upper bound. Return an empty match list
+for an empty index; reject invalid bounds and duplicate/noncanonical/
+oversized/rehashed forged output and changed source order. Canonical
+≤8-KiB ASCII binds full source index SHA-256. Real-source >16-window
+capacity-refusal and 16-window all-matches build→verify regressions added.
+Tests RED→GREEN; independent review, focused/full regression and
+exact-head Ubuntu Python 3.13/3.14 CI remain merge gates. No host/provider/private I/O, cache, native authority,
+trusted chronology or severity. A1/B8/N1c/UID-502/stale provider/
+real Level-3 remain OPEN.

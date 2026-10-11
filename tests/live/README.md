@@ -2296,3 +2296,27 @@ independent
 oversized, rehashed forged query/rank/window/hash and changed source
 ordering. No cache, detached index, host/provider/private I/O,
 trusted chronology, severity, provenance or authorization semantics.
+
+### Source-verified disputed-window overlap navigation (PR #200)
+
+`staging_dispute_overlap.build_public_dispute_overlap(runs, start_hop,
+end_hop_exclusive)` returns all public disputed windows intersecting a
+strict half-open hop query **only when the complete canonical result fits
+8 KiB**, in the full source-verified index's **length-first rank order**
+(not time or severity order). Each match contains its full ranked window
+and clipped nonempty overlap bounds; empty source dispute indexes return
+an empty match list. If a valid query exceeds 8 KiB,
+`DisputeOverlapCapacityError` (a `DisputeOverlapError` subclass with the
+same sanitized message) rejects the request: no partial/truncated output,
+match count, or cursor is returned. Split the query into smaller disjoint
+half-open hop intervals and make separate source-verified calls; do not
+infer a globally safe window count from the successful 16-window sample.
+Both query bounds must be exact ints, `0 <= start < end <= hop_count`. The full
+original ordered 3–5 cohort index is rebuilt on every build and verify,
+never accepted as detached/cached wire. Canonical ≤8-KiB ASCII binds
+the full source index SHA-256; independent verification rejects
+oversized/noncanonical/duplicate-key/rehashed-forged output and
+changed source order. A genuine two-segment 16-distinct-disputed-window
+source fixture covers the all-matches build→verify boundary. No private
+paths, host/provider I/O, authority, trusted chronology, severity,
+provenance or native recovery.

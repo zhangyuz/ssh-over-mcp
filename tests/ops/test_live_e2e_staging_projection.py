@@ -5187,3 +5187,251 @@ def test_dispute_range_rank_follows_length_not_hop_order(dispute_range_module, t
         )
         assert verified.rank == rank
         assert verified.source_index_sha256 == index.sha256
+
+
+@pytest.fixture
+def dispute_overlap_module(dispute_range_module):
+    return importlib.import_module("staging_dispute_overlap")
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "expected_ranks", "expected_clips"),
+    [
+        (0, 1, [0], [(0, 1)]),
+        (1, 3, [0, 1], [(1, 2), (2, 3)]),
+        (2, 3, [1], [(2, 3)]),
+        (0, 3, [0, 1], [(0, 2), (2, 3)]),
+    ],
+)
+def test_dispute_overlap_source_bound_rank_order(
+    dispute_overlap_module, dispute_index_runs, start, end, expected_ranks, expected_clips
+):
+    m = dispute_overlap_module
+    original = m.index.build_public_dispute_index(dispute_index_runs)
+    windows = json.loads(original.payload)["ranked_windows"]
+    built = m.build_public_dispute_overlap(dispute_index_runs, start, end)
+    body = json.loads(built.payload)
+    assert body["query"] == {"start_hop": start, "end_hop_exclusive": end}
+    assert body["source_dispute_index_sha256"] == original.sha256
+    assert [x["rank"] for x in body["matches"]] == expected_ranks
+    assert [x["window"] for x in body["matches"]] == [windows[i] for i in expected_ranks]
+    assert [
+        (x["overlap_start_hop"], x["overlap_end_hop_exclusive"]) for x in body["matches"]
+    ] == expected_clips
+    assert len(built.payload) <= m.MAX_PUBLIC_DISPUTE_OVERLAP_BYTES
+    facts = m.verify_public_dispute_overlap(
+        dispute_index_runs, start, end, built.payload, expected_sha256=built.sha256
+    )
+    assert facts.ranks == tuple(expected_ranks)
+    assert m.build_public_dispute_overlap(dispute_index_runs, start, end) == built
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [(-1, 1), (0, 0), (3, 4), (2, 1), (True, 2), (0, False), (0.0, 2), ("0", 2)],
+)
+def test_dispute_overlap_rejects_invalid_bounds(
+    dispute_overlap_module, dispute_index_runs, start, end
+):
+    m = dispute_overlap_module
+    with pytest.raises(m.DisputeOverlapError, match="^staging dispute overlap rejected$"):
+        m.build_public_dispute_overlap(dispute_index_runs, start, end)
+
+
+def test_dispute_overlap_empty_index_returns_empty_matches(
+    dispute_overlap_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    same = ((a, b), (b, c))
+    runs = (same, same, same)
+    m = dispute_overlap_module
+    built = m.build_public_dispute_overlap(runs, 0, 1)
+    assert json.loads(built.payload)["matches"] == []
+    assert (
+        m.verify_public_dispute_overlap(
+            runs, 0, 1, built.payload, expected_sha256=built.sha256
+        ).ranks
+        == ()
+    )
+
+
+def test_dispute_overlap_rehashed_forgery_rejected(dispute_overlap_module, dispute_index_runs):
+    m = dispute_overlap_module
+    valid = m.build_public_dispute_overlap(dispute_index_runs, 0, 3)
+    for field in ("query", "matches", "source_dispute_index_sha256"):
+        body = json.loads(valid.payload)
+        if field == "query":
+            body[field]["start_hop"] = 1
+        elif field == "matches":
+            body[field][0]["rank"] = 1
+        else:
+            body[field] = "f" * 64
+        raw = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+            "ascii"
+        )
+        with pytest.raises(m.DisputeOverlapError):
+            m.verify_public_dispute_overlap(
+                dispute_index_runs, 0, 3, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+            )
+
+
+def test_dispute_overlap_changed_source_order_rejected(dispute_overlap_module, dispute_index_runs):
+    m = dispute_overlap_module
+    valid = m.build_public_dispute_overlap(dispute_index_runs, 0, 3)
+    swapped = (dispute_index_runs[1], dispute_index_runs[0], *dispute_index_runs[2:])
+    with pytest.raises(m.DisputeOverlapError):
+        m.verify_public_dispute_overlap(swapped, 0, 3, valid.payload, expected_sha256=valid.sha256)
+
+
+def test_dispute_overlap_noncanonical_and_oversize_rejected(
+    dispute_overlap_module, dispute_index_runs
+):
+    m = dispute_overlap_module
+    valid = m.build_public_dispute_overlap(dispute_index_runs, 0, 3)
+    for raw in (
+        valid.payload + b" ",
+        valid.payload.replace(b'"audience":"public",', b'"audience":"public","audience":"public",'),
+        b"x" * (m.MAX_PUBLIC_DISPUTE_OVERLAP_BYTES + 1),
+    ):
+        with pytest.raises(m.DisputeOverlapError):
+            m.verify_public_dispute_overlap(
+                dispute_index_runs, 0, 3, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+            )
+
+
+def test_dispute_overlap_keeps_index_rank_not_hop_order(dispute_overlap_module, timeline_sources):
+    a, b, c = timeline_sources
+    snapshots = (
+        (b, c, b, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (a, a, b, b),
+        (a, a, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:3]),
+            tuple(row[member] for row in snapshots[2:]),
+        )
+        for member in range(4)
+    )
+    m = dispute_overlap_module
+    built = m.build_public_dispute_overlap(runs, 0, 4)
+    body = json.loads(built.payload)
+    assert [row["rank"] for row in body["matches"]] == [0, 1]
+    assert [
+        (row["window"]["start_hop"], row["window"]["end_hop_exclusive"]) for row in body["matches"]
+    ] == [(2, 4), (0, 1)]
+    assert m.verify_public_dispute_overlap(
+        runs, 0, 4, built.payload, expected_sha256=built.sha256
+    ).ranks == (0, 1)
+
+
+def test_dispute_overlap_forbids_private_and_host_io(
+    dispute_overlap_module, dispute_index_runs, monkeypatch
+):
+    m = dispute_overlap_module
+    valid = m.build_public_dispute_overlap(dispute_index_runs, 0, 3)
+    private = importlib.import_module("staging_comparison_portfolio")
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("public overlap accessed private builder or host IO")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(private, "build_private_portfolio", forbidden)
+        for name in ("open", "stat", "scandir", "listdir", "kill", "system", "fork"):
+            if hasattr(os, name):
+                patch.setattr(os, name, forbidden)
+        assert m.build_public_dispute_overlap(dispute_index_runs, 0, 3) == valid
+        assert m.verify_public_dispute_overlap(
+            dispute_index_runs, 0, 3, valid.payload, expected_sha256=valid.sha256
+        ).ranks == (0, 1)
+
+
+def test_dispute_overlap_oversize_rejected_before_parse(dispute_overlap_module, monkeypatch):
+    m = dispute_overlap_module
+    raw = b"x" * (m.MAX_PUBLIC_DISPUTE_OVERLAP_BYTES + 1)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversized overlap wire reached JSON parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.DisputeOverlapError):
+            m._checked(raw, hashlib.sha256(raw).hexdigest())
+
+
+def test_dispute_overlap_sixteen_window_success_sample(dispute_overlap_module, timeline_sources):
+    """This 16-window source sample fits, but is not a global upper bound."""
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, c, c),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+        (c, c, a, a),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+        (c, c, a, a),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+        (c, c, a, a),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:9]),
+            tuple(row[member] for row in snapshots[8:]),
+        )
+        for member in range(4)
+    )
+    m = dispute_overlap_module
+    built = m.build_public_dispute_overlap(runs, 0, 16)
+    body = json.loads(built.payload)
+    assert len(body["matches"]) == 16
+    assert [row["rank"] for row in body["matches"]] == list(range(16))
+    assert [
+        (row["overlap_start_hop"], row["overlap_end_hop_exclusive"]) for row in body["matches"]
+    ] == [(i, i + 1) for i in range(16)]
+    assert len(built.payload) <= m.MAX_PUBLIC_DISPUTE_OVERLAP_BYTES
+    assert m.verify_public_dispute_overlap(
+        runs, 0, 16, built.payload, expected_sha256=built.sha256
+    ).ranks == tuple(range(16))
+
+
+def test_dispute_overlap_valid_source_index_can_exceed_wire_capacity(
+    dispute_overlap_module, timeline_sources
+):
+    """A valid >16-window source index must produce an explicit capacity refusal."""
+    a, b, c = timeline_sources
+    snapshots = ((a, a, a, a),) + (
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+        (c, c, a, a),
+    ) * 12
+    runs = tuple(
+        tuple(
+            tuple(row[member] for row in snapshots[start : start + 9])
+            for start in range(0, len(snapshots) - 1, 8)
+        )
+        for member in range(4)
+    )
+    m = dispute_overlap_module
+    original = m.index.build_public_dispute_index(runs)
+    source = json.loads(original.payload)
+    assert 16 < source["window_count"]
+    assert len(original.payload) <= m.index.MAX_PUBLIC_DISPUTE_INDEX_BYTES
+    assert source["hop_count"] == len(snapshots) - 1
+    with pytest.raises(m.DisputeOverlapCapacityError, match="^staging dispute overlap rejected$"):
+        m.build_public_dispute_overlap(runs, 0, source["hop_count"])
+    single = m.build_public_dispute_overlap(runs, 0, 1)
+    with pytest.raises(m.DisputeOverlapCapacityError, match="^staging dispute overlap rejected$"):
+        m.verify_public_dispute_overlap(
+            runs, 0, source["hop_count"], single.payload, expected_sha256=single.sha256
+        )
