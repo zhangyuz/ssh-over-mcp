@@ -2387,3 +2387,31 @@ bounds, reordered source cohorts and rehashed forged results. The
 batch is navigation only, not trusted chronology, severity, provenance,
 authorization or native host/provider recovery. No detached index,
 cross-request cache, private/host/provider I/O or unbounded output.
+
+### Canonical public disputed-coverage union (next isolated slice)
+
+`staging_dispute_overlap_union.build_public_dispute_overlap_union(runs,
+queries)` accepts **1–8** caller-ordered exact-int half-open hop ranges,
+allowing duplicates/overlaps. It freezes bounded mutable outer/inner
+list inputs, then merges overlapping **or touching** query ranges for
+union coverage. Canonical ≤4-KiB ASCII wire retains the original query
+order and reports sorted `merged_ranges`, total `requested_hops`,
+the count of distinct disputed windows touching the union,
+`matched_disputed_hops` with duplicates counted once, and complementary
+`unmatched_hops`. The independent verifier rebuilds the complete
+ranked index from original caller-ordered 3–5 cohorts, checks size
+and SHA before parsing, rejects duplicate/noncanonical/rehashed-forged
+bytes or source reordering, and compares the exact output. A digest
+is not authentication; the union conveys no severity, authority,
+provenance or trustworthy chronology. No private/host/provider I/O,
+cache or detached index trust.
+
+Independent PR #204 review regression: a real ordered four-cohort, two-segment
+source fixture with one length-4 disputed window queries two non-touching
+clips [0,1) and [2,3). The union retains both separate merged ranges and
+returns 2 requested hops, **1 distinct window**, 2 disputed hops, 0
+unmatched hops, the original full index digest, and successful independent
+build→verify. This guards against double-counting a window across disjoint
+queries. PR #201 merged as `d9273a0`; #202 merged as `5f340307`;
+#203 now targets main; #204 remains stacked on #203, with final
+exact-head CI/review gates still required.
