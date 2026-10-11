@@ -5650,3 +5650,150 @@ def test_dispute_overlap_page_rejects_untrusted_wire_preparse(
         patch.setattr(m.json, "loads", forbidden)
         with pytest.raises(m.DisputeOverlapPageError):
             m._checked(oversized, hashlib.sha256(oversized).hexdigest())
+
+
+@pytest.fixture
+def dispute_overlap_coverage_module(dispute_overlap_page_module):
+    return importlib.import_module("staging_dispute_overlap_coverage")
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "count", "hops"),
+    [(0, 3, 2, 3), (1, 3, 2, 2), (0, 2, 1, 2), (2, 3, 1, 1)],
+)
+def test_dispute_overlap_coverage_exact_clipped_hops(
+    dispute_overlap_coverage_module, dispute_index_runs, start, end, count, hops
+):
+    m = dispute_overlap_coverage_module
+    original = m.index.build_public_dispute_index(dispute_index_runs)
+    built = m.build_public_dispute_overlap_coverage(dispute_index_runs, start, end)
+    body = json.loads(built.payload)
+    assert body["query"] == {"start_hop": start, "end_hop_exclusive": end}
+    assert body["matched_window_count"] == count
+    assert body["matched_disputed_hops"] == hops
+    assert body["unmatched_hops"] == end - start - hops
+    assert body["source_dispute_index_sha256"] == original.sha256
+    assert len(built.payload) <= m.MAX_PUBLIC_DISPUTE_OVERLAP_COVERAGE_BYTES
+    facts = m.verify_public_dispute_overlap_coverage(
+        dispute_index_runs, start, end, built.payload, expected_sha256=built.sha256
+    )
+    assert facts.matched_windows == count
+    assert facts.matched_hops == hops
+    assert m.build_public_dispute_overlap_coverage(dispute_index_runs, start, end) == built
+
+
+def test_dispute_overlap_coverage_empty_source_index(
+    dispute_overlap_coverage_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    same = ((a, b), (b, c))
+    runs = (same, same, same)
+    m = dispute_overlap_coverage_module
+    built = m.build_public_dispute_overlap_coverage(runs, 0, 1)
+    body = json.loads(built.payload)
+    assert body["matched_window_count"] == 0
+    assert body["matched_disputed_hops"] == 0
+    assert body["unmatched_hops"] == 1
+    assert (
+        m.verify_public_dispute_overlap_coverage(
+            runs, 0, 1, built.payload, expected_sha256=built.sha256
+        ).matched_windows
+        == 0
+    )
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [(-1, 2), (0, 0), (2, 1), (0, 4), (True, 3), (0, False), (0.0, 3), ("0", 3)],
+)
+def test_dispute_overlap_coverage_rejects_invalid_bounds(
+    dispute_overlap_coverage_module, dispute_index_runs, start, end
+):
+    m = dispute_overlap_coverage_module
+    with pytest.raises(
+        m.DisputeOverlapCoverageError, match="^staging dispute overlap coverage rejected$"
+    ):
+        m.build_public_dispute_overlap_coverage(dispute_index_runs, start, end)
+
+
+def test_dispute_overlap_coverage_rejects_rehashed_forgery_and_order(
+    dispute_overlap_coverage_module, dispute_index_runs
+):
+    m = dispute_overlap_coverage_module
+    built = m.build_public_dispute_overlap_coverage(dispute_index_runs, 1, 3)
+    body = json.loads(built.payload)
+    forged = dict(body, matched_disputed_hops=1)
+    raw = json.dumps(forged, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode(
+        "ascii"
+    )
+    with pytest.raises(m.DisputeOverlapCoverageError):
+        m.verify_public_dispute_overlap_coverage(
+            dispute_index_runs, 1, 3, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+    swapped = (dispute_index_runs[1], dispute_index_runs[0], *dispute_index_runs[2:])
+    with pytest.raises(m.DisputeOverlapCoverageError):
+        m.verify_public_dispute_overlap_coverage(
+            swapped, 1, 3, built.payload, expected_sha256=built.sha256
+        )
+    duplicate = b'{"audience":"public","audience":"public"}'
+    with pytest.raises(m.DisputeOverlapCoverageError):
+        m.verify_public_dispute_overlap_coverage(
+            dispute_index_runs,
+            1,
+            3,
+            duplicate,
+            expected_sha256=hashlib.sha256(duplicate).hexdigest(),
+        )
+
+
+def test_dispute_overlap_coverage_rejects_oversize_before_parse(
+    dispute_overlap_coverage_module, monkeypatch
+):
+    m = dispute_overlap_coverage_module
+    raw = b"x" * (m.MAX_PUBLIC_DISPUTE_OVERLAP_COVERAGE_BYTES + 1)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversized summary wire reached JSON parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.DisputeOverlapCoverageError):
+            m._checked(raw, hashlib.sha256(raw).hexdigest())
+
+
+def test_dispute_overlap_coverage_remains_bounded_on_valid_large_index(
+    dispute_overlap_coverage_module, dispute_overlap_module, timeline_sources
+):
+    """The compact count works even when complete overlap wire exceeds 8 KiB."""
+    a, b, c = timeline_sources
+    snapshots = ((a, a, a, a),) + (
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+        (c, c, a, a),
+    ) * 12
+    runs = tuple(
+        tuple(
+            tuple(row[member] for row in snapshots[start : start + 9])
+            for start in range(0, len(snapshots) - 1, 8)
+        )
+        for member in range(4)
+    )
+    m = dispute_overlap_coverage_module
+    index_payload = m.index.build_public_dispute_index(runs)
+    source = json.loads(index_payload.payload)
+    assert source["window_count"] > 16
+    with pytest.raises(dispute_overlap_module.DisputeOverlapCapacityError):
+        dispute_overlap_module.build_public_dispute_overlap(runs, 0, 48)
+    built = m.build_public_dispute_overlap_coverage(runs, 0, 48)
+    body = json.loads(built.payload)
+    assert body["matched_window_count"] == source["window_count"]
+    assert body["matched_disputed_hops"] == source["total_disputed_hops"]
+    assert body["unmatched_hops"] == 48 - source["total_disputed_hops"]
+    assert body["source_dispute_index_sha256"] == index_payload.sha256
+    assert len(built.payload) <= m.MAX_PUBLIC_DISPUTE_OVERLAP_COVERAGE_BYTES
+    facts = m.verify_public_dispute_overlap_coverage(
+        runs, 0, 48, built.payload, expected_sha256=built.sha256
+    )
+    assert facts.matched_windows == source["window_count"]
+    assert facts.matched_hops == source["total_disputed_hops"]

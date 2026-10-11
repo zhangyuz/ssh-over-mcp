@@ -1314,3 +1314,22 @@ verifier. Independent review at `f8e4c0d` found 0 Critical/Important,
 retarget to main remain merge gates. The earlier stacked-head CI is not
 final main acceptance.
 A1/B8/N1c/UID-502/provider disposition/native Level-3 remain OPEN.
+
+**Next isolated public-only functional slice — disputed-overlap coverage
+summary (branch `live-e2e-dispute-overlap-coverage`, stacked on PR #201):**
+Provide a compact canonical ≤4-KiB ASCII source-verified coverage summary
+for strict integer half-open hop queries. Report clipped disputed-window
+intersection count, total disputed hops inside query and complementary
+non-disputed query hops, along with full original index SHA-256.
+Use original ordered 3–5 cohorts for every build/verify; never treat a
+SHA-256 as authentication or infer severity/chronology/authority.
+Fail closed on invalid bounds, oversized/noncanonical/duplicate/rehashed
+wire and source reordering. A real multi-segment >16-window index fixture
+confirms the summary remains ≤4 KiB when full overlap output exceeds
+8 KiB. This does not change #200's 8-KiB complete
+overlap bound or #201's paginated retrieval; it enables bounded counts.
+RED→GREEN focused regression, Ruff, docs consistency, independent review,
+and exact-head Python 3.13/3.14 CI required before integration. PR #201
+remains the dependency until merged. PR-only Level-3 SKIPPED is not native
+acceptance; A1/B8/N1c/UID-502/provider disposition/native Level-3
+remain OPEN.
