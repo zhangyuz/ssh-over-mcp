@@ -6047,3 +6047,189 @@ def test_dispute_overlap_coverages_freezes_mutable_pairs_before_validation(
     body = json.loads(built.payload)
     assert body["queries"] == [{"start_hop": 0, "end_hop_exclusive": 1} for _ in original]
     assert len(body["results"]) == 8
+
+
+@pytest.fixture
+def dispute_overlap_union_module(dispute_overlap_coverages_module):
+    return importlib.import_module("staging_dispute_overlap_union")
+
+
+def test_dispute_overlap_union_deduplicates_overlapping_queries(
+    dispute_overlap_union_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    snapshots = (
+        (b, c, b, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (a, a, b, b),
+        (a, a, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:3]),
+            tuple(row[member] for row in snapshots[2:]),
+        )
+        for member in range(4)
+    )
+    m = dispute_overlap_union_module
+    original = m.index.build_public_dispute_index(runs)
+    queries = ((0, 3), (2, 4), (0, 1), (3, 4))
+    built = m.build_public_dispute_overlap_union(runs, queries)
+    body = json.loads(built.payload)
+    assert body["queries"] == [
+        {"start_hop": start, "end_hop_exclusive": end} for start, end in queries
+    ]
+    assert body["merged_ranges"] == [{"start_hop": 0, "end_hop_exclusive": 4}]
+    assert body["source_dispute_index_sha256"] == original.sha256
+    assert (body["requested_hops"], body["matched_window_count"]) == (4, 2)
+    assert (body["matched_disputed_hops"], body["unmatched_hops"]) == (3, 1)
+    assert len(built.payload) <= m.MAX_PUBLIC_DISPUTE_OVERLAP_UNION_BYTES
+    facts = m.verify_public_dispute_overlap_union(
+        runs, queries, built.payload, expected_sha256=built.sha256
+    )
+    assert facts.query_ranges == queries
+    assert facts.merged_ranges == ((0, 4),)
+    assert facts.requested_hops == 4
+    assert facts.matched_windows == 2
+    assert facts.matched_hops == 3
+
+
+def test_dispute_overlap_union_separate_ranges_and_eight_limit(
+    dispute_overlap_union_module, dispute_index_runs
+):
+    m = dispute_overlap_union_module
+    source = m.index.build_public_dispute_index(dispute_index_runs)
+    queries = [[0, 1], [2, 3], [0, 1], [2, 3]] * 2
+    built = m.build_public_dispute_overlap_union(dispute_index_runs, queries)
+    body = json.loads(built.payload)
+    assert len(body["queries"]) == 8
+    assert body["merged_ranges"] == [
+        {"start_hop": 0, "end_hop_exclusive": 1},
+        {"start_hop": 2, "end_hop_exclusive": 3},
+    ]
+    assert body["requested_hops"] == 2
+    assert body["matched_disputed_hops"] == 2
+    assert body["unmatched_hops"] == 0
+    assert body["matched_window_count"] == 2
+    assert body["source_dispute_index_sha256"] == source.sha256
+    assert m.verify_public_dispute_overlap_union(
+        dispute_index_runs, queries, built.payload, expected_sha256=built.sha256
+    ).merged_ranges == ((0, 1), (2, 3))
+
+
+def test_dispute_overlap_union_empty_dispute_index(dispute_overlap_union_module, timeline_sources):
+    a, b, c = timeline_sources
+    same = ((a, b), (b, c))
+    runs = (same, same, same)
+    m = dispute_overlap_union_module
+    built = m.build_public_dispute_overlap_union(runs, ((0, 1),))
+    body = json.loads(built.payload)
+    assert body["matched_window_count"] == body["matched_disputed_hops"] == 0
+    assert body["unmatched_hops"] == body["requested_hops"] == 1
+
+
+@pytest.mark.parametrize(
+    "queries",
+    [
+        [],
+        (),
+        [(0, 1)] * 9,
+        (True,),
+        ((True, 1),),
+        ((0, False),),
+        ((-1, 1),),
+        ((0, 0),),
+        ((0, 4),),
+        ((0.0, 2),),
+        ((0, "2"),),
+        ((0,),),
+        ((0, 1, 2),),
+        "0,1",
+        ((0, 1), {"hop": 2}),
+    ],
+)
+def test_dispute_overlap_union_rejects_invalid_queries(
+    dispute_overlap_union_module, dispute_index_runs, queries
+):
+    m = dispute_overlap_union_module
+    with pytest.raises(
+        m.DisputeOverlapUnionError, match="^staging dispute overlap union rejected$"
+    ):
+        m.build_public_dispute_overlap_union(dispute_index_runs, queries)
+
+
+def test_dispute_overlap_union_rejects_rehashed_forgery_and_reordered_sources(
+    dispute_overlap_union_module, dispute_index_runs
+):
+    m = dispute_overlap_union_module
+    queries = ((0, 2), (1, 3))
+    built = m.build_public_dispute_overlap_union(dispute_index_runs, queries)
+    body = json.loads(built.payload)
+    body["matched_disputed_hops"] = 0
+    raw = json.dumps(body, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("ascii")
+    with pytest.raises(m.DisputeOverlapUnionError):
+        m.verify_public_dispute_overlap_union(
+            dispute_index_runs, queries, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+    swapped = (dispute_index_runs[1], dispute_index_runs[0], *dispute_index_runs[2:])
+    with pytest.raises(m.DisputeOverlapUnionError):
+        m.verify_public_dispute_overlap_union(
+            swapped, queries, built.payload, expected_sha256=built.sha256
+        )
+    duplicated = b'{"audience":"public","audience":"public"}'
+    with pytest.raises(m.DisputeOverlapUnionError):
+        m.verify_public_dispute_overlap_union(
+            dispute_index_runs,
+            queries,
+            duplicated,
+            expected_sha256=hashlib.sha256(duplicated).hexdigest(),
+        )
+
+
+def test_dispute_overlap_union_preparse_size_rejection(dispute_overlap_union_module, monkeypatch):
+    m = dispute_overlap_union_module
+    raw = b"x" * (m.MAX_PUBLIC_DISPUTE_OVERLAP_UNION_BYTES + 1)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversized union wire reached JSON parsing")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.DisputeOverlapUnionError):
+            m._checked(raw, hashlib.sha256(raw).hexdigest())
+
+
+def test_dispute_overlap_union_single_query_agrees_with_coverage_and_rebuilds_once(
+    dispute_overlap_union_module,
+    dispute_overlap_coverage_module,
+    dispute_index_runs,
+    monkeypatch,
+):
+    m = dispute_overlap_union_module
+    original = m.index.build_public_dispute_index
+    counted = []
+
+    def counted_build(original_runs):
+        counted.append(1)
+        return original(original_runs)
+
+    queries = ((1, 3),)
+    with monkeypatch.context() as patch:
+        patch.setattr(m.index, "build_public_dispute_index", counted_build)
+        built = m.build_public_dispute_overlap_union(dispute_index_runs, queries)
+        assert len(counted) == 1
+        facts = m.verify_public_dispute_overlap_union(
+            dispute_index_runs, queries, built.payload, expected_sha256=built.sha256
+        )
+        assert len(counted) == 2
+    single = dispute_overlap_coverage_module.build_public_dispute_overlap_coverage(
+        dispute_index_runs, 1, 3
+    )
+    expected = json.loads(single.payload)
+    actual = json.loads(built.payload)
+    assert actual["source_dispute_index_sha256"] == expected["source_dispute_index_sha256"]
+    assert actual["matched_window_count"] == expected["matched_window_count"]
+    assert actual["matched_disputed_hops"] == expected["matched_disputed_hops"]
+    assert actual["unmatched_hops"] == expected["unmatched_hops"]
+    assert facts.requested_hops == 2

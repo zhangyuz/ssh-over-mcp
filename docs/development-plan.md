@@ -1360,3 +1360,21 @@ independent security/docs review and exact-head dual Python 3.13/3.14
 CI after PR #202 has merged and this branch retargeted to main. Native
 Level-3 remains OPEN (PR-only skip is not acceptance), alongside
 A1/B8/N1c/UID-502/provider disposition.
+
+**Next isolated public-only functional slice — query-union disputed
+coverage (branch `live-e2e-dispute-overlap-union`, stacked on PR #203):**
+Extend navigation with an independent canonical ≤4-KiB union summary
+over 1–8 strict exact-int caller-ordered half-open ranges. Freeze bounded
+outer and inner inputs once; sorted merged intervals deduplicate all
+overlaps, repetitions and touching endpoints. Report requested unique
+hops, distinct intersecting disputed windows, clipped disputed unique
+hops and complementary non-disputed hops, retaining original query
+order and full source-index SHA. Rebuild full ranked index once from
+original ordered 3–5 cohorts per build or verify; no detached index,
+private host/provider I/O, trusted severity/time/provenance/authority.
+TDD tests overlapping/duplicate union, mixed-gap coverage, disjoint
+ranges, 8-range bound, malformed/oversized/duplicate/rehashed wire and
+changed source order. Require independent review and exact-head Ubuntu
+Python 3.13/3.14 CI after stacked dependencies #201–#203 are merged
+and PR retargeted to main; PR-only Level-3 skip is not native approval.
+A1/B8/N1c/UID-502/provider disposition/native Level-3 remain OPEN.
