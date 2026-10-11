@@ -1337,3 +1337,26 @@ and exact-head Python 3.13/3.14 CI required before integration. PR #201
 remains the dependency until merged. PR-only Level-3 SKIPPED is not native
 acceptance; A1/B8/N1c/UID-502/provider disposition/native Level-3
 remain OPEN.
+
+**In-progress isolated public-only functional slice — batch dispute-overlap
+coverage (branch `live-e2e-dispute-overlap-coverages`, stacked on PR #202):**
+Add canonical ≤8-KiB summary of 1–8 caller-ordered strict exact-int
+half-open hop ranges. A single full index rebuild per build or verify
+from original 3–5 ordered source cohorts serves all independent clipped
+`matched_window_count`, `matched_disputed_hops` and `unmatched_hops`
+results, including repeat/overlapping query pairs in caller order.
+Never trust detached index or cached digest, reject oversized,
+noncanonical/duplicate/rehashed forged wire, invalid/bool/out-of-range
+pairs and reordered cohorts using fixed sanitized errors. TDD verifies
+mixed-coverage source fixtures and that rebuild occurs once per call,
+input refusal, wire tamper and preparse bound. Independent PR #203
+review found 0 Critical/Important and 1 Minor: a list/list
+validate-then-copy race. Fixed by bounded frozen outer and inner
+snapshots before shape/value validation; added 8-pair upper-bound
+build→verify and deterministic worker-thread mutation regressions. Production security
+boundary unchanged: no private/host/provider I/O, authority, chronology,
+severity or provenance. Run focused regression and Ruff, require an
+independent security/docs review and exact-head dual Python 3.13/3.14
+CI after PR #202 has merged and this branch retargeted to main. Native
+Level-3 remains OPEN (PR-only skip is not acceptance), alongside
+A1/B8/N1c/UID-502/provider disposition.
