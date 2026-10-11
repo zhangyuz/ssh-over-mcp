@@ -2596,3 +2596,18 @@ terminal cursor, class-length parity against the independent single
 classified coverage API, forged output and preparse cap.
 No cached/detached public or private source, host/provider I/O, trusted
 timeline, authenticated provenance, severity, authorization or safety.
+
+Independent PR #210 review follow-up: an original four-cohort, two-segment
+source fixture has two distinct majority intervals with both query
+endpoints strictly *inside* these respective original source intervals.
+After filtering, limit=1 pages must return the two correctly clipped
+majority segments with no disputed gap leakage, terminal cursor and the
+unchanged full source-interval SHA. The resulting total majority hop
+length is independently cross-verified against #206 single-range
+classified hop coverage on the exact same original cohorts and query.
+A second real 8-hop, 4-cohort fixture has eight adjacent
+disputed intervals but changing agreement_groups. Source-bound
+filtering must preserve all eight identities and hop-order as distinct
+segments, with a legitimate limit=8 full page and complete
+limit=1 build→verify cursor traversal. Equal classification does
+not authorize merging original agreement-group boundaries.

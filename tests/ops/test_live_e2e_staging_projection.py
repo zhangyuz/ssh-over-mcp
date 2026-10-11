@@ -7849,3 +7849,140 @@ def test_classified_hop_filtered_page_preparse_cap_and_one_source_rebuild(
         patch.setattr(m.json, "loads", forbidden)
         with pytest.raises(m.ClassifiedHopFilteredPageError):
             m._checked(raw, hashlib.sha256(raw).hexdigest())
+
+
+def test_classified_hop_filtered_page_majority_clips_inside_both_source_segments(
+    classified_hop_filtered_page_module,
+    classified_hop_coverage_module,
+    timeline_sources,
+):
+    """Both query edges are strictly inside separate real majority source intervals."""
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, a, b),
+        (b, b, b, c),
+        (a, a, a, a),
+        (b, b, c, c),
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, a, b),
+        (b, b, b, c),
+        (a, a, a, a),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:6]),
+            tuple(row[member] for row in snapshots[5:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_filtered_page_module
+    source = m.intervals.build_public_intervals(runs)
+    rows = json.loads(source.payload)["intervals"]
+    start, end, category = 1, 9, "majority"
+    first = next(row for row in rows if row["start_hop"] < start < row["end_hop_exclusive"])
+    last = next(row for row in rows if row["start_hop"] < end < row["end_hop_exclusive"])
+    assert first is not last
+    assert first["classification"] == last["classification"] == category
+    clipped_source = tuple(
+        (max(start, item["start_hop"]), min(end, item["end_hop_exclusive"]), category)
+        for item in rows
+        if item["classification"] == category
+        and min(end, item["end_hop_exclusive"]) > max(start, item["start_hop"])
+    )
+    assert len(clipped_source) == 2
+    assert clipped_source[0][0] == start > first["start_hop"]
+    assert clipped_source[-1][1] == end < last["end_hop_exclusive"]
+    assert clipped_source[0][1] < clipped_source[1][0]  # filtered cursor skips disputed gap
+    actual = []
+    offset = 0
+    for _ in range(8):
+        page = m.build_public_classified_hop_filtered_page(runs, start, end, category, offset, 1)
+        wire = json.loads(page.payload)
+        assert wire["source_intervals_sha256"] == source.sha256
+        assert wire["total_segments"] == len(clipped_source)
+        checked = m.verify_public_classified_hop_filtered_page(
+            runs, start, end, category, offset, 1, page.payload, expected_sha256=page.sha256
+        )
+        assert checked.source_intervals_sha256 == source.sha256
+        assert checked.segments == tuple(
+            (segment["start_hop"], segment["end_hop_exclusive"], segment["classification"])
+            for segment in wire["segments"]
+        )
+        actual.extend(checked.segments)
+        if wire["next_offset"] is None:
+            break
+        assert wire["next_offset"] == offset + len(checked.segments)
+        offset = wire["next_offset"]
+    else:
+        pytest.fail("category-filtered cursor did not terminate")
+    assert tuple(actual) == clipped_source
+
+    single = classified_hop_coverage_module
+    summary = single.build_public_classified_hop_coverage(runs, start, end)
+    verified_summary = single.verify_public_classified_hop_coverage(
+        runs, start, end, summary.payload, expected_sha256=summary.sha256
+    )
+    assert verified_summary.source_intervals_sha256 == source.sha256
+    assert sum(right - left for left, right, _ in actual) == (verified_summary.classified_hops[1])
+
+
+def test_classified_hop_filtered_page_keeps_eight_same_class_source_groups(
+    classified_hop_filtered_page_module, timeline_sources
+):
+    """Adjacent disputed rows with changing agreement groups remain distinct."""
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, c, c),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+        (c, c, a, a),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:5]),
+            tuple(row[member] for row in snapshots[4:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_filtered_page_module
+    source = m.intervals.build_public_intervals(runs)
+    rows = json.loads(source.payload)["intervals"]
+    assert len(rows) == 8
+    assert all(row["classification"] == "disputed" for row in rows)
+    assert all(rows[i]["agreement_groups"] != rows[i + 1]["agreement_groups"] for i in range(7))
+    expected = tuple((row["start_hop"], row["end_hop_exclusive"], "disputed") for row in rows)
+    whole = m.build_public_classified_hop_filtered_page(runs, 0, 8, "disputed", 0, 8)
+    wire = json.loads(whole.payload)
+    assert wire["total_segments"] == 8
+    assert len(wire["segments"]) == m.MAX_CLASSIFIED_HOP_FILTERED_PAGE_LIMIT == 8
+    assert wire["next_offset"] is None
+    assert wire["source_intervals_sha256"] == source.sha256
+    checked = m.verify_public_classified_hop_filtered_page(
+        runs, 0, 8, "disputed", 0, 8, whole.payload, expected_sha256=whole.sha256
+    )
+    assert checked.segments == expected
+
+    traversed = []
+    offset = 0
+    for i in range(8):
+        page = m.build_public_classified_hop_filtered_page(runs, 0, 8, "disputed", offset, 1)
+        body = json.loads(page.payload)
+        facts = m.verify_public_classified_hop_filtered_page(
+            runs, 0, 8, "disputed", offset, 1, page.payload, expected_sha256=page.sha256
+        )
+        assert body["total_segments"] == 8
+        assert body["source_intervals_sha256"] == source.sha256
+        assert facts.segments == expected[i : i + 1]
+        traversed.extend(facts.segments)
+        assert body["next_offset"] == (i + 1 if i < 7 else None)
+        offset = i + 1
+    assert tuple(traversed) == expected
+    assert sum(end - start for start, end, _ in traversed) == 8

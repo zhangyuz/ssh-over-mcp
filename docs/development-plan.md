@@ -1582,3 +1582,17 @@ security/docs review and final exact-head dual Python CI after
 upstream #205→#206→#207→#208→#209 merge and #210 main retarget
 remain mandatory. PR-only Level-3 skipped is not native acceptance;
 A1/B8/N1c/UID-502/stale provider/native Level-3 remain OPEN.
+
+Independent PR #210 review (original HEAD d2ed1c7, 0 Critical /
+0 Important / 2 Minor) requested stronger source-derived pagination
+tests, not a change to production algorithm. Added exact real
+four-cohort/two-segment source regression with a filtered majority query
+whose *both* boundaries fall strictly inside separate source intervals;
+page cursor/length and full source SHA cross-check against independently
+verified #206 classified coverage. Added a separate real eight-hop
+disputed-only original source with changing agreement groups across
+all eight adjacent same-category intervals; verified one legal
+limit=8 page and complete limit=1 cursor traversal without
+coalescing source identities. This is navigation evidence only,
+not provenance/safety/host authority. Exact-head 3.13/3.14 CI
+and upstream merges #205→#206→#207→#208→#209 remain gates.
