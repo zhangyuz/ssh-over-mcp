@@ -1278,7 +1278,8 @@ intersecting public disputed window in index rank order with its
 clipped intersection. Return an empty match list for an empty index;
 reject invalid bounds, duplicate/noncanonical/oversized/rehashed
 forged output and changed source order. Canonical ≤8-KiB ASCII
-binds full source index SHA-256. Tests RED→GREEN; independent review,
+binds full source index SHA-256. Real-source 16-window all-matches
+build→verify upper-bound regression added. Tests RED→GREEN; independent review,
 focused/full regression, exact-head Ubuntu Python 3.13/3.14 CI remain
 merge gates. No host/provider/private I/O, cache, native authority,
 trusted chronology or severity. A1/B8/N1c/UID-502/stale provider/

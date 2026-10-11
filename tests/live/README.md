@@ -2310,5 +2310,7 @@ original ordered 3–5 cohort index is rebuilt on every build and verify,
 never accepted as detached/cached wire. Canonical ≤8-KiB ASCII binds
 the full source index SHA-256; independent verification rejects
 oversized/noncanonical/duplicate-key/rehashed-forged output and
-changed source order. No private paths, host/provider I/O, authority,
-trusted chronology, severity, provenance or native recovery.
+changed source order. A genuine two-segment 16-distinct-disputed-window
+source fixture covers the all-matches build→verify boundary. No private
+paths, host/provider I/O, authority, trusted chronology, severity,
+provenance or native recovery.
