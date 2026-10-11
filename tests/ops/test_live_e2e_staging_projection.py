@@ -5147,3 +5147,43 @@ def test_dispute_range_oversize_rejected_before_parser(dispute_range_module, mon
         patch.setattr(m.json, "loads", forbidden)
         with pytest.raises(m.DisputeRangeError):
             m._checked(raw, hashlib.sha256(raw).hexdigest())
+
+
+def test_dispute_range_rank_follows_length_not_hop_order(dispute_range_module, timeline_sources):
+    """A later, longer disputed window ranks ahead of the earlier short one."""
+    a, b, c = timeline_sources
+    # Genuine two-segment five-snapshot source series: early disputed hop, then
+    # unanimous hop, then two contiguous disputed hops sharing membership.
+    # The index must rank the later two-hop window ahead of the earlier one.
+    snapshots = (
+        (b, c, b, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (a, a, b, b),
+        (a, a, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:3]),
+            tuple(row[member] for row in snapshots[2:]),
+        )
+        for member in range(4)
+    )
+    m = dispute_range_module
+    index = m.index.build_public_dispute_index(runs)
+    windows = json.loads(index.payload)["ranked_windows"]
+    assert [(w["start_hop"], w["end_hop_exclusive"]) for w in windows] == [
+        (2, 4),  # rank 0: longer, despite later hop start
+        (0, 1),  # rank 1: shorter, despite earlier hop start
+    ]
+    for start, end, rank in ((2, 4, 0), (0, 1, 1)):
+        built = m.build_public_dispute_range(runs, start, end)
+        body = json.loads(built.payload)
+        assert body["rank"] == rank
+        assert body["window"] == windows[rank]
+        assert body["source_dispute_index_sha256"] == index.sha256
+        verified = m.verify_public_dispute_range(
+            runs, start, end, built.payload, expected_sha256=built.sha256
+        )
+        assert verified.rank == rank
+        assert verified.source_index_sha256 == index.sha256
