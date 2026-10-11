@@ -2503,3 +2503,26 @@ a ninth outer query or changing an inner hop boundary after capture
 cannot change source-bound canonical query order, classification counts
 or verification facts. A single full intervals rebuild is asserted for
 each invocation. This is test coverage, not a production code change.
+
+### Classified hop union across bounded query ranges (isolated next slice)
+
+`staging_classified_hop_union.build_public_classified_hop_union(runs,
+queries)` accepts **1–8** strict exact-int half-open ranges. Caller
+queries retain their original order (including repetition) but sorted
+merged union ranges remove all overlap and touching boundaries before
+counting unique `unanimous_hops`, `majority_hops`,
+`disputed_hops`, `non_disputed_hops=unanimous+majority`, and
+`unique_hops` (sum of three classifications).
+The canonical ≤4-KiB ASCII payload binds the complete original
+source-interval SHA-256. Builder/verifier each rebuild the complete
+public `staging_consensus_intervals` once from the original ordered
+3–5 cohorts. Bounded outer/inner caller snapshots precede validation
+to prevent validate/use races; strict exact-int/shape/range rejection,
+SHA and size before parsing, duplicate-key/noncanonical/rehashed
+forgery and source reordering refuse with fixed sanitized errors.
+Tests cover mixed-class overlapping/touching/repeated sources,
+disjoint union with the legal eight-range input bound, invalid inputs,
+one full source rebuild per build/verify, tamper and oversize.
+This is public navigation only, never authenticated provenance, native
+provider state, host/private I/O, security severity/authority or
+trusted chronology.

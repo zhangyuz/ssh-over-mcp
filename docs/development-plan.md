@@ -1480,3 +1480,26 @@ original frozen pairs. Production logic already freezes before source
 I/O; this is a forward regression guard, not an observed runtime bug.
 #205 and #206 remain upstream merge gates; the final exact-HEAD/main
 Python 3.13/3.14 CI plus independent review remain required.
+
+**Next isolated public-only slice — classified hop union coverage
+(branch `live-e2e-classified-hop-union`, stacked on PR #207):**
+Add bounded 1–8 original caller-ordered strict-int half-open hop queries
+with sorted merged unique intervals (overlapping, duplicate and
+touching segments coalesce). Return canonical ≤4-KiB ASCII one-shot
+source-verified unique unanimous/majority/disputed and non-disputed
+hop counts with the complete original source-interval SHA-256.
+Independent build/verify each reconstruct the original ordered 3–5
+cohort public intervals exactly once; never use detached/cached data.
+Bounded frozen outer/inner input capture, original-query echo, disjoint
+sorted merged ranges, strict sum=unique width and byte-for-byte
+original-source verifier are mandatory. Invalid/bool/shape/oversized,
+duplicate-key/noncanonical/rehashed forgery and reordered originals
+fail with fixed sanitized errors. RED→GREEN focused tests include
+real mixed-class source fixture, duplicates/touching queries, disjoint
+8-input bound, one rebuild for build and verify, invalid shape/type/
+bounds and tampered/reordered/oversized before parse. No host/provider/
+private I/O, trusted time, provenance, severity or authority. Independent
+security/docs review and final exact-head dual Python 3.13/3.14 CI are
+required after #205→#206→#207 merge and final main retarget; PR-only
+Level-3 SKIPPED is not native acceptance. A1/B8/N1c/UID-502/stale
+provider/native Level-3 remain OPEN.

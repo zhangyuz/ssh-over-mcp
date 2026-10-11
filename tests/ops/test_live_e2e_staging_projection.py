@@ -7005,3 +7005,165 @@ def test_classified_hop_coverages_freezes_caller_lists_before_source_rebuild(
     assert json.loads(expected.payload)["queries"] == [
         {"start_hop": start, "end_hop_exclusive": end} for start, end in initial
     ]
+
+
+@pytest.fixture
+def classified_hop_union_module(classified_hop_coverages_module):
+    return importlib.import_module("staging_classified_hop_union")
+
+
+def test_classified_hop_union_source_verified_mixed_class_and_dedup(
+    classified_hop_union_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, c, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (b, b, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:4]),
+            tuple(row[member] for row in snapshots[3:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_union_module
+    source = m.intervals.build_public_intervals(runs)
+    queries = ((0, 2), (1, 4), (4, 5), (0, 1))
+    built = m.build_public_classified_hop_union(runs, queries)
+    wire = json.loads(built.payload)
+    assert wire["queries"] == [
+        {"start_hop": start, "end_hop_exclusive": end} for start, end in queries
+    ]
+    assert wire["merged_ranges"] == [{"start_hop": 0, "end_hop_exclusive": 5}]
+    assert wire["source_intervals_sha256"] == source.sha256
+    assert wire["unique_hops"] == 5
+    assert wire["unanimous_hops"] == 2
+    assert wire["majority_hops"] == 1
+    assert wire["disputed_hops"] == 2
+    assert wire["non_disputed_hops"] == 3
+    assert len(built.payload) <= m.MAX_PUBLIC_CLASSIFIED_HOP_UNION_BYTES
+    facts = m.verify_public_classified_hop_union(
+        runs, queries, built.payload, expected_sha256=built.sha256
+    )
+    assert facts.merged_ranges == ((0, 5),)
+    assert facts.query_ranges == queries
+    assert facts.classified_hops == (2, 1, 2)
+    assert facts.source_intervals_sha256 == source.sha256
+
+
+def test_classified_hop_union_disjoint_ranges_and_eight_query_boundary(
+    classified_hop_union_module, dispute_index_runs
+):
+    m = classified_hop_union_module
+    queries = [[0, 1], [2, 3]] * 4
+    built = m.build_public_classified_hop_union(dispute_index_runs, queries)
+    body = json.loads(built.payload)
+    assert len(body["queries"]) == 8
+    assert body["merged_ranges"] == [
+        {"start_hop": 0, "end_hop_exclusive": 1},
+        {"start_hop": 2, "end_hop_exclusive": 3},
+    ]
+    assert body["unique_hops"] == 2
+    assert sum(body[key] for key in ("unanimous_hops", "majority_hops", "disputed_hops")) == 2
+    facts = m.verify_public_classified_hop_union(
+        dispute_index_runs, queries, built.payload, expected_sha256=built.sha256
+    )
+    assert facts.merged_ranges == ((0, 1), (2, 3))
+
+
+@pytest.mark.parametrize(
+    "queries",
+    [
+        [],
+        (),
+        ((0, 1),) * 9,
+        ((0, 1, 2),),
+        ((0,),),
+        ((0, 4),),
+        ((-1, 1),),
+        ((1, 1),),
+        ((1, 0),),
+        ((True, 1),),
+        ((0, False),),
+        ((0.0, 1),),
+        ((0, 1.0),),
+        ((0, "1"),),
+        ((None, 1),),
+        ((0, 1), "invalid"),
+    ],
+)
+def test_classified_hop_union_rejects_invalid_inputs(
+    classified_hop_union_module, dispute_index_runs, queries
+):
+    m = classified_hop_union_module
+    with pytest.raises(m.ClassifiedHopUnionError, match="^staging classified hop union rejected$"):
+        m.build_public_classified_hop_union(dispute_index_runs, queries)
+
+
+def test_classified_hop_union_forgery_source_reorder_and_one_rebuild(
+    classified_hop_union_module, dispute_index_runs, monkeypatch
+):
+    m = classified_hop_union_module
+    queries = ((0, 1), (1, 3), (0, 1))
+    original = m.intervals.build_public_intervals
+    calls = []
+
+    def counted(source):
+        calls.append(1)
+        return original(source)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.intervals, "build_public_intervals", counted)
+        built = m.build_public_classified_hop_union(dispute_index_runs, queries)
+        assert len(calls) == 1
+        m.verify_public_classified_hop_union(
+            dispute_index_runs, queries, built.payload, expected_sha256=built.sha256
+        )
+        assert len(calls) == 2
+    altered = json.loads(built.payload)
+    altered["disputed_hops"] = 0
+    forged = json.dumps(altered, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode(
+        "ascii"
+    )
+    with pytest.raises(m.ClassifiedHopUnionError):
+        m.verify_public_classified_hop_union(
+            dispute_index_runs, queries, forged, expected_sha256=hashlib.sha256(forged).hexdigest()
+        )
+    swapped = (
+        dispute_index_runs[2],
+        dispute_index_runs[1],
+        dispute_index_runs[0],
+        dispute_index_runs[3],
+    )
+    with pytest.raises(m.ClassifiedHopUnionError):
+        m.verify_public_classified_hop_union(
+            swapped, queries, built.payload, expected_sha256=built.sha256
+        )
+    repeated_key = b'{"audience":"public","audience":"public"}'
+    with pytest.raises(m.ClassifiedHopUnionError):
+        m.verify_public_classified_hop_union(
+            dispute_index_runs,
+            queries,
+            repeated_key,
+            expected_sha256=hashlib.sha256(repeated_key).hexdigest(),
+        )
+
+
+def test_classified_hop_union_rejects_oversize_before_parsing(
+    classified_hop_union_module, monkeypatch
+):
+    m = classified_hop_union_module
+    raw = b"x" * (m.MAX_PUBLIC_CLASSIFIED_HOP_UNION_BYTES + 1)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversized classified union reached parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.ClassifiedHopUnionError):
+            m._checked(raw, hashlib.sha256(raw).hexdigest())
