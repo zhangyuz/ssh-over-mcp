@@ -1290,3 +1290,22 @@ Tests RED→GREEN; independent review, focused/full regression and
 exact-head Ubuntu Python 3.13/3.14 CI remain merge gates. No host/provider/private I/O, cache, native authority,
 trusted chronology or severity. A1/B8/N1c/UID-502/stale provider/
 real Level-3 remain OPEN.
+
+**In-progress isolated public-only slice — bounded overlap pagination
+(branch `live-e2e-dispute-overlap-page`, stacked on pending PR #200
+exact head `87fcfa1`):**
+Add a separate deterministic source-verified page builder/verifier for
+overlapping disputed windows, using exact integer hop bounds, matching
+window offset 0..total and limit 1..16. Each public canonical ASCII page
+fits ≤8 KiB; include complete clipped windows in length-first index rank
+order, total matches, full rebuilt index digest and an advancing next
+offset or terminal null. Automatically fit fewer than limit when required;
+if one complete window cannot fit, reject with fixed sanitized typed
+capacity error rather than silently truncate. Rebuild from original
+ordered 3–5 source cohorts on every call and reject invalid, rehashed
+forgery, reordered source and noncanonical output. TDD for multi-page
+valid source overflow, cursor semantics, size, invalid inputs and
+verifier; independent review and exact-head dual-Python CI before
+integration. PR #200 must merge separately once its own CI/review gates
+pass; do not count a stacked CI result as main/native acceptance.
+A1/B8/N1c/UID-502/provider disposition/native Level-3 remain OPEN.
