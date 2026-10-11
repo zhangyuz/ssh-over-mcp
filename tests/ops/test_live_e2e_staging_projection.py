@@ -7555,3 +7555,87 @@ def test_classified_hop_page_eight_complete_segments_real_source(
         (row["start_hop"], row["end_hop_exclusive"], row["classification"]) for row in rows
     )
     assert sum(end - start for start, end, _ in facts.segments) == 8
+
+
+def test_classified_hop_page_clips_inside_both_distinct_source_intervals(
+    classified_hop_page_module, classified_hop_coverage_module, timeline_sources
+):
+    """Both endpoints lie strictly inside different source agreement intervals."""
+    a, b, _ = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, b),
+        (a, a, a, a),
+        (b, b, b, b),
+        (a, a, a, b),
+        (b, b, b, b),
+        (a, a, a, b),
+        (b, b, a, a),
+        (a, a, a, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:5]),
+            tuple(row[member] for row in snapshots[4:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_page_module
+    source = m.intervals.build_public_intervals(runs)
+    rows = json.loads(source.payload)["intervals"]
+    # Not merely coincidentally at a source boundary: both query
+    # boundaries must fall inside original, distinct, positive spans.
+    start, end = 1, 5
+    left_source = next(row for row in rows if row["start_hop"] < start < row["end_hop_exclusive"])
+    right_source = next(row for row in rows if row["start_hop"] < end < row["end_hop_exclusive"])
+    assert left_source is not right_source
+    original_clipped = tuple(
+        (max(start, row["start_hop"]), min(end, row["end_hop_exclusive"]), row["classification"])
+        for row in rows
+        if min(end, row["end_hop_exclusive"]) > max(start, row["start_hop"])
+    )
+    assert len(original_clipped) >= 2
+    assert original_clipped[0][0] == start
+    assert original_clipped[-1][1] == end
+    assert original_clipped[0][0] > left_source["start_hop"]
+    assert original_clipped[-1][1] < right_source["end_hop_exclusive"]
+    assert sum(right - left for left, right, _ in original_clipped) == end - start
+
+    actual = []
+    cursor = 0
+    for _ in range(8):
+        page = m.build_public_classified_hop_page(runs, start, end, cursor, 1)
+        wire = json.loads(page.payload)
+        assert wire["source_intervals_sha256"] == source.sha256
+        assert wire["total_segments"] == len(original_clipped)
+        checked = m.verify_public_classified_hop_page(
+            runs, start, end, cursor, 1, page.payload, expected_sha256=page.sha256
+        )
+        actual.extend(checked.segments)
+        assert (
+            tuple(
+                (item["start_hop"], item["end_hop_exclusive"], item["classification"])
+                for item in wire["segments"]
+            )
+            == checked.segments
+        )
+        if wire["next_offset"] is None:
+            break
+        assert wire["next_offset"] == cursor + len(checked.segments)
+        cursor = wire["next_offset"]
+    else:
+        pytest.fail("source classified segments failed to terminate pagination")
+    assert tuple(actual) == original_clipped
+
+    single = classified_hop_coverage_module
+    summary = single.build_public_classified_hop_coverage(runs, start, end)
+    facts = single.verify_public_classified_hop_coverage(
+        runs, start, end, summary.payload, expected_sha256=summary.sha256
+    )
+    assert facts.source_intervals_sha256 == source.sha256
+    counts = tuple(
+        sum(right - left for left, right, label in actual if label == kind)
+        for kind in ("unanimous", "majority", "disputed")
+    )
+    assert counts == facts.classified_hops
+    assert sum(counts) == end - start

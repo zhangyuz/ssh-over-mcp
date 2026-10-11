@@ -1544,3 +1544,15 @@ exact-head dual Python 3.13/3.14 CI required after #205→#206→#207→#208
 merge and this branch retargets main. PR-only Level-3 skip does not
 equal native acceptance; A1/B8/N1c/UID-502/stale provider/native
 Level-3 remain OPEN.
+
+Independent PR #209 review at initial HEAD `0ccbb46`: **0 Critical,
+0 Important, 1 Minor**, concerning a test that asserted both-end
+clipping although its query start was exactly at a source interval
+boundary. Added real original four-cohort/two-segment source
+build→verify parity: query endpoints strictly inside two *different*
+underlying source intervals, `limit=1` traversal through all clipped
+segments, preservation of full original intervals SHA and precise
+unanimous/majority/disputed hop totals matching the original-source
+#206 single-query classified summary. No production algorithm change.
+Final exact-head dual Python 3.13/3.14 CI and independent review
+remain mandatory after #205→#206→#207→#208 merge and main retarget.

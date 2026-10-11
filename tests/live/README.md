@@ -2562,3 +2562,14 @@ invalid bool/query/cursor, digest-rehashed forgery, duplicate keys,
 source reorder and oversized-before-parser checks.
 No host/provider/private I/O, cached/detached original source,
 authenticated provenance, severity, trust or safety certification.
+
+Independent PR #209 Review: a separate real four-cohort/two-segment
+source fixture has original interval boundaries strictly surrounding
+*both* endpoints of query `[1,5)`. Each returned page (limit 1)
+clips the leading and trailing source intervals at their interior
+points, retains all source interval rows without silently dropping a
+segment, and uses the full original source intervals SHA-256. The
+independently verified sum by unanimous/majority/disputed class is
+identical to #206 one-query classified coverage for the exact same
+original cohorts and half-open query. This specifically repairs a
+prior test that began exactly on a source interval boundary.
