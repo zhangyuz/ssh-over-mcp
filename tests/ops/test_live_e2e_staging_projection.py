@@ -7167,3 +7167,141 @@ def test_classified_hop_union_rejects_oversize_before_parsing(
         patch.setattr(m.json, "loads", forbidden)
         with pytest.raises(m.ClassifiedHopUnionError):
             m._checked(raw, hashlib.sha256(raw).hexdigest())
+
+
+@pytest.mark.parametrize(
+    ("queries", "expected_ranges", "expected_counts"),
+    [
+        (((0, 1), (2, 4), (2, 3)), ((0, 1), (2, 4)), (1, 1, 1)),
+        (((1, 2), (4, 5), (1, 2)), ((1, 2), (4, 5)), (1, 0, 1)),
+    ],
+)
+def test_classified_hop_union_agrees_with_dispute_union_and_single_range_classification(
+    classified_hop_union_module,
+    dispute_overlap_union_module,
+    classified_hop_coverage_module,
+    timeline_sources,
+    queries,
+    expected_ranges,
+    expected_counts,
+):
+    """All three public APIs agree on a real *disjoint* source-derived union."""
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, c),  # majority hop 0
+        (a, a, c, c),  # disputed hop 1
+        (a, a, a, a),  # disputed hop 2
+        (b, b, b, b),  # unanimous hop 3
+        (b, b, b, b),  # unanimous hop 4
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:4]),
+            tuple(row[member] for row in snapshots[3:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_union_module
+    built = m.build_public_classified_hop_union(runs, queries)
+    wire = json.loads(built.payload)
+    facts = m.verify_public_classified_hop_union(
+        runs, queries, built.payload, expected_sha256=built.sha256
+    )
+    assert facts.merged_ranges == expected_ranges
+    assert facts.classified_hops == expected_counts
+    assert wire["source_intervals_sha256"] == m.intervals.build_public_intervals(runs).sha256
+
+    other = dispute_overlap_union_module
+    disputed = other.build_public_dispute_overlap_union(runs, queries)
+    dispute_wire = json.loads(disputed.payload)
+    dispute_facts = other.verify_public_dispute_overlap_union(
+        runs, queries, disputed.payload, expected_sha256=disputed.sha256
+    )
+    assert dispute_facts.merged_ranges == facts.merged_ranges
+    assert wire["unique_hops"] == dispute_wire["requested_hops"]
+    assert wire["disputed_hops"] == dispute_wire["matched_disputed_hops"]
+    assert wire["non_disputed_hops"] == dispute_wire["unmatched_hops"]
+
+    single = classified_hop_coverage_module
+    sums = [0, 0, 0]
+    for start, end in facts.merged_ranges:
+        page = single.build_public_classified_hop_coverage(runs, start, end)
+        page_wire = json.loads(page.payload)
+        page_facts = single.verify_public_classified_hop_coverage(
+            runs, start, end, page.payload, expected_sha256=page.sha256
+        )
+        assert page_facts.source_intervals_sha256 == facts.source_intervals_sha256
+        assert page_wire["source_intervals_sha256"] == facts.source_intervals_sha256
+        assert page_wire["query_hops"] == end - start
+        for i, value in enumerate(page_facts.classified_hops):
+            sums[i] += value
+    assert tuple(sums) == expected_counts
+    assert tuple(sums) == facts.classified_hops
+    assert sum(sums) == wire["unique_hops"]
+
+
+@pytest.mark.parametrize("mutation", ["append_ninth", "change_inner_boundary"])
+@pytest.mark.parametrize("action", ["build", "verify"])
+def test_classified_hop_union_freezes_caller_lists_before_source_rebuild(
+    classified_hop_union_module,
+    dispute_index_runs,
+    mutation,
+    action,
+    monkeypatch,
+):
+    """Freeze eight query pairs before a synchronized worker changes caller lists."""
+    m = classified_hop_union_module
+    initial = tuple((0, 1) for _ in range(m.MAX_CLASSIFIED_HOP_UNION_RANGES))
+    expected = m.build_public_classified_hop_union(dispute_index_runs, initial)
+    expected_facts = m.verify_public_classified_hop_union(
+        dispute_index_runs, initial, expected.payload, expected_sha256=expected.sha256
+    )
+    queries = [[start, end] for start, end in initial]
+    ready = threading.Event()
+    mutated = threading.Event()
+
+    def worker():
+        if ready.wait(timeout=5):
+            if mutation == "append_ninth":
+                queries.append([2, 3])
+            else:
+                queries[0][1] = 2
+            mutated.set()
+
+    thread = threading.Thread(target=worker, daemon=True)
+    original = m.intervals.build_public_intervals
+    calls = []
+
+    def rebuild_during_mutation(runs):
+        calls.append(1)
+        ready.set()
+        assert mutated.wait(timeout=5), "worker did not update caller inputs"
+        return original(runs)
+
+    thread.start()
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(m.intervals, "build_public_intervals", rebuild_during_mutation)
+            if action == "build":
+                assert m.build_public_classified_hop_union(dispute_index_runs, queries) == expected
+            else:
+                assert (
+                    m.verify_public_classified_hop_union(
+                        dispute_index_runs,
+                        queries,
+                        expected.payload,
+                        expected_sha256=expected.sha256,
+                    )
+                    == expected_facts
+                )
+    finally:
+        ready.set()
+        thread.join(timeout=5)
+    assert mutated.is_set() and not thread.is_alive()
+    assert calls == [1]
+    assert len(queries) == (9 if mutation == "append_ninth" else 8)
+    assert queries[0][1] == (2 if mutation == "change_inner_boundary" else 1)
+    assert json.loads(expected.payload)["queries"] == [
+        {"start_hop": start, "end_hop_exclusive": end} for start, end in initial
+    ]

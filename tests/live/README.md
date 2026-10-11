@@ -2526,3 +2526,16 @@ one full source rebuild per build/verify, tamper and oversize.
 This is public navigation only, never authenticated provenance, native
 provider state, host/private I/O, security severity/authority or
 trusted chronology.
+
+Independent PR #208 review follow-up: on real ordered four-cohort
+two-segment sources, two disjoint (and optionally duplicated) half-open
+union queries with majority/disputed/unanimous mixes must agree with
+`staging_dispute_overlap_union`'s requested/disputed/non-disputed
+hop counts. Independently build→verify each resulting merged range
+with the single-query `staging_classified_hop_coverage` and sum all
+three classes; the total must match the union's unique width and
+full original source-interval digest. A second synchronized test matrix
+mutates caller lists after the union builder/verifier freezes eight pairs
+(outer ninth append, inner boundary change). Neither canonical wire
+nor verified facts can read the later mutation. No production
+algorithm change or inferred host/provider/trust authority.

@@ -1503,3 +1503,19 @@ security/docs review and final exact-head dual Python 3.13/3.14 CI are
 required after #205→#206→#207 merge and final main retarget; PR-only
 Level-3 SKIPPED is not native acceptance. A1/B8/N1c/UID-502/stale
 provider/native Level-3 remain OPEN.
+
+Independent PR #208 review at initial HEAD `4bb22cc` found
+**0 Critical / 0 Important / 2 Minor**: requested a real
+four-cohort, two-segment source fixture with disjoint union queries
+cross-checked against original-source rebuilt disputed overlap union
+and the per-merged-range one-query classified coverage; and deterministic
+build/verify worker-thread mutation after the new batch's bounded freeze.
+Two parametrized parity queries cover majority, unanimous and disputed
+hop mixes and clipped gaps, asserting unique, disputed and non-disputed
+counts are identical across API layers and summing every classified
+merged range exactly reconstructs the union totals. Four deterministic
+snapshot tests cover append-ninth outer mutation and a changed inner
+hop boundary during source rebuild in both build and verify. No
+production change: independent reviewer found existing algorithm and
+security invariants sound. Exact final-head dual Python 3.13/3.14 CI,
+independent final review and upstream #205→#206→#207 merges remain gates.
