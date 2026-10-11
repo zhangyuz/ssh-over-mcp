@@ -2296,3 +2296,19 @@ independent
 oversized, rehashed forged query/rank/window/hash and changed source
 ordering. No cache, detached index, host/provider/private I/O,
 trusted chronology, severity, provenance or authorization semantics.
+
+### Source-verified disputed-window overlap navigation (next slice)
+
+`staging_dispute_overlap.build_public_dispute_overlap(runs, start_hop,
+end_hop_exclusive)` returns all public disputed windows intersecting a
+strict half-open hop query, in the full source-verified index's
+**length-first rank order** (not time or severity order). Each match
+contains its full ranked window and clipped nonempty overlap bounds;
+empty source dispute indexes return an empty match list. Both query
+bounds must be exact ints, `0 <= start < end <= hop_count`. The full
+original ordered 3–5 cohort index is rebuilt on every build and verify,
+never accepted as detached/cached wire. Canonical ≤8-KiB ASCII binds
+the full source index SHA-256; independent verification rejects
+oversized/noncanonical/duplicate-key/rehashed-forged output and
+changed source order. No private paths, host/provider I/O, authority,
+trusted chronology, severity, provenance or native recovery.
