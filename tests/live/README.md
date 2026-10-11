@@ -2377,7 +2377,10 @@ include repeated or overlapping queries: each independent `results` entry
 contains `matched_window_count`, clipped `matched_disputed_hops`,
 and `unmatched_hops` (= query width minus disputed coverage).
 The single full source index SHA-256 applies to the entire batch; no
-window list or per-query provider read. The verifier independently
+window list or per-query provider read. Mutable outer and inner list
+inputs are each captured into bounded immutable tuples before validating
+the frozen shape/values; caller mutation cannot enlarge the accepted
+batch or change already captured hop bounds. The verifier independently
 rebuilds the same original index once, prechecks size and digest, and
 requires exact canonical bytes, rejecting duplicate keys, invalid
 bounds, reordered source cohorts and rehashed forged results. The

@@ -1349,7 +1349,11 @@ Never trust detached index or cached digest, reject oversized,
 noncanonical/duplicate/rehashed forged wire, invalid/bool/out-of-range
 pairs and reordered cohorts using fixed sanitized errors. TDD verifies
 mixed-coverage source fixtures and that rebuild occurs once per call,
-input refusal, wire tamper and preparse bound. Production security
+input refusal, wire tamper and preparse bound. Independent PR #203
+review found 0 Critical/Important and 1 Minor: a list/list
+validate-then-copy race. Fixed by bounded frozen outer and inner
+snapshots before shape/value validation; added 8-pair upper-bound
+build→verify and deterministic worker-thread mutation regressions. Production security
 boundary unchanged: no private/host/provider I/O, authority, chronology,
 severity or provenance. Run focused regression and Ruff, require an
 independent security/docs review and exact-head dual Python 3.13/3.14

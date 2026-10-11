@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import inspect
 import json
 import os
+import sys
+import threading
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
@@ -5971,3 +5974,76 @@ def test_dispute_overlap_coverages_reject_oversized_before_parse(
         patch.setattr(m.json, "loads", forbidden)
         with pytest.raises(m.DisputeOverlapCoveragesError):
             m._checked(raw, hashlib.sha256(raw).hexdigest())
+
+
+def test_dispute_overlap_coverages_accepts_eight_source_bound_queries(
+    dispute_overlap_coverages_module, dispute_index_runs
+):
+    m = dispute_overlap_coverages_module
+    queries = tuple((hop, hop + 1) for hop in (0, 1, 2, 0, 1, 2, 0, 1))
+    built = m.build_public_dispute_overlap_coverages(dispute_index_runs, queries)
+    wire = json.loads(built.payload)
+    assert len(wire["queries"]) == m.MAX_DISPUTE_OVERLAP_COVERAGES == 8
+    assert len(wire["results"]) == 8
+    facts = m.verify_public_dispute_overlap_coverages(
+        dispute_index_runs, queries, built.payload, expected_sha256=built.sha256
+    )
+    assert facts.query_ranges == queries
+    assert len(facts.matching_windows) == 8
+
+
+@pytest.mark.parametrize("mutation", ["append_ninth", "corrupt_inner"])
+def test_dispute_overlap_coverages_freezes_mutable_pairs_before_validation(
+    dispute_overlap_coverages_module, dispute_index_runs, mutation
+):
+    """A concurrent caller mutation after capture cannot change batch contents."""
+    m = dispute_overlap_coverages_module
+    queries = [[0, 1] for _ in range(8)]
+    original = tuple((0, 1) for _ in range(8))
+    lines, first = inspect.getsourcelines(m._compute)
+    freeze_lines = [
+        first + pos
+        for pos, line in enumerate(lines)
+        if line.strip().startswith("selected = tuple(")
+    ]
+    assert len(freeze_lines) == 1
+    freeze_line = freeze_lines[0]
+    ready = threading.Event()
+    mutated = threading.Event()
+    hit = False
+
+    def worker():
+        if ready.wait(timeout=3):
+            if mutation == "append_ninth":
+                queries.append([1, 2])
+            else:
+                queries[0][0] = True
+            mutated.set()
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+
+    def trace(frame, event, arg):
+        nonlocal hit
+        if (
+            not hit
+            and frame.f_code is m._compute.__code__
+            and event == "line"
+            and frame.f_lineno == freeze_line
+        ):
+            hit = True
+            ready.set()
+            assert mutated.wait(timeout=3), "mutating thread did not run"
+        return trace
+
+    try:
+        sys.settrace(trace)
+        built = m.build_public_dispute_overlap_coverages(dispute_index_runs, queries)
+    finally:
+        sys.settrace(None)
+        ready.set()
+        thread.join(timeout=3)
+    assert hit and mutated.is_set()
+    body = json.loads(built.payload)
+    assert body["queries"] == [{"start_hop": 0, "end_hop_exclusive": 1} for _ in original]
+    assert len(body["results"]) == 8

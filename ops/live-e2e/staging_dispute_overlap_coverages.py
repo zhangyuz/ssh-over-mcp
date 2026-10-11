@@ -71,12 +71,25 @@ def _checked(raw: object, expected_sha256: object) -> dict:
 def _compute(
     runs: object, queries: object
 ) -> tuple[PublicDisputeOverlapCoverages, VerifiedPublicDisputeOverlapCoverages]:
-    if type(queries) not in (tuple, list) or not 1 <= len(queries) <= MAX_DISPUTE_OVERLAP_COVERAGES:
+    if type(queries) not in (tuple, list):
         raise DisputeOverlapCoveragesError(_FAILURE)
-    # Snapshot mutable caller sequence before any upstream computation.
-    if any(type(item) not in (tuple, list) or len(item) != 2 for item in queries):
+
+    # One bounded snapshot of each mutable level. Keep at most one
+    # over-limit item to reject huge caller collections before rebuilding.
+    # All subsequent validation/selection uses only frozen data.
+    outer = tuple(queries[: MAX_DISPUTE_OVERLAP_COVERAGES + 1])
+    if not 1 <= len(outer) <= MAX_DISPUTE_OVERLAP_COVERAGES:
         raise DisputeOverlapCoveragesError(_FAILURE)
-    selected = tuple((item[0], item[1]) for item in queries)
+    frozen = []
+    for item in outer:
+        if type(item) not in (tuple, list):
+            raise DisputeOverlapCoveragesError(_FAILURE)
+        # Three captured entries suffice to reject a non-pair, even if the
+        # source list is huge or changes while the snapshot is taken.
+        frozen.append(tuple(item[:3]))
+    selected = tuple(frozen)
+    if any(len(pair) != 2 for pair in selected):
+        raise DisputeOverlapCoveragesError(_FAILURE)
     if any(
         type(start) is not int or type(end) is not int or start < 0 or end <= start
         for start, end in selected
