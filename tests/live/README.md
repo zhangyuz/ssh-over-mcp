@@ -2445,3 +2445,22 @@ query-trailing gaps with `limit=8`, terminal cursor and original full
 index digest. A second range whose endpoints clip disputed windows
 returns exactly seven disjoint non-disputed gaps. Both build→verify
 from the unchanged original ordered cohorts.
+
+### Source-verified three-class hop coverage (next public-only slice)
+
+`staging_classified_hop_coverage.build_public_classified_hop_coverage(runs,
+start_hop, end_hop_exclusive)` returns a **≤4-KiB canonical ASCII** count
+summary over a strict exact-int half-open hop query: `unanimous_hops`,
+`majority_hops`, `disputed_hops`, their sum `query_hops`, and
+`non_disputed_hops=unanimous+majority`. Unlike the gap-page complement,
+the summary separates majority from unanimous without calling either
+safe. Each build or independent verify reconstructs the **entire**
+`staging_consensus_intervals` from the original ordered 3–5 cohorts,
+clips disjoint interval classifications, includes the complete source
+intervals SHA-256 and demands exact canonical wire after bounded
+size/SHA-before-parse, duplicate-key/noncanonical and forged-rehashed
+rejection. Any original source reorder fails verification.
+Tests cover all three real source classes in one query, clipped subset,
+exact-int/bool/out-of-range refusal, forged wire and one rebuild per
+builder/verifier. No host/provider/private I/O, detached interval index,
+cache, authenticated provenance, trusted chronology, severity or authority.

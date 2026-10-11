@@ -1419,3 +1419,25 @@ or native observation. Independent review and final exact-head Ubuntu Python
 3.13/3.14 CI required after #204 merges and PR retargets main.
 A1/B8/N1c/UID-502/stale provider/native Level-3 remain OPEN;
 PR-only Level-3 skip does not certify native acceptance.
+
+**Next isolated public-only functional slice — three-class hop coverage
+(branch `live-e2e-classified-hop-coverage`, stacked on PR #205):**
+Add canonical ≤4-KiB ASCII original-source-verifiable count summary for
+one strict exact-int half-open hop query: positive-width counts of
+unanimous, majority, disputed hops, their sum and the non-disputed
+(unanimous+majority) count. The return is navigation only, not trust.
+Each build and independent verify reconstructs complete ordered 3–5
+cohort `staging_consensus_intervals` once and clips their source
+intervals. Include full original interval digest; SHA-256 provides
+consistency only, not authenticated source provenance. Fail closed on
+bool/invalid/out-of-bounds, oversize/digest-before-parse, duplicate-key,
+noncanonical, rehashed forgery and source reorder. TDD exercises a
+single real source fixture with majority, disputed and unanimous hops,
+clipped subset, bad inputs/tamper, and one source interval rebuild per
+call. Keep modules path-free and entirely offline: no host/provider/
+private I/O, detached or cached summaries, native authorization,
+severity, or trustworthy chronology. Independent review, exact-head
+dual Python 3.13/3.14 CI, and upstream merge PRs #204 then #205
+remain gates before merging this stacked slice. PR-only Level-3 SKIPPED
+is not native acceptance; A1/B8/N1c/UID-502/provider native Level-3
+remain OPEN.
