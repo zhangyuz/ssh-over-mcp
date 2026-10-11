@@ -6233,3 +6233,50 @@ def test_dispute_overlap_union_single_query_agrees_with_coverage_and_rebuilds_on
     assert actual["matched_disputed_hops"] == expected["matched_disputed_hops"]
     assert actual["unmatched_hops"] == expected["unmatched_hops"]
     assert facts.requested_hops == 2
+
+
+def test_dispute_overlap_union_one_long_window_across_disjoint_queries(
+    dispute_overlap_union_module, timeline_sources
+):
+    """The same original-source dispute counts as one window across two disjoint clips."""
+    a, b, _ = timeline_sources
+    # Four independent original cohorts have one stable 2-vs-2 partition
+    # across all four hops: one [0,4) disputed window, not four windows.
+    snapshots = ((a, a, b, b),) * 5
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:3]),
+            tuple(row[member] for row in snapshots[2:]),
+        )
+        for member in range(4)
+    )
+    m = dispute_overlap_union_module
+    source = m.index.build_public_dispute_index(runs)
+    index_body = json.loads(source.payload)
+    assert [(w["start_hop"], w["end_hop_exclusive"]) for w in index_body["ranked_windows"]] == [
+        (0, 4)
+    ]
+
+    queries = ((0, 1), (2, 3))
+    built = m.build_public_dispute_overlap_union(runs, queries)
+    body = json.loads(built.payload)
+    assert body["merged_ranges"] == [
+        {"start_hop": 0, "end_hop_exclusive": 1},
+        {"start_hop": 2, "end_hop_exclusive": 3},
+    ]
+    assert body["queries"] == [
+        {"start_hop": 0, "end_hop_exclusive": 1},
+        {"start_hop": 2, "end_hop_exclusive": 3},
+    ]
+    assert body["source_dispute_index_sha256"] == source.sha256
+    assert body["requested_hops"] == 2
+    assert body["matched_window_count"] == 1
+    assert body["matched_disputed_hops"] == 2
+    assert body["unmatched_hops"] == 0
+    facts = m.verify_public_dispute_overlap_union(
+        runs, queries, built.payload, expected_sha256=built.sha256
+    )
+    assert facts.merged_ranges == queries
+    assert facts.matched_windows == 1
+    assert facts.matched_hops == 2
+    assert facts.source_index_sha256 == source.sha256
