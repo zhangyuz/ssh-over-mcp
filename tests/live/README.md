@@ -2341,3 +2341,7 @@ prechecks size/digest/canonical JSON and rebuilds the exact original-source
 index and expected page; duplicate keys, forged/rehashed bytes, changed
 source order and invalid queries are rejected. No cache, detached index,
 private/host I/O, trusted chronology, severity or native authority.
+A real four-member two-segment source fixture verifies cross-page
+`limit=1` traversal: the later two-hop disputed window is returned
+at rank 0 before the earlier one-hop window at rank 1, with exact
+clipped bounds, `next_offset`, and independent source-bound verification.

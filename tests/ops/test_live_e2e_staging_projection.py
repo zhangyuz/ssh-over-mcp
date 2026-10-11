@@ -5545,6 +5545,61 @@ def test_dispute_overlap_page_paginates_real_valid_overflow(
     assert ranks == list(range(source_body["window_count"]))
 
 
+def test_dispute_overlap_page_length_rank_precedes_hop_order_across_pages(
+    dispute_overlap_page_module, timeline_sources
+):
+    """Source-built later two-hop window must precede earlier one-hop window."""
+    a, b, c = timeline_sources
+    snapshots = (
+        (b, c, b, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (a, a, b, b),
+        (a, a, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:3]),
+            tuple(row[member] for row in snapshots[2:]),
+        )
+        for member in range(4)
+    )
+    m = dispute_overlap_page_module
+    source = m.index.build_public_dispute_index(runs)
+    assert [
+        (window["start_hop"], window["end_hop_exclusive"])
+        for window in json.loads(source.payload)["ranked_windows"]
+    ] == [(2, 4), (0, 1)]
+    observed = []
+    for offset, expected_window, next_offset in (
+        (0, (2, 4), 1),
+        (1, (0, 1), None),
+    ):
+        built = m.build_public_dispute_overlap_page(runs, 0, 4, offset, 1)
+        body = json.loads(built.payload)
+        assert body["source_dispute_index_sha256"] == source.sha256
+        assert body["total_matches"] == 2
+        assert body["next_offset"] == next_offset
+        assert len(body["matches"]) == 1
+        match = body["matches"][0]
+        assert match["rank"] == offset
+        assert (
+            match["window"]["start_hop"],
+            match["window"]["end_hop_exclusive"],
+        ) == expected_window
+        assert (
+            match["overlap_start_hop"],
+            match["overlap_end_hop_exclusive"],
+        ) == expected_window
+        verified = m.verify_public_dispute_overlap_page(
+            runs, 0, 4, offset, 1, built.payload, expected_sha256=built.sha256
+        )
+        assert verified.ranks == (offset,)
+        assert verified.next_offset == next_offset
+        observed.append(expected_window)
+    assert observed == [(2, 4), (0, 1)]
+
+
 def test_dispute_overlap_page_adapts_to_byte_limit(
     dispute_overlap_page_module, dispute_index_runs, monkeypatch
 ):
