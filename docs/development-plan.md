@@ -1365,8 +1365,7 @@ severity or provenance. Run focused regression and Ruff, require an
 independent security/docs review and exact-head dual Python 3.13/3.14
 CI run `38144439187` Python 3.13/3.14 PASS on final main base;
 #203 merged as `0a17e0fe2d73420f44dd9380273ae6c463b35eb2`.
-Native
-Level-3 remains OPEN (PR-only skip is not acceptance), alongside
+Native Level-3 remains OPEN (PR-only skip is not acceptance), alongside
 A1/B8/N1c/UID-502/provider disposition.
 
 **In-review isolated public-only functional slice — query-union disputed
@@ -1414,8 +1413,9 @@ requested original-source majority-not-unanimous gap and leading/trailing
 clipped query coverage including the valid 8-gap limit, plus historic
 roadmap repair. Added a 4-cohort, 2-segment 24-hop original source fixture
 with eight majority gaps and independently verified build→verify; updated
-#202 to Merged and #203 to merged commit `0a17e0f`, #204 to main-base. Gap=unanimous or majority, **not** certified safety or native
-observation. Independent review and final exact-head Ubuntu Python
+#202 to Merged, #203 to merged commit `0a17e0f`, and #204 to
+main-base. A gap is unanimous or majority, **not** certified safety
+or native observation. Independent review and final exact-head Ubuntu Python
 3.13/3.14 CI required after #204 merges and PR retargets main.
 A1/B8/N1c/UID-502/stale provider/native Level-3 remain OPEN;
 PR-only Level-3 skip does not certify native acceptance.
