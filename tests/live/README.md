@@ -2288,7 +2288,10 @@ ordered 3–5 verified source cohorts. Both boundaries must be exact ints
 (not bool), with `0 <= start < end <= hop_count`. An exact disputed
 window returns its rank and full public window; a valid nonmatching
 range returns explicit null rank/window. The ≤4-KiB canonical ASCII
-wire binds the complete source index SHA-256; independent
+wire binds the complete source index SHA-256. A real-source regression
+verifies that a later two-hop disputed window ranks ahead of an earlier
+one-hop window (length-first navigation, never trusted chronology);
+independent
 `verify_public_dispute_range` rejects noncanonical/duplicate-key,
 oversized, rehashed forged query/rank/window/hash and changed source
 ordering. No cache, detached index, host/provider/private I/O,

@@ -1261,8 +1261,10 @@ rebuild the full source-verified public dispute index from original
 ordered 3–5 source cohorts, and return exact disputed window rank
 or explicit null for a valid nonmatching range. Reject invalid bounds,
 oversized/noncanonical/duplicate-key wire, rehashed forged
-query/rank/window/index digest and source reordering. Bounded canonical
-≤4-KiB public ASCII; no private paths, host/provider I/O, cache,
+query/rank/window/index digest and source reordering. Independent review
+Minor addressed by a real-source build→verify regression proving a later
+longer disputed window ranks ahead of an earlier shorter window.
+Bounded canonical ≤4-KiB public ASCII; no private paths, host/provider I/O, cache,
 trusted time, severity, authority or native acceptance. RED→GREEN
 tests, focused regression, Ruff, exact-head Python 3.13/3.14 CI and
 independent review required before merge. A1/B8/N1c/UID-502/native
