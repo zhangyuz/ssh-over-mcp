@@ -21,6 +21,10 @@ class DisputeOverlapError(RuntimeError):
     """Fixed nonsensitive rejection of invalid or inconsistent overlap queries."""
 
 
+class DisputeOverlapCapacityError(DisputeOverlapError):
+    """Valid query whose complete canonical result cannot fit in 8 KiB."""
+
+
 @dataclass(frozen=True, slots=True)
 class PublicDisputeOverlap:
     payload: bytes
@@ -105,7 +109,9 @@ def _compute(
         "matches": matches,
     }
     raw = _canonical(body)
-    if not 1 <= len(raw) <= MAX_PUBLIC_DISPUTE_OVERLAP_BYTES:
+    if len(raw) > MAX_PUBLIC_DISPUTE_OVERLAP_BYTES:
+        raise DisputeOverlapCapacityError(_FAILURE)
+    if not raw:
         raise DisputeOverlapError(_FAILURE)
     digest = hashlib.sha256(raw).hexdigest()
     return (
@@ -123,9 +129,11 @@ def _compute(
 def build_public_dispute_overlap(
     runs: object, start_hop: object, end_hop_exclusive: object
 ) -> PublicDisputeOverlap:
-    """Select all overlapping public windows in deterministic index-rank order."""
+    """Return all rank-ordered overlaps or explicitly refuse >8-KiB results."""
     try:
         return _compute(runs, start_hop, end_hop_exclusive)[0]
+    except DisputeOverlapCapacityError:
+        raise DisputeOverlapCapacityError(_FAILURE) from None
     except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):  # noqa: BLE001
         raise DisputeOverlapError(_FAILURE) from None
 
@@ -147,5 +155,7 @@ def verify_public_dispute_overlap(
         ):
             raise DisputeOverlapError(_FAILURE)
         return facts
+    except DisputeOverlapCapacityError:
+        raise DisputeOverlapCapacityError(_FAILURE) from None
     except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):  # noqa: BLE001
         raise DisputeOverlapError(_FAILURE) from None

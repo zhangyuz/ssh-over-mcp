@@ -5361,8 +5361,8 @@ def test_dispute_overlap_oversize_rejected_before_parse(dispute_overlap_module, 
             m._checked(raw, hashlib.sha256(raw).hexdigest())
 
 
-def test_dispute_overlap_full_sixteen_window_bound(dispute_overlap_module, timeline_sources):
-    """All 16 distinct source-derived disputed windows fit the public bound."""
+def test_dispute_overlap_sixteen_window_success_sample(dispute_overlap_module, timeline_sources):
+    """This 16-window source sample fits, but is not a global upper bound."""
     a, b, c = timeline_sources
     snapshots = (
         (a, a, a, a),
@@ -5402,3 +5402,36 @@ def test_dispute_overlap_full_sixteen_window_bound(dispute_overlap_module, timel
     assert m.verify_public_dispute_overlap(
         runs, 0, 16, built.payload, expected_sha256=built.sha256
     ).ranks == tuple(range(16))
+
+
+def test_dispute_overlap_valid_source_index_can_exceed_wire_capacity(
+    dispute_overlap_module, timeline_sources
+):
+    """A valid >16-window source index must produce an explicit capacity refusal."""
+    a, b, c = timeline_sources
+    snapshots = ((a, a, a, a),) + (
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+        (c, c, a, a),
+    ) * 12
+    runs = tuple(
+        tuple(
+            tuple(row[member] for row in snapshots[start : start + 9])
+            for start in range(0, len(snapshots) - 1, 8)
+        )
+        for member in range(4)
+    )
+    m = dispute_overlap_module
+    original = m.index.build_public_dispute_index(runs)
+    source = json.loads(original.payload)
+    assert 16 < source["window_count"]
+    assert len(original.payload) <= m.index.MAX_PUBLIC_DISPUTE_INDEX_BYTES
+    assert source["hop_count"] == len(snapshots) - 1
+    with pytest.raises(m.DisputeOverlapCapacityError, match="^staging dispute overlap rejected$"):
+        m.build_public_dispute_overlap(runs, 0, source["hop_count"])
+    single = m.build_public_dispute_overlap(runs, 0, 1)
+    with pytest.raises(m.DisputeOverlapCapacityError, match="^staging dispute overlap rejected$"):
+        m.verify_public_dispute_overlap(
+            runs, 0, source["hop_count"], single.payload, expected_sha256=single.sha256
+        )
