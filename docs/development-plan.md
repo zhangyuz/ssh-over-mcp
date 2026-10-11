@@ -1437,8 +1437,13 @@ single real source fixture with majority, disputed and unanimous hops,
 clipped subset, bad inputs/tamper, and one source interval rebuild per
 call. Keep modules path-free and entirely offline: no host/provider/
 private I/O, detached or cached summaries, native authorization,
-severity, or trustworthy chronology. Independent review, exact-head
-dual Python 3.13/3.14 CI, and upstream merge PRs #204 then #205
-remain gates before merging this stacked slice. PR-only Level-3 SKIPPED
+severity, or trustworthy chronology. Independent PR #206 review
+(0 Critical/Important, 2 Minor) requested cross-API parity from the
+same original cohorts and roadmap gate correction: compare disputed hops
+against #202 single-range coverage and exhaustive gap-page non-disputed
+length against unanimous+majority, including clipped queries and majority
+hops. PR #204 merged as `30770c4`; #205 must merge first, then retarget
+#206 to main and verify exact final-head Python 3.13/3.14 CI and
+independent review before merging. PR-only Level-3 SKIPPED
 is not native acceptance; A1/B8/N1c/UID-502/provider native Level-3
 remain OPEN.

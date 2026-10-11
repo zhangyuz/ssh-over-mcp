@@ -2464,3 +2464,15 @@ Tests cover all three real source classes in one query, clipped subset,
 exact-int/bool/out-of-range refusal, forged wire and one rebuild per
 builder/verifier. No host/provider/private I/O, detached interval index,
 cache, authenticated provenance, trusted chronology, severity or authority.
+
+Independent PR #206 review cross-API parity: the same original ordered
+four-cohort/two-segment source is queried with both `[0,4)` (majority
+plus disputed plus unanimous) and clipped `[1,5)`. For each query,
+the three-class public summary, source-verified single-range disputed
+coverage, and **all** source-verified gap pages (`limit=1`, followed
+until terminal cursor) must agree: `disputed_hops` equals clipped
+overlap disputed hops; `unanimous_hops+majority_hops` equals the sum
+of the complete non-disputed gap lengths. Distinct gap pages retain the
+same full dispute-index SHA. No provider I/O or trusted safety claim.
+PR #204 merged as `30770c4`; #205 now targets main; #206 stays
+stacked until #205 final gates and merge.

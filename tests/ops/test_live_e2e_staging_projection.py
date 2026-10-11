@@ -6677,3 +6677,100 @@ def test_classified_hop_coverage_rebuilds_original_intervals_once_per_call(
             == built.sha256
         )
         assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    (
+        "start",
+        "end",
+        "expected_unanimous",
+        "expected_majority",
+        "expected_disputed",
+        "expected_gaps",
+    ),
+    [
+        (0, 4, 1, 1, 2, ((0, 1), (3, 4))),
+        (1, 5, 2, 0, 2, ((3, 5),)),
+    ],
+)
+def test_classified_hop_coverage_agrees_with_overlap_and_all_gap_pages(
+    classified_hop_coverage_module,
+    dispute_overlap_coverage_module,
+    dispute_gap_page_module,
+    timeline_sources,
+    start,
+    end,
+    expected_unanimous,
+    expected_majority,
+    expected_disputed,
+    expected_gaps,
+):
+    """Across the same original cohorts, all three public navigation APIs agree."""
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, c, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (b, b, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:4]),
+            tuple(row[member] for row in snapshots[3:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_coverage_module
+    classified = m.build_public_classified_hop_coverage(runs, start, end)
+    classification = json.loads(classified.payload)
+    assert classification["source_intervals_sha256"] == (
+        m.intervals.build_public_intervals(runs).sha256
+    )
+    assert (
+        classification["unanimous_hops"],
+        classification["majority_hops"],
+        classification["disputed_hops"],
+    ) == (expected_unanimous, expected_majority, expected_disputed)
+    assert m.verify_public_classified_hop_coverage(
+        runs, start, end, classified.payload, expected_sha256=classified.sha256
+    ).classified_hops == (expected_unanimous, expected_majority, expected_disputed)
+
+    overlap = dispute_overlap_coverage_module.build_public_dispute_overlap_coverage(
+        runs, start, end
+    )
+    overlap_body = json.loads(overlap.payload)
+    dispute_overlap_coverage_module.verify_public_dispute_overlap_coverage(
+        runs, start, end, overlap.payload, expected_sha256=overlap.sha256
+    )
+    assert classification["disputed_hops"] == overlap_body["matched_disputed_hops"]
+    assert classification["non_disputed_hops"] == overlap_body["unmatched_hops"]
+
+    # Exhaust the genuine gap pages with limit=1; counting only the first
+    # page would silently miss the separate majority/unanimous ranges.
+    all_gaps = []
+    offset = 0
+    for _ in range(8):
+        page = dispute_gap_page_module.build_public_dispute_gap_page(runs, start, end, offset, 1)
+        body = json.loads(page.payload)
+        facts = dispute_gap_page_module.verify_public_dispute_gap_page(
+            runs, start, end, offset, 1, page.payload, expected_sha256=page.sha256
+        )
+        assert body["total_gaps"] == len(expected_gaps)
+        assert body["source_dispute_index_sha256"] == overlap_body["source_dispute_index_sha256"]
+        assert facts.gap_ranges == tuple(
+            (gap["start_hop"], gap["end_hop_exclusive"]) for gap in body["gaps"]
+        )
+        all_gaps.extend(facts.gap_ranges)
+        if body["next_offset"] is None:
+            break
+        assert body["next_offset"] > offset
+        offset = body["next_offset"]
+    else:
+        pytest.fail("bounded gap pagination did not terminate")
+    assert tuple(all_gaps) == expected_gaps
+    assert sum(right - left for left, right in all_gaps) == classification["non_disputed_hops"]
+    assert classification["query_hops"] == (
+        classification["disputed_hops"] + classification["non_disputed_hops"]
+    )
