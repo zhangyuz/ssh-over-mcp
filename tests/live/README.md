@@ -2320,3 +2320,28 @@ changed source order. A genuine two-segment 16-distinct-disputed-window
 source fixture covers the all-matches build→verify boundary. No private
 paths, host/provider I/O, authority, trusted chronology, severity,
 provenance or native recovery.
+
+### Source-verified bounded dispute-overlap pages (next isolated slice)
+
+`staging_dispute_overlap_page.build_public_dispute_overlap_page(runs,
+start_hop, end_hop_exclusive, offset, limit)` produces a canonical ≤8-KiB
+ASCII page of **complete** clipped overlapping disputed windows in the
+original length-first index-rank order. The query bounds are strict exact
+integers and half-open, `offset` is a zero-based **matching-window offset**,
+and `limit` is an exact integer from 1 through 16. The wire includes
+`total_matches`, `matches`, `next_offset` (integer or null), full source
+index SHA-256 and the query/offset/limit; callers follow `next_offset`
+under the same original ordered source inputs to assemble every match.
+A byte-bound page may contain fewer than `limit` matches; each nonterminal
+page advances its cursor. An empty result or terminal offset returns an
+empty page and null cursor. If even one full match cannot fit, a typed
+sanitized `DisputeOverlapPageCapacityError` fails closed: no empty
+nonterminal page, truncation or partial window. The independent verifier
+prechecks size/digest/canonical JSON and rebuilds the exact original-source
+index and expected page; duplicate keys, forged/rehashed bytes, changed
+source order and invalid queries are rejected. No cache, detached index,
+private/host I/O, trusted chronology, severity or native authority.
+A real four-member two-segment source fixture verifies cross-page
+`limit=1` traversal: the later two-hop disputed window is returned
+at rank 0 before the earlier one-hop window at rank 1, with exact
+clipped bounds, `next_offset`, and independent source-bound verification.

@@ -5435,3 +5435,218 @@ def test_dispute_overlap_valid_source_index_can_exceed_wire_capacity(
         m.verify_public_dispute_overlap(
             runs, 0, source["hop_count"], single.payload, expected_sha256=single.sha256
         )
+
+
+@pytest.fixture
+def dispute_overlap_page_module(dispute_overlap_module):
+    return importlib.import_module("staging_dispute_overlap_page")
+
+
+def test_dispute_overlap_page_ranked_cursor_and_source_verification(
+    dispute_overlap_page_module, dispute_index_runs
+):
+    m = dispute_overlap_page_module
+    first = m.build_public_dispute_overlap_page(dispute_index_runs, 0, 3, 0, 1)
+    one = json.loads(first.payload)
+    assert one["total_matches"] == 2
+    assert [x["rank"] for x in one["matches"]] == [0]
+    assert one["next_offset"] == 1
+    assert (
+        one["source_dispute_index_sha256"]
+        == m.index.build_public_dispute_index(dispute_index_runs).sha256
+    )
+    assert len(first.payload) <= m.MAX_PUBLIC_DISPUTE_OVERLAP_PAGE_BYTES
+    assert (
+        m.verify_public_dispute_overlap_page(
+            dispute_index_runs, 0, 3, 0, 1, first.payload, expected_sha256=first.sha256
+        ).next_offset
+        == 1
+    )
+    second = m.build_public_dispute_overlap_page(dispute_index_runs, 0, 3, 1, 16)
+    assert [x["rank"] for x in json.loads(second.payload)["matches"]] == [1]
+    assert json.loads(second.payload)["next_offset"] is None
+    empty = m.build_public_dispute_overlap_page(dispute_index_runs, 0, 3, 2, 16)
+    assert json.loads(empty.payload)["matches"] == []
+    assert json.loads(empty.payload)["next_offset"] is None
+    swapped = (dispute_index_runs[1], dispute_index_runs[0], *dispute_index_runs[2:])
+    with pytest.raises(m.DisputeOverlapPageError):
+        m.verify_public_dispute_overlap_page(
+            swapped, 0, 3, 0, 1, first.payload, expected_sha256=first.sha256
+        )
+    forged = dict(one, next_offset=None)
+    raw = json.dumps(forged, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+        "ascii"
+    )
+    with pytest.raises(m.DisputeOverlapPageError):
+        m.verify_public_dispute_overlap_page(
+            dispute_index_runs, 0, 3, 0, 1, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "offset", "limit"),
+    [
+        (True, 3, 0, 1),
+        (0, 3, False, 1),
+        (0, 3, 0, True),
+        (0, 3, -1, 1),
+        (0, 3, 0, 0),
+        (0, 3, 0, 17),
+        (1, 1, 0, 1),
+        (0, 4, 0, 1),
+        (0, 3, 3, 1),
+    ],
+)
+def test_dispute_overlap_page_invalid_arguments(
+    dispute_overlap_page_module, dispute_index_runs, start, end, offset, limit
+):
+    m = dispute_overlap_page_module
+    with pytest.raises(m.DisputeOverlapPageError, match="^staging dispute overlap page rejected$"):
+        m.build_public_dispute_overlap_page(dispute_index_runs, start, end, offset, limit)
+
+
+def test_dispute_overlap_page_paginates_real_valid_overflow(
+    dispute_overlap_page_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    snapshots = ((a, a, a, a),) + ((a, b, a, b), (c, b, c, b), (a, a, b, b), (c, c, a, a)) * 12
+    runs = tuple(
+        tuple(
+            tuple(row[member] for row in snapshots[start : start + 9])
+            for start in range(0, len(snapshots) - 1, 8)
+        )
+        for member in range(4)
+    )
+    m = dispute_overlap_page_module
+    source = m.index.build_public_dispute_index(runs)
+    source_body = json.loads(source.payload)
+    assert source_body["window_count"] > 16
+    offset = 0
+    ranks = []
+    for _ in range(20):
+        built = m.build_public_dispute_overlap_page(runs, 0, 48, offset, 16)
+        body = json.loads(built.payload)
+        assert len(built.payload) <= 8192
+        assert body["source_dispute_index_sha256"] == source.sha256
+        assert body["total_matches"] == source_body["window_count"]
+        page_ranks = [row["rank"] for row in body["matches"]]
+        assert page_ranks
+        ranks.extend(page_ranks)
+        verified = m.verify_public_dispute_overlap_page(
+            runs, 0, 48, offset, 16, built.payload, expected_sha256=built.sha256
+        )
+        assert verified.ranks == tuple(page_ranks)
+        if body["next_offset"] is None:
+            break
+        assert body["next_offset"] > offset
+        offset = body["next_offset"]
+    else:
+        pytest.fail("pagination did not terminate")
+    assert ranks == list(range(source_body["window_count"]))
+
+
+def test_dispute_overlap_page_length_rank_precedes_hop_order_across_pages(
+    dispute_overlap_page_module, timeline_sources
+):
+    """Source-built later two-hop window must precede earlier one-hop window."""
+    a, b, c = timeline_sources
+    snapshots = (
+        (b, c, b, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (a, a, b, b),
+        (a, a, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:3]),
+            tuple(row[member] for row in snapshots[2:]),
+        )
+        for member in range(4)
+    )
+    m = dispute_overlap_page_module
+    source = m.index.build_public_dispute_index(runs)
+    assert [
+        (window["start_hop"], window["end_hop_exclusive"])
+        for window in json.loads(source.payload)["ranked_windows"]
+    ] == [(2, 4), (0, 1)]
+    observed = []
+    for offset, expected_window, next_offset in (
+        (0, (2, 4), 1),
+        (1, (0, 1), None),
+    ):
+        built = m.build_public_dispute_overlap_page(runs, 0, 4, offset, 1)
+        body = json.loads(built.payload)
+        assert body["source_dispute_index_sha256"] == source.sha256
+        assert body["total_matches"] == 2
+        assert body["next_offset"] == next_offset
+        assert len(body["matches"]) == 1
+        match = body["matches"][0]
+        assert match["rank"] == offset
+        assert (
+            match["window"]["start_hop"],
+            match["window"]["end_hop_exclusive"],
+        ) == expected_window
+        assert (
+            match["overlap_start_hop"],
+            match["overlap_end_hop_exclusive"],
+        ) == expected_window
+        verified = m.verify_public_dispute_overlap_page(
+            runs, 0, 4, offset, 1, built.payload, expected_sha256=built.sha256
+        )
+        assert verified.ranks == (offset,)
+        assert verified.next_offset == next_offset
+        observed.append(expected_window)
+    assert observed == [(2, 4), (0, 1)]
+
+
+def test_dispute_overlap_page_adapts_to_byte_limit(
+    dispute_overlap_page_module, dispute_index_runs, monkeypatch
+):
+    m = dispute_overlap_page_module
+    complete = m.build_public_dispute_overlap_page(dispute_index_runs, 0, 3, 0, 2)
+    single = m.build_public_dispute_overlap_page(dispute_index_runs, 0, 3, 0, 1)
+    assert len(complete.payload) > len(single.payload)
+    with monkeypatch.context() as patch:
+        patch.setattr(m, "MAX_PUBLIC_DISPUTE_OVERLAP_PAGE_BYTES", len(single.payload))
+        page = m.build_public_dispute_overlap_page(dispute_index_runs, 0, 3, 0, 2)
+        body = json.loads(page.payload)
+        assert body["next_offset"] == 1
+        assert [x["rank"] for x in body["matches"]] == [0]
+        assert len(page.payload) <= m.MAX_PUBLIC_DISPUTE_OVERLAP_PAGE_BYTES
+        assert m.verify_public_dispute_overlap_page(
+            dispute_index_runs, 0, 3, 0, 2, page.payload, expected_sha256=page.sha256
+        ).ranks == (0,)
+        patch.setattr(m, "MAX_PUBLIC_DISPUTE_OVERLAP_PAGE_BYTES", 1)
+        with pytest.raises(m.DisputeOverlapPageCapacityError):
+            m.build_public_dispute_overlap_page(dispute_index_runs, 0, 3, 0, 2)
+
+
+def test_dispute_overlap_page_rejects_untrusted_wire_preparse(
+    dispute_overlap_page_module, dispute_index_runs, monkeypatch
+):
+    m = dispute_overlap_page_module
+    valid = m.build_public_dispute_overlap_page(dispute_index_runs, 0, 3, 0, 2)
+    body = json.loads(valid.payload)
+    raw = b'{"audience":"public","audience":"private"}'
+    with pytest.raises(m.DisputeOverlapPageError):
+        m.verify_public_dispute_overlap_page(
+            dispute_index_runs, 0, 3, 0, 2, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+    forged = dict(body, total_matches=999)
+    raw = json.dumps(forged, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode(
+        "ascii"
+    )
+    with pytest.raises(m.DisputeOverlapPageError):
+        m.verify_public_dispute_overlap_page(
+            dispute_index_runs, 0, 3, 0, 2, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+    oversized = b"x" * (m.MAX_PUBLIC_DISPUTE_OVERLAP_PAGE_BYTES + 1)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversized input reached the JSON parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.DisputeOverlapPageError):
+            m._checked(oversized, hashlib.sha256(oversized).hexdigest())

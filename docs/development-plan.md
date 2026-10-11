@@ -1270,8 +1270,8 @@ regression and Ruff PASS; pre-merge exact-head self-hosted Python
 merge. PR-only Level-3 SKIPPED is not native acceptance;
 A1/B8/N1c/UID-502/native Level-3 and stale provider disposition remain OPEN.
 
-**Next bounded public-only functional slice — dispute overlap navigation
-(PR #200, based on main after PR #199 merged as `383ad811`):**
+**Completed public-only slice — dispute overlap navigation
+(PR #200 merged as `c5ff0dcccf13612514861284d8459fdac688ce58`):**
 Given strict integer half-open hop bounds, rebuild the original-source
 full ranked dispute index once per build/verify, return every
 intersecting public disputed window in index rank order with its
@@ -1286,7 +1286,31 @@ for an empty index; reject invalid bounds and duplicate/noncanonical/
 oversized/rehashed forged output and changed source order. Canonical
 ≤8-KiB ASCII binds full source index SHA-256. Real-source >16-window
 capacity-refusal and 16-window all-matches build→verify regressions added.
-Tests RED→GREEN; independent review, focused/full regression and
-exact-head Ubuntu Python 3.13/3.14 CI remain merge gates. No host/provider/private I/O, cache, native authority,
+Tests RED→GREEN and focused regression PASS; independent review's
+Important capacity contract and Minor roadmap drift addressed. Exact-head
+Ubuntu Python 3.13/3.14 CI `38103461194` PASS before merge; PR-only
+Level-3 SKIPPED is not native acceptance. No host/provider/private I/O,
+cache, native authority,
 trusted chronology or severity. A1/B8/N1c/UID-502/stale provider/
 real Level-3 remain OPEN.
+
+**In-review isolated public-only slice — bounded overlap pagination
+(PR #201, branch `live-e2e-dispute-overlap-page`, now based on main
+after PR #200 merged):**
+Add a separate deterministic source-verified page builder/verifier for
+overlapping disputed windows, using exact integer hop bounds, matching
+window offset 0..total and limit 1..16. Each public canonical ASCII page
+fits ≤8 KiB; include complete clipped windows in length-first index rank
+order, total matches, full rebuilt index digest and an advancing next
+offset or terminal null. Automatically fit fewer than limit when required;
+if one complete window cannot fit, reject with fixed sanitized typed
+capacity error rather than silently truncate. Rebuild from original
+ordered 3–5 source cohorts on every call and reject invalid, rehashed
+forgery, reordered source and noncanonical output. TDD for multi-page
+valid source overflow, cursor semantics, size, invalid inputs and
+verifier. Independent review at `f8e4c0d` found 0 Critical/Important,
+1 Minor: add source-verified later-longer rank-before-hop cross-page
+`limit=1` build→verify test. Exact-head dual-Python CI and review after
+retarget to main remain merge gates. The earlier stacked-head CI is not
+final main acceptance.
+A1/B8/N1c/UID-502/provider disposition/native Level-3 remain OPEN.
