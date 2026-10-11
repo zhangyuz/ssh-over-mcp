@@ -1271,7 +1271,7 @@ independent review required before merge. A1/B8/N1c/UID-502/native
 Level-3 and stale provider disposition remain OPEN.
 
 **Next bounded public-only functional slice — dispute overlap navigation
-(branch `live-e2e-dispute-overlap`, temporarily stacked on #199):**
+(PR #200, based on main after PR #199 merged as `383ad811`):**
 Given strict integer half-open hop bounds, rebuild the original-source
 full ranked dispute index once per build/verify, return every
 intersecting public disputed window in index rank order with its

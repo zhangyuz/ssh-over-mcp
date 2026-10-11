@@ -2297,7 +2297,7 @@ oversized, rehashed forged query/rank/window/hash and changed source
 ordering. No cache, detached index, host/provider/private I/O,
 trusted chronology, severity, provenance or authorization semantics.
 
-### Source-verified disputed-window overlap navigation (next slice)
+### Source-verified disputed-window overlap navigation (PR #200)
 
 `staging_dispute_overlap.build_public_dispute_overlap(runs, start_hop,
 end_hop_exclusive)` returns all public disputed windows intersecting a
