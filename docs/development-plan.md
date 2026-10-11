@@ -1316,7 +1316,7 @@ workflow `38139789927` both PASS before merge. PR-only native
 Level-3 SKIPPED is not native acceptance.
 A1/B8/N1c/UID-502/provider disposition/native Level-3 remain OPEN.
 
-**Next isolated public-only functional slice — disputed-overlap coverage
+**Merged public-only functional slice — disputed-overlap coverage
 summary (PR #202, branch `live-e2e-dispute-overlap-coverage`,
 merged to main as `5f340307b50ed467a458ed230777b8067f1129c8`):**
 Provide a compact canonical ≤4-KiB ASCII source-verified coverage summary
@@ -1343,9 +1343,9 @@ PR-only Level-3 SKIPPED is not native
 acceptance; A1/B8/N1c/UID-502/provider disposition/native Level-3
 remain OPEN.
 
-**In-review isolated public-only functional slice — batch dispute-overlap
+**Merged public-only functional slice — batch dispute-overlap
 coverage (PR #203, branch `live-e2e-dispute-overlap-coverages`,
-retargeted to main after #202 merged):**
+merged to main as `0a17e0fe2d73420f44dd9380273ae6c463b35eb2`):**
 Add canonical ≤8-KiB summary of 1–8 caller-ordered strict exact-int
 half-open hop ranges. A single full index rebuild per build or verify
 from original 3–5 ordered source cohorts serves all independent clipped
@@ -1363,14 +1363,15 @@ build→verify and deterministic worker-thread mutation regressions. Production 
 boundary unchanged: no private/host/provider I/O, authority, chronology,
 severity or provenance. Run focused regression and Ruff, require an
 independent security/docs review and exact-head dual Python 3.13/3.14
-CI on the final main base; #202 merged and #203 now targets main.
+CI run `38144439187` Python 3.13/3.14 PASS on final main base;
+#203 merged as `0a17e0fe2d73420f44dd9380273ae6c463b35eb2`.
 Native
 Level-3 remains OPEN (PR-only skip is not acceptance), alongside
 A1/B8/N1c/UID-502/provider disposition.
 
-**Next isolated public-only functional slice — query-union disputed
+**In-review isolated public-only functional slice — query-union disputed
 coverage (PR #204, branch `live-e2e-dispute-overlap-union`,
-stacked on open PR #203):**
+retargeted to main after #203 merged):**
 Extend navigation with an independent canonical ≤4-KiB union summary
 over 1–8 strict exact-int caller-ordered half-open ranges. Freeze bounded
 outer and inner inputs once; sorted merged intervals deduplicate all
@@ -1408,7 +1409,12 @@ original-source verification refuse malformed/duplicated/oversized/
 rehashed-forged output, invalid/bool hop/cursor/limit or reorder.
 TDD includes mixed disputed/unanimous sources, real two-page gap cursor
 fixture, empty-source/all-disputed cases, invalid inputs, and forgery
-refusal. Gap=unanimous or majority, **not** certified safety or native
+refusal. Independent PR #205 review (0 Critical/Important, 2 Minor)
+requested original-source majority-not-unanimous gap and leading/trailing
+clipped query coverage including the valid 8-gap limit, plus historic
+roadmap repair. Added a 4-cohort, 2-segment 24-hop original source fixture
+with eight majority gaps and independently verified build→verify; updated
+#202 to Merged and #203 to merged commit `0a17e0f`, #204 to main-base. Gap=unanimous or majority, **not** certified safety or native
 observation. Independent review and final exact-head Ubuntu Python
 3.13/3.14 CI required after #204 merges and PR retargets main.
 A1/B8/N1c/UID-502/stale provider/native Level-3 remain OPEN;

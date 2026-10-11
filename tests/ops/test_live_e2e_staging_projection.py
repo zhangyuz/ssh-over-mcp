@@ -6457,3 +6457,69 @@ def test_dispute_gap_page_advances_across_two_real_source_gaps(
         )
         assert facts.gap_ranges == (gap,)
         assert facts.next_offset == body["next_offset"]
+
+
+def test_dispute_gap_page_majority_leading_trailing_and_eight_gap_bound(
+    dispute_gap_page_module, timeline_sources
+):
+    """Eight real majority gaps, including query edges, with source-verifiable clips."""
+    a, b, c = timeline_sources
+    unanimous = (a, a, a, a)
+    majority = (b, b, b, c)
+    disputed = (a, a, c, c)
+    # Twenty-four hops: majority U->M, disputed M->D and D->U,
+    # eight times. Two 13-snapshot original source segments share a
+    # boundary, preserving the complete original four ordered cohorts.
+    snapshots = (unanimous,) + (majority, disputed, unanimous) * 8
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:13]),
+            tuple(row[member] for row in snapshots[12:]),
+        )
+        for member in range(4)
+    )
+    m = dispute_gap_page_module
+    source = m.index.build_public_dispute_index(runs)
+    intervals = json.loads(m.index.intervals.build_public_intervals(runs).payload)
+    assert any(
+        row["classification"] == "majority"
+        and row["start_hop"] == 0
+        and row["end_hop_exclusive"] == 1
+        for row in intervals["intervals"]
+    )
+
+    expected = tuple((3 * hop, 3 * hop + 1) for hop in range(8))
+    # Query ends immediately after the eighth majority gap: both a
+    # leading and trailing gap, plus clipped disputed ranges.
+    built = m.build_public_dispute_gap_page(runs, 0, 22, 0, 8)
+    wire = json.loads(built.payload)
+    assert wire["source_dispute_index_sha256"] == source.sha256
+    assert wire["total_gaps"] == 8
+    assert wire["next_offset"] is None
+    assert wire["gaps"] == [
+        {"start_hop": start, "end_hop_exclusive": end} for start, end in expected
+    ]
+    assert len(built.payload) <= m.MAX_PUBLIC_DISPUTE_GAP_PAGE_BYTES
+    facts = m.verify_public_dispute_gap_page(
+        runs, 0, 22, 0, 8, built.payload, expected_sha256=built.sha256
+    )
+    assert facts.gap_ranges == expected
+    assert facts.total_gaps == 8
+    assert facts.next_offset is None
+    assert facts.source_index_sha256 == source.sha256
+
+    # Both query edges fall *inside* disputed windows. The complement
+    # must return only seven full non-disputed ranges, with no overlap.
+    clipped = m.build_public_dispute_gap_page(runs, 2, 23, 0, 8)
+    clipped_wire = json.loads(clipped.payload)
+    assert clipped_wire["total_gaps"] == 7
+    assert clipped_wire["gaps"] == [
+        {"start_hop": start, "end_hop_exclusive": end} for start, end in expected[1:]
+    ]
+    assert clipped_wire["next_offset"] is None
+    assert (
+        m.verify_public_dispute_gap_page(
+            runs, 2, 23, 0, 8, clipped.payload, expected_sha256=clipped.sha256
+        ).gap_ranges
+        == expected[1:]
+    )

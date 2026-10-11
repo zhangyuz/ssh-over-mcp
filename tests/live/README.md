@@ -2413,8 +2413,8 @@ returns 2 requested hops, **1 distinct window**, 2 disputed hops, 0
 unmatched hops, the original full index digest, and successful independent
 build→verify. This guards against double-counting a window across disjoint
 queries. PR #201 merged as `d9273a0`; #202 merged as `5f340307`;
-#203 now targets main; #204 remains stacked on #203, with final
-exact-head CI/review gates still required.
+#203 merged as `0a17e0f`; #204 now targets main; #205 remains
+stacked on #204, with final exact-head CI/review gates still required.
 
 ### Bounded public non-disputed gap pages (new isolated slice)
 
@@ -2436,3 +2436,12 @@ Tests cover a real original-source pair of separate non-disputed gaps
 across `limit=1` build→verify pages, distinct from index rank order.
 This is only public navigation, never time/severity/authentication/
 provenance/provider recovery, with no private/host/provider I/O or cache.
+
+Independent PR #205 Review follow-up: a valid original four-cohort,
+two-segment **24-hop** source alternates majority (three-agree, one-differs)
+and disputed hops. Its eight separate **majority** gaps are accepted as
+non-disputed (not certified safe), including query-leading and
+query-trailing gaps with `limit=8`, terminal cursor and original full
+index digest. A second range whose endpoints clip disputed windows
+returns exactly seven disjoint non-disputed gaps. Both build→verify
+from the unchanged original ordered cohorts.
