@@ -2345,3 +2345,23 @@ A real four-member two-segment source fixture verifies cross-page
 `limit=1` traversal: the later two-hop disputed window is returned
 at rank 0 before the earlier one-hop window at rank 1, with exact
 clipped bounds, `next_offset`, and independent source-bound verification.
+
+### Source-verified public disputed-overlap coverage summary (next isolated slice)
+
+`staging_dispute_overlap_coverage.build_public_dispute_overlap_coverage(runs,
+start_hop, end_hop_exclusive)` emits canonical ≤4-KiB public ASCII with
+the full original-source dispute-index SHA-256, strict exact-int half-open
+query, `matched_window_count`, `matched_disputed_hops`, and
+`unmatched_hops`. Counts use clipped nonempty intersections of **disjoint**
+source-verified disputed windows; `unmatched_hops` is the query span minus
+disputed coverage, not a measure of severity or safety. This compact
+navigation summary works even when the full overlap list exceeds its 8-KiB
+bound. Full 3–5 ordered cohorts are rebuilt on every build/verify; the
+independent verifier rejects oversize before parse, duplicate/noncanonical
+wire, forged/rehashed counts, changed source order and invalid bounds.
+A real four-source two-segment regression queries [0,3), which intersects
+two disputed windows across a unanimous gap: 2 matched windows,
+2 disputed hops and 1 unmatched hop, source digest identical to the full
+ranked index, and independent build→verify. No cache, detached index,
+private/host/provider I/O, trusted chronology, provenance or native
+authority.
