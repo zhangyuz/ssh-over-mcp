@@ -1519,3 +1519,28 @@ hop boundary during source rebuild in both build and verify. No
 production change: independent reviewer found existing algorithm and
 security invariants sound. Exact final-head dual Python 3.13/3.14 CI,
 independent final review and upstream #205→#206→#207 merges remain gates.
+
+**New isolated public-only slice — source-verified classified hop interval
+pages (branch `live-e2e-classified-hop-page`, stacked on PR #208):**
+Add source-bound canonical ≤4-KiB ASCII per-page navigation of the
+original `staging_consensus_intervals` rows clipped by one strict
+exact-int half-open hop query. The public projection includes only
+classification (unanimous/majority/disputed) and clipped start/end
+bounds, not sensitive group or host metadata. Preserve original
+interval boundaries and chronological **hop index navigation only**,
+not verified time, security severity, provenance or authority.
+`offset` counts clipped source segments (0..total) and `limit` is
+1..8, with full positive-width segments, monotonic nonterminal cursor
+and explicit empty terminal pages. Build/verify each rebuild complete
+original ordered 3–5 cohorts' public intervals once, bind their full
+SHA-256 and compare exact canonical bytes. Reject bool/invalid/
+out-of-bounds query/cursor/limit, oversize/digest-before-parse,
+duplicate-key/noncanonical/rehashed forgery and changed original order
+with sanitized errors. TDD includes mixed real source segments and
+multi-page cursor verification, valid 8-segment upper bound, query
+clipping, empty terminal, invalid type/bound, tamper and one complete
+source rebuild per call. Independent security/docs review and final
+exact-head dual Python 3.13/3.14 CI required after #205→#206→#207→#208
+merge and this branch retargets main. PR-only Level-3 skip does not
+equal native acceptance; A1/B8/N1c/UID-502/stale provider/native
+Level-3 remain OPEN.

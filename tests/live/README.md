@@ -2539,3 +2539,26 @@ mutates caller lists after the union builder/verifier freezes eight pairs
 (outer ninth append, inner boundary change). Neither canonical wire
 nor verified facts can read the later mutation. No production
 algorithm change or inferred host/provider/trust authority.
+
+### Bounded source-verified classified hop interval pages (next slice)
+
+`staging_classified_hop_page.build_public_classified_hop_page(runs, start,
+end, offset, limit)` returns deterministic, canonical **≤4-KiB ASCII**
+pages of clipped original **classified source interval rows** within a
+strict exact-int half-open hop query. A segment includes only
+`start_hop`, `end_hop_exclusive` and public `classification`
+(`unanimous`, `majority` or `disputed`), never private groups or
+paths. Segments preserve original interval boundaries (they do **not**
+necessarily merge adjacent rows with the same class).
+`offset` counts segments from 0 through `total_segments`;
+`limit` is **1–8**, with forward-only `next_offset` and null terminal
+cursor; an offset at the total returns an explicit empty terminal page.
+Each independent build/verify recomputes complete original ordered 3–5
+cohort consensus intervals once, enforces bounded preparse digest+size,
+canonical bytes and exact byte-for-byte source rebuild.
+Tests cover mixed real majority/disputed/unanimous intervals, query
+clipping, page traversal and terminal empty, valid eight-segment page,
+invalid bool/query/cursor, digest-rehashed forgery, duplicate keys,
+source reorder and oversized-before-parser checks.
+No host/provider/private I/O, cached/detached original source,
+authenticated provenance, severity, trust or safety certification.

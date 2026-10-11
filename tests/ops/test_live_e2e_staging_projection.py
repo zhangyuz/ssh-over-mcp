@@ -7305,3 +7305,253 @@ def test_classified_hop_union_freezes_caller_lists_before_source_rebuild(
     assert json.loads(expected.payload)["queries"] == [
         {"start_hop": start, "end_hop_exclusive": end} for start, end in initial
     ]
+
+
+@pytest.fixture
+def classified_hop_page_module(classified_hop_union_module):
+    return importlib.import_module("staging_classified_hop_page")
+
+
+def test_classified_hop_page_original_source_all_pages_and_clipped_interval(
+    classified_hop_page_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, c, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (b, b, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:4]),
+            tuple(row[member] for row in snapshots[3:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_page_module
+    source = m.intervals.build_public_intervals(runs)
+    source_doc = json.loads(source.payload)
+    assert source_doc["counts"] == {"unanimous": 2, "majority": 1, "disputed": 2}
+    assert source_doc["hop_count"] == 5
+
+    # Exhaust paginated source intervals, including a majority segment,
+    # disputed transitions, and the terminal unanimous segment.
+    expected = tuple(
+        (item["start_hop"], item["end_hop_exclusive"], item["classification"])
+        for item in source_doc["intervals"]
+    )
+    assert expected[0] == (0, 1, "majority")
+    assert expected[-1] == (3, 5, "unanimous")
+    all_rows = []
+    offset = 0
+    for _ in range(8):
+        page = m.build_public_classified_hop_page(runs, 0, 5, offset, 1)
+        body = json.loads(page.payload)
+        assert body["total_segments"] == len(expected)
+        assert body["source_intervals_sha256"] == source.sha256
+        assert len(page.payload) <= m.MAX_PUBLIC_CLASSIFIED_HOP_PAGE_BYTES
+        facts = m.verify_public_classified_hop_page(
+            runs, 0, 5, offset, 1, page.payload, expected_sha256=page.sha256
+        )
+        chunk = tuple(
+            (row["start_hop"], row["end_hop_exclusive"], row["classification"])
+            for row in body["segments"]
+        )
+        assert facts.segments == chunk
+        all_rows.extend(chunk)
+        if body["next_offset"] is None:
+            break
+        assert body["next_offset"] > offset
+        offset = body["next_offset"]
+    else:
+        pytest.fail("classified hop page cursor failed to terminate")
+    assert tuple(all_rows) == expected
+    assert sum(end - start for start, end, _ in all_rows) == 5
+
+    # Clipping at both query boundaries never leaks out-of-range hops.
+    clipped = m.build_public_classified_hop_page(runs, 1, 4, 0, 8)
+    clipped_doc = json.loads(clipped.payload)
+    clipped_rows = [
+        (row["start_hop"], row["end_hop_exclusive"], row["classification"])
+        for row in clipped_doc["segments"]
+    ]
+    assert clipped_rows[0][0] == 1
+    assert clipped_rows[-1][1] == 4
+    assert sum(end - start for start, end, _ in clipped_rows) == 3
+    assert m.verify_public_classified_hop_page(
+        runs, 1, 4, 0, 8, clipped.payload, expected_sha256=clipped.sha256
+    ).segments == tuple(clipped_rows)
+
+
+def test_classified_hop_page_terminal_empty_and_one_full_class(
+    classified_hop_page_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    same = ((a, b), (b, c))
+    runs = (same, same, same)
+    m = classified_hop_page_module
+    full = m.build_public_classified_hop_page(runs, 0, 1, 0, 8)
+    doc = json.loads(full.payload)
+    assert doc["segments"] == [
+        {"start_hop": 0, "end_hop_exclusive": 1, "classification": "unanimous"}
+    ]
+    assert doc["total_segments"] == 1 and doc["next_offset"] is None
+    assert m.verify_public_classified_hop_page(
+        runs, 0, 1, 0, 8, full.payload, expected_sha256=full.sha256
+    ).segments == ((0, 1, "unanimous"),)
+    terminal = m.build_public_classified_hop_page(runs, 0, 1, 1, 1)
+    tail = json.loads(terminal.payload)
+    assert tail["segments"] == [] and tail["next_offset"] is None
+    assert (
+        m.verify_public_classified_hop_page(
+            runs, 0, 1, 1, 1, terminal.payload, expected_sha256=terminal.sha256
+        ).segments
+        == ()
+    )
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "offset", "limit"),
+    [
+        (-1, 1, 0, 1),
+        (0, 0, 0, 1),
+        (3, 2, 0, 1),
+        (0, 4, 0, 1),
+        (True, 1, 0, 1),
+        (0, False, 0, 1),
+        (0.0, 1, 0, 1),
+        (0, 1.0, 0, 1),
+        (0, 1, True, 1),
+        (0, 1, -1, 1),
+        (0, 1, 1.0, 1),
+        (0, 1, 0, True),
+        (0, 1, 0, 0),
+        (0, 1, 0, 9),
+        (0, 1, 99, 1),
+    ],
+)
+def test_classified_hop_page_rejects_bad_query_or_cursor(
+    classified_hop_page_module, dispute_index_runs, start, end, offset, limit
+):
+    m = classified_hop_page_module
+    with pytest.raises(m.ClassifiedHopPageError, match="^staging classified hop page rejected$"):
+        m.build_public_classified_hop_page(dispute_index_runs, start, end, offset, limit)
+
+
+def test_classified_hop_page_fail_closed_forgery_and_reordered_sources(
+    classified_hop_page_module, dispute_index_runs
+):
+    m = classified_hop_page_module
+    built = m.build_public_classified_hop_page(dispute_index_runs, 0, 3, 0, 8)
+    altered = json.loads(built.payload)
+    altered["total_segments"] = 99
+    raw = json.dumps(altered, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode(
+        "ascii"
+    )
+    with pytest.raises(m.ClassifiedHopPageError):
+        m.verify_public_classified_hop_page(
+            dispute_index_runs, 0, 3, 0, 8, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+    swapped = (
+        dispute_index_runs[2],
+        dispute_index_runs[1],
+        dispute_index_runs[0],
+        dispute_index_runs[3],
+    )
+    with pytest.raises(m.ClassifiedHopPageError):
+        m.verify_public_classified_hop_page(
+            swapped, 0, 3, 0, 8, built.payload, expected_sha256=built.sha256
+        )
+    duplicate = b'{"audience":"public","audience":"public"}'
+    with pytest.raises(m.ClassifiedHopPageError):
+        m.verify_public_classified_hop_page(
+            dispute_index_runs,
+            0,
+            3,
+            0,
+            8,
+            duplicate,
+            expected_sha256=hashlib.sha256(duplicate).hexdigest(),
+        )
+
+
+def test_classified_hop_page_rejects_oversize_before_parser(
+    classified_hop_page_module, monkeypatch
+):
+    m = classified_hop_page_module
+    raw = b"x" * (m.MAX_PUBLIC_CLASSIFIED_HOP_PAGE_BYTES + 1)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversized classified page parsed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.ClassifiedHopPageError):
+            m._checked(raw, hashlib.sha256(raw).hexdigest())
+
+
+def test_classified_hop_page_one_original_interval_rebuild_per_call(
+    classified_hop_page_module, dispute_index_runs, monkeypatch
+):
+    m = classified_hop_page_module
+    original = m.intervals.build_public_intervals
+    calls = []
+
+    def counted(source):
+        calls.append(1)
+        return original(source)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.intervals, "build_public_intervals", counted)
+        built = m.build_public_classified_hop_page(dispute_index_runs, 0, 3, 0, 2)
+        assert len(calls) == 1
+        m.verify_public_classified_hop_page(
+            dispute_index_runs, 0, 3, 0, 2, built.payload, expected_sha256=built.sha256
+        )
+        assert len(calls) == 2
+
+
+def test_classified_hop_page_eight_complete_segments_real_source(
+    classified_hop_page_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    # Eight real hop partitions with a different agreement grouping on
+    # every hop; two five-snapshot segments share one original boundary.
+    snapshots = (
+        (a, a, a, a),
+        (b, b, c, c),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+        (c, c, a, a),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:5]),
+            tuple(row[member] for row in snapshots[4:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_page_module
+    original = m.intervals.build_public_intervals(runs)
+    rows = json.loads(original.payload)["intervals"]
+    assert len(rows) == 8
+    page = m.build_public_classified_hop_page(runs, 0, 8, 0, 8)
+    body = json.loads(page.payload)
+    assert body["source_intervals_sha256"] == original.sha256
+    assert len(body["segments"]) == m.MAX_CLASSIFIED_HOP_PAGE_LIMIT == 8
+    assert body["next_offset"] is None
+    assert body["total_segments"] == 8
+    facts = m.verify_public_classified_hop_page(
+        runs, 0, 8, 0, 8, page.payload, expected_sha256=page.sha256
+    )
+    assert facts.segments == tuple(
+        (row["start_hop"], row["end_hop_exclusive"], row["classification"]) for row in rows
+    )
+    assert sum(end - start for start, end, _ in facts.segments) == 8
