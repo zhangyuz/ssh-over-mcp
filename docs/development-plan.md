@@ -1368,9 +1368,9 @@ CI run `38144439187` Python 3.13/3.14 PASS on final main base;
 Native Level-3 remains OPEN (PR-only skip is not acceptance), alongside
 A1/B8/N1c/UID-502/provider disposition.
 
-**In-review isolated public-only functional slice — query-union disputed
-coverage (PR #204, branch `live-e2e-dispute-overlap-union`,
-retargeted to main after #203 merged):**
+**Merged public-only functional slice — query-union disputed
+coverage (PR #204, branch `live-e2e-dispute-overlap-union`, merged
+to main as `30770c4a3652f9da0f74985bb929b695e1e03e05`):**
 Extend navigation with an independent canonical ≤4-KiB union summary
 over 1–8 strict exact-int caller-ordered half-open ranges. Freeze bounded
 outer and inner inputs once; sorted merged intervals deduplicate all
@@ -1387,14 +1387,14 @@ changed source order. Independent PR #204 review found 0 Critical,
 split by two non-touching query clips, which must count 1 distinct
 window/2 disputed hops, with build→verify; updated #201 merged status, #202 now merged status, #203 main-base
 retarget and current #203→#204 stack and CI gates. Require independent
-review and exact-head Ubuntu
-Python 3.13/3.14 CI after upstream PR #203 is merged
-and PR retargeted to main; PR-only Level-3 skip is not native approval.
+review and exact-head Ubuntu Python 3.13/3.14 CI run
+`38149588161` both PASS on main-base, then #204 merged as `30770c4`.
+PR-only Level-3 skip is not native approval.
 A1/B8/N1c/UID-502/provider disposition/native Level-3 remain OPEN.
 
-**New review-ready isolated public-only slice — source-verified
-non-disputed gap pages (branch `live-e2e-dispute-gap-page`, stacked on
-PR #204):** Add a separate bounded canonical ≤4-KiB ASCII API that
+**In-review isolated public-only slice — source-verified
+non-disputed gap pages (PR #205, branch `live-e2e-dispute-gap-page`,
+now targeting main after #204 merged):** Add a separate bounded canonical ≤4-KiB ASCII API that
 returns complement spans of disputed windows inside one strict exact-int
 half-open hop query. The list is sorted by hop location, not by ranked
 window position. `offset` identifies matching gap number (0..total),
@@ -1416,7 +1416,8 @@ with eight majority gaps and independently verified build→verify; updated
 #202 to Merged, #203 to merged commit `0a17e0f`, and #204 to
 main-base. A gap is unanimous or majority, **not** certified safety
 or native observation. Independent review and final exact-head Ubuntu Python
-3.13/3.14 CI required after #204 merges and PR retargets main.
+3.13/3.14 CI required on final HEAD/main-base; #204 merged,
+#205 is retargeted to main and remains open.
 A1/B8/N1c/UID-502/stale provider/native Level-3 remain OPEN;
 PR-only Level-3 skip does not certify native acceptance.
 

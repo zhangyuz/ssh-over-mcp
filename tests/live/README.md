@@ -2413,8 +2413,8 @@ returns 2 requested hops, **1 distinct window**, 2 disputed hops, 0
 unmatched hops, the original full index digest, and successful independent
 build→verify. This guards against double-counting a window across disjoint
 queries. PR #201 merged as `d9273a0`; #202 merged as `5f340307`;
-#203 merged as `0a17e0f`; #204 now targets main; #205 remains
-stacked on #204, with final exact-head CI/review gates still required.
+#203 merged as `0a17e0f`; #204 merged as `30770c4`;
+#205 now targets main, with final exact-head CI/review gates still required.
 
 ### Bounded public non-disputed gap pages (new isolated slice)
 
