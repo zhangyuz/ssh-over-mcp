@@ -2476,3 +2476,22 @@ of the complete non-disputed gap lengths. Distinct gap pages retain the
 same full dispute-index SHA. No provider I/O or trusted safety claim.
 PR #204 merged as `30770c4`; #205 now targets main; #206 stays
 stacked until #205 final gates and merge.
+
+### Canonical public classified-hop coverage batches (new isolated slice)
+
+`staging_classified_hop_coverages.build_public_classified_hop_coverages(runs,
+queries)` accepts **1–8** caller-ordered strict exact-int half-open hop
+ranges. Duplicates/overlaps are retained as **independent** queries;
+the canonical ≤8-KiB ASCII payload binds the full original intervals
+SHA-256, preserves query order and returns per-query `query_hops`,
+`unanimous_hops`, `majority_hops`, `disputed_hops` and
+`non_disputed_hops=unanimous+majority`. Every query's three class
+counts must sum exactly to its width. Mutable outer/inner lists are
+bounded-snapshotted before shape/value validation to avoid races.
+Builder and independent verifier each fully rebuild the original
+ordered 3–5 cohort source intervals exactly once, then verify byte-exact
+canonical output. Refuse bool/invalid/out-of-range inputs, oversized
+or duplicate-key/noncanonical/rehashed-forged wires, and source order
+changes. SHA is consistency, not authenticated provenance; no
+trusted time, host/provider/private I/O, severity, safety/authorization,
+detached source data, or cross-request cache.

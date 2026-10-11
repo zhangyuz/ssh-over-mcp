@@ -1447,3 +1447,25 @@ hops. PR #204 merged as `30770c4`; #205 must merge first, then retarget
 independent review before merging. PR-only Level-3 SKIPPED
 is not native acceptance; A1/B8/N1c/UID-502/provider native Level-3
 remain OPEN.
+
+**Next isolated public-only slice — source-verified classified-hop batches
+(branch `live-e2e-classified-hop-coverages`, stacked on PR #206):**
+Add a separate ≤8-KiB canonical ASCII builder/verifier for 1–8
+caller-ordered (possibly duplicate/overlapping) strict exact-int
+half-open queries. One complete original 3–5 cohort intervals rebuild
+per build/verify call serves per-query clipped unanimous/majority/disputed
+counts and non-disputed sum, with exact width identity and complete
+source-interval SHA. Bounded caller-list capture must precede all
+validation/use; reject malformed/boolean/out-of-range queries, oversize,
+noncanonical/duplicate/rehashed forged wire, and reordered cohort
+sources by fixed sanitized failures. Keep source fully public and
+offline: no detached index/cache, host/provider/private I/O, trusted
+time, severity, provenance or authorization inference. RED→GREEN tests
+cover real mixed-class two-segment original cohorts, caller-order and
+duplicates, legal eight-query upper bound, invalid shape/type/bounds,
+one rebuilt full source per invocation, rehashed forgery/source
+reordering and parsing size cap. Independent security/docs review and
+**final exact-head dual Python 3.13/3.14 CI** after PR #205 and PR #206
+have merged and this stacked branch retargets main are required.
+PR-only Level-3 skipped is not native acceptance; A1/B8/N1c/UID-502/
+stale provider/native Level-3 remain OPEN.

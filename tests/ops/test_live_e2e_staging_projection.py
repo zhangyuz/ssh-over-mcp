@@ -6774,3 +6774,169 @@ def test_classified_hop_coverage_agrees_with_overlap_and_all_gap_pages(
     assert classification["query_hops"] == (
         classification["disputed_hops"] + classification["non_disputed_hops"]
     )
+
+
+@pytest.fixture
+def classified_hop_coverages_module(classified_hop_coverage_module):
+    return importlib.import_module("staging_classified_hop_coverages")
+
+
+def test_classified_hop_coverages_real_source_order_and_single_rebuild(
+    classified_hop_coverages_module, timeline_sources, monkeypatch
+):
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, c, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (b, b, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:4]),
+            tuple(row[member] for row in snapshots[3:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_coverages_module
+    queries = ((0, 5), (1, 4), (0, 1), (3, 5), (0, 1))
+    original = m.intervals.build_public_intervals
+    calls = []
+
+    def counted(r):
+        calls.append(1)
+        return original(r)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.intervals, "build_public_intervals", counted)
+        built = m.build_public_classified_hop_coverages(runs, queries)
+        assert len(calls) == 1
+        facts = m.verify_public_classified_hop_coverages(
+            runs, queries, built.payload, expected_sha256=built.sha256
+        )
+        assert len(calls) == 2
+    wire = json.loads(built.payload)
+    assert wire["source_intervals_sha256"] == original(runs).sha256
+    assert wire["queries"] == [
+        {"start_hop": start, "end_hop_exclusive": end} for start, end in queries
+    ]
+    expected_counts = ((2, 1, 2), (1, 0, 2), (0, 1, 0), (2, 0, 0), (0, 1, 0))
+    assert [
+        (row["unanimous_hops"], row["majority_hops"], row["disputed_hops"])
+        for row in wire["results"]
+    ] == list(expected_counts)
+    assert [row["non_disputed_hops"] for row in wire["results"]] == [3, 1, 1, 2, 1]
+    assert all(
+        row["query_hops"] == row["unanimous_hops"] + row["majority_hops"] + row["disputed_hops"]
+        for row in wire["results"]
+    )
+    assert len(built.payload) <= m.MAX_PUBLIC_CLASSIFIED_HOP_COVERAGES_BYTES
+    assert facts.query_ranges == queries
+    assert facts.classified_counts == expected_counts
+    assert facts.source_intervals_sha256 == original(runs).sha256
+
+
+def test_classified_hop_coverages_eight_valid_query_upper_bound(
+    classified_hop_coverages_module, dispute_index_runs
+):
+    m = classified_hop_coverages_module
+    queries = [[i % 3, i % 3 + 1] for i in range(8)]
+    built = m.build_public_classified_hop_coverages(dispute_index_runs, queries)
+    body = json.loads(built.payload)
+    assert len(body["queries"]) == m.MAX_CLASSIFIED_HOP_COVERAGES == 8
+    assert len(body["results"]) == 8
+    assert (
+        len(
+            m.verify_public_classified_hop_coverages(
+                dispute_index_runs, queries, built.payload, expected_sha256=built.sha256
+            ).classified_counts
+        )
+        == 8
+    )
+
+
+@pytest.mark.parametrize(
+    "queries",
+    [
+        [],
+        (),
+        ((0, 1),) * 9,
+        ((0, 1), "invalid"),
+        "0,1",
+        ((True, 1),),
+        ((0, False),),
+        ((0.0, 1),),
+        ((0, 1.0),),
+        ((-1, 1),),
+        ((0, 0),),
+        ((1, 1),),
+        ((2, 1),),
+        ((0, 4),),
+        ((0, 1, 2),),
+        ((0,),),
+        ([0, 1, 2],),
+        ((0, "1"),),
+        ((None, 1),),
+    ],
+)
+def test_classified_hop_coverages_rejects_invalid_query_shape(
+    classified_hop_coverages_module, dispute_index_runs, queries
+):
+    m = classified_hop_coverages_module
+    with pytest.raises(
+        m.ClassifiedHopCoveragesError,
+        match="^staging classified hop coverages rejected$",
+    ):
+        m.build_public_classified_hop_coverages(dispute_index_runs, queries)
+
+
+def test_classified_hop_coverages_rejects_rehashed_forgery_and_changed_sources(
+    classified_hop_coverages_module, dispute_index_runs
+):
+    m = classified_hop_coverages_module
+    queries = ((0, 2), (1, 3))
+    built = m.build_public_classified_hop_coverages(dispute_index_runs, queries)
+    changed = json.loads(built.payload)
+    changed["results"][0]["disputed_hops"] = 0
+    raw = json.dumps(changed, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode(
+        "ascii"
+    )
+    with pytest.raises(m.ClassifiedHopCoveragesError):
+        m.verify_public_classified_hop_coverages(
+            dispute_index_runs, queries, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+    swapped = (
+        dispute_index_runs[2],
+        dispute_index_runs[1],
+        dispute_index_runs[0],
+        dispute_index_runs[3],
+    )
+    with pytest.raises(m.ClassifiedHopCoveragesError):
+        m.verify_public_classified_hop_coverages(
+            swapped, queries, built.payload, expected_sha256=built.sha256
+        )
+    duplicated = b'{"audience":"public","audience":"public"}'
+    with pytest.raises(m.ClassifiedHopCoveragesError):
+        m.verify_public_classified_hop_coverages(
+            dispute_index_runs,
+            queries,
+            duplicated,
+            expected_sha256=hashlib.sha256(duplicated).hexdigest(),
+        )
+
+
+def test_classified_hop_coverages_rejects_oversize_before_parsing(
+    classified_hop_coverages_module, monkeypatch
+):
+    m = classified_hop_coverages_module
+    raw = b"x" * (m.MAX_PUBLIC_CLASSIFIED_HOP_COVERAGES_BYTES + 1)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversized classified batch parsed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.ClassifiedHopCoveragesError):
+            m._checked(raw, hashlib.sha256(raw).hexdigest())
