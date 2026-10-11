@@ -1236,25 +1236,27 @@ acceptance. No trusted time, severity, private path, host/provider I/O
 or native authority; provider disposition, A1/B8/N1c/UID-502 and
 real Level-3 remain OPEN.
 
-**Next small public-only slice — sparse dispute-rank batch (branch
-`live-e2e-dispute-ranks`, based on main after PR #197 merged):**
+**Completed public-only slice — sparse dispute-rank batch (PR #198
+merged as `5239d10e7539d025c7083b8aa8d6a83dde17b690`):**
 1–16 strict, unique, ascending exact-integer navigation ranks, with one
 snapshot of caller input and one complete rebuild of the original-source
 public dispute index per build/verify. Return bounded canonical ≤16-KiB
 ASCII with full index digest and exact sparse selected windows; reject
 empty/out-of-range/duplicate/noncanonical/oversized/forged/rehashed
 input or changed source ordering. Distinct from contiguous page lookup
-and per-rank single lookup. Independent review Minor follow-up added a
-real four-member two-segment 16-disputed-window upper-bound build→verify
-test, and corrected #197 merged status/CI evidence. Tests RED→GREEN, Ruff, full regression,
-exact-head Python 3.13/3.14 CI and independent review remain merge
-gates. No host/provider/private I/O, native recovery or authority
-change. A1/B8/N1c/UID-502/provider disposition/real Level-3 remain OPEN.
-PR #197 is merged; this branch targets main.
+and per-rank single lookup. Independent review found two Minors,
+both fixed: #197 merged status/CI documentation and real four-member
+two-segment 16-disputed-window upper-bound build→verify. RED→GREEN
+tests, focused dispute regression 119/119 PASS, Ruff/format PASS,
+exact-head self-hosted Python 3.13/3.14 CI `38096587675` PASS,
+review clear and PR #198 merged as `5239d10e`. PR-only Level-3
+SKIPPED is not native acceptance. No host/provider/private I/O,
+native recovery or authority change. A1/B8/N1c/UID-502/provider
+disposition/real Level-3 remain OPEN.
 
 **Next isolated public-only functional slice — exact disputed-window
-boundary lookup (branch `live-e2e-dispute-range`, temporarily stacked
-on #198 until merged):** Accept strict integer half-open hop bounds,
+boundary lookup (branch `live-e2e-dispute-range`, based on main
+after PR #198 merged):** Accept strict integer half-open hop bounds,
 rebuild the full source-verified public dispute index from original
 ordered 3–5 source cohorts, and return exact disputed window rank
 or explicit null for a valid nonmatching range. Reject invalid bounds,
