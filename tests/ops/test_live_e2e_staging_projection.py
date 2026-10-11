@@ -5682,6 +5682,49 @@ def test_dispute_overlap_coverage_exact_clipped_hops(
     assert m.build_public_dispute_overlap_coverage(dispute_index_runs, start, end) == built
 
 
+def test_dispute_overlap_coverage_mixed_disputed_and_unanimous_hops(
+    dispute_overlap_coverage_module, timeline_sources
+):
+    """Two source-derived disputes across a real central unanimous gap."""
+    a, b, c = timeline_sources
+    snapshots = (
+        (b, c, b, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (a, a, b, b),
+        (a, a, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:3]),
+            tuple(row[member] for row in snapshots[2:]),
+        )
+        for member in range(4)
+    )
+    m = dispute_overlap_coverage_module
+    original = m.index.build_public_dispute_index(runs)
+    source = json.loads(original.payload)
+    assert [
+        (window["start_hop"], window["end_hop_exclusive"]) for window in source["ranked_windows"]
+    ] == [(2, 4), (0, 1)]
+
+    built = m.build_public_dispute_overlap_coverage(runs, 0, 3)
+    wire = json.loads(built.payload)
+    assert wire["query"] == {"start_hop": 0, "end_hop_exclusive": 3}
+    assert wire["source_dispute_index_sha256"] == original.sha256
+    assert wire["matched_window_count"] == 2
+    assert wire["matched_disputed_hops"] == 2
+    assert wire["unmatched_hops"] == 1
+    assert len(built.payload) <= m.MAX_PUBLIC_DISPUTE_OVERLAP_COVERAGE_BYTES
+    verified = m.verify_public_dispute_overlap_coverage(
+        runs, 0, 3, built.payload, expected_sha256=built.sha256
+    )
+    assert verified.source_index_sha256 == original.sha256
+    assert (verified.start_hop, verified.end_hop_exclusive) == (0, 3)
+    assert verified.matched_windows == 2
+    assert verified.matched_hops == 2
+
+
 def test_dispute_overlap_coverage_empty_source_index(
     dispute_overlap_coverage_module, timeline_sources
 ):

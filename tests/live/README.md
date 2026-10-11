@@ -2359,5 +2359,9 @@ navigation summary works even when the full overlap list exceeds its 8-KiB
 bound. Full 3–5 ordered cohorts are rebuilt on every build/verify; the
 independent verifier rejects oversize before parse, duplicate/noncanonical
 wire, forged/rehashed counts, changed source order and invalid bounds.
-No cache, detached index, private/host/provider I/O, trusted chronology,
-provenance or native authority.
+A real four-source two-segment regression queries [0,3), which intersects
+two disputed windows across a unanimous gap: 2 matched windows,
+2 disputed hops and 1 unmatched hop, source digest identical to the full
+ranked index, and independent build→verify. No cache, detached index,
+private/host/provider I/O, trusted chronology, provenance or native
+authority.

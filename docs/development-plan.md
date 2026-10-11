@@ -1324,7 +1324,11 @@ non-disputed query hops, along with full original index SHA-256.
 Use original ordered 3–5 cohorts for every build/verify; never treat a
 SHA-256 as authentication or infer severity/chronology/authority.
 Fail closed on invalid bounds, oversized/noncanonical/duplicate/rehashed
-wire and source reordering. A real multi-segment >16-window index fixture
+wire and source reordering. Independent Review #202 (0 Critical/Important,
+1 Minor) was addressed by real four-cohort mixed-coverage build→verify:
+query [0,3) crosses two disputed windows and one unanimous gap,
+returning 2 matched windows, 2 disputed hops and 1 unmatched hop,
+with exact full index SHA-256. A real multi-segment >16-window index fixture
 confirms the summary remains ≤4 KiB when full overlap output exceeds
 8 KiB. This does not change #200's 8-KiB complete
 overlap bound or #201's paginated retrieval; it enables bounded counts.
