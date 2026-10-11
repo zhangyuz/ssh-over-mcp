@@ -7639,3 +7639,213 @@ def test_classified_hop_page_clips_inside_both_distinct_source_intervals(
     )
     assert counts == facts.classified_hops
     assert sum(counts) == end - start
+
+
+@pytest.fixture
+def classified_hop_filtered_page_module(classified_hop_page_module):
+    return importlib.import_module("staging_classified_hop_filtered_page")
+
+
+@pytest.mark.parametrize("classification", ["unanimous", "majority", "disputed"])
+def test_classified_hop_filtered_page_original_source_matches_interval_projection(
+    classified_hop_filtered_page_module,
+    classified_hop_coverage_module,
+    timeline_sources,
+    classification,
+):
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, c, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (b, b, b, b),
+    )
+    runs = tuple(
+        (tuple(row[member] for row in snapshots[:4]), tuple(row[member] for row in snapshots[3:]))
+        for member in range(4)
+    )
+    m = classified_hop_filtered_page_module
+    source = m.intervals.build_public_intervals(runs)
+    rows = json.loads(source.payload)["intervals"]
+    original = tuple(
+        (row["start_hop"], row["end_hop_exclusive"], row["classification"])
+        for row in rows
+        if row["classification"] == classification
+    )
+    assert original, "real source fixture must contain all three public classes"
+    actual = []
+    cursor = 0
+    for _ in range(8):
+        page = m.build_public_classified_hop_filtered_page(runs, 0, 5, classification, cursor, 1)
+        wire = json.loads(page.payload)
+        facts = m.verify_public_classified_hop_filtered_page(
+            runs, 0, 5, classification, cursor, 1, page.payload, expected_sha256=page.sha256
+        )
+        assert wire["classification"] == classification
+        assert wire["total_segments"] == len(original)
+        assert wire["source_intervals_sha256"] == source.sha256
+        assert all(x["classification"] == classification for x in wire["segments"])
+        assert len(page.payload) <= m.MAX_PUBLIC_CLASSIFIED_HOP_FILTERED_PAGE_BYTES
+        actual.extend(facts.segments)
+        if wire["next_offset"] is None:
+            break
+        assert wire["next_offset"] > cursor
+        cursor = wire["next_offset"]
+    else:
+        pytest.fail("class-filtered pagination did not terminate")
+    assert tuple(actual) == original
+
+    single = classified_hop_coverage_module
+    summary = single.build_public_classified_hop_coverage(runs, 0, 5)
+    checked = single.verify_public_classified_hop_coverage(
+        runs, 0, 5, summary.payload, expected_sha256=summary.sha256
+    )
+    index = ("unanimous", "majority", "disputed").index(classification)
+    assert sum(end - start for start, end, _ in actual) == checked.classified_hops[index]
+
+
+def test_classified_hop_filtered_page_clipped_and_empty_filter(
+    classified_hop_filtered_page_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    unanimous = ((a, b), (b, c))
+    runs = (unanimous, unanimous, unanimous)
+    m = classified_hop_filtered_page_module
+    missing = m.build_public_classified_hop_filtered_page(runs, 0, 1, "majority", 0, 8)
+    wire = json.loads(missing.payload)
+    assert wire["total_segments"] == 0
+    assert wire["segments"] == [] and wire["next_offset"] is None
+    assert (
+        m.verify_public_classified_hop_filtered_page(
+            runs, 0, 1, "majority", 0, 8, missing.payload, expected_sha256=missing.sha256
+        ).segments
+        == ()
+    )
+    full = m.build_public_classified_hop_filtered_page(runs, 0, 1, "unanimous", 0, 8)
+    assert m.verify_public_classified_hop_filtered_page(
+        runs, 0, 1, "unanimous", 0, 8, full.payload, expected_sha256=full.sha256
+    ).segments == ((0, 1, "unanimous"),)
+    terminal = m.build_public_classified_hop_filtered_page(runs, 0, 1, "unanimous", 1, 1)
+    assert json.loads(terminal.payload)["segments"] == []
+    assert (
+        m.verify_public_classified_hop_filtered_page(
+            runs, 0, 1, "unanimous", 1, 1, terminal.payload, expected_sha256=terminal.sha256
+        ).segments
+        == ()
+    )
+
+
+@pytest.mark.parametrize("category", [None, True, 1, "", "all", "Disputed", "disputed "])
+def test_classified_hop_filtered_page_rejects_unknown_category(
+    classified_hop_filtered_page_module, dispute_index_runs, category
+):
+    m = classified_hop_filtered_page_module
+    with pytest.raises(
+        m.ClassifiedHopFilteredPageError,
+        match="^staging classified hop filtered page rejected$",
+    ):
+        m.build_public_classified_hop_filtered_page(dispute_index_runs, 0, 3, category, 0, 1)
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "offset", "limit"),
+    [
+        (-1, 1, 0, 1),
+        (0, 0, 0, 1),
+        (0, 4, 0, 1),
+        (True, 1, 0, 1),
+        (0, False, 0, 1),
+        (0.0, 1, 0, 1),
+        (0, 1, True, 1),
+        (0, 1, -1, 1),
+        (0, 1, 0, 0),
+        (0, 1, 0, 9),
+        (0, 1, 99, 1),
+        (0, 1, 0, True),
+    ],
+)
+def test_classified_hop_filtered_page_refuses_bad_ranges_and_cursor(
+    classified_hop_filtered_page_module, dispute_index_runs, start, end, offset, limit
+):
+    m = classified_hop_filtered_page_module
+    with pytest.raises(m.ClassifiedHopFilteredPageError):
+        m.build_public_classified_hop_filtered_page(
+            dispute_index_runs, start, end, "disputed", offset, limit
+        )
+
+
+def test_classified_hop_filtered_page_rejects_rehashed_forgery_reorder_and_duplicates(
+    classified_hop_filtered_page_module, dispute_index_runs
+):
+    m = classified_hop_filtered_page_module
+    built = m.build_public_classified_hop_filtered_page(dispute_index_runs, 0, 3, "disputed", 0, 8)
+    body = json.loads(built.payload)
+    body["total_segments"] = 77
+    raw = json.dumps(body, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("ascii")
+    with pytest.raises(m.ClassifiedHopFilteredPageError):
+        m.verify_public_classified_hop_filtered_page(
+            dispute_index_runs,
+            0,
+            3,
+            "disputed",
+            0,
+            8,
+            raw,
+            expected_sha256=hashlib.sha256(raw).hexdigest(),
+        )
+    swapped = (
+        dispute_index_runs[2],
+        dispute_index_runs[1],
+        dispute_index_runs[0],
+        dispute_index_runs[3],
+    )
+    with pytest.raises(m.ClassifiedHopFilteredPageError):
+        m.verify_public_classified_hop_filtered_page(
+            swapped, 0, 3, "disputed", 0, 8, built.payload, expected_sha256=built.sha256
+        )
+    duplicate = b'{"audience":"public","audience":"public"}'
+    with pytest.raises(m.ClassifiedHopFilteredPageError):
+        m.verify_public_classified_hop_filtered_page(
+            dispute_index_runs,
+            0,
+            3,
+            "disputed",
+            0,
+            8,
+            duplicate,
+            expected_sha256=hashlib.sha256(duplicate).hexdigest(),
+        )
+
+
+def test_classified_hop_filtered_page_preparse_cap_and_one_source_rebuild(
+    classified_hop_filtered_page_module, dispute_index_runs, monkeypatch
+):
+    m = classified_hop_filtered_page_module
+    original = m.intervals.build_public_intervals
+    calls = []
+
+    def counted(r):
+        calls.append(1)
+        return original(r)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.intervals, "build_public_intervals", counted)
+        built = m.build_public_classified_hop_filtered_page(
+            dispute_index_runs, 0, 3, "disputed", 0, 8
+        )
+        assert len(calls) == 1
+        m.verify_public_classified_hop_filtered_page(
+            dispute_index_runs, 0, 3, "disputed", 0, 8, built.payload, expected_sha256=built.sha256
+        )
+        assert len(calls) == 2
+    raw = b"x" * (m.MAX_PUBLIC_CLASSIFIED_HOP_FILTERED_PAGE_BYTES + 1)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversize filtered page reached JSON parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.ClassifiedHopFilteredPageError):
+            m._checked(raw, hashlib.sha256(raw).hexdigest())

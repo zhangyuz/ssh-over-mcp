@@ -1556,3 +1556,29 @@ unanimous/majority/disputed hop totals matching the original-source
 #206 single-query classified summary. No production algorithm change.
 Final exact-head dual Python 3.13/3.14 CI and independent review
 remain mandatory after #205→#206→#207→#208 merge and main retarget.
+
+**New isolated public-only slice — class-filtered classified hop interval
+pages (branch `live-e2e-classified-filter-page`, stacked on PR #209):**
+Add canonical ≤4-KiB ASCII per-page source-bound projection of
+original classified intervals for one strict exact class selected from
+`unanimous/majority/disputed` and one strict exact-int half-open hop
+query. Filter *before* cursor navigation; `offset` counts only
+matching clipped original interval rows (0..total); `limit` 1..8,
+monotonic nonterminal cursor or terminal null, including zero-match
+and explicit offset-total empty page. Preserve original source
+agreement boundaries and stable hop ordering; do not treat majority or
+unanimous as certified safe. Independently build/verify from the full
+original ordered 3–5 cohorts' interval index exactly once per call,
+bind complete source interval SHA and compare byte-exact canonical
+bytes. Fail closed on malformed/bool/invalid class or bounds,
+oversized/digest-before-parse, duplicate keys, noncanonical and
+rehashed forgery, source reorder via fixed sanitized errors.
+RED→GREEN tests cover all three real source classes, paging,
+independent one-query class length parity, empty terminal,
+strict invalid input, forged wire and one rebuild per invocation.
+No host/provider/private I/O, cache/detached index, trustworthy time,
+severity, authorization or authenticated provenance. Independent
+security/docs review and final exact-head dual Python CI after
+upstream #205→#206→#207→#208→#209 merge and #210 main retarget
+remain mandatory. PR-only Level-3 skipped is not native acceptance;
+A1/B8/N1c/UID-502/stale provider/native Level-3 remain OPEN.

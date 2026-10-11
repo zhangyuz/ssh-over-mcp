@@ -2573,3 +2573,26 @@ independently verified sum by unanimous/majority/disputed class is
 identical to #206 one-query classified coverage for the exact same
 original cohorts and half-open query. This specifically repairs a
 prior test that began exactly on a source interval boundary.
+
+### Public class-filtered classified interval pages (next isolated slice)
+
+`staging_classified_hop_filtered_page.build_public_classified_hop_filtered_page(
+runs, start_hop, end_hop_exclusive, classification, offset, limit)`
+returns clipped source interval rows for **one exact public class**:
+`unanimous`, `majority` or `disputed`. Strict exact-int hop query
+uses a positive-width half-open range. Offset counts only **matching**
+segments, including terminal `offset==total_segments`; limit is 1–8.
+Pages preserve source intervals' original hop order and boundaries
+without merging equal-class agreement-group changes. A class with no
+matching segment produces a terminal empty page.
+Canonical ≤4-KiB ASCII output binds the full original intervals SHA;
+every independent build/verify rebuilds original ordered 3–5 cohort
+source intervals once, checks bounded wire size and digest before
+JSON parsing, refuses duplicate keys/noncanonical/rehashed forgery,
+invalid class/bool/out-of-range/cursor and reordered original sources,
+and compares exact canonical rebuilt bytes. Tests include each of the
+three real original-source classes, cursor traversal, empty class,
+terminal cursor, class-length parity against the independent single
+classified coverage API, forged output and preparse cap.
+No cached/detached public or private source, host/provider I/O, trusted
+timeline, authenticated provenance, severity, authorization or safety.
