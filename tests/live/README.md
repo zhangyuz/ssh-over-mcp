@@ -2365,3 +2365,22 @@ two disputed windows across a unanimous gap: 2 matched windows,
 ranked index, and independent build→verify. No cache, detached index,
 private/host/provider I/O, trusted chronology, provenance or native
 authority.
+
+### Bounded public source-verified overlap coverage batches (next isolated slice)
+
+`staging_dispute_overlap_coverages.build_public_dispute_overlap_coverages(runs,
+queries)` takes **1–8** caller-ordered exact-int half-open hop pairs, each
+within the original index `hop_count`. It rebuilds the complete ranked
+dispute index once from the original ordered 3–5 cohorts and emits a
+canonical **≤8-KiB ASCII** batch. `queries` retains caller order and may
+include repeated or overlapping queries: each independent `results` entry
+contains `matched_window_count`, clipped `matched_disputed_hops`,
+and `unmatched_hops` (= query width minus disputed coverage).
+The single full source index SHA-256 applies to the entire batch; no
+window list or per-query provider read. The verifier independently
+rebuilds the same original index once, prechecks size and digest, and
+requires exact canonical bytes, rejecting duplicate keys, invalid
+bounds, reordered source cohorts and rehashed forged results. The
+batch is navigation only, not trusted chronology, severity, provenance,
+authorization or native host/provider recovery. No detached index,
+cross-request cache, private/host/provider I/O or unbounded output.
