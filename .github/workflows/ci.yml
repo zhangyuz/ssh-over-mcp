@@ -23,7 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
-        suite: [core, projection-heavy, projection-rest]
+        suite: [source-heavy, everything-else]
 
     steps:
       - name: Verify hardened Ubuntu 26.04 x86 runner container
@@ -122,13 +122,12 @@ jobs:
           # uses pytest -k not (...) so every collected test runs once.
           heavy="test_dispute_overlap_page_paginates_real_valid_overflow or test_private_series_max_eight_segments_and_128_hops or test_dispute_overlap_valid_source_index_can_exceed_wire_capacity or test_dispute_overlap_coverage_remains_bounded_on_valid_large_index or test_dispute_gap_page_majority_leading_trailing_and_eight_gap_bound or test_dispute_ranks_real_sixteen_distinct_windows_upper_bound or test_dossier_public_maximum_8x16_on_both_sides or test_series_max_eight_segments_128_hops or test_portfolio_rejects_mismatched_genuine_pair_and_sources or test_dossier_rejects_genuine_mismatched_pair_and_source_splice"
           case "${{ matrix.suite }}" in
-            core)
-              python -m pytest -q --durations=15 --ignore=tests/ops/test_live_e2e_staging_projection.py
-              ;;
-            projection-heavy)
+            source-heavy)
               python -m pytest -q --durations=15 tests/ops/test_live_e2e_staging_projection.py -k "${heavy}"
               ;;
-            projection-rest)
+            everything-else)
+              # First run all non-projection tests; then run the exact complement.
+              python -m pytest -q --durations=15 --ignore=tests/ops/test_live_e2e_staging_projection.py
               python -m pytest -q --durations=15 tests/ops/test_live_e2e_staging_projection.py -k "not (${heavy})"
               ;;
             *)
@@ -138,7 +137,7 @@ jobs:
 
 
   # Keep the historical required-check names. Both Python gate jobs
-  # fail unless *all* 3x2 shards succeeded, including slow original-source
+  # fail unless *all* 2x2 shards succeeded, including slow original-source
   # security regressions. Never treat skipped/cancelled shards as PASS.
   validate:
     name: Ubuntu 26.04 x86 / Python ${{ matrix.python-version }}
@@ -160,7 +159,7 @@ jobs:
             echo "::error::Python 3.13/3.14 required suite shard did not pass: ${SHARD_RESULT}"
             exit 1
           fi
-          echo "All six Python/suite shards PASS"
+          echo "All four Python/suite shards PASS"
 
   live-local-e2e:
     name: Merge-main no-network Level-3
