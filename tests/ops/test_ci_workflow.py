@@ -24,7 +24,8 @@ def test_ci_cancels_only_stale_pr_runs_and_preserves_main_pushes() -> None:
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["concurrency"] == {
         "group": (
-            "${{ github.workflow }}-${{ github.event_name == 'pull_request' "
+            "${{ github.workflow }}-${{ github.event_name }}-"
+            "${{ github.event_name == 'pull_request' "
             "&& github.event.pull_request.number || github.run_id }}"
         ),
         "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",

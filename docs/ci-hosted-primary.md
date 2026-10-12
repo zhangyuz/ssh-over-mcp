@@ -69,3 +69,17 @@ P95 (target <10 minutes), billing, and security regression outcomes.
 **Rollback:** restore the original `.github/workflows/ci.yml` from the
 pre-migration commit and its exact `tests/ops/test_ci_workflow.py` contract.
 Do not disable native E2E or hardened security checks.
+
+
+### Event-transition concurrency safety
+
+While the pre-migration base branch still defines a legacy
+`pull_request_target` CI, the updated `pull_request` workflow can fire on
+the same PR. The new concurrency key includes the **event name** to avoid
+the old base-branch run cancelling the new unprivileged hosted run:
+`CI-pull_request-PR` is distinct from the old `CI-PR`. Both sets of checks
+must complete honestly during the transition; duplicate check contexts
+may appear until the base branch adopts the new workflow. Confirm branch
+protection still requires both historical Python checks and inspect **all**
+checks at exact PR HEAD before merging, including any legacy checks.
+After merge, the main branch contains only the new pull-request CI trigger.
