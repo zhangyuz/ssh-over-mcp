@@ -109,6 +109,16 @@ def _fake_host_env(tmp_path: Path) -> tuple[dict[str, str], Path, Path]:
     )
 
     env = os.environ.copy()
+    # GitHub Actions injects RUNNER_NAME automatically; mock host setup
+    # must not mistake the executing CI runner for the simulated target slot.
+    for name in (
+        "RUNNER_NAME",
+        "RUNNER_CONTAINER_NAME",
+        "RUNNER_CPUS",
+        "RUNNER_MEMORY",
+        "RUNNER_SUPERVISOR_SLOT",
+    ):
+        env.pop(name, None)
     env.update(
         {
             "PATH": f"{fake_bin}:{env['PATH']}",
