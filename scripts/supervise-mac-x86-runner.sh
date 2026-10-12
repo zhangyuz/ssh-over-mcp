@@ -5,9 +5,61 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 DEPLOY="${RUNNER_DEPLOY_SCRIPT:-${SCRIPT_DIR}/deploy-mac-x86-runner.sh}"
 
-LABEL="com.ssh-over-mcp.mac-x86-runner"
+# Slots are separate launchd agents, locks, GitHub identities and Docker
+# containers. Existing installations continue using the primary slot.
+slot="${RUNNER_SUPERVISOR_SLOT:-primary}"
+case "${slot}" in
+  primary)
+    LABEL="com.ssh-over-mcp.mac-x86-runner"
+    default_runner="ssh-over-mcp-mac-x86"
+    default_container="ssh-over-mcp-runner-mac-x86"
+    default_cpus=2
+    ;;
+  secondary)
+    LABEL="com.ssh-over-mcp.mac-x86-runner-b"
+    default_runner="ssh-over-mcp-mac-x86-b"
+    default_container="ssh-over-mcp-runner-mac-x86-b"
+    default_cpus=3
+    ;;
+  *)
+    printf 'error: unsupported runner slot: %s\n' "${slot}" >&2
+    exit 2
+    ;;
+esac
 repo_slug="${RUNNER_REPO_SLUG:-zhangyuz/ssh-over-mcp}"
-container_name="${RUNNER_CONTAINER_NAME:-ssh-over-mcp-runner-mac-x86}"
+container_name="${RUNNER_CONTAINER_NAME:-${default_container}}"
+runner_name="${RUNNER_NAME:-${default_runner}}"
+cpu_limit="${RUNNER_CPUS:-${default_cpus}}"
+memory_limit="${RUNNER_MEMORY:-4g}"
+
+# Values are persisted in a launchd plist, so accept only bounded
+# literal resource quotas (also prevents plist/XML injection).
+if [[ ! "${cpu_limit}" =~ ^[1-4]$ ]] || [[ ! "${memory_limit}" =~ ^[2-5]g$ ]]; then
+  echo "error: runner CPU quota must be 1-4 and memory quota 2g-5g" >&2
+  exit 2
+fi
+
+# Both names flow into a launchd plist and into Docker/GitHub API calls.
+# Fail closed on characters that could inject XML or a shell fragment.
+for identity in "${runner_name}" "${container_name}"; do
+  if [[ ! "${identity}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
+    echo "error: runner/container name contains unsupported characters" >&2
+    exit 2
+  fi
+done
+
+# A secondary service must never acquire the primary runner identity.
+if [[ "${slot}" == "secondary" ]] && {
+  [[ "${runner_name}" == "ssh-over-mcp-mac-x86" ]] ||
+  [[ "${container_name}" == "ssh-over-mcp-runner-mac-x86" ]]
+}; then
+  echo "error: secondary runner must not reuse primary runner/container identity" >&2
+  exit 2
+fi
+export RUNNER_CONTAINER_NAME="${container_name}"
+export RUNNER_NAME="${runner_name}"
+export RUNNER_CPUS="${cpu_limit}"
+export RUNNER_MEMORY="${memory_limit}"
 image="${RUNNER_IMAGE:-ssh-over-mcp-actions-runner:ubuntu26.04-x86}"
 poll_seconds="${RUNNER_SUPERVISOR_POLL_SECONDS:-2}"
 replacement_delay="${RUNNER_SUPERVISOR_REPLACEMENT_DELAY_SECONDS:-2}"
@@ -15,10 +67,12 @@ launchd_path="${RUNNER_SUPERVISOR_LAUNCHD_PATH:-/usr/local/bin:/opt/homebrew/bin
 
 home_dir="${HOME:?HOME is required}"
 state_dir="${RUNNER_SUPERVISOR_STATE_DIR:-${home_dir}/Library/Application Support/ssh-over-mcp}"
-lock_dir="${state_dir}/runner-supervisor.lock"
+lock_suffix=""
+[[ "${slot}" == "secondary" ]] && lock_suffix="-b"
+lock_dir="${state_dir}/runner-supervisor${lock_suffix}.lock"
 plist_path="${home_dir}/Library/LaunchAgents/${LABEL}.plist"
-stdout_log="${home_dir}/Library/Logs/ssh-over-mcp-runner-supervisor.log"
-stderr_log="${home_dir}/Library/Logs/ssh-over-mcp-runner-supervisor.err.log"
+stdout_log="${home_dir}/Library/Logs/ssh-over-mcp-runner-supervisor${lock_suffix}.log"
+stderr_log="${home_dir}/Library/Logs/ssh-over-mcp-runner-supervisor${lock_suffix}.err.log"
 
 stop_requested=0
 lock_held=0
@@ -219,6 +273,16 @@ install_launchd() {
     <string>${escaped_home}</string>
     <key>PATH</key>
     <string>${escaped_path}</string>
+    <key>RUNNER_SUPERVISOR_SLOT</key>
+    <string>${slot}</string>
+    <key>RUNNER_NAME</key>
+    <string>${runner_name}</string>
+    <key>RUNNER_CONTAINER_NAME</key>
+    <string>${container_name}</string>
+    <key>RUNNER_CPUS</key>
+    <string>${cpu_limit}</string>
+    <key>RUNNER_MEMORY</key>
+    <string>${memory_limit}</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -277,8 +341,13 @@ Usage:
   scripts/supervise-mac-x86-runner.sh status
   scripts/supervise-mac-x86-runner.sh logs
 
-run        Keep exactly one disposable runner container available.
+run        Keep one disposable runner available for selected slot.
 once       Start/adopt one disposable runner and exit after it retires.
+
+RUNNER_SUPERVISOR_SLOT=primary|secondary (default primary)
+  Each slot has an independent launchd agent, container and lock.
+  Secondary defaults to 3 vCPU / 4 GiB and registers the same CI label.
+  Both slots use one-job ephemeral containers and fresh tokens.
 install    Install and start a per-user launchd service.
 uninstall  Stop launchd supervision and remove its plist.
 status     Show launchd service and runner-container state.

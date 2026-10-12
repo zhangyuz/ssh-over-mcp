@@ -12,12 +12,61 @@ supervisor from the repository root:
 bash scripts/supervise-mac-x86-runner.sh install
 ```
 
-The launchd-managed supervisor keeps at most one hardened ephemeral runner
-container available. Every runner still accepts exactly one GitHub Actions job,
-then deregisters and is removed. After retirement, the supervisor obtains a new
-short-lived registration token through authenticated `gh` and starts a fresh
-container. The one-shot `deploy-mac-x86-runner.sh up` entrypoint remains
-available for maintenance and bootstrap validation.
+By default, the launchd-managed **primary** supervisor keeps exactly one
+hardened ephemeral runner available. An **opt-in, separately supervised
+secondary slot** can add one more independent runner without replacing the
+primary launchd service. Each runner accepts exactly one GitHub Actions job,
+then deregisters and is removed; the slot supervisor mints a fresh short-lived
+registration token through authenticated `gh` before replacement. The one-shot
+`deploy-mac-x86-runner.sh up` entrypoint remains available for maintenance
+and bootstrap validation.
+
+### Optional second ephemeral runner (staged CI capacity rollout)
+
+Only enable this after CI-security review and confirmed Docker Desktop capacity:
+the Intel Mac presently has **8 logical CPUs / 16 GiB RAM**, and Docker Desktop
+has been allocated **8 vCPUs / 12 GB RAM**. Each slot gets a distinct GitHub
+runner name, Docker container, launchd agent, logfile and lock; both register
+the existing `ssh-over-mcp-mac-x86` runner label and retain the **same**
+non-root/zero-capability/no-new-privileges/no-Docker-socket security limits.
+
+| Slot | GitHub name | Docker container | CPU | RAM |
+|---|---|---|---:|---:|
+| primary | `ssh-over-mcp-mac-x86` | `ssh-over-mcp-runner-mac-x86` | 2 vCPU (existing default) | 4 GiB |
+| secondary | `ssh-over-mcp-mac-x86-b` | `ssh-over-mcp-runner-mac-x86-b` | 3 vCPU | 4 GiB |
+
+**After merging the implementation PR**, and only after checking runner idle
+status / resource pressure, enable the secondary slot with:
+
+```bash
+RUNNER_SUPERVISOR_SLOT=secondary bash scripts/supervise-mac-x86-runner.sh install
+RUNNER_SUPERVISOR_SLOT=secondary bash scripts/supervise-mac-x86-runner.sh status
+```
+
+The original primary service is untouched by these commands. Its CPU allowance
+remains 2 vCPU until a separately planned **idle-only** redeployment; the
+optional 3+3 vCPU / 4+4 GiB allocation is a *later* tuning experiment, not a
+requirement for enabling the secondary slot. Docker VM memory must leave room
+for other containers and caches, and macOS host swap/memory pressure must stay
+healthy. Do **not** run both slots at a combined allocation exceeding available
+host/VM resources.
+
+Rollback the secondary slot while idle using:
+
+```bash
+RUNNER_SUPERVISOR_SLOT=secondary bash scripts/supervise-mac-x86-runner.sh uninstall
+```
+
+Uninstall stops *supervision*, not an already running job: do not manually
+kill a busy runner. An orphaned secondary runner can be retired only after its
+job finishes and its GitHub registration is gone. The original primary slot
+must remain available as fallback.
+
+This change only adds safe runner **capacity**, not parallel test execution
+within each runner. A later, separate PR will assess `pytest-xdist` and
+source-bound hot paths; no 10-minute CI claim is made until both Python
+versions pass their exact-head required checks in real Canary runs and the
+end-to-end P95 is verified.
 
 ## What this runner validates
 
