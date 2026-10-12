@@ -1411,3 +1411,15 @@ static validation and post-merge workflow-run verification; PR_target
 checks on the unmerged workflow use the *base* config and cannot
 prove new shard timings. The external 300-second watcher cadence
 and all native Level-3 OPEN gates are unchanged.
+
+**CI shard canary follow-up (2026-10-12):** The first real push canary
+`38198741151` completed two Python `source-heavy` shards PASS; both
+`everything-else` shards FAILED on five old `test_ci_workflow.py`
+contracts that assumed the old monolithic `validate` job structure.
+Both fail-closed required Python gate jobs correctly FAILED. Updated
+contract checks now inspect the reusable shard's hardened lint/compile
+and complementary suite commands and preserve the untouched
+`self-hosted-security.yml` matrix contract; local focused tests and
+Ruff pass. The canary must be rerun and each shard, both historical
+Python checks, independent review and exact-main gates verified before
+integration. Native Level-3 acceptance remains OPEN.
