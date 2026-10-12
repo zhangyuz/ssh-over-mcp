@@ -1391,3 +1391,31 @@ review and exact-head Ubuntu
 Python 3.13/3.14 CI after upstream PR #203 is merged
 and PR retargeted to main; PR-only Level-3 skip is not native approval.
 A1/B8/N1c/UID-502/provider disposition/native Level-3 remain OPEN.
+
+
+### CI architecture change — GitHub-hosted PR CI, self-hosted native E2E (2026-10-12, pending PR)
+
+The staged CI throughput plan moves routine Python 3.13/3.14 PR/main-push
+**full test suites** (including privileged-operator source tests, Ruff and
+compile) to parallel GitHub-hosted Ubuntu 26.04 x86 VMs. Historical required
+Python check names remain unchanged and fail closed. The PR workflow uses
+`pull_request` instead of `pull_request_target` and does not provide
+repository secrets or write token permissions. Strict Linux test identity
+is retained through a non-root `setpriv` step that clears only GitHub-hosted
+desktop supplementary groups. The manual trusted-main hardened
+`self-hosted-security.yml` workflow remains separate and intact.
+
+The **real, native no-network Level-3** E2E must still run after BOTH main-push
+required checks succeed, on the dedicated non-admin macOS Intel QEMU
+orchestrator with exact merged main SHA. It must not be represented as having
+passed for a PR or while still queued. The optional second ephemeral Linux
+Docker runner is capacity for dedicated security tests, **not** a prerequisite
+to routine PR CI. The hosted full-suite canary
+[38294820787](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38294820787)
+is PASS for both Python versions, but required ~12m17s end-to-end; the
+10-minute goal is **not yet established**. The four-VM hosted partition
+experiment is pending [PR #216](https://github.com/zhangyuz/ssh-over-mcp/pull/216).
+Rollout and post-merge acceptance require exact-head dual Python PASS,
+no missing test nodes, no weakened security checks, trusted-main native
+Level-3 PASS, and repeated end-to-end P95 under 10 minutes; see
+`docs/ci-hosted-primary.md`.
