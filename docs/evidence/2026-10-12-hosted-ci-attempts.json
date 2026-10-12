@@ -1,0 +1,586 @@
+{
+  "observed_at": "2026-10-12T23:14:24.618238+00:00",
+  "records": [
+    {
+      "run_id": 38300258158,
+      "attempt": 1,
+      "head_sha": "cd5f26fed62b7317b3d27cce7e090bf832b0d56e",
+      "event": "pull_request",
+      "workflow_name": "Hosted Fast CI Experiment",
+      "attempt_started_at": "2026-10-12T19:50:08Z",
+      "workflow_status": "completed",
+      "workflow_conclusion": "success",
+      "hosted_all_success": true,
+      "hosted_feedback_seconds": 421,
+      "jobs": [
+        {
+          "name": "Hosted fast / Python 3.14 / projection-rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T19:50:12Z",
+          "completed_at": "2026-10-12T19:54:38Z"
+        },
+        {
+          "name": "Hosted fast / Python 3.14 / rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T19:50:12Z",
+          "completed_at": "2026-10-12T19:51:05Z"
+        },
+        {
+          "name": "Hosted fast / Python 3.13 / projection-rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T19:50:12Z",
+          "completed_at": "2026-10-12T19:57:02Z"
+        },
+        {
+          "name": "Hosted fast / Python 3.13 / projection-hot",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T19:50:11Z",
+          "completed_at": "2026-10-12T19:53:17Z"
+        },
+        {
+          "name": "Hosted fast / Python 3.14 / projection-hot",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T19:50:13Z",
+          "completed_at": "2026-10-12T19:52:53Z"
+        },
+        {
+          "name": "Hosted fast / Python 3.13 / rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T19:50:12Z",
+          "completed_at": "2026-10-12T19:51:15Z"
+        },
+        {
+          "name": "Hosted fast / Python 3.13 + 3.14 / full-suite gate",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T19:57:05Z",
+          "completed_at": "2026-10-12T19:57:09Z"
+        }
+      ]
+    },
+    {
+      "run_id": 38303346075,
+      "attempt": 1,
+      "head_sha": "def0681a145bac37bbdbfbcbc2122f5770cb5d20",
+      "event": "pull_request",
+      "workflow_name": "CI",
+      "attempt_started_at": "2026-10-12T20:18:25Z",
+      "workflow_status": "completed",
+      "workflow_conclusion": "success",
+      "hosted_all_success": true,
+      "hosted_feedback_seconds": 314,
+      "jobs": [
+        {
+          "name": "Hosted CI shard / Python 3.14 / projection-hot",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:18:29Z",
+          "completed_at": "2026-10-12T20:21:47Z"
+        },
+        {
+          "name": "Hosted CI shard / Python 3.13 / projection-rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:18:29Z",
+          "completed_at": "2026-10-12T20:21:50Z"
+        },
+        {
+          "name": "Hosted CI shard / Python 3.13 / projection-hot",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:18:29Z",
+          "completed_at": "2026-10-12T20:21:40Z"
+        },
+        {
+          "name": "Hosted CI shard / Python 3.14 / projection-rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:18:30Z",
+          "completed_at": "2026-10-12T20:23:32Z"
+        },
+        {
+          "name": "Hosted CI shard / Python 3.14 / rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:18:29Z",
+          "completed_at": "2026-10-12T20:19:29Z"
+        },
+        {
+          "name": "Hosted CI shard / Python 3.13 / rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:18:30Z",
+          "completed_at": "2026-10-12T20:19:33Z"
+        },
+        {
+          "name": "Ubuntu 26.04 x86 / Python 3.13",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:23:35Z",
+          "completed_at": "2026-10-12T20:23:38Z"
+        },
+        {
+          "name": "Ubuntu 26.04 x86 / Python 3.14",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:23:35Z",
+          "completed_at": "2026-10-12T20:23:39Z"
+        },
+        {
+          "name": "Merge-main no-network Level-3",
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-10-12T20:23:40Z",
+          "completed_at": "2026-10-12T20:23:40Z"
+        }
+      ]
+    },
+    {
+      "run_id": 38303775407,
+      "attempt": 1,
+      "head_sha": "9607fd086ef02fa17360b82773fd2ccb28d5f905",
+      "event": "pull_request",
+      "workflow_name": "CI",
+      "attempt_started_at": "2026-10-12T20:22:19Z",
+      "workflow_status": "completed",
+      "workflow_conclusion": "success",
+      "hosted_all_success": true,
+      "hosted_feedback_seconds": 439,
+      "jobs": [
+        {
+          "name": "Full validation / Python 3.14 / projection-rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:22:22Z",
+          "completed_at": "2026-10-12T20:29:31Z"
+        },
+        {
+          "name": "Full validation / Python 3.13 / rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:22:23Z",
+          "completed_at": "2026-10-12T20:23:19Z"
+        },
+        {
+          "name": "Full validation / Python 3.14 / projection-hot",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:22:22Z",
+          "completed_at": "2026-10-12T20:25:37Z"
+        },
+        {
+          "name": "Full validation / Python 3.13 / projection-rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:22:23Z",
+          "completed_at": "2026-10-12T20:29:08Z"
+        },
+        {
+          "name": "Full validation / Python 3.14 / rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:22:23Z",
+          "completed_at": "2026-10-12T20:23:18Z"
+        },
+        {
+          "name": "Full validation / Python 3.13 / projection-hot",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:22:22Z",
+          "completed_at": "2026-10-12T20:24:35Z"
+        },
+        {
+          "name": "Ubuntu 26.04 x86 / Python 3.13",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:29:34Z",
+          "completed_at": "2026-10-12T20:29:37Z"
+        },
+        {
+          "name": "Ubuntu 26.04 x86 / Python 3.14",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:29:35Z",
+          "completed_at": "2026-10-12T20:29:38Z"
+        },
+        {
+          "name": "Merge-main no-network Level-3",
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-10-12T20:29:38Z",
+          "completed_at": "2026-10-12T20:29:38Z"
+        }
+      ]
+    },
+    {
+      "run_id": 38304746153,
+      "attempt": 1,
+      "head_sha": "117f1b6717f9a3649de5be1ed7f951ea1e100a68",
+      "event": "pull_request",
+      "workflow_name": "CI",
+      "attempt_started_at": "2026-10-12T20:31:10Z",
+      "workflow_status": "completed",
+      "workflow_conclusion": "success",
+      "hosted_all_success": true,
+      "hosted_feedback_seconds": 442,
+      "jobs": [
+        {
+          "name": "Full validation / Python 3.14 / projection-hot",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:31:14Z",
+          "completed_at": "2026-10-12T20:34:21Z"
+        },
+        {
+          "name": "Full validation / Python 3.14 / rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:31:14Z",
+          "completed_at": "2026-10-12T20:32:15Z"
+        },
+        {
+          "name": "Full validation / Python 3.13 / rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:31:14Z",
+          "completed_at": "2026-10-12T20:32:11Z"
+        },
+        {
+          "name": "Full validation / Python 3.13 / projection-rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:31:14Z",
+          "completed_at": "2026-10-12T20:37:55Z"
+        },
+        {
+          "name": "Full validation / Python 3.14 / projection-rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:31:15Z",
+          "completed_at": "2026-10-12T20:38:23Z"
+        },
+        {
+          "name": "Full validation / Python 3.13 / projection-hot",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:31:16Z",
+          "completed_at": "2026-10-12T20:34:19Z"
+        },
+        {
+          "name": "Ubuntu 26.04 x86 / Python 3.13",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:38:29Z",
+          "completed_at": "2026-10-12T20:38:32Z"
+        },
+        {
+          "name": "Ubuntu 26.04 x86 / Python 3.14",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T20:38:28Z",
+          "completed_at": "2026-10-12T20:38:32Z"
+        },
+        {
+          "name": "Merge-main no-network Level-3",
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-10-12T20:38:33Z",
+          "completed_at": "2026-10-12T20:38:32Z"
+        }
+      ]
+    },
+    {
+      "run_id": 38304746153,
+      "attempt": 2,
+      "head_sha": "117f1b6717f9a3649de5be1ed7f951ea1e100a68",
+      "event": "pull_request",
+      "workflow_name": "CI",
+      "attempt_started_at": "2026-10-12T21:16:59Z",
+      "workflow_status": "completed",
+      "workflow_conclusion": "success",
+      "hosted_all_success": true,
+      "hosted_feedback_seconds": 442,
+      "jobs": [
+        {
+          "name": "Full validation / Python 3.13 / projection-rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:17:04Z",
+          "completed_at": "2026-10-12T21:22:11Z"
+        },
+        {
+          "name": "Full validation / Python 3.14 / projection-rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:17:04Z",
+          "completed_at": "2026-10-12T21:24:12Z"
+        },
+        {
+          "name": "Full validation / Python 3.13 / projection-hot",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:17:04Z",
+          "completed_at": "2026-10-12T21:20:18Z"
+        },
+        {
+          "name": "Full validation / Python 3.14 / rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:17:04Z",
+          "completed_at": "2026-10-12T21:18:06Z"
+        },
+        {
+          "name": "Full validation / Python 3.13 / rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:17:04Z",
+          "completed_at": "2026-10-12T21:18:06Z"
+        },
+        {
+          "name": "Full validation / Python 3.14 / projection-hot",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:17:04Z",
+          "completed_at": "2026-10-12T21:20:19Z"
+        },
+        {
+          "name": "Ubuntu 26.04 x86 / Python 3.14",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:24:15Z",
+          "completed_at": "2026-10-12T21:24:18Z"
+        },
+        {
+          "name": "Ubuntu 26.04 x86 / Python 3.13",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:24:17Z",
+          "completed_at": "2026-10-12T21:24:21Z"
+        },
+        {
+          "name": "Merge-main no-network Level-3",
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-10-12T21:24:22Z",
+          "completed_at": "2026-10-12T21:24:21Z"
+        }
+      ]
+    },
+    {
+      "run_id": 38308656457,
+      "attempt": 1,
+      "head_sha": "39a4f868bb77b0391dbeeee5fb56d3cdb4ae3128",
+      "event": "push",
+      "workflow_name": "CI",
+      "attempt_started_at": "2026-10-12T21:07:39Z",
+      "workflow_status": "completed",
+      "workflow_conclusion": "failure",
+      "hosted_all_success": true,
+      "hosted_feedback_seconds": 350,
+      "jobs": [
+        {
+          "name": "Full validation / Python 3.13 / projection-rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:07:44Z",
+          "completed_at": "2026-10-12T21:12:11Z"
+        },
+        {
+          "name": "Full validation / Python 3.14 / projection-rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:07:43Z",
+          "completed_at": "2026-10-12T21:13:21Z"
+        },
+        {
+          "name": "Full validation / Python 3.14 / rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:07:43Z",
+          "completed_at": "2026-10-12T21:08:28Z"
+        },
+        {
+          "name": "Full validation / Python 3.13 / rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:07:43Z",
+          "completed_at": "2026-10-12T21:08:34Z"
+        },
+        {
+          "name": "Full validation / Python 3.14 / projection-hot",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:07:43Z",
+          "completed_at": "2026-10-12T21:09:54Z"
+        },
+        {
+          "name": "Full validation / Python 3.13 / projection-hot",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:07:44Z",
+          "completed_at": "2026-10-12T21:10:51Z"
+        },
+        {
+          "name": "Ubuntu 26.04 x86 / Python 3.13",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:13:25Z",
+          "completed_at": "2026-10-12T21:13:29Z"
+        },
+        {
+          "name": "Ubuntu 26.04 x86 / Python 3.14",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:13:25Z",
+          "completed_at": "2026-10-12T21:13:28Z"
+        },
+        {
+          "name": "Merge-main no-network Level-3 / No-network Ubuntu 26.04 local E2E",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-10-12T21:13:32Z",
+          "completed_at": "2026-10-12T21:13:44Z"
+        }
+      ]
+    },
+    {
+      "run_id": 38310229053,
+      "attempt": 1,
+      "head_sha": "0626a407015c2115af12bace7c80175972d0e7d7",
+      "event": "pull_request",
+      "workflow_name": "CI",
+      "attempt_started_at": "2026-10-12T21:22:29Z",
+      "workflow_status": "completed",
+      "workflow_conclusion": "success",
+      "hosted_all_success": true,
+      "hosted_feedback_seconds": 431,
+      "jobs": [
+        {
+          "name": "Full validation / Python 3.13 / projection-rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:22:33Z",
+          "completed_at": "2026-10-12T21:29:20Z"
+        },
+        {
+          "name": "Full validation / Python 3.13 / projection-hot",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:22:32Z",
+          "completed_at": "2026-10-12T21:24:50Z"
+        },
+        {
+          "name": "Full validation / Python 3.13 / rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:22:33Z",
+          "completed_at": "2026-10-12T21:23:36Z"
+        },
+        {
+          "name": "Full validation / Python 3.14 / projection-rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:22:33Z",
+          "completed_at": "2026-10-12T21:29:33Z"
+        },
+        {
+          "name": "Full validation / Python 3.14 / rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:22:33Z",
+          "completed_at": "2026-10-12T21:23:35Z"
+        },
+        {
+          "name": "Full validation / Python 3.14 / projection-hot",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:22:32Z",
+          "completed_at": "2026-10-12T21:24:23Z"
+        },
+        {
+          "name": "Ubuntu 26.04 x86 / Python 3.14",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:29:36Z",
+          "completed_at": "2026-10-12T21:29:40Z"
+        },
+        {
+          "name": "Ubuntu 26.04 x86 / Python 3.13",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T21:29:37Z",
+          "completed_at": "2026-10-12T21:29:40Z"
+        },
+        {
+          "name": "Merge-main no-network Level-3",
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-10-12T21:29:41Z",
+          "completed_at": "2026-10-12T21:29:41Z"
+        }
+      ]
+    },
+    {
+      "run_id": 38310229053,
+      "attempt": 2,
+      "head_sha": "0626a407015c2115af12bace7c80175972d0e7d7",
+      "event": "pull_request",
+      "workflow_name": "CI",
+      "attempt_started_at": "2026-10-12T23:13:06Z",
+      "workflow_status": "in_progress",
+      "workflow_conclusion": null,
+      "hosted_all_success": false,
+      "hosted_feedback_seconds": null,
+      "jobs": [
+        {
+          "name": "Full validation / Python 3.13 / rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T23:13:11Z",
+          "completed_at": "2026-10-12T23:14:15Z"
+        },
+        {
+          "name": "Full validation / Python 3.13 / projection-rest",
+          "status": "in_progress",
+          "conclusion": null,
+          "started_at": "2026-10-12T23:13:10Z",
+          "completed_at": null
+        },
+        {
+          "name": "Full validation / Python 3.13 / projection-hot",
+          "status": "in_progress",
+          "conclusion": null,
+          "started_at": "2026-10-12T23:13:10Z",
+          "completed_at": null
+        },
+        {
+          "name": "Full validation / Python 3.14 / projection-hot",
+          "status": "in_progress",
+          "conclusion": null,
+          "started_at": "2026-10-12T23:13:10Z",
+          "completed_at": null
+        },
+        {
+          "name": "Full validation / Python 3.14 / rest",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T23:13:10Z",
+          "completed_at": "2026-10-12T23:14:12Z"
+        },
+        {
+          "name": "Full validation / Python 3.14 / projection-rest",
+          "status": "in_progress",
+          "conclusion": null,
+          "started_at": "2026-10-12T23:13:11Z",
+          "completed_at": null
+        }
+      ]
+    }
+  ]
+}

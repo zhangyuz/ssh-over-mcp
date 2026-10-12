@@ -24,3 +24,4 @@ Current ADRs:
 - [0010 — Authenticated offline native E2E toolchain](0010-offline-native-e2e-toolchain.md)
 - [0011 — Incident-bound E2E staging recovery (proposed)](0011-incident-bound-e2e-staging-recovery.md)
 - [0012 — Owned diagnostic-child lifecycle for incident inspection (written design approved; implementation pending)](0012-owned-diagnostic-child-lifecycle.md)
+- [0013 — GitHub-hosted ordinary CI and self-hosted native E2E](0013-hosted-ci-self-hosted-e2e.md)
