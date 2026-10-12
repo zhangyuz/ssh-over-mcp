@@ -41,7 +41,7 @@ jobs:
         with:
           persist-credentials: false
           clean: true
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -57,7 +57,21 @@ jobs:
       - name: Compile source, tests and operator scripts
         run: python -m compileall -q src tests ops/systemd ops/live-e2e
 
+      - name: Verify clean non-root hosted test identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Strict project identity requires no supplementary Linux groups.
+          # Invoke only trusted system setpriv with root; test Python runs
+          # under the same non-root UID/GID as the hosted runner process.
+          sudo /usr/bin/setpriv --reuid "$(id -u)" --regid "$(id -g)" \
+            --clear-groups "$(command -v python)" -c \
+            'import os; assert os.getuid() == os.geteuid() != 0; assert set(os.getgroups()) <= {os.getgid()}'
+
       - name: Run complete suite on Python ${{ matrix.python-version }}
-        # 2 vCPU / 8 GB are the standard private-repo Ubuntu VM limits.
-        # Run every test, including expensive source-bound regressions.
-        run: python -m pytest -q --durations=15 -n 2 --dist=load
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo /usr/bin/setpriv --reuid "$(id -u)" --regid "$(id -g)" \
+            --clear-groups "$(command -v python)" -m pytest -q \
+            --durations=15 -n 2 --dist=load
