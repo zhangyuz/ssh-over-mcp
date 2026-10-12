@@ -1391,3 +1391,23 @@ review and exact-head Ubuntu
 Python 3.13/3.14 CI after upstream PR #203 is merged
 and PR retargeted to main; PR-only Level-3 skip is not native approval.
 A1/B8/N1c/UID-502/provider disposition/native Level-3 remain OPEN.
+
+**CI validation performance blocker / isolated remediation PR (October
+2026):** Recorded passing exact-head Python 3.13 full-suite durations
+around 18–19 minutes and cancelled jobs at the existing 20-minute
+Ubuntu self-hosted CI timeout. Durations profiling attributes the
+long tail to required heavy original-source projection regressions,
+not pip/lint/compile. New isolated workflow splits *all* project tests
+into two exact complementary suites per Python version: ten measured
+expensive original-source projection checks and the remainder of the
+entire project, while retaining all existing container-hardening,
+exact-head, and no-secret PR gating. Historical two Python required
+check names become fail-closed aggregate gates over all four shards,
+including any cancelled/failed/skipped child. No test is removed or
+assumed safe. Static shard contract tests + operational rationale
+live in tests/ops/test_ci_shards.py and docs/ci-shard-validation.md.
+This PR remains subject to independent CI-security review, in-branch
+static validation and post-merge workflow-run verification; PR_target
+checks on the unmerged workflow use the *base* config and cannot
+prove new shard timings. The external 300-second watcher cadence
+and all native Level-3 OPEN gates are unchanged.
