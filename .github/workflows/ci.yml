@@ -114,7 +114,7 @@ jobs:
         run: python -m compileall -q src tests ops/systemd ops/live-e2e
 
       - name: Test on Python ${{ matrix.python-version }}
-        run: python -m pytest -q --durations=15
+        run: python -m pytest -q --durations=15 -n 3 --dist=load
 
   live-local-e2e:
     name: Merge-main no-network Level-3

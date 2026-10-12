@@ -72,7 +72,7 @@ def test_both_python_versions_run_complete_isolated_hardened_matrix(filename: st
         step for step in steps if step.get("name") == "Test on Python ${{ matrix.python-version }}"
     )
     assert shlex.split(test_step["run"]) == (
-        ["python", "-m", "pytest", "-q", "--durations=15"]
+        ["python", "-m", "pytest", "-q", "--durations=15", "-n", "3", "--dist=load"]
         if filename == "ci.yml"
         else ["python", "-m", "pytest", "-q"]
     )

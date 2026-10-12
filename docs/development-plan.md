@@ -1391,3 +1391,19 @@ review and exact-head Ubuntu
 Python 3.13/3.14 CI after upstream PR #203 is merged
 and PR retargeted to main; PR-only Level-3 skip is not native approval.
 A1/B8/N1c/UID-502/provider disposition/native Level-3 remain OPEN.
+
+
+**CI throughput experiment (2026-10-12, pending live validation):**
+The opt-in second ephemeral runner implementation is staged separately in
+PR #213. A follow-up stacked branch experiments with **full, unfiltered**
+Python 3.13/3.14 pytest runs using `pytest-xdist>=3.8,<4`,
+`-n 3 --dist=load`. Each Python version retains its original required
+check context, 20-minute job budget, exact revision checkout, read-only
+token and hardened Ubuntu x86 runner. `load` is the conservative initial
+scheduler; `worksteal` is not adopted without explicit fixture-isolation
+proof. `self-hosted-security.yml` keeps its existing independent full-suite
+matrix. No coverage is removed; source-bound expensive cases must run on
+both versions. This is a **hypothesis**, not a verified speedup. A real
+push canary with two separate runner slots, worker crash/failure tests,
+full result count, and end-to-end timings must pass before deployment;
+if slower, revert and profile source-bound bottlenecks.
