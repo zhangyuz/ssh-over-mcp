@@ -8383,9 +8383,15 @@ def test_classified_multifilter_source_clipping_matches_single_class_pages(
     a, b, c = timeline_sources
     snapshots = (
         (a, a, a, a),
-        (b, b, b, c), (a, a, a, b), (b, b, b, c),
-        (a, a, a, a), (b, b, c, c), (a, a, a, a),
-        (b, b, b, c), (a, a, a, b), (b, b, b, c),
+        (b, b, b, c),
+        (a, a, a, b),
+        (b, b, b, c),
+        (a, a, a, a),
+        (b, b, c, c),
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, a, b),
+        (b, b, b, c),
         (a, a, a, a),
     )
     runs = tuple(
@@ -8417,12 +8423,10 @@ def test_classified_multifilter_source_clipping_matches_single_class_pages(
         w_one = json.loads(one.payload)
         w_many = json.loads(many.payload)
         f_one = single.verify_public_classified_hop_filtered_page(
-            runs, start, end, classes[0], cursor, 1,
-            one.payload, expected_sha256=one.sha256
+            runs, start, end, classes[0], cursor, 1, one.payload, expected_sha256=one.sha256
         )
         f_many = multi.verify_public_classified_hop_multifilter_page(
-            runs, start, end, classes, cursor, 1,
-            many.payload, expected_sha256=many.sha256
+            runs, start, end, classes, cursor, 1, many.payload, expected_sha256=many.sha256
         )
         assert w_one["source_intervals_sha256"] == source.sha256
         assert w_many["source_intervals_sha256"] == source.sha256
@@ -8436,9 +8440,7 @@ def test_classified_multifilter_source_clipping_matches_single_class_pages(
     else:
         pytest.fail("one-class parity pagination never terminated")
 
-    summary = classified_hop_coverage_module.build_public_classified_hop_coverage(
-        runs, start, end
-    )
+    summary = classified_hop_coverage_module.build_public_classified_hop_coverage(runs, start, end)
     checked = classified_hop_coverage_module.verify_public_classified_hop_coverage(
         runs, start, end, summary.payload, expected_sha256=summary.sha256
     )
@@ -8456,9 +8458,15 @@ def test_classified_multifilter_two_classes_interleave_original_hop_order(
     a, b, c = timeline_sources
     snapshots = (
         (a, a, a, a),
-        (b, b, b, c), (a, a, a, b), (b, b, b, c),
-        (a, a, a, a), (b, b, c, c), (a, a, a, a),
-        (b, b, b, c), (a, a, a, b), (b, b, b, c),
+        (b, b, b, c),
+        (a, a, a, b),
+        (b, b, b, c),
+        (a, a, a, a),
+        (b, b, c, c),
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, a, b),
+        (b, b, b, c),
         (a, a, a, a),
     )
     runs = tuple(
@@ -8483,16 +8491,14 @@ def test_classified_multifilter_two_classes_interleave_original_hop_order(
                     runs, start, end, selected, cursor, 1
                 )
                 facts = m.verify_public_classified_hop_multifilter_page(
-                    runs, start, end, selected, cursor, 1,
-                    page.payload, expected_sha256=page.sha256
+                    runs, start, end, selected, cursor, 1, page.payload, expected_sha256=page.sha256
                 )
             else:
                 page = single.build_public_classified_hop_filtered_page(
                     runs, start, end, selected, cursor, 1
                 )
                 facts = single.verify_public_classified_hop_filtered_page(
-                    runs, start, end, selected, cursor, 1,
-                    page.payload, expected_sha256=page.sha256
+                    runs, start, end, selected, cursor, 1, page.payload, expected_sha256=page.sha256
                 )
             body = json.loads(page.payload)
             assert body["source_intervals_sha256"] == source.sha256
@@ -8526,8 +8532,14 @@ def test_classified_multifilter_freezes_valid_three_classes_before_append_fourth
         dispute_index_runs, 0, 3, original_classes, 0, 8
     )
     expected_facts = m.verify_public_classified_hop_multifilter_page(
-        dispute_index_runs, 0, 3, original_classes, 0, 8,
-        expected.payload, expected_sha256=expected.sha256
+        dispute_index_runs,
+        0,
+        3,
+        original_classes,
+        0,
+        8,
+        expected.payload,
+        expected_sha256=expected.sha256,
     )
     categories = list(original_classes)
     ready = threading.Event()
@@ -8552,14 +8564,26 @@ def test_classified_multifilter_freezes_valid_three_classes_before_append_fourth
         with monkeypatch.context() as patch:
             patch.setattr(m.intervals, "build_public_intervals", rebuild_once)
             if action == "build":
-                assert m.build_public_classified_hop_multifilter_page(
-                    dispute_index_runs, 0, 3, categories, 0, 8
-                ) == expected
+                assert (
+                    m.build_public_classified_hop_multifilter_page(
+                        dispute_index_runs, 0, 3, categories, 0, 8
+                    )
+                    == expected
+                )
             else:
-                assert m.verify_public_classified_hop_multifilter_page(
-                    dispute_index_runs, 0, 3, categories, 0, 8,
-                    expected.payload, expected_sha256=expected.sha256
-                ) == expected_facts
+                assert (
+                    m.verify_public_classified_hop_multifilter_page(
+                        dispute_index_runs,
+                        0,
+                        3,
+                        categories,
+                        0,
+                        8,
+                        expected.payload,
+                        expected_sha256=expected.sha256,
+                    )
+                    == expected_facts
+                )
     finally:
         ready.set()
         thread.join(timeout=5)
