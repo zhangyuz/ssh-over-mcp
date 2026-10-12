@@ -1620,3 +1620,15 @@ or host/provider/private authority. After upstream
 exact-final-head Python 3.13+3.14 CI and independent comprehensive
 review. PR-only Level-3 SKIPPED is not native acceptance; A1/B8/N1c/
 UID-502/stale provider/native Level-3 remain OPEN.
+
+Independent #211 deep review (initial HEAD e9bb141, 0 Critical,
+0 Important, 2 Minor) requested extra regression—not production
+algorithm changes—for source-bound 1-class vs #210 paging and
+2-class source-hop interleaving after strict interior clipping at both
+query ends, including original interval SHA and #206 class-count
+consistency. Added both real original cohort coverage and deterministic
+3-to-4 category-list worker race during original interval rebuild
+for build and verify, preserving the first immutable legal triple
+and exactly one original rebuild per call. Final HEAD/source-specific
+dual Python CI and independent review remain necessary; #205→#210
+upstream stacked merges are still blocked.
