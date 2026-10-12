@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import os
+import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -141,3 +144,31 @@ def test_manual_hardened_security_runner_stays_complete_and_independent() -> Non
     assert "Verify hardened Ubuntu 26.04 x86 runner container" in steps
     assert "Verify project cgroup-v2 read-only probe" in steps
     assert steps["Test on Python ${{ matrix.python-version }}"]["run"] == "python -m pytest -q"
+
+
+@pytest.mark.parametrize(
+    ("matrix_result", "expected_exit"),
+    [
+        ("success", 0),
+        ("failure", 1),
+        ("cancelled", 1),
+        ("skipped", 1),
+        ("", 1),
+    ],
+)
+def test_required_check_gate_script_rejects_incomplete_shards(
+    matrix_result: str, expected_exit: int
+) -> None:
+    script = _workflow(WORKFLOW)["jobs"]["required-python"]["steps"][0]["run"]
+    result = subprocess.run(
+        ["bash", "-c", script],
+        env={**os.environ, "SHARDS_RESULT": matrix_result},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == expected_exit
+    if expected_exit:
+        assert "::error::" in result.stdout
+    else:
+        assert "passed" in result.stdout

@@ -12,8 +12,8 @@ a 15-minute fail-closed timeout, `pytest-xdist -n 2 --dist=load`,
 complete Ruff/compile operator coverage, full Git history, strictly non-root
 test identity and immutable SHA-pinned official actions. Two independent
 historical required-check contexts now refer to **aggregate gates**: both
-fail unless **all six jobs** succeed (including partial rerun failure). The existing required
-check **names** are retained:
+fail unless **all six jobs** succeed (including partial rerun failure).
+The existing required check **names** are retained:
 
 - `Ubuntu 26.04 x86 / Python 3.13`
 - `Ubuntu 26.04 x86 / Python 3.14`
@@ -29,8 +29,11 @@ the original non-root UID/GID preserved and independently verified.
 ## Security boundaries remain separate
 
 - **Manual self-hosted hardened security regression:** the existing
-  `self-hosted-security.yml` workflow (trusted main only) remains fully
-  intact on disposable hardened Linux containers. These assert capability
+  `self-hosted-security.yml` workflow (manually dispatched from `main`)
+  remains intact on disposable hardened Linux containers. The manual
+  `inputs.ref` can select a non-main target revision: the operator must
+  review and trust that exact target before dispatch; `github.ref=main`
+  alone does **not** authenticate `inputs.ref`. These assert capability
   dropping, cgroup-v2 visibility, non-root status, no privilege escalation,
   Docker socket exclusion and complete dual-Python suite. GitHub-hosted
   job success does **not** demonstrate these VM/container properties.

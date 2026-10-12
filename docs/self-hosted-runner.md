@@ -185,11 +185,15 @@ test harness to the same strict identity policy without relaxing product
 security assertions. Fork PRs do not receive secrets or write permissions.
 
 The **explicit** `.github/workflows/self-hosted-security.yml` is retained
-for trusted-`main`, deliberately dispatched security regression checks.
+for manual security regressions dispatched from trusted `main`. Its
+`inputs.ref` may still name a different commit: **the operator must verify
+that target is trusted before dispatch**, since the workflow only checks
+that the event ref is `main`, not that `inputs.ref` resolves to `main`.
 It validates the full Python 3.13 / 3.14 suites on this hardened ephemeral
 Docker runner with non-root identity, zero capabilities, no-new-privileges,
-no Docker socket, and the read-only cgroup-v2 probe. Its target must be
-trusted `main`; it is **not** a PR CI or substitute for native Level-3.
+no Docker socket, and the read-only cgroup-v2 probe. The selected target must
+be independently trusted; this manual workflow is **not** a PR CI or
+substitute for native Level-3.
 
 The merge-main **no-network Level-3 E2E** remains on the dedicated
 non-admin macOS x86 QEMU orchestrator, testing the exact merged main SHA
