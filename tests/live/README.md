@@ -2634,3 +2634,18 @@ or verification. Valid original-source eight-segment page and
 independent class-count parity tests guard navigation.
 This is public navigation only, never trusted time, authenticated
 provenance, severity, host/provider/private I/O, safety or authority.
+
+Independent PR #211 review follow-up (0 Critical / 0 Important / 2
+Minor): real four-cohort, two-segment original source with a hop query
+strictly inside separate majority intervals now cross-checks a
+single-class multifilter page against #210 class-filtered page
+for each unanimous/majority/disputed class at every cursor, including
+exact full source SHA, source interval boundaries and #206 class hop
+count. The same clipped query also interleaves the source-hop-ordered
+union of independent majority and disputed one-class pages with
+two-class multifilter pages. Build and independent verify are exercised
+at each page. A separate synchronized worker-thread test freezes a
+valid three-class list before source reconstruction, then appends an
+illegal fourth item during rebuild, for both build and verify: original
+three classes and one complete source rebuild remain authoritative.
+All remain public navigation, not authenticated time or source authority.
