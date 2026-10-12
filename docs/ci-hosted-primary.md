@@ -1,6 +1,10 @@
 # Primary CI on GitHub-hosted; native E2E on self-hosted
 
-## Proposed execution topology
+Normative policy: [ADR 0013](decisions/0013-hosted-ci-self-hosted-e2e.md).
+Attempt-specific latency and unresolved acceptance gates:
+[2026-10-12 evidence](ci-hosted-acceptance-2026-10-12.md).
+
+## Current execution topology
 
 Routine `pull_request` (including fork PRs) and `push:main` execute
 the **complete** Python 3.13 and 3.14 pytest collections on six independent

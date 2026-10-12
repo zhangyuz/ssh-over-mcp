@@ -121,11 +121,16 @@ Not every change needs every level. A change MUST run the strongest level requir
 
 ### Level 1 — ordinary PR validation
 
-Every behavior-changing PR runs the ordinary self-hosted validation suite:
+Every behavior-changing PR runs the complete ordinary validation suite on
+GitHub-hosted Ubuntu 26.04 x86 runners, as defined by
+[ADR 0013](decisions/0013-hosted-ci-self-hosted-e2e.md):
 - unit/static/integration/security tests;
-- full pytest;
-- supported Python versions;
-- lint/compile checks.
+- complete pytest collection, distributed across disjoint exhaustive partitions;
+- Python 3.13 and 3.14, each covering the entire collection;
+- full source, tests and operator-tool lint/compile checks;
+- both historical Python required contexts, failing unless all six shards succeed.
+
+Hosted CI PASS is not hardened-container or native Level-3 acceptance.
 
 ### Level 2 — deployment/container validation
 
@@ -213,13 +218,39 @@ A ruling MUST NOT silently weaken an approved security invariant.
 
 Plan deviations that materially change architecture, authority, trust boundaries, or acceptance criteria require renewed design/ADR review before implementation continues.
 
-## 12. Self-hosted CI policy
+## 12. CI and E2E execution policy
 
-Normal CI remains self-hosted only using the repository's configured Linux x86 runner labels.
+The approved migration in PRs #217 and #220 supersedes the former
+self-hosted-only ordinary CI policy; see
+[ADR 0013](decisions/0013-hosted-ci-self-hosted-e2e.md) and
+[primary CI topology](ci-hosted-primary.md). Historical plans retain their
+original platform evidence; their self-hosted-only instructions do not override
+this current policy for future ordinary CI.
 
-Do not introduce a GitHub-hosted fallback merely to make CI convenient.
+Routine PR validation MUST use the unprivileged `pull_request` event;
+main validation MUST use `push:main`. Both MUST use GitHub-hosted Ubuntu
+26.04 x86 VMs, read-only tokens, no PR secrets, SHA-pinned actions and
+complete coverage on both Python versions. Both historical required Python
+check names MUST remain fail closed for every
+failed, skipped or cancelled shard.
 
-Do not add a Docker socket or privileged runtime to ordinary CI. Specialized live/E2E workflows use their own reviewed trust model.
+Manual hardened Linux security validation remains on isolated self-hosted
+containers. Dispatch MUST use trusted-main workflow authority and an
+independently reviewed exact target revision; `github.ref=main` alone does not
+make `inputs.ref` trusted.
+
+Native no-network Level-3 remains on the dedicated non-admin Intel macOS
+self-hosted orchestrator, using already-merged trusted-main authority and a
+fresh disposable Ubuntu guest at the exact target SHA. Main-push native E2E
+MUST depend on both hosted required gates. Unknown provider state still fails
+closed and requires separately authorized disposition. Hosted CI success
+MUST NOT be reported as hardened-container or native Level-3 success.
+
+Do not add a Docker socket, host namespace or generic privileged runtime to
+ordinary CI. Specialized live/E2E workflows retain their reviewed trust model.
+Measure PR-style feedback latency separately from the complete main workflow,
+including E2E. Keep slow, failed and cancelled attempts in performance evidence;
+repeated fast samples do not authorize closing a failed security or cleanup gate.
 
 ## 13. Definition of Done checklist
 

@@ -14,7 +14,7 @@ This directory is the canonical behavioral and security specification for `ssh-o
 8. **Approvals and audit** — [`audit-and-approvals.md`](audit-and-approvals.md)
 9. **Development methodology** — [`development-methodology.md`](development-methodology.md)
 10. **Implementation sequencing** — [`development-plan.md`](development-plan.md)
-11. **Self-hosted Docker validation** — [`self-hosted-runner.md`](self-hosted-runner.md)
+11. **CI execution topology** — [`ci-hosted-primary.md`](ci-hosted-primary.md); manual hardened Docker validation — [`self-hosted-runner.md`](self-hosted-runner.md)
 12. **Normative design changes** — [`decisions/`](decisions/README.md)
 
 ## Normative language
