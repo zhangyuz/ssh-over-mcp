@@ -582,7 +582,7 @@ def test_ci_calls_live_local_e2e_only_after_successful_main_validation() -> None
     workflow = yaml.load(CI_WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
     job = workflow["jobs"]["live-local-e2e"]
     assert job["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/main'"
-    assert job["needs"] == "validate"
+    assert job["needs"] == "required"
     assert job["uses"] == "./.github/workflows/live-local-e2e.yml"
     assert job["with"] == {"commit_sha": "${{ github.sha }}"}
     assert job["permissions"] == {"contents": "read"}
@@ -590,7 +590,8 @@ def test_ci_calls_live_local_e2e_only_after_successful_main_validation() -> None
 
 def test_primary_ci_is_hosted_and_native_e2e_keeps_dedicated_self_hosted_runner() -> None:
     workflow = yaml.load(CI_WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
-    assert workflow["jobs"]["validate"]["runs-on"] == "ubuntu-26.04"
+    assert workflow["jobs"]["shards"]["runs-on"] == "ubuntu-26.04"
+    assert workflow["jobs"]["required"]["needs"] == ["shards"]
     assert workflow["jobs"]["live-local-e2e"]["uses"] == "./.github/workflows/live-local-e2e.yml"
     assert "ssh-over-mcp-e2e-orchestrator" not in CI_WORKFLOW.read_text(encoding="utf-8")
     native = yaml.load(WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)

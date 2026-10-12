@@ -1419,3 +1419,18 @@ Rollout and post-merge acceptance require exact-head dual Python PASS,
 no missing test nodes, no weakened security checks, trusted-main native
 Level-3 PASS, and repeated end-to-end P95 under 10 minutes; see
 `docs/ci-hosted-primary.md`.
+
+
+**Six-way production required-gate experiment (2026-10-12):**
+Canary [38300258158](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38300258158)
+achieved **7m02s end-to-end with 6/6 full-coverage test partitions + 1/1
+fail-closed gate PASS**. The isolated source-heavy module's real
+collection proved 611 node IDs = 4 selected slow boundary tests + 607
+remaining, no overlap. Promotion to primary CI replaces each full-suite
+job with three disjoint jobs per version and introduces two required gates
+that retain exact historical names, each of which fails unless the **entire
+six-job matrix** succeeded. Post-merge no-network Level-3 continues to
+depend on both gate jobs, and the manual trusted-main hardened Linux
+validation remains unchanged. Real exact-head CI, security review, native
+postmerge E2E, and repeated P95 under 10 minutes remain mandatory;
+first Canary PASS alone does not establish P95.
