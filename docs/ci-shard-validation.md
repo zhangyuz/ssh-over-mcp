@@ -70,3 +70,28 @@ CI issue fully resolved.
 The 5-minute external monitoring cadence is unchanged. Native
 A1/B8/N1c/UID-502/stale-provider/Level-3 acceptance remains OPEN;
 a PR-only `SKIPPED` is not a substitute for native evidence.
+
+## First canary and CI workflow contract migration (2026-10-12)
+
+The first isolated `ci/verify-shards-canary` push run
+[`38198741151`](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38198741151)
+ran all four shards on the real hardened Ubuntu 26.04 x86 runner.
+Python 3.13/3.14 `source-heavy` passed, with the nine present expensive
+source-derived tests completing in under their per-shard 20-minute limits.
+Both `everything-else` shards **failed, not timed out**, because five
+pre-existing `tests/ops/test_ci_workflow.py` assertions still looked for
+lint/compile/full-suite steps under the old `ci.yml` `validate` job. The
+new `validate` job is a five-minute gate, while actual lint/compile/tests
+and the 20-minute bound are in `ci-validation-shard.yml`. Both historical
+required gate jobs failed as designed when the rest shards failed.
+
+Contract regressions were updated to check the reusable workflow's actual
+validation steps, both explicitly selected Python versions, complete
+complementary test selection, container hardening and provenance guard,
+while separately retaining the original `self-hosted-security.yml` full
+matrix assertions. No production implementation or security boundary was
+changed, and no test was skipped to make CI green. A new exact canary run
+and post-merge exact-main push remain required before marking this effort
+complete. The source-only project-dev venv intentionally lacks some
+runtime packages; its whole-project collection test explicitly skips
+locally but executes on fully installed CI runner dependencies.
