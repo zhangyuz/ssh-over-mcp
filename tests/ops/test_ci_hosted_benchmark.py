@@ -28,6 +28,7 @@ def test_hosted_benchmark_is_an_opt_in_unprivileged_pr_workflow() -> None:
     assert checkout["uses"].startswith("actions/checkout@3d3c42e5")
     assert checkout["with"]["persist-credentials"] == "false"
     assert checkout["with"]["clean"] == "true"
+    assert checkout["with"]["fetch-depth"] == "0"
     assert "ref" not in checkout["with"]
     assert steps["Set up Python ${{ matrix.python-version }}"]["uses"].startswith(
         "actions/setup-python@5fda3b95"
@@ -39,6 +40,13 @@ def test_hosted_benchmark_is_an_opt_in_unprivileged_pr_workflow() -> None:
     assert "ops/live-e2e" in steps["Lint source and tests"]["run"]
     assert "ops/systemd" in steps["Compile source, tests and operator scripts"]["run"]
     assert "ops/live-e2e" in steps["Compile source, tests and operator scripts"]["run"]
-    assert steps["Run complete suite on Python ${{ matrix.python-version }}"]["run"] == (
-        "python -m pytest -q --durations=15 -n 2 --dist=load"
-    )
+    identity = steps["Verify clean non-root hosted test identity"]["run"]
+    assert "sudo /usr/bin/setpriv" in identity
+    assert "--clear-groups" in identity
+    assert "os.getgroups()" in identity
+    run = steps["Run complete suite on Python ${{ matrix.python-version }}"]["run"]
+    assert "sudo /usr/bin/setpriv" in run
+    assert "--clear-groups" in run
+    assert "-m pytest -q" in run
+    assert "--durations=15 -n 2 --dist=load" in run
+    assert "--ignore" not in run and " -k " not in run
