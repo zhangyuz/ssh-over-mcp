@@ -69,8 +69,8 @@ not approval to delete, archive or otherwise change any provider artifact.
     analogous wheel/payload/seed/checkout directories.
     **`expected_commit=null`**.
 - The previous 2026-10-10 inspection recorded a valid target-bound
-  `expected_commit` in the first directory; **the new absence of that
-  binding is a material change**. It does not authorize reassigning the
+  `expected_commit` in the first directory; **that value is no longer observed by the same bounded inspector, a
+  material change in the observations**. It does not authorize reassigning the
   tree, assuming it is disposable, or reconstructing a trusted binding
   from its name or age. Stop any cleanup pending independent provenance
   review.
@@ -93,8 +93,10 @@ not approval to delete, archive or otherwise change any provider artifact.
    active runner-owned orchestrator, without relying only on historical
    PID or a different user's process view.
 3. Obtain immutable provenance/ownership for each of the **three**
-   directories. Determine why the first directory's prior
-   `expected_commit` disappeared, and bound the two unbound trees.
+   directories. Investigate why the first directory's prior
+   `expected_commit` value is no longer observed by the same bounded
+   inspector, and bound the two unbound trees. Do not infer the cause or
+   nested-file identity continuity from root inode equality.
    Unknown or changed contents mean **refuse disposition**.
 4. Produce a separately reviewed, *per exact path/identity* action plan
    with failure/rollback behavior and obtain **explicit human operator
@@ -111,3 +113,42 @@ not approval to delete, archive or otherwise change any provider artifact.
 The hosted six-way CI later merged to main in PR #220 is orthogonal: it
 has verified fast dual-Python test coverage, but neither asserts nor
 repairs host-level native E2E provenance.
+
+
+## 2026-10-12 23:17 UTC current-main inspection and dormant acceptance
+
+Fresh trusted-main [inspect-only run 38321349471](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38321349471)
+on exact main `39a4f868bb77b0391dbeeee5fb56d3cdb4ae3128` completed
+successfully with owner PID input **0** and `RECOVERY_MODE=inspect-only`.
+It reports the same marker target/owner and the same three device/inode
+identities as run 38308355924. All three again report
+`expected_commit=null`; the bounded direct-child inventories are unchanged
+between these two October 12 observations. This establishes no owner-death,
+QEMU-quiescence, provenance, accepted receipt or disposition permission.
+
+Independent source review confirms that both the October 10 authority
+`9e5b94d7` and the October 12 authority inspect the same fixed relative
+`payload-content/expected_commit` path. The first directory's prior valid
+value is no longer observed; regular direct-child artifacts previously
+reported (`git-askpass`, `overlay.qcow2`, `payload.iso`, `seed.iso`,
+`target.bundle`) also no longer appear. The reason and nested-file identity
+continuity are unknown. Do not reconstruct a binding or relax the fixed
+catalog to accept the current partial trees.
+
+The composition plan's old A1 acceptance note needs to be read alongside
+later component evidence: PR #161 already added
+`test_real_pinned_authority_byte_tamper_blocks_getconf_before_capture`,
+parameterized over all three pinned authority documents. Its disposable
+fixtures verify authentic copies, change one byte without changing length,
+call the production dormant getconf adapter and prove zero capture calls.
+Current-main verification of the full fixed-getconf test module plus
+`test_binding_matches_exact_main_blobs` passed **41 checks** on the developer
+account. No existing incident staging or actual UID-502 capture was invoked.
+
+This is narrow authority-byte-before-capture evidence only. **Incident
+recovery A1, B8 trusted-main workflow/receipts, actual UID-502 compatibility,
+changed-state provenance, per-directory human disposition and native
+Level-3/cleanup remain OPEN.** The next live-observation workflow needs its
+separate reviewed integration contract; fixture success cannot activate it.
+No pinned authority document, recovery code, workflow or provider resource
+was changed by this update.
