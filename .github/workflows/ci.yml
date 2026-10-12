@@ -14,135 +14,52 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
 
 jobs:
-  validate-shards:
-    name: CI shard / Python ${{ matrix.python-version }} / ${{ matrix.suite }}
+  validate-py313-heavy:
+    name: CI 3.13 / source-heavy
     if: github.event_name != 'pull_request_target' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, linux, x64, ssh-over-mcp-mac-x86]
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.13", "3.14"]
-        suite: [source-heavy, everything-else]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci-validation-shard.yml
+    with:
+      python-version: "3.13"
+      suite: source-heavy
 
-    steps:
-      - name: Verify hardened Ubuntu 26.04 x86 runner container
-        shell: bash
-        run: |
-          set -euo pipefail
+  validate-py313-rest:
+    name: CI 3.13 / everything-else
+    if: github.event_name != 'pull_request_target' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci-validation-shard.yml
+    with:
+      python-version: "3.13"
+      suite: everything-else
 
-          if [ "$(id -u)" -eq 0 ]; then
-            echo "::error::Runner container must execute jobs as non-root"
-            exit 1
-          fi
+  validate-py314-heavy:
+    name: CI 3.14 / source-heavy
+    if: github.event_name != 'pull_request_target' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci-validation-shard.yml
+    with:
+      python-version: "3.14"
+      suite: source-heavy
 
-          . /etc/os-release
-          if [ "${ID}" != "ubuntu" ] || [ "${VERSION_ID}" != "26.04" ]; then
-            echo "::error::Expected Ubuntu 26.04, got ${PRETTY_NAME:-unknown}"
-            exit 1
-          fi
+  validate-py314-rest:
+    name: CI 3.14 / everything-else
+    if: github.event_name != 'pull_request_target' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci-validation-shard.yml
+    with:
+      python-version: "3.14"
+      suite: everything-else
 
-          if [ "$(uname -m)" != "x86_64" ]; then
-            echo "::error::Expected x86_64 runner, got $(uname -m)"
-            exit 1
-          fi
-
-          cap_eff="$(awk '/^CapEff:/ { print $2 }' /proc/self/status)"
-          if [ "${cap_eff}" != "0000000000000000" ]; then
-            echo "::error::Runner container must have all Linux capabilities dropped"
-            exit 1
-          fi
-
-          no_new_privs="$(awk '/^NoNewPrivs:/ { print $2 }' /proc/self/status)"
-          if [ "${no_new_privs}" != "1" ]; then
-            echo "::error::Runner container must have no-new-privileges enabled"
-            exit 1
-          fi
-
-          if [ -S /var/run/docker.sock ]; then
-            echo "::error::Docker socket must not be mounted into the runner"
-            exit 1
-          fi
-
-          if [ ! -r /sys/fs/cgroup/cgroup.controllers ]; then
-            echo "::error::Unified cgroup v2 controllers file is unavailable"
-            exit 1
-          fi
-
-          controllers="$(cat /sys/fs/cgroup/cgroup.controllers)"
-          for controller in cpu memory pids; do
-            if ! grep -qw "${controller}" <<<"${controllers}"; then
-              echo "::error::Missing cgroup v2 controller: ${controller}"
-              exit 1
-            fi
-          done
-
-      - name: Checkout selected revision
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-          clean: true
-          fetch-depth: 0
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-
-      - name: Install test dependencies
-        run: |
-          python -m pip install -U pip
-          python -m pip install -e '.[dev]'
-
-      - name: Lint source and tests
-        run: python -m ruff check src tests ops/systemd ops/live-e2e
-
-      - name: Verify project cgroup-v2 read-only probe
-        shell: bash
-        run: |
-          python - <<'PYCODE'
-          from ssh_over_mcp.host_agent.containment import probe_cgroup_v2
-
-          probe = probe_cgroup_v2("/sys/fs/cgroup")
-          print(probe)
-          if not probe.ready_for_containment:
-              raise SystemExit("project cgroup-v2 probe failed")
-          PYCODE
-
-      - name: Compile on Python ${{ matrix.python-version }}
-        run: python -m compileall -q src tests ops/systemd ops/live-e2e
-
-      - name: Test ${{ matrix.suite }} on Python ${{ matrix.python-version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Heavy names from exact-head Python 3.13 --durations=15; complement
-          # uses pytest -k not (...) so every collected test runs once.
-          heavy="test_dispute_overlap_page_paginates_real_valid_overflow or test_private_series_max_eight_segments_and_128_hops or test_dispute_overlap_valid_source_index_can_exceed_wire_capacity or test_dispute_overlap_coverage_remains_bounded_on_valid_large_index or test_dispute_gap_page_majority_leading_trailing_and_eight_gap_bound or test_dispute_ranks_real_sixteen_distinct_windows_upper_bound or test_dossier_public_maximum_8x16_on_both_sides or test_series_max_eight_segments_128_hops or test_portfolio_rejects_mismatched_genuine_pair_and_sources or test_dossier_rejects_genuine_mismatched_pair_and_source_splice"
-          case "${{ matrix.suite }}" in
-            source-heavy)
-              python -m pytest -q --durations=15 tests/ops/test_live_e2e_staging_projection.py -k "${heavy}"
-              ;;
-            everything-else)
-              # First run all non-projection tests; then run the exact complement.
-              python -m pytest -q --durations=15 --ignore=tests/ops/test_live_e2e_staging_projection.py
-              python -m pytest -q --durations=15 tests/ops/test_live_e2e_staging_projection.py -k "not (${heavy})"
-              ;;
-            *)
-              echo "::error::Unknown CI suite"; exit 2
-              ;;
-          esac
-
-
-  # Keep the historical required-check names. Both Python gate jobs
-  # fail unless *all* 2x2 shards succeeded, including slow original-source
-  # security regressions. Never treat skipped/cancelled shards as PASS.
+  # Preserve both historical branch-protection checks. Four independent
+  # job conclusions prevent matrix-result ambiguity after partial reruns.
   validate:
     name: Ubuntu 26.04 x86 / Python ${{ matrix.python-version }}
     if: always() && (github.event_name != 'pull_request_target' || github.event.pull_request.head.repo.full_name == github.repository)
-    needs: [validate-shards]
+    needs: [validate-py313-heavy, validate-py313-rest, validate-py314-heavy, validate-py314-rest]
     runs-on: [self-hosted, linux, x64, ssh-over-mcp-mac-x86]
     timeout-minutes: 5
     strategy:
@@ -150,16 +67,23 @@ jobs:
       matrix:
         python-version: ["3.13", "3.14"]
     steps:
-      - name: Require every Python/suite shard PASS
+      - name: Require all four individual CI shards PASS
         shell: bash
         env:
-          SHARD_RESULT: ${{ needs.validate-shards.result }}
+          CI_PY313_HEAVY: ${{ needs['validate-py313-heavy'].result }}
+          CI_PY313_REST: ${{ needs['validate-py313-rest'].result }}
+          CI_PY314_HEAVY: ${{ needs['validate-py314-heavy'].result }}
+          CI_PY314_REST: ${{ needs['validate-py314-rest'].result }}
         run: |
-          if [ "${SHARD_RESULT}" != "success" ]; then
-            echo "::error::Python 3.13/3.14 required suite shard did not pass: ${SHARD_RESULT}"
-            exit 1
-          fi
-          echo "All four Python/suite shards PASS"
+          set -euo pipefail
+          for name in CI_PY313_HEAVY CI_PY313_REST CI_PY314_HEAVY CI_PY314_REST; do
+            result="${!name}"
+            if [ "${result}" != "success" ]; then
+              echo "::error::Required shard ${name} not successful: ${result}"
+              exit 1
+            fi
+          done
+          echo "All four independently resolved Python/suite shards PASS"
 
   live-local-e2e:
     name: Merge-main no-network Level-3

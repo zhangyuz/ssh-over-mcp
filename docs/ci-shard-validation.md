@@ -29,8 +29,10 @@ delete, mock away, skip or loosen them** to reduce wall time.
 
 The `CI` workflow preserves the exact two legacy required check names,
 `Ubuntu 26.04 x86 / Python 3.13` and `Ubuntu 26.04 x86 / Python 3.14`.
-Each check is now a **fail-closed aggregator**, dependent on a matrix of
-four self-hosted Ubuntu 26.04 x86 shard Jobs:
+Each check is now a **fail-closed aggregator**, dependent on **four
+explicitly named, independent reusable-workflow jobs** on the hardened
+self-hosted Ubuntu 26.04 x86 runner. No multi-cell matrix result is
+used for shard success; every named result is inspected individually:
 
 - Python 3.13 / 3.14 × `source-heavy`: the explicitly enumerated ten
   long-running original-source tests from the projection module.
@@ -45,6 +47,11 @@ no-new-privileges, no Docker socket, cgroup-v2 and Ubuntu x86 validation,
 untrusted pull-request guard, SHA-pinned checkout/setup actions, Ruff,
 compile and test steps. Each shard retains a 20-minute upper bound,
 but the measured ~19-minute suite is now divided into shorter pieces.
+The original check-name gate explicitly requires the success of each of
+the four named jobs. Shell-level regression tests exercise all 16 single
+failed/skipped/cancelled/unset cases and simulated partial reruns: a
+successfully rerun shard may not hide another failed job. **Real GitHub
+Actions multi-failure partial-rerun validation is still pending**.
 A gate **must fail** if *any* shard fails, is skipped or is cancelled.
 The merge-main native Level-3 step still depends on the validated gate.
 
@@ -55,7 +62,8 @@ weakening verification or provenance boundaries. GitHub
 `pull_request_target` reads its workflow configuration from the base
 branch: a CI-workflow PR's existing base-branch check does **not**
 independently certify that the proposed new workflow has executed.
-Independent review, static shard-partition tests and post-merge/main
+Independent review, dynamic nodeid-set collection-partition tests,
+branch-protection gate shell simulations and post-merge/main
 exact-head live verification are still required before declaring the
 CI issue fully resolved.
 

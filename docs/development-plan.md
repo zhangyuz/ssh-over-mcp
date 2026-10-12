@@ -1343,9 +1343,9 @@ PR-only Level-3 SKIPPED is not native
 acceptance; A1/B8/N1c/UID-502/provider disposition/native Level-3
 remain OPEN.
 
-**In-review isolated public-only functional slice — batch dispute-overlap
+**Merged public-only functional slice — batch dispute-overlap
 coverage (PR #203, branch `live-e2e-dispute-overlap-coverages`,
-retargeted to main after #202 merged):**
+merged into main as `0a17e0fe2d73420f44dd9380273ae6c463b35eb2`):**
 Add canonical ≤8-KiB summary of 1–8 caller-ordered strict exact-int
 half-open hop ranges. A single full index rebuild per build or verify
 from original 3–5 ordered source cohorts serves all independent clipped
@@ -1363,14 +1363,14 @@ build→verify and deterministic worker-thread mutation regressions. Production 
 boundary unchanged: no private/host/provider I/O, authority, chronology,
 severity or provenance. Run focused regression and Ruff, require an
 independent security/docs review and exact-head dual Python 3.13/3.14
-CI on the final main base; #202 merged and #203 now targets main.
+Final merge/CI gates were completed; #202 and #203 have both merged into main.
 Native
 Level-3 remains OPEN (PR-only skip is not acceptance), alongside
 A1/B8/N1c/UID-502/provider disposition.
 
-**Next isolated public-only functional slice — query-union disputed
+**Merged public-only functional slice — query-union disputed
 coverage (PR #204, branch `live-e2e-dispute-overlap-union`,
-stacked on open PR #203):**
+integrated into main as `30770c4a3652f9da0f74985bb929b695e1e03e05` after merged #203):**
 Extend navigation with an independent canonical ≤4-KiB union summary
 over 1–8 strict exact-int caller-ordered half-open ranges. Freeze bounded
 outer and inner inputs once; sorted merged intervals deduplicate all
@@ -1386,10 +1386,8 @@ changed source order. Independent PR #204 review found 0 Critical,
 0 Important, 2 Minor: added source-derived one long disputed window
 split by two non-touching query clips, which must count 1 distinct
 window/2 disputed hops, with build→verify; updated #201 merged status, #202 now merged status, #203 main-base
-retarget and current #203→#204 stack and CI gates. Require independent
-review and exact-head Ubuntu
-Python 3.13/3.14 CI after upstream PR #203 is merged
-and PR retargeted to main; PR-only Level-3 skip is not native approval.
+retarget and then-current #203→#204 stack and CI gates. Historical independent
+review and exact-head Ubuntu Python 3.13/3.14 CI gates preceded both merges; PR-only Level-3 skip is not native approval.
 A1/B8/N1c/UID-502/provider disposition/native Level-3 remain OPEN.
 
 **CI validation performance blocker / isolated remediation PR (October
@@ -1402,7 +1400,9 @@ into two exact complementary suites per Python version: ten measured
 expensive original-source projection checks and the remainder of the
 entire project, while retaining all existing container-hardening,
 exact-head, and no-secret PR gating. Historical two Python required
-check names become fail-closed aggregate gates over all four shards,
+check names become fail-closed aggregate gates over four **explicit independent**
+reusable-workflow shard jobs, each individually checked; this prevents
+partial matrix re-run ambiguity from masking a failed shard,
 including any cancelled/failed/skipped child. No test is removed or
 assumed safe. Static shard contract tests + operational rationale
 live in tests/ops/test_ci_shards.py and docs/ci-shard-validation.md.
