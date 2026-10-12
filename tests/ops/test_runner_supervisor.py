@@ -88,6 +88,10 @@ def _fake_host_env(tmp_path: Path) -> tuple[dict[str, str], Path, Path]:
         #!/usr/bin/env bash
         [[ -z "${RUNNER_TOKEN:-}" ]] || exit 23
         printf '%s\n' "$*" >> "${FAKE_DEPLOY_LOG}"
+        if [[ -n "${FAKE_DEPLOY_IDENTITIES:-}" ]]; then
+          printf '%s|%s|%s|%s\n' "${RUNNER_NAME:-}" "${RUNNER_CONTAINER_NAME:-}" \
+            "${RUNNER_CPUS:-}" "${RUNNER_MEMORY:-}" >> "${FAKE_DEPLOY_IDENTITIES}"
+        fi
 
         count=0
         if [[ -f "${FAKE_DEPLOY_COUNT}" ]]; then
@@ -105,6 +109,16 @@ def _fake_host_env(tmp_path: Path) -> tuple[dict[str, str], Path, Path]:
     )
 
     env = os.environ.copy()
+    # GitHub Actions injects RUNNER_NAME automatically; mock host setup
+    # must not mistake the executing CI runner for the simulated target slot.
+    for name in (
+        "RUNNER_NAME",
+        "RUNNER_CONTAINER_NAME",
+        "RUNNER_CPUS",
+        "RUNNER_MEMORY",
+        "RUNNER_SUPERVISOR_SLOT",
+    ):
+        env.pop(name, None)
     env.update(
         {
             "PATH": f"{fake_bin}:{env['PATH']}",
@@ -200,3 +214,89 @@ def test_install_creates_keepalive_launchd_user_agent(tmp_path: Path) -> None:
     launchctl_calls = launchctl_log.read_text(encoding="utf-8")
     assert "bootstrap" in launchctl_calls
     assert "kickstart" in launchctl_calls
+
+
+def test_secondary_once_has_distinct_ephemeral_runner_identity_and_quota(tmp_path: Path) -> None:
+    env, deploy_log, _ = _fake_host_env(tmp_path)
+    identities = tmp_path / "identities.log"
+    env.update({"RUNNER_SUPERVISOR_SLOT": "secondary", "FAKE_DEPLOY_IDENTITIES": str(identities)})
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "once"],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert deploy_log.read_text(encoding="utf-8").strip() == "up --no-build"
+    assert identities.read_text(encoding="utf-8").strip() == (
+        "ssh-over-mcp-mac-x86-b|ssh-over-mcp-runner-mac-x86-b|3|4g"
+    )
+
+
+def test_secondary_launchd_service_does_not_replace_primary(tmp_path: Path) -> None:
+    env, _, launchctl_log = _fake_host_env(tmp_path)
+    secondary = env | {"RUNNER_SUPERVISOR_SLOT": "secondary"}
+
+    primary_result = subprocess.run(
+        ["bash", str(SCRIPT), "install"],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    secondary_result = subprocess.run(
+        ["bash", str(SCRIPT), "install"],
+        cwd=ROOT,
+        env=secondary,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert primary_result.returncode == 0, primary_result.stderr
+    assert secondary_result.returncode == 0, secondary_result.stderr
+    directory = Path(env["HOME"]) / "Library" / "LaunchAgents"
+    original = (directory / f"{LABEL}.plist").read_text(encoding="utf-8")
+    second = (directory / f"{LABEL}-b.plist").read_text(encoding="utf-8")
+    assert "<string>primary</string>" in original
+    assert "<string>secondary</string>" in second
+    assert "<string>ssh-over-mcp-mac-x86-b</string>" in second
+    assert "<string>ssh-over-mcp-runner-mac-x86-b</string>" in second
+    assert "<string>3</string>" in second
+    assert "<string>4g</string>" in second
+    assert "RUNNER_TOKEN" not in original + second
+    assert f"{LABEL}-b" not in original
+    assert len(launchctl_log.read_text(encoding="utf-8").splitlines()) == 6
+
+
+def test_secondary_cannot_reuse_primary_identity_or_receive_unsafe_quota(tmp_path: Path) -> None:
+    env, deploy_log, _ = _fake_host_env(tmp_path)
+    bad_configurations = [
+        {"RUNNER_SUPERVISOR_SLOT": "third"},
+        {"RUNNER_SUPERVISOR_SLOT": "secondary", "RUNNER_NAME": "ssh-over-mcp-mac-x86"},
+        {
+            "RUNNER_SUPERVISOR_SLOT": "secondary",
+            "RUNNER_CONTAINER_NAME": "ssh-over-mcp-runner-mac-x86",
+        },
+        {"RUNNER_SUPERVISOR_SLOT": "secondary", "RUNNER_CPUS": "9"},
+        {"RUNNER_SUPERVISOR_SLOT": "secondary", "RUNNER_MEMORY": "6g"},
+        {"RUNNER_SUPERVISOR_SLOT": "secondary", "RUNNER_MEMORY": "4g</string><key>Bad</key>"},
+        {"RUNNER_SUPERVISOR_SLOT": "secondary", "RUNNER_NAME": "bad<XML"},
+        {"RUNNER_SUPERVISOR_SLOT": "secondary", "RUNNER_CONTAINER_NAME": "bad name"},
+    ]
+    for overrides in bad_configurations:
+        result = subprocess.run(
+            ["bash", str(SCRIPT), "once"],
+            cwd=ROOT,
+            env=env | overrides,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 2, (overrides, result.stdout, result.stderr)
+    assert not deploy_log.exists()
