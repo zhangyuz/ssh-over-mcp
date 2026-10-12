@@ -40,3 +40,74 @@ workflow, marker, host, or privileged account is changed by this plan.
 Implementation contracts: [`ops/live-e2e/README.md`](../../ops/live-e2e/README.md),
 [`recover_provider.py`](../../ops/live-e2e/recover_provider.py), and the
 [trusted-main recovery workflow](../../.github/workflows/live-local-e2e-recovery.yml).
+
+
+## 2026-10-12 trusted-main reinspection — **still blocked; evidence changed**
+
+This update is read-only evidence for an **explicit subsequent operator decision**,
+not approval to delete, archive or otherwise change any provider artifact.
+
+- [Trusted-main CI 38304470006](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38304470006)
+  on exact main `2a00db8165e5a96ec70f779a3e8925938e1dc462`:
+  GitHub-hosted Python 3.13 and 3.14 both PASS; the native no-network
+  Level-3 stage **FAIL-CLOSED** before QEMU launch on `stale E2E provider
+  state detected` (exit 70). Its postcondition also fails because
+  `active-run.json` is still present. This is a pre-existing host-state
+  blocker, not evidence that native Level-3 passed.
+- [Trusted-main inspect-only workflow 38308355924](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38308355924)
+  ran `workflow_dispatch` on trusted main with **exact stale target**
+  `47531dadb58d365f74089dd5f52ce1b61bb0fdd1`, owner PID
+  **`38013`**, and `expected_owner_pid=0` (inspect only).
+  `RECOVERY_MODE=inspect-only` succeeded with **three UID-502 directories**
+  still present:
+  - `ssh-over-mcp-e2e-i8ow1ni6` (device 16777220, inode 187176421):
+    `bootstrap-wheels`, `payload-content`, `payload-iso`, `seed`,
+    `target.git`, `wheels`. **`expected_commit=null`**.
+  - `ssh-over-mcp-e2e-recover.cc8Del` (device 16777220, inode 186815322):
+    only a `clean` directory reported. **`expected_commit=null`**.
+  - `ssh-over-mcp-e2e-w_kn4rus` (device 16777220, inode 186877220):
+    analogous wheel/payload/seed/checkout directories.
+    **`expected_commit=null`**.
+- The previous 2026-10-10 inspection recorded a valid target-bound
+  `expected_commit` in the first directory; **the new absence of that
+  binding is a material change**. It does not authorize reassigning the
+  tree, assuming it is disposable, or reconstructing a trusted binding
+  from its name or age. Stop any cleanup pending independent provenance
+  review.
+- A read-only host-wide `ps` scan from the separate developer account
+  did not show a running `qemu-system-x86_64` or E2E orchestrator child,
+  but this **does not establish quiescence** of UID 502 and does not rule
+  out PID reuse. The UID-502 marker is `0600` and cannot be read from
+  the developer account; do not attempt privilege escalation, change
+  permissions, or access provider payload contents to get around it.
+- The existing recovery workflow refuses marker unlink while **any**
+  E2E temp directory remains. Current conditions do not permit recovery.
+  **No marker or directory was deleted, no process signalled, no sudo,
+  no new guest launched, and no recovery with nonzero PID authorized.**
+
+### Independent disposition gates required before any later action
+
+1. Reinspect exact marker and three device/inode identities under the
+   trusted non-admin UID-502 account, with bounded metadata only.
+2. Establish contemporaneous PID identity/death and absence of QEMU or
+   active runner-owned orchestrator, without relying only on historical
+   PID or a different user's process view.
+3. Obtain immutable provenance/ownership for each of the **three**
+   directories. Determine why the first directory's prior
+   `expected_commit` disappeared, and bound the two unbound trees.
+   Unknown or changed contents mean **refuse disposition**.
+4. Produce a separately reviewed, *per exact path/identity* action plan
+   with failure/rollback behavior and obtain **explicit human operator
+   authorization** for every destructive step. The existing recovery
+   workflow cannot perform directory cleanup and must not be extended
+   implicitly.
+5. Only after safely resolving **all** orphan state, run fresh
+   trusted-main inspect, invoke marker-only recovery with exact owner
+   PID if its guards allow it, then run exact-main native no-network
+   Level-3 and verify provider-state absence and host/guest cleanup.
+   Until then native Level-3 is **BLOCKED / FAIL-CLOSED**, regardless of
+   GitHub-hosted CI performance.
+
+The hosted six-way CI later merged to main in PR #220 is orthogonal: it
+has verified fast dual-Python test coverage, but neither asserts nor
+repairs host-level native E2E provenance.
