@@ -588,10 +588,15 @@ def test_ci_calls_live_local_e2e_only_after_successful_main_validation() -> None
     assert job["permissions"] == {"contents": "read"}
 
 
-def test_ordinary_ci_runner_contract_is_unchanged() -> None:
-    rendered = CI_WORKFLOW.read_text(encoding="utf-8")
-    assert "runs-on: [self-hosted, linux, x64, ssh-over-mcp-mac-x86]" in rendered
-    assert "ssh-over-mcp-e2e-orchestrator" not in rendered
+def test_primary_ci_is_hosted_and_native_e2e_keeps_dedicated_self_hosted_runner() -> None:
+    workflow = yaml.load(CI_WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    assert workflow["jobs"]["validate"]["runs-on"] == "ubuntu-26.04"
+    assert workflow["jobs"]["live-local-e2e"]["uses"] == "./.github/workflows/live-local-e2e.yml"
+    assert "ssh-over-mcp-e2e-orchestrator" not in CI_WORKFLOW.read_text(encoding="utf-8")
+    native = yaml.load(WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    assert native["jobs"]["e2e"]["runs-on"] == [
+        "self-hosted", "macOS", "X64", "ssh-over-mcp-e2e-orchestrator"
+    ]
 
 
 def test_operator_docs_pin_no_network_qemu_boundary() -> None:

@@ -85,7 +85,9 @@ def _child_limits() -> HostChildLimits:
 def _source(*candidates: str) -> Path:
     for candidate in candidates:
         name = Path(candidate).name
-        if name in {"cat", "yes", "dd"}:
+        # Ubuntu 26.04 uutils multicall rejects copied fd-exec for sleep.
+        # Prefer the GNU ELF counterpart, keeping real timeout assertions.
+        if name in {"cat", "yes", "dd", "sleep"}:
             gnu_path = Path("/usr/bin") / f"gnu{name}"
             if gnu_path.exists():
                 return gnu_path.resolve()

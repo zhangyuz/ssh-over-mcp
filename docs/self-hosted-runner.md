@@ -1,6 +1,6 @@
 # Self-hosted Ubuntu 26.04 x86 Docker runner
 
-The active generic validation runner is an ephemeral GitHub Actions runner
+The optional hardened validation runner is an ephemeral GitHub Actions runner
 container on the dedicated Intel/x86 Mac host. The container is always
 **Ubuntu 26.04 x86_64**. Apple Silicon/M4 is intentionally excluded from
 runner scheduling.
@@ -168,29 +168,31 @@ The deployment also does not mount:
 The runner's job workspace lives only in the container filesystem. In
 ephemeral mode the container is removed after its one assigned job.
 
-Both primary CI and the explicit trusted-main security workflow validate
-Python 3.13 and 3.14 in **separate matrix jobs**, each on a fresh hardened Ubuntu 26.04 x86 ephemeral runner with
-its own **20-minute** timeout. Both jobs run the entire unfiltered test
-suite, lint, compilation and cgroup probe; `fail-fast: false` ensures
-one version cannot cancel the other. A single available x86 runner may
-execute these jobs sequentially. The merge-main no-network Level-3 job
-still depends on **both** validation jobs succeeding; a skipped native
-PR job is not evidence of native acceptance. This split avoids the old
-combined 20-minute budget exceeding its limit without skipping tests,
-weakening sandbox rules or increasing either individual job timeout.
+**Primary PR and main-push CI runs on GitHub-hosted Ubuntu 26.04 x86 VMs**,
+not on this self-hosted container. The two historical Python 3.13 / 3.14
+required check names are preserved. Each hosted VM runs the **entire unfiltered
+test suite** in an independent job with `pytest-xdist -n 2` and its own
+20-minute timeout, plus complete Ruff/compile checks. Hosted runners use a
+read-only token, `pull_request` (not `pull_request_target`), SHA-pinned
+actions, full Git history, and a strictly non-root `setpriv` environment
+with the hosted VM's extra supplementary groups cleared. This adapts the
+test harness to the same strict identity policy without relaxing product
+security assertions. Fork PRs do not receive secrets or write permissions.
 
-The self-hosted CI workflow itself:
+The **explicit** `.github/workflows/self-hosted-security.yml` is retained
+for trusted-`main`, deliberately dispatched security regression checks.
+It validates the full Python 3.13 / 3.14 suites on this hardened ephemeral
+Docker runner with non-root identity, zero capabilities, no-new-privileges,
+no Docker socket, and the read-only cgroup-v2 probe. Its target must be
+trusted `main`; it is **not** a PR CI or substitute for native Level-3.
 
-- is defined by trusted base-branch workflow code;
-- runs on `main` pushes and same-repository `pull_request_target` events;
-- rejects fork pull requests before assigning the self-hosted runner;
-- uses `permissions: contents: read`;
-- receives no repository secrets;
-- checks out the selected revision only after runner hardening preflight;
-- pins third-party GitHub Actions to full commit SHAs.
-
-A selected target revision still contains executable code. The current
-same-repository PR gate treats that revision as trusted project code.
+The merge-main **no-network Level-3 E2E** remains on the dedicated
+non-admin macOS x86 QEMU orchestrator, testing the exact merged main SHA
+inside a disposable Ubuntu 26.04 guest with no network access. The E2E
+workflow is still fail-closed after **both hosted required checks** succeed
+on main. A green hosted PR result proves its full test suites, **not**
+hardened-container or native E2E acceptance; native E2E only runs on main.
+See `docs/ci-hosted-primary.md` for the trust boundary and rollout gates.
 
 ## Deploy on the Intel Mac
 
