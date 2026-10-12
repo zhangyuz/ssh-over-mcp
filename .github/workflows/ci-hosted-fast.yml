@@ -22,7 +22,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
-        partition: ["projection", "rest"]
+        partition: ["projection-hot", "projection-rest", "rest"]
     steps:
       - name: Verify Ubuntu 26.04 non-root x86
         shell: bash
@@ -69,12 +69,30 @@ jobs:
           PARTITION: ${{ matrix.partition }}
         run: |
           set -euo pipefail
+          # Exact node IDs selected from the four longest real GitHub-hosted
+          # projection tests. The hot and projection-rest sets are disjoint;
+          # any future tests in the module fall into projection-rest.
+          hot_tests=(
+            "tests/ops/test_live_e2e_staging_projection.py::test_dispute_overlap_page_paginates_real_valid_overflow"
+            "tests/ops/test_live_e2e_staging_projection.py::test_private_series_max_eight_segments_and_128_hops"
+            "tests/ops/test_live_e2e_staging_projection.py::test_dispute_overlap_valid_source_index_can_exceed_wire_capacity"
+            "tests/ops/test_live_e2e_staging_projection.py::test_dispute_overlap_coverage_remains_bounded_on_valid_large_index"
+          )
           case "${PARTITION}" in
-            projection)
+            projection-hot)
+              sudo /usr/bin/setpriv --reuid "$(id -u)" --regid "$(id -g)" \
+                --clear-groups "$(command -v python)" -m pytest -q \
+                --durations=15 -n 2 --dist=load "${hot_tests[@]}"
+              ;;
+            projection-rest)
+              deselect_args=()
+              for node in "${hot_tests[@]}"; do
+                deselect_args+=("--deselect=${node}")
+              done
               sudo /usr/bin/setpriv --reuid "$(id -u)" --regid "$(id -g)" \
                 --clear-groups "$(command -v python)" -m pytest -q \
                 --durations=15 -n 2 --dist=load \
-                tests/ops/test_live_e2e_staging_projection.py
+                tests/ops/test_live_e2e_staging_projection.py "${deselect_args[@]}"
               ;;
             rest)
               sudo /usr/bin/setpriv --reuid "$(id -u)" --regid "$(id -g)" \
@@ -94,7 +112,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Require all four independent test partitions to succeed
+      - name: Require all six independent test partitions to succeed
         shell: bash
         env:
           SHARDS_RESULT: ${{ needs.validate.result }}
@@ -104,4 +122,4 @@ jobs:
             echo "::error::At least one Python/partition failed or was cancelled"
             exit 1
           fi
-          echo "All four Python/partition jobs succeeded."
+          echo "All six Python/partition jobs succeeded."

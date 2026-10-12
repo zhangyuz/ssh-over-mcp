@@ -1,4 +1,4 @@
-"""Fail-closed contract for the optional 2 x Python, 2 x partition hosted experiment."""
+"""Fail-closed contract for the optional 2 x Python, 3 x partition hosted experiment."""
 
 from pathlib import Path
 
@@ -20,7 +20,7 @@ def test_hosted_fast_matrix_is_complete_and_partition_is_exactly_disjoint() -> N
     assert validate["strategy"]["fail-fast"] == "false"
     assert validate["strategy"]["matrix"] == {
         "python-version": ["3.13", "3.14"],
-        "partition": ["projection", "rest"],
+        "partition": ["projection-hot", "projection-rest", "rest"],
     }
     assert validate["timeout-minutes"] == "15"
     assert "head.repo.full_name == github.repository" in validate["if"]
@@ -40,15 +40,30 @@ def test_hosted_fast_matrix_is_complete_and_partition_is_exactly_disjoint() -> N
     assert "ops/systemd" in steps["Compile all source and operator tools"]["run"]
 
     run = steps["Execute complete disjoint partition"]["run"]
-    assert run.count("sudo /usr/bin/setpriv") == 2
-    assert run.count("--clear-groups") == 2
-    assert run.count("-m pytest -q") == 2
-    assert run.count("--durations=15 -n 2 --dist=load") == 2
-    assert run.count(HEAVY) == 2
+    assert run.count("sudo /usr/bin/setpriv") == 3
+    assert run.count("--clear-groups") == 3
+    assert run.count("-m pytest -q") == 3
+    assert run.count("--durations=15 -n 2 --dist=load") == 3
+    assert run.count(HEAVY) == 6
     assert f"--ignore={HEAVY}" in run
-    assert any(line.strip() == HEAVY for line in run.splitlines())
+    assert any(line.strip().startswith(HEAVY + " ") for line in run.splitlines())
+    assert "projection-hot)" in run and "projection-rest)" in run and "rest)" in run
+    assert '"${hot_tests[@]}"' in run
+    assert 'deselect_args+=("--deselect=${node}")' in run
+    assert '"${deselect_args[@]}"' in run
+    expected_hot = {
+        "test_dispute_overlap_page_paginates_real_valid_overflow",
+        "test_private_series_max_eight_segments_and_128_hops",
+        "test_dispute_overlap_valid_source_index_can_exceed_wire_capacity",
+        "test_dispute_overlap_coverage_remains_bounded_on_valid_large_index",
+    }
+    source = (ROOT / HEAVY).read_text(encoding="utf-8")
+    for test_name in expected_hot:
+        assert run.count(f'"{HEAVY}::{test_name}"') == 1
+        assert f"def {test_name}(" in source, "hot source selector must resolve to a real test"
+    assert run.count(f'"{HEAVY}::') == len(expected_hot)
     assert "Unknown test partition" in run
-    assert "--deselect" not in run
+    assert run.count("--deselect=") == 1, "only the four exact hot IDs may be deselected"
     assert " -k " not in run
 
     gate = workflow["jobs"]["complete"]
