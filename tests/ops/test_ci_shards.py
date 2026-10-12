@@ -24,7 +24,7 @@ def test_ci_shards_preserve_original_required_dual_python_gates():
     assert gate["name"] == "Ubuntu 26.04 x86 / Python ${{ matrix.python-version }}"
     assert gate["needs"] == ["validate-shards"]
     gate_step = gate["steps"][0]
-    assert 'SHARD_RESULT' in gate_step["env"]
+    assert "SHARD_RESULT" in gate_step["env"]
     assert "success" in gate_step["run"]
     assert "exit 1" in gate_step["run"]
     assert "always()" in gate["if"]
@@ -45,7 +45,7 @@ def test_ci_shards_are_exact_complements_and_target_real_costly_tests():
     functions = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
     # The #205 gap-bound regression is in an upstream stacked PR, not yet
     # present on main. Once merged it must stay in the heavy shard.
-    future_upstream = {'test_dispute_gap_page_majority_leading_trailing_and_eight_gap_bound'}
+    future_upstream = {"test_dispute_gap_page_majority_leading_trailing_and_eight_gap_bound"}
     assert set(selectors) - functions <= future_upstream
     assert len(set(selectors) & functions) >= 8
     target = "tests/ops/test_live_e2e_staging_projection.py"
