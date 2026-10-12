@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import itertools
 import os
 import re
@@ -10,6 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -41,7 +43,7 @@ def _suite_run():
     return next(step["run"] for step in steps if step["name"].startswith("Test "))
 
 
-def _collect(*args):
+def _collect(*args, target=SOURCE):
     process = subprocess.run(
         [
             sys.executable,
@@ -51,7 +53,7 @@ def _collect(*args):
             "-q",
             "-o",
             "addopts=--import-mode=importlib",
-            SOURCE,
+            target,
             *args,
         ],
         cwd=ROOT,
@@ -60,7 +62,11 @@ def _collect(*args):
         capture_output=True,
         check=True,
     )
-    return {line.strip() for line in process.stdout.splitlines() if line.startswith(SOURCE + "::")}
+    return {
+        line.strip()
+        for line in process.stdout.splitlines()
+        if line.startswith("tests/") and "::" in line
+    }
 
 
 def test_ci_shards_use_explicit_nonmatrix_dependencies_and_hardened_reusable_workflow():
@@ -165,3 +171,26 @@ def test_ci_collection_partitions_are_exact_nodeid_complements():
     assert heavy_ids  # never let a missing/mistyped selector yield an empty shard
     assert not heavy_ids & rest_ids
     assert heavy_ids | rest_ids == all_ids
+
+
+def test_ci_whole_repository_partition_with_complete_runtime_dependencies():
+    # The shared development .venv is deliberately minimal; CI installs
+    # the full '.[dev]' set before collecting. Do not install packages
+    # into Yuz.local merely to validate a collection-only contract.
+    required = ("mcp", "uvicorn", "starlette", "asyncssh")
+    unavailable = [name for name in required if importlib.util.find_spec(name) is None]
+    if unavailable:
+        pytest.skip(f"Full-project CI collection requires missing runtime packages: {unavailable}")
+    run = _suite_run()
+    match = re.search(r'^\s*heavy="([^"]+)"$', run, re.MULTILINE)
+    assert match is not None
+    heavy_ids = _collect("-k", match.group(1))
+    rest_ids = _collect("-k", f"not ({match.group(1)})")
+    # Whole-project nodeid partition: every non-projection case must run
+    # only in everything-else, without missing or duplicate test nodes.
+    project_ids = _collect(target="tests")
+    nonprojection_ids = _collect(f"--ignore={SOURCE}", target="tests")
+    all_ids = heavy_ids | rest_ids
+    assert nonprojection_ids
+    assert all_ids.isdisjoint(nonprojection_ids)
+    assert project_ids == heavy_ids | rest_ids | nonprojection_ids
