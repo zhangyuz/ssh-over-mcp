@@ -42,7 +42,7 @@ fi
 # Both names flow into a launchd plist and into Docker/GitHub API calls.
 # Fail closed on characters that could inject XML or a shell fragment.
 for identity in "${runner_name}" "${container_name}"; do
-  if [[ ! "${identity}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
+  if [[ ! "${identity}" =~ ^[A-Za-z0-9][-A-Za-z0-9._]{0,63}$ ]]; then
     echo "error: runner/container name contains unsupported characters" >&2
     exit 2
   fi
