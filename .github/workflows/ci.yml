@@ -14,8 +14,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
 
 jobs:
-  validate:
-    name: Ubuntu 26.04 x86 / Python ${{ matrix.python-version }}
+  validate-shards:
+    name: CI shard / Python ${{ matrix.python-version }} / ${{ matrix.suite }}
     if: github.event_name != 'pull_request_target' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux, x64, ssh-over-mcp-mac-x86]
     timeout-minutes: 20
@@ -23,6 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
+        suite: [core, projection-heavy, projection-rest]
 
     steps:
       - name: Verify hardened Ubuntu 26.04 x86 runner container
@@ -113,8 +114,53 @@ jobs:
       - name: Compile on Python ${{ matrix.python-version }}
         run: python -m compileall -q src tests ops/systemd ops/live-e2e
 
-      - name: Test on Python ${{ matrix.python-version }}
-        run: python -m pytest -q --durations=15
+      - name: Test ${{ matrix.suite }} on Python ${{ matrix.python-version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Heavy names from exact-head Python 3.13 --durations=15; complement
+          # uses pytest -k not (...) so every collected test runs once.
+          heavy="test_dispute_overlap_page_paginates_real_valid_overflow or test_private_series_max_eight_segments_and_128_hops or test_dispute_overlap_valid_source_index_can_exceed_wire_capacity or test_dispute_overlap_coverage_remains_bounded_on_valid_large_index or test_dispute_gap_page_majority_leading_trailing_and_eight_gap_bound or test_dispute_ranks_real_sixteen_distinct_windows_upper_bound or test_dossier_public_maximum_8x16_on_both_sides or test_series_max_eight_segments_128_hops or test_portfolio_rejects_mismatched_genuine_pair_and_sources or test_dossier_rejects_genuine_mismatched_pair_and_source_splice"
+          case "${{ matrix.suite }}" in
+            core)
+              python -m pytest -q --durations=15 --ignore=tests/ops/test_live_e2e_staging_projection.py
+              ;;
+            projection-heavy)
+              python -m pytest -q --durations=15 tests/ops/test_live_e2e_staging_projection.py -k "${heavy}"
+              ;;
+            projection-rest)
+              python -m pytest -q --durations=15 tests/ops/test_live_e2e_staging_projection.py -k "not (${heavy})"
+              ;;
+            *)
+              echo "::error::Unknown CI suite"; exit 2
+              ;;
+          esac
+
+
+  # Keep the historical required-check names. Both Python gate jobs
+  # fail unless *all* 3x2 shards succeeded, including slow original-source
+  # security regressions. Never treat skipped/cancelled shards as PASS.
+  validate:
+    name: Ubuntu 26.04 x86 / Python ${{ matrix.python-version }}
+    if: always() && (github.event_name != 'pull_request_target' || github.event.pull_request.head.repo.full_name == github.repository)
+    needs: [validate-shards]
+    runs-on: [self-hosted, linux, x64, ssh-over-mcp-mac-x86]
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - name: Require every Python/suite shard PASS
+        shell: bash
+        env:
+          SHARD_RESULT: ${{ needs.validate-shards.result }}
+        run: |
+          if [ "${SHARD_RESULT}" != "success" ]; then
+            echo "::error::Python 3.13/3.14 required suite shard did not pass: ${SHARD_RESULT}"
+            exit 1
+          fi
+          echo "All six Python/suite shards PASS"
 
   live-local-e2e:
     name: Merge-main no-network Level-3
