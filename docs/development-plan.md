@@ -1419,3 +1419,25 @@ Rollout and post-merge acceptance require exact-head dual Python PASS,
 no missing test nodes, no weakened security checks, trusted-main native
 Level-3 PASS, and repeated end-to-end P95 under 10 minutes; see
 `docs/ci-hosted-primary.md`.
+
+
+### Six-way GitHub-hosted throughput milestone (2026-10-12, review pending)
+
+Follow-up primary-CI migration integration retains Python 3.13/3.14
+historical required check names as two independent fail-closed aggregate
+gates, covering six parallel GitHub-hosted Ubuntu 26.04 shard jobs (3
+disjoint partitions per Python). First separate six-way hosted
+[Canary 38300258158](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38300258158)
+fully PASSED 7/7 jobs in **7m02s end-to-end**. The 611 source-heavy module
+tests split as exactly 4 selected hot IDs plus 607 other tests; all other
+project tests remain in the rest partition, tested for both Python versions.
+The earlier two full-suite hosted [Canary 38294820787](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38294820787)
+PASSED in 12m17s, and four-way [Canary 38297317913](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38297317913)
+PASSED in 10m08s. **One 7m02s sample is not verified P95 <10m.**
+Only trusted main continues native no-network Level-3 on the dedicated
+non-admin Intel Mac x86 QEMU runner, and manual hardened security workflow
+is unchanged. Maintain source/docs/test consistency, exact-head green gates,
+post-merge exact-main CI and native Level-3 PASS, and multiple genuine
+performance samples before claiming final completion. GitHub branch
+protection cannot be read on this private-repo plan (HTTP 403); manually
+verify each required status and do not assume enforcement.

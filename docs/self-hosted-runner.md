@@ -170,9 +170,14 @@ ephemeral mode the container is removed after its one assigned job.
 
 **Primary PR and main-push CI runs on GitHub-hosted Ubuntu 26.04 x86 VMs**,
 not on this self-hosted container. The two historical Python 3.13 / 3.14
-required check names are preserved. Each hosted VM runs the **entire unfiltered
-test suite** in an independent job with `pytest-xdist -n 2` and its own
-20-minute timeout, plus complete Ruff/compile checks. Hosted runners use a
+required check names are preserved as separate **fail-closed aggregate
+checks**. Each Python version runs its **complete test suite distributed
+without omissions** across 3 independent hosted VM jobs (four exact
+projection hot-node IDs, all other projection tests, all other project
+tests). Each shard uses `pytest-xdist -n 2` and a 15-minute timeout.
+Both required aggregate checks fail unless all six shard jobs succeed,
+and both remain dependencies of the exact-main native Level-3 E2E.
+All six VMs run complete Ruff/compile checks. Hosted runners use a
 read-only token, `pull_request` (not `pull_request_target`), SHA-pinned
 actions, full Git history, and a strictly non-root `setpriv` environment
 with the hosted VM's extra supplementary groups cleared. This adapts the
@@ -180,11 +185,15 @@ test harness to the same strict identity policy without relaxing product
 security assertions. Fork PRs do not receive secrets or write permissions.
 
 The **explicit** `.github/workflows/self-hosted-security.yml` is retained
-for trusted-`main`, deliberately dispatched security regression checks.
+for manual security regressions dispatched from trusted `main`. Its
+`inputs.ref` may still name a different commit: **the operator must verify
+that target is trusted before dispatch**, since the workflow only checks
+that the event ref is `main`, not that `inputs.ref` resolves to `main`.
 It validates the full Python 3.13 / 3.14 suites on this hardened ephemeral
 Docker runner with non-root identity, zero capabilities, no-new-privileges,
-no Docker socket, and the read-only cgroup-v2 probe. Its target must be
-trusted `main`; it is **not** a PR CI or substitute for native Level-3.
+no Docker socket, and the read-only cgroup-v2 probe. The selected target must
+be independently trusted; this manual workflow is **not** a PR CI or
+substitute for native Level-3.
 
 The merge-main **no-network Level-3 E2E** remains on the dedicated
 non-admin macOS x86 QEMU orchestrator, testing the exact merged main SHA
