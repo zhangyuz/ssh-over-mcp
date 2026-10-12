@@ -1407,3 +1407,17 @@ both versions. This is a **hypothesis**, not a verified speedup. A real
 push canary with two separate runner slots, worker crash/failure tests,
 full result count, and end-to-end timings must pass before deployment;
 if slower, revert and profile source-bound bottlenecks.
+
+
+**Optional GitHub-hosted comparison (2026-10-12, implementation staged):**
+Following dual-slot runner PR #213 and unfiltered `pytest-xdist` PR #214,
+the experimental `.github/workflows/ci-hosted-benchmark.yml` exercises
+the same complete Python 3.13/3.14 test suite on separate GitHub-hosted
+Ubuntu 26.04 x64 **2-vCPU/8-GB private-repository** runners. Only opt-in
+same-repository `ci/hosted-` PRs trigger automatically; it uses the
+unprivileged `pull_request` event, a read-only token, no secrets, and
+a 20-minute per-job cost cap. The hosted VM does NOT substitute for hardened
+no-capabilities self-hosted security validation or native Level-3. See
+`docs/ci-hosted-benchmark.md` for private-repository billing exposure,
+security/coverage comparison, measurement and rollout criteria. No hosted
+success, 10-minute target or merge approval is claimed without live results.
