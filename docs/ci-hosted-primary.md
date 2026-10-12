@@ -3,12 +3,16 @@
 ## Proposed execution topology
 
 Routine `pull_request` (including fork PRs) and `push:main` execute
-the same **full** Python 3.13 and 3.14 test collection on independent
-standard GitHub-hosted Ubuntu 26.04 x86_64 VMs (private repo standard
-2 vCPU / 8 GB each). Each retains a 20-minute timeout, complete pytest,
-`pytest-xdist -n 2 --dist=load`, complete Ruff/compile operator coverage,
-full Git history (needed by exact binding regressions), strict non-root test
-identity and immutable SHA-pinned official actions. The existing required
+the **complete** Python 3.13 and 3.14 pytest collections on six independent
+GitHub-hosted Ubuntu 26.04 x86_64 VMs (private repo standard 2 vCPU /
+8 GB each). Each Python version has three disjoint, jointly exhaustive
+partitions: the four exact long-running projection node IDs; all remaining
+projection tests (currently 607); and all other project tests. Each job has
+a 15-minute fail-closed timeout, `pytest-xdist -n 2 --dist=load`,
+complete Ruff/compile operator coverage, full Git history, strictly non-root
+test identity and immutable SHA-pinned official actions. Two independent
+historical required-check contexts now refer to **aggregate gates**: both
+fail unless **all six jobs** succeed (including partial rerun failure). The existing required
 check **names** are retained:
 
 - `Ubuntu 26.04 x86 / Python 3.13`
@@ -52,18 +56,23 @@ resources. Existing hosted exact-head baseline
 **PASSED both full suites**: Python 3.13 job 8m43s, 3.14 job
 10m57s, workflow end-to-end 12m17s. That is not yet <10 minutes.
 
-The independently staged [PR #216](https://github.com/zhangyuz/ssh-over-mcp/pull/216)
-benchmarks disjoint projection/rest source partitions on four independent
-hosted VMs, with an always-run fail-closed gate. This primary CI topology
-change initially selects the already proven **two full suites**; do not
-deploy the faster sharded approach until a successful exact-head Canary and
-test coverage comparison, and the two historical required check contexts
-must remain fail-closed after any subsequent job split.
+The independent [PR #216](https://github.com/zhangyuz/ssh-over-mcp/pull/216)
+**PASSED** its four-way, fail-closed experiment in **10m08s** end-to-end.
+The further six-way [PR #218](https://github.com/zhangyuz/ssh-over-mcp/pull/218)
+also **PASSED 7/7** in **7m02s** end-to-end, splitting only the four most
+expensive projection node IDs out of the original 611-node projection module.
+Collection was checked: **611 = 4 hot + 607 other projection, 0 missing
+and 0 duplicate**. Its success is an empirical Canary, not proof of
+P95 under ten minutes. The new required-Python aggregate gates keep legacy
+names and independently check the six-job `needs.validate.result` for
+`success`; every failure, cancellation and skip must fail closed.
 
 SOM is a **private repository**; standard hosted Linux minutes consume
 account included usage, then bill at the published account-specific rate.
-Two 20-minute jobs are at most 40 hosted runner-minutes per run (excluding
-any other workflows). Monitor queue time, measured test time, end-to-end
+Six 15-minute shard caps and two 3-minute aggregate caps permit up to
+96 hosted runner-minutes per attempt (excluding other workflows); typical
+usage in the six-way green Canary was substantially lower. Check remaining
+Actions quota and monitor billable usage before routine production rollout. Monitor queue time, measured test time, end-to-end
 P95 (target <10 minutes), billing, and security regression outcomes.
 
 **Rollback:** restore the original `.github/workflows/ci.yml` from the

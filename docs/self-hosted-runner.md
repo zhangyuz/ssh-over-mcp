@@ -170,9 +170,14 @@ ephemeral mode the container is removed after its one assigned job.
 
 **Primary PR and main-push CI runs on GitHub-hosted Ubuntu 26.04 x86 VMs**,
 not on this self-hosted container. The two historical Python 3.13 / 3.14
-required check names are preserved. Each hosted VM runs the **entire unfiltered
-test suite** in an independent job with `pytest-xdist -n 2` and its own
-20-minute timeout, plus complete Ruff/compile checks. Hosted runners use a
+required check names are preserved as separate **fail-closed aggregate
+checks**. Each Python version runs its **complete test suite distributed
+without omissions** across 3 independent hosted VM jobs (four exact
+projection hot-node IDs, all other projection tests, all other project
+tests). Each shard uses `pytest-xdist -n 2` and a 15-minute timeout.
+Both required aggregate checks fail unless all six shard jobs succeed,
+and both remain dependencies of the exact-main native Level-3 E2E.
+All six VMs run complete Ruff/compile checks. Hosted runners use a
 read-only token, `pull_request` (not `pull_request_target`), SHA-pinned
 actions, full Git history, and a strictly non-root `setpriv` environment
 with the hosted VM's extra supplementary groups cleared. This adapts the

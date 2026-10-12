@@ -1,6 +1,6 @@
 name: CI
 
-# Untrusted PR code must never execute with pull_request_target privileges.
+# Run untrusted PR code without pull_request_target privileges or secrets.
 on:
   push:
     branches: [main]
@@ -16,17 +16,16 @@ concurrency:
 
 jobs:
   validate:
-    # Retain historical names to preserve existing required branch checks.
-    name: Ubuntu 26.04 x86 / Python ${{ matrix.python-version }}
+    name: Full validation / Python ${{ matrix.python-version }} / ${{ matrix.partition }}
     runs-on: ubuntu-26.04
-    timeout-minutes: 20
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
-
+        partition: ["projection-hot", "projection-rest", "rest"]
     steps:
-      - name: Verify GitHub-hosted Ubuntu 26.04 x86 runner
+      - name: Verify Ubuntu 26.04 non-root x86
         shell: bash
         run: |
           set -euo pipefail
@@ -36,7 +35,7 @@ jobs:
           test "$(uname -m)" = x86_64
           test "$(id -u)" -ne 0
 
-      - name: Checkout selected revision
+      - name: Checkout exact pull request merge revision with history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
@@ -48,38 +47,94 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install complete test dependencies
+      - name: Install all test dependencies
         run: python -m pip install -e '.[dev]'
 
-      - name: Lint source and tests
+      - name: Lint source, tests, and operator tools
         run: python -m ruff check src tests ops/systemd ops/live-e2e
 
-      - name: Compile on Python ${{ matrix.python-version }}
+      - name: Compile all source and operator tools
         run: python -m compileall -q src tests ops/systemd ops/live-e2e
 
-      - name: Verify strict non-root test identity
+      - name: Verify hosted-only minimal non-root Linux groups
         shell: bash
         run: |
           set -euo pipefail
-          # Hosted users have supplementary desktop groups. Preserve the
-          # product's strict Linux process identity policy by clearing only
-          # these groups; every test remains unprivileged.
           sudo /usr/bin/setpriv --reuid "$(id -u)" --regid "$(id -g)" \
             --clear-groups "$(command -v python)" -c \
             'import os; assert os.getuid() == os.geteuid() != 0; assert set(os.getgroups()) <= {os.getgid()}'
 
-      - name: Test on Python ${{ matrix.python-version }}
+      - name: Execute complete disjoint partition
         shell: bash
+        env:
+          PARTITION: ${{ matrix.partition }}
         run: |
           set -euo pipefail
-          sudo /usr/bin/setpriv --reuid "$(id -u)" --regid "$(id -g)" \
-            --clear-groups "$(command -v python)" -m pytest -q \
-            --durations=15 -n 2 --dist=load
+          # Exact node IDs selected from the four longest real GitHub-hosted
+          # projection tests. The hot and projection-rest sets are disjoint;
+          # any future tests in the module fall into projection-rest.
+          hot_tests=(
+            "tests/ops/test_live_e2e_staging_projection.py::test_dispute_overlap_page_paginates_real_valid_overflow"
+            "tests/ops/test_live_e2e_staging_projection.py::test_private_series_max_eight_segments_and_128_hops"
+            "tests/ops/test_live_e2e_staging_projection.py::test_dispute_overlap_valid_source_index_can_exceed_wire_capacity"
+            "tests/ops/test_live_e2e_staging_projection.py::test_dispute_overlap_coverage_remains_bounded_on_valid_large_index"
+          )
+          case "${PARTITION}" in
+            projection-hot)
+              sudo /usr/bin/setpriv --reuid "$(id -u)" --regid "$(id -g)" \
+                --clear-groups "$(command -v python)" -m pytest -q \
+                --durations=15 -n 2 --dist=load "${hot_tests[@]}"
+              ;;
+            projection-rest)
+              deselect_args=()
+              for node in "${hot_tests[@]}"; do
+                deselect_args+=("--deselect=${node}")
+              done
+              sudo /usr/bin/setpriv --reuid "$(id -u)" --regid "$(id -g)" \
+                --clear-groups "$(command -v python)" -m pytest -q \
+                --durations=15 -n 2 --dist=load \
+                tests/ops/test_live_e2e_staging_projection.py "${deselect_args[@]}"
+              ;;
+            rest)
+              sudo /usr/bin/setpriv --reuid "$(id -u)" --regid "$(id -g)" \
+                --clear-groups "$(command -v python)" -m pytest -q \
+                --durations=15 -n 2 --dist=load \
+                --ignore=tests/ops/test_live_e2e_staging_projection.py
+              ;;
+            *) echo "::error::Unknown test partition" >&2; exit 2 ;;
+          esac
+
+  required-python:
+    # Preserve historical required contexts. Each gate fails unless ALL
+    # six dual-Python shards passed (including cancelled and partial reruns).
+    name: Ubuntu 26.04 x86 / Python ${{ matrix.python-version }}
+    if: always()
+    needs: [validate]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - name: Require all six full-suite partitions to succeed
+        shell: bash
+        env:
+          SHARDS_RESULT: ${{ needs.validate.result }}
+        run: |
+          set -euo pipefail
+          if [[ "${SHARDS_RESULT}" != "success" ]]; then
+            echo "::error::A Python/partition failed, was skipped or cancelled"
+            exit 1
+          fi
+          echo "All six full-coverage test partitions passed."
 
   live-local-e2e:
     name: Merge-main no-network Level-3
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: validate
+    needs: [required-python]
     uses: ./.github/workflows/live-local-e2e.yml
     with:
       commit_sha: ${{ github.sha }}

@@ -582,7 +582,7 @@ def test_ci_calls_live_local_e2e_only_after_successful_main_validation() -> None
     workflow = yaml.load(CI_WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
     job = workflow["jobs"]["live-local-e2e"]
     assert job["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/main'"
-    assert job["needs"] == "validate"
+    assert job["needs"] == ["required-python"]
     assert job["uses"] == "./.github/workflows/live-local-e2e.yml"
     assert job["with"] == {"commit_sha": "${{ github.sha }}"}
     assert job["permissions"] == {"contents": "read"}
