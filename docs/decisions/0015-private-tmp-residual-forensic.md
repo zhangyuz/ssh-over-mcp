@@ -24,3 +24,11 @@ Even successful evidence is NOT a provenance guarantee, exclusive quiescence ass
 ## Refusal-only phase refinement (2026-10-13)
 
 The first trusted-main [private-tmp inspection 38383833045](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38383833045) passed fixed parent, marker and all three catalog root checks but refused at generic inventory-a, exit 70. Separate fixed labels inventory-a-1/2/3 and inventory-b-1/2/3 now identify only which of the three immutable catalog roots failed a complete metadata pass. They do not disclose any observed path, file name, file mode, owner, contents or underlying OS error; do not alter inventory policy or confer disposition authority. Failure still generates no successful artifact.
+
+## 2026-10-13 fixed root-2 refusal classification
+
+The trusted-main [read-only run 38385011852](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38385011852) refused at `inventory-a-2`: first catalog root completed its first metadata pass; the second exact UID-502 recovery root failed; the third was not yet inventoried. This does **not** establish the unsafe entry or its history.
+
+On failure of the unchanged authoritative collector, the inspector may perform one separately bounded metadata-only **post-failure probe** on the already-pinned failed catalog root, at most 128 entries, depth 12, path length 4096 bytes, 10 seconds of observed operations. It opens only directories through no-follow descriptors, reads no regular-file contents, and reports only a fixed failure category: `unsafe-mode`, `unsupported-kind`, `foreign-owner`, `foreign-device`, `hardlink`, `duplicate`, `unstable`, `bounds`, `unavailable`, or `unresolved`. A label may reflect subsequent changes and is not an atomic explanation of the original strict rejection. No entry names, paths, ownership values, lower-level exceptions, file payloads or artifacts are emitted upon refusal. The strict inventory error remains an error; the probe never manufactures successful evidence or recovery authority.
+
+After review and all exact-head Hosted checks, rerun trusted-main read-only forensic to identify a bounded fixed refusal reason. **No automatic deletion, marker recovery, mode repairs or permissive fallback.**
