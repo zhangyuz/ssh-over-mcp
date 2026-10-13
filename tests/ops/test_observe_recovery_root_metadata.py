@@ -177,3 +177,26 @@ def test_link_contents_are_never_resolved(case, monkeypatch):
         raise AssertionError("must never read link contents")
     monkeypatch.setattr(mod.os, "readlink", fail_readlink)
     assert json.loads(mod.observe_recovery_root())["recovery_eligible"] is False
+
+
+def test_budget_applies_during_enumeration_not_after_all_child_stats(case, monkeypatch):
+    mod, root, nested, _ = case
+    for index in range(10):
+        leaf = nested / f"file-{index}"
+        leaf.write_bytes(b"x")
+        leaf.chmod(0o600)
+    monkeypatch.setattr(mod, "MAX_ENTRIES", 3)
+    real_stat = mod.os.stat
+    observed = []
+    def counted_stat(path, *args, **kwargs):
+        if kwargs.get("dir_fd") is not None:
+            observed.append(path)
+        return real_stat(path, *args, **kwargs)
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        monkeypatch.setattr(mod.os, "stat", counted_stat)
+        with pytest.raises(mod.preflight.PreflightError):
+            mod._collect_special_metadata(fd, uid=os.geteuid())
+    finally:
+        os.close(fd)
+    assert len(observed) <= 2, "must refuse before probing unbounded child names"

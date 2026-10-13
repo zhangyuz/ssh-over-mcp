@@ -103,6 +103,7 @@ def _collect_special_metadata(root_fd: int, *, uid: int) -> tuple[dict[str, int 
     entries: list[dict[str, int | str]] = []
     started = monotonic()
     used_bytes = 32
+    discovered = 1  # The root itself; reserve every child before stat.
     try:
         root_dev = os.fstat(root_fd).st_dev
 
@@ -117,6 +118,7 @@ def _collect_special_metadata(root_fd: int, *, uid: int) -> tuple[dict[str, int 
             entries.append(entry)
 
         def walk(fd: int, relative: str, depth: int) -> None:
+            nonlocal discovered
             if monotonic() - started > MAX_PASS_SECONDS or depth > MAX_DEPTH:
                 raise preflight.PreflightError()
             original = os.fstat(fd)
@@ -137,8 +139,12 @@ def _collect_special_metadata(root_fd: int, *, uid: int) -> tuple[dict[str, int 
                     inventory._path_key(child_path)
                     if len(os.fsencode(child_path)) > MAX_PATH_BYTES:
                         raise preflight.PreflightError()
-                    if len(entries) >= MAX_ENTRIES:
+                    if (
+                        discovered >= MAX_ENTRIES or name in observed
+                        or monotonic() - started > MAX_PASS_SECONDS
+                    ):
                         raise preflight.PreflightError()
+                    discovered += 1
                     observed[name] = os.stat(name, dir_fd=fd, follow_symlinks=False)
             for name in sorted(observed, key=os.fsencode):
                 first = observed[name]
