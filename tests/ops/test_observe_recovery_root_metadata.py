@@ -252,3 +252,30 @@ def test_second_pass_refusal_has_fixed_phase_without_partial_output(case, monkey
         mod.main([])
     assert mod._REFUSAL_PHASE == "inventory-b-directory-policy"
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    ("limit_name", "limit", "expected"),
+    [
+        ("MAX_DEPTH", 1, "inventory-a-entry-path-depth"),
+        ("MAX_PATH_BYTES", 10, "inventory-a-entry-path-bytes"),
+    ],
+)
+def test_rejected_relative_path_reports_only_fixed_limit_kind(
+    case, monkeypatch, limit_name, limit, expected, capsys
+):
+    mod, root, nested, _ = case
+    (nested / "safe-long-leaf").symlink_to("/private/never-follow")
+    monkeypatch.setattr(mod.inventory, limit_name, limit)
+    with pytest.raises(mod.preflight.PreflightError):
+        mod.main([])
+    assert mod._REFUSAL_PHASE == expected
+    assert capsys.readouterr().out == ""
+    assert root.is_dir()
+
+
+def test_relative_path_violation_kinds_do_not_expose_names():
+    mod = load()
+    assert mod._path_violation_kind("a/../b") == "invalid"
+    assert mod._path_violation_kind("a/" + "x" * 5000) == "bytes"
+    assert mod._path_violation_kind("a/b") == "unresolved"

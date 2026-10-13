@@ -95,6 +95,30 @@ def _record(path: str, info: os.stat_result) -> dict[str, int | str]:
     }
 
 
+def _path_violation_kind(path: str) -> str:
+    """Fixed refusal-only taxonomy for an already-rejected relative path.
+
+    Never return the path, an exception, or an observed component.
+    """
+    try:
+        if (
+            type(path) is not str
+            or not path
+            or "\x00" in path
+            or any(part in {"", ".", ".."} for part in path.split("/"))
+        ):
+            return "invalid"
+        if len(path.split("/")) > inventory.MAX_DEPTH:
+            return "depth"
+        if len(path) > inventory.MAX_PATH_BYTES:
+            return "bytes"
+        if len(os.fsencode(path)) > inventory.MAX_PATH_BYTES:
+            return "bytes"
+    except (OSError, ValueError, TypeError, UnicodeError, MemoryError):
+        return "unavailable"
+    return "unresolved"
+
+
 def _collect_special_metadata(root_fd: int, *, uid: int) -> tuple[dict[str, int | str], ...]:
     """Borrow pinned root FD; collect no-follow node metadata only.
 
@@ -147,8 +171,13 @@ def _collect_special_metadata(root_fd: int, *, uid: int) -> tuple[dict[str, int 
                     child_path = name if relative == "." else relative + "/" + name
                     # _path_key enforces relative path and depth/length rules.
                     _COLLECT_PHASE = "entry-path"
-                    inventory._path_key(child_path)
+                    try:
+                        inventory._path_key(child_path)
+                    except inventory.InventoryError:
+                        _COLLECT_PHASE = "entry-path-" + _path_violation_kind(child_path)
+                        raise
                     if len(os.fsencode(child_path)) > MAX_PATH_BYTES:
+                        _COLLECT_PHASE = "entry-path-bytes"
                         raise preflight.PreflightError()
                     _COLLECT_PHASE = "entry-budget"
                     if (

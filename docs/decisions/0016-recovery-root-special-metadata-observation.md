@@ -37,3 +37,17 @@ enumeration, child-stat, entry-budget, directory identity/edge drift, etc.),
 not a name, pathname, owner, object identity, file payload, exception string
 or raw metadata. They are observations, not evidence of provenance or cleanup
 eligibility; any failure still exits 70 with no successful artifact.
+
+## 2026-10-13 fixed entry-path refusal taxonomy
+
+Trusted-main UID-502 [38396725028](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38396725028)
+refused at `inventory-a-entry-path` with no artifact. To distinguish
+an over-depth relative path from excess encoded path bytes or an invalid
+component, the observer now labels an **already-rejected** path with
+`entry-path-depth`, `entry-path-bytes`, `entry-path-invalid`,
+`entry-path-unavailable` or `entry-path-unresolved` inside the existing
+fixed inventory-pass refusal phase. The original `_path_key` validator
+still makes every acceptance/rejection decision, and its failure is still
+raised. Neither pathname nor individual components, symlink target, raw
+metadata or exceptions are logged. This is diagnostic observation only,
+not a reason to skip an entry, relax depth/size bounds or dispose of it.
