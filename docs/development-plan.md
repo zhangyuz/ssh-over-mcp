@@ -1757,3 +1757,24 @@ Python required checks still require all six hosted partitions to succeed.
 The changed routing must be revalidated by new exact-head hosted CI for
 both Python versions. Prior 10/10 speed acceptance remains historical and
 does not imply this expanded suite has met the latency target.
+
+
+### Complementary projection-rest hosted shards (2026-10-13)
+
+Exact-node collection on the #227 integration checkout records **795**
+projection parametrized nodes. The four original plus 15 additional
+hosted-measured hot IDs select 19 unique nodes. Two complementary pytest
+keyword filters applied to the remaining collection select **408**
+'classified or dispute' and **368** 'not (classified or dispute)' nodes.
+Disposable local --collect-only proof confirmed all **795 = 19 + 408 + 368**
+nodes are covered once, with zero overlap or omissions. Neither source
+tests nor assertions changed. The general rest partition continues to
+exclude only the projection source module. The new workflow has eight
+parallel hosted partitions (four per Python) and retains both historical
+required check names; each aggregate fails closed unless all eight pass.
+Only the native main-push Level-3 stage uses the non-admin Intel Mac runner.
+
+The preceding six-partition integration run passed functional checks but
+exceeded the 10-minute latency target due to expanded projection-rest work.
+This eight-way layout is an improvement candidate, not a new speed PASS
+before its exact-head hosted CI validation and measurement.

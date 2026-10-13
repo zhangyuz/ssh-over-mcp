@@ -23,7 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
-        partition: ["projection-hot", "projection-rest", "rest"]
+        partition: ["projection-hot", "projection-rest-classified", "projection-rest-other", "rest"]
     steps:
       - name: Verify Ubuntu 26.04 non-root x86
         shell: bash
@@ -101,7 +101,14 @@ jobs:
                 --clear-groups "$(command -v python)" -m pytest -q \
                 --durations=15 -n 2 --dist=load "${hot_tests[@]}"
               ;;
-            projection-rest)
+            projection-rest-classified|projection-rest-other)
+              # Fixed complementary selectors. Every non-hot node belongs
+              # to exactly one projection-rest partition.
+              if [[ "$PARTITION" == projection-rest-classified ]]; then
+                keyword_filter="classified or dispute"
+              else
+                keyword_filter="not (classified or dispute)"
+              fi
               deselect_args=()
               for node in "${hot_tests[@]}"; do
                 deselect_args+=("--deselect=${node}")
@@ -109,7 +116,7 @@ jobs:
               sudo /usr/bin/setpriv --reuid "$(id -u)" --regid "$(id -g)" \
                 --clear-groups "$(command -v python)" -m pytest -q \
                 --durations=15 -n 2 --dist=load \
-                tests/ops/test_live_e2e_staging_projection.py "${deselect_args[@]}"
+                -k "$keyword_filter" tests/ops/test_live_e2e_staging_projection.py "${deselect_args[@]}"
               ;;
             rest)
               sudo /usr/bin/setpriv --reuid "$(id -u)" --regid "$(id -g)" \
@@ -122,7 +129,7 @@ jobs:
 
   required-python:
     # Preserve historical required contexts. Each gate fails unless ALL
-    # six dual-Python shards passed (including cancelled and partial reruns).
+    # eight dual-Python shards passed (including cancelled and partial reruns).
     name: Ubuntu 26.04 x86 / Python ${{ matrix.python-version }}
     if: always()
     needs: [validate]
@@ -145,7 +152,7 @@ jobs:
             echo "::error::A Python/partition failed, was skipped or cancelled"
             exit 1
           fi
-          echo "All six full-coverage test partitions passed."
+          echo "All eight full-coverage test partitions passed."
 
   live-local-e2e:
     name: Merge-main no-network Level-3

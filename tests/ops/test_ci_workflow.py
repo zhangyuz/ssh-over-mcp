@@ -55,7 +55,7 @@ def test_pr_ci_is_unprivileged_and_main_validation_is_non_cancelling() -> None:
     }
 
 
-def test_complete_dual_python_six_shard_matrix_and_operator_checks() -> None:
+def test_complete_dual_python_eight_shard_matrix_and_operator_checks() -> None:
     job = _workflow(WORKFLOW)["jobs"]["validate"]
     assert (
         job["name"]
@@ -66,7 +66,7 @@ def test_complete_dual_python_six_shard_matrix_and_operator_checks() -> None:
         "fail-fast": "false",
         "matrix": {
             "python-version": ["3.13", "3.14"],
-            "partition": ["projection-hot", "projection-rest", "rest"],
+            "partition": ["projection-hot", "projection-rest-classified", "projection-rest-other", "rest"],
         },
     }
     assert job["timeout-minutes"] == "15"
@@ -101,13 +101,15 @@ def test_disjoint_partitions_select_all_exact_hot_tests_without_dropping_others(
     assert run.count("--clear-groups") == 3
     assert run.count("-m pytest -q") == 3
     assert run.count("--durations=15 -n 2 --dist=load") == 3
-    assert "projection-hot)" in run and "projection-rest)" in run and "rest)" in run
+    assert "projection-hot)" in run and "projection-rest-classified|projection-rest-other)" in run and "rest)" in run
     assert '"${hot_tests[@]}"' in run
     assert 'deselect_args+=("--deselect=${node}")' in run
     assert '"${deselect_args[@]}"' in run
     assert run.count("--deselect=") == 1
     assert f"--ignore={PROJECTION}" in run
-    assert " -k " not in run
+    assert '-k "$keyword_filter"' in run
+    assert 'keyword_filter="classified or dispute"' in run
+    assert 'keyword_filter="not (classified or dispute)"' in run
     assert "--ignore=tests/ops/test_live_e2e_staging_projection.py" in run
     source = (ROOT / PROJECTION).read_text(encoding="utf-8")
     for test_name in HOT:
@@ -117,7 +119,7 @@ def test_disjoint_partitions_select_all_exact_hot_tests_without_dropping_others(
     assert "Unknown test partition" in run
 
 
-def test_historical_required_check_names_fail_closed_on_all_six_shards() -> None:
+def test_historical_required_check_names_fail_closed_on_all_eight_shards() -> None:
     jobs = _workflow(WORKFLOW)["jobs"]
     gate = jobs["required-python"]
     assert gate["name"] == "Ubuntu 26.04 x86 / Python ${{ matrix.python-version }}"
