@@ -1823,3 +1823,19 @@ The stale-provider blocker is RESOLVED. This does not reconstruct historical
 provenance or automatically close A1/B8/N1c; future temp-root alignment is
 a separate design task. The user's active progress.md handoff and both
 older dirty worktrees remain preserved.
+
+
+### Next Phase 7B1 infrastructure prerequisite — protected staging proposal (2026-10-13)
+
+Verified main b39e08a (PR #241) passed full hosted CI and actual native E2E/cleanup
+in run 38466541180. The historical provider incident is resolved. Future staging
+retention/selector alignment remains a separate architectural change; see
+[proposed ADR 0019](decisions/0019-protected-native-e2e-staging.md) and
+[written design](superpowers/specs/2026-10-13-protected-native-e2e-staging-design.md).
+The proposal uses a fixed private Application Support namespace with shared
+protected+legacy blocking checks and explicit owned lifetime. It changes no
+behavior yet and grants no activation, generic deletion or historical receipt
+authority. Written review precedes implementation planning/approval. After
+verified activation, reconcile A1/B8 pause conditions before N1c, complete
+N1–N4 native proof, then return to Ledger systemd Task 3. Do not claim the
+remaining native toolchain/sandbox gates closed by incident recovery.
