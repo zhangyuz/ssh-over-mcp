@@ -250,3 +250,7 @@ following symlinks or weakening any selected-root identity requirement.
 **State:** host/provider recovery remains BLOCKED / FAIL-CLOSED. No
 provider marker, QEMU, residual tree, or privileged account was modified
 by the UID-502 comparison.
+
+## 2026-10-13 proposed fixed private-tmp residual follow-up
+
+[ADR 0015](../decisions/0015-private-tmp-residual-forensic.md) describes a separate bounded private metadata-only inspector for three exact /private/tmp roots. It leaves ADR 0014 and existing marker recovery unchanged. Successful evidence is non-authorizing; all three directory dispositions need later independent review and explicit operator permission. Native Level-3 remains blocked until safe disposition, marker recovery and exact-main guest acceptance.
