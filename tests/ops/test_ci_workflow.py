@@ -17,6 +17,21 @@ HOT = {
     "test_private_series_max_eight_segments_and_128_hops",
     "test_dispute_overlap_valid_source_index_can_exceed_wire_capacity",
     "test_dispute_overlap_coverage_remains_bounded_on_valid_large_index",
+    "test_classified_hop_filtered_page_keeps_eight_same_class_source_groups",
+    "test_dispute_gap_page_majority_leading_trailing_and_eight_gap_bound",
+    "test_classified_multifilter_source_clipping_matches_single_class_pages[classes0]",
+    "test_classified_multifilter_two_classes_interleave_original_hop_order",
+    "test_classified_multifilter_source_clipping_matches_single_class_pages[classes1]",
+    "test_classified_hop_filtered_page_majority_clips_inside_both_source_segments",
+    "test_series_max_eight_segments_128_hops",
+    "test_dossier_public_maximum_8x16_on_both_sides",
+    "test_dispute_ranks_real_sixteen_distinct_windows_upper_bound",
+    "test_classified_hop_multifilter_page_original_source_order_and_category_subset[categories2]",
+    "test_classified_hop_page_original_source_all_pages_and_clipped_interval",
+    "test_classified_hop_page_clips_inside_both_distinct_source_intervals",
+    "test_portfolio_rejects_mismatched_genuine_pair_and_sources",
+    "test_dossier_rejects_genuine_mismatched_pair_and_source_splice",
+    "test_classified_multifilter_source_clipping_matches_single_class_pages[classes2]",
 }
 
 
@@ -97,7 +112,7 @@ def test_disjoint_partitions_select_all_exact_hot_tests_without_dropping_others(
     source = (ROOT / PROJECTION).read_text(encoding="utf-8")
     for test_name in HOT:
         assert run.count(f'"{PROJECTION}::{test_name}"') == 1
-        assert f"def {test_name}(" in source
+        assert f"def {test_name.partition(chr(91))[0]}(" in source
     assert run.count(f'"{PROJECTION}::') == len(HOT)
     assert "Unknown test partition" in run
 

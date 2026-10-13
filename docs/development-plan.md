@@ -1739,3 +1739,21 @@ reconfirmed the same three UID-502 residual identities, all without valid
 expected_commit. No directory deletion, marker clearance, process signal,
 privilege escalation, E2E guest launch or disposition is authorized. Native
 Level-3, A1/B8/N1c provenance and exact cleanup remain OPEN.
+
+
+### Source-heavy CI rebalance during classified-stack integration (2026-10-13)
+
+The first updated-main integration CI run 38333335954 proved that adding
+#205–#211 source-bound regression cases can make Python 3.14 projection-rest
+exceed the original under-ten-minute end-to-end budget, although the other
+five partitions passed. This is a measured runtime regression, not a proven
+assertion failure or native E2E clearance. To rebalance without changing
+scope, move 15 exact nodes selected from the source-heavy Python 3.13
+projection-rest hosted slowest-call evidence in run 38332697221 to the
+existing projection-hot shard. Preserve all four original hot nodes and
+all remaining projection tests; exact IDs are deselected from projection-rest
+while every other test stays in its existing partition. Both historical
+Python required checks still require all six hosted partitions to succeed.
+The changed routing must be revalidated by new exact-head hosted CI for
+both Python versions. Prior 10/10 speed acceptance remains historical and
+does not imply this expanded suite has met the latency target.
