@@ -1794,3 +1794,16 @@ unproven. The [operator decision plan](plans/2026-10-13-native-provider-recovery
 is proposed only. No disposal implementation, execution, marker recovery,
 or native acceptance is authorized or complete. Future temp-root alignment
 is a separate design task. Preserve both older dirty recovery worktrees.
+
+
+### Approved exact historical disposition implementation (2026-10-13)
+
+The operator approved the exact decision in PR240 at12:18:16 EDT. ADR0018
+and the separate incident tool/workflow bind three full private inventory
+digests and the unchanged marker. Disposable Mac tests exercise opaque-link
+removal, bottom-up directories, drift refusal, journal/replay and I/O
+uncertainty. Actual native recovery and cleanup remain OPEN until fresh
+review, exact-head hosted CI, trusted-main merge/inspection, approved
+disposition, guarded marker recovery and actual exact-main Level3 succeed.
+Future temp-root alignment remains separate. Earlier no-authorization
+statements describe the historical state before this explicit approval.

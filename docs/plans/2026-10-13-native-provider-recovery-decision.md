@@ -1,6 +1,7 @@
 # Native provider recovery: exact operator decision
 
-Status: proposed, not approved or implemented. Native Level-3 remains blocked.
+Status: exact disposition approved by the operator at 12:18:16 EDT;
+implementation/test/review gates in progress. Native Level-3 remains blocked.
 Date: 2026-10-13 (America/Toronto).
 
 ## Verified current state
@@ -74,19 +75,22 @@ causal hypothesis**, not an authenticated historical deletion record. It
 neither proves the original cancellation cause nor reconstructs a commit
 binding or deletion authority. Do not disable the system cleaner.
 
-## Exact operator decision requested
+## Exact operator decision — approved
 
-The operator must explicitly decide whether these three exact residual
+The operator explicitly approved this exact decision on October13 at
+12:18:16 EDT: “Sounds good, let’s just fix it”. It covers whether these three exact residual
 trees may be discarded despite incomplete historical provenance and the
 loss of prior regular-file evidence. Approval applies only to the listed
 root identities and the complete matching private per-entry manifests.
 It does not authorize recovering deleted payload, accepting unknown
 entries, trusting symlink destinations or classifying the old run as passed.
 
-Approval of this document would authorize developing, reviewing, testing
+Approval of this document authorizes developing, reviewing, testing
 and, only after its gates pass, executing the narrow disposition below.
-Until explicit approval, this document and observation runs grant no
-unlink, rmdir, rename, marker clearance, permission repair or process signals.
+Observation runs still grant no mutation authority. The separate approved
+[ADR0018](../decisions/0018-approved-historical-residual-disposition.md) binds
+the new implementation and dispatch to this incident. Permission repair,
+process signals, generic deletion and quarantine rename remain excluded.
 
 ## Bounded implementation and execution sequence after approval
 
@@ -103,6 +107,9 @@ unlink, rmdir, rename, marker clearance, permission repair or process signals.
    cache; write/fsync its initial record and fsync the cache directory.
    Record and sync intention before each mutation. Sync the mutated parent
    directory and verify absence before recording/syncing confirmation.
+   Durability here covers process interruption with kernel/storage intact,
+   not OS crash or power loss. Journal text alone cannot certify a failed
+   sync; successful workflow completion and fresh state checks are required.
    Any uncertain durability stops the operation. Require disposable macOS
    evidence for journal creation/write/fsync, parent sync and confirmation
    failures, including crash recovery.
@@ -153,8 +160,9 @@ unlink, rmdir, rename, marker clearance, permission repair or process signals.
    staging cleanup. Report hosted and native results separately. A new
    failure starts a fresh root-cause investigation.
 
-The disposition tool, workflow, exclusivity proof and RED/GREEN tests do
-not exist yet. Approval is not evidence that their technical gates passed.
+The separate disposition tool/workflow and disposable fixture regressions
+are now being verified. Approval is not evidence that technical gates passed.
+See [the implementation checklist](2026-10-13-approved-residual-disposition-implementation.md).
 
 ## Follow-on defect prevention
 

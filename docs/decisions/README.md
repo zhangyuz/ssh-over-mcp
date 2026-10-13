@@ -27,3 +27,5 @@ Current ADRs:
 - [0013 — GitHub-hosted ordinary CI and self-hosted native E2E](0013-hosted-ci-self-hosted-e2e.md)
 
 - [0014 — Exact residual forensic inspection](0014-exact-residual-forensic-inspection.md)
+
+- [0018: Approved historical residual disposition](0018-approved-historical-residual-disposition.md) — exact operator-approved one-incident design; trusted-main verification and native acceptance still required.

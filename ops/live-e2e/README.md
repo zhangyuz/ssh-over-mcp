@@ -234,3 +234,18 @@ bounded private metadata snapshots, without file-content reads, link
 following, stale marker clearance, disposition or staging policy changes.
 Only manually dispatch after independent review, exact-head Hosted CI and
 trusted-main merge. Results are not cleanup authorization.
+
+
+## Approved October13 historical incident disposition
+
+[ADR0018](../../docs/decisions/0018-approved-historical-residual-disposition.md)
+records the operator approval and the new separate manual trusted-main tool.
+It pins all three exact inventories and marker metadata; inspection is the
+default. Apply removes only1362 directories and six opaque symlink entries
+under an exclusive operator maintenance assumption. It retains a private
+durable intent/confirmation journal and never clears the provider marker.
+Changed metadata, regular files, active owner/QEMU, an existing journal,
+uncertain I/O or the midnight-cleaner window refuse. This does not activate
+ADR0011 apply or turn observers into cleanup authority. After reviewed
+exact-head hosted CI and merge, run inspect-only, then approved apply, then
+existing guarded marker-only recovery and exact-main native Level3.
