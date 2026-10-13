@@ -89,6 +89,29 @@ def test_replaced_catalog_root_refuses(fixture):
         module.inspect_residuals()
 
 
+@pytest.mark.parametrize("index,name", [(1, "first"), (2, "recovery"), (3, "older")])
+def test_catalog_phase_identifies_replaced_root_without_exposing_name(
+    fixture, index, name
+):
+    module, temp, _ = fixture
+    (temp / name).rename(temp / f"preserved-{index}")
+    (temp / name).mkdir(mode=0o700)
+    with pytest.raises(module.preflight.PreflightError):
+        module.inspect_residuals()
+    assert module._REFUSAL_PHASE == f"catalog-identity-{index}"
+
+
+@pytest.mark.parametrize("index,name", [(1, "first"), (2, "recovery"), (3, "older")])
+def test_catalog_phase_identifies_missing_root_without_exposing_name(
+    fixture, index, name
+):
+    module, temp, _ = fixture
+    (temp / name).rename(temp / f"preserved-{index}")
+    with pytest.raises(module.preflight.PreflightError):
+        module.inspect_residuals()
+    assert module._REFUSAL_PHASE == f"catalog-open-{index}"
+
+
 def test_nested_symlink_refuses(fixture):
     module, temp, _ = fixture
     (temp / "first/empty/link").symlink_to(temp)
