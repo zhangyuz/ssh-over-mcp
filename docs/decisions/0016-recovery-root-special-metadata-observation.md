@@ -22,3 +22,18 @@ Every successful artifact explicitly records `recovery_eligible=false`; the two 
 ## Required follow-through
 
 Independently review the complete private artifact and verify all exact identities and old PID/QEMU quiescence under UID 502. Investigate the root-2 symlink identity and every remaining object without following links. Then review first and third catalog roots independently. Propose an exact per-identity disposition with explicit operator approval **before any mutation**. Only after roots are safely resolved and marker-only recovery's guards pass, rerun exact-main no-network Level-3 and validate complete host/guest cleanup. Until then, Native Level-3 is FAIL-CLOSED.
+
+## 2026-10-13 refusal-only phase refinement
+
+The first trusted-main UID-502 manual metadata run
+[38394389366](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38394389366)
+refused at generic `inventory-a`, exit 70, without producing a partial
+artifact. Exact catalog and marker checks had completed; the private contents
+remain unknown. To distinguish a safe collector failure from a malformed or
+changing entry **without relaxing any check**, the observer adds fixed
+phase-only labels on an exception from its already-bounded first or second
+metadata pass. Labels describe only an operation class (directory policy,
+enumeration, child-stat, entry-budget, directory identity/edge drift, etc.),
+not a name, pathname, owner, object identity, file payload, exception string
+or raw metadata. They are observations, not evidence of provenance or cleanup
+eligibility; any failure still exits 70 with no successful artifact.
