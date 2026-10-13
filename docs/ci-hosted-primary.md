@@ -1,8 +1,10 @@
 # Primary CI on GitHub-hosted; native E2E on self-hosted
 
 Normative policy: [ADR 0013](decisions/0013-hosted-ci-self-hosted-e2e.md).
-Attempt-specific latency and unresolved acceptance gates:
-[2026-10-12 evidence](ci-hosted-acceptance-2026-10-12.md).
+[Ten-sample production CI acceptance](ci-production-acceptance-2026-10-12.md)
+records the completed observed latency gate. Earlier
+[pilot evidence](ci-hosted-acceptance-2026-10-12.md) and separate unresolved
+native/security gates remain explicit.
 
 ## Current execution topology
 

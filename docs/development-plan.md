@@ -1441,3 +1441,18 @@ post-merge exact-main CI and native Level-3 PASS, and multiple genuine
 performance samples before claiming final completion. GitHub branch
 protection cannot be read on this private-repo plan (HTTP 403); manually
 verify each required status and do not assume enforcement.
+
+
+### Hosted CI latency acceptance (2026-10-12)
+
+The unchanged production workflow and actual tested source/test/operator
+Git objects now have **10/10 complete hosted successes**: median
+**7m14s**, observed nearest-rank P95 and maximum
+**7m22s**, all under 10m. Exact-main `db42a8e`
+run `38323133514` passed the six shards and both historical gates in 7m12s.
+See [the reproducible acceptance record](ci-production-acceptance-2026-10-12.md).
+This closes the observed **ordinary hosted CI speed gate** only. Native
+Level-3/provider cleanup, actual UID-502 provenance and manual hardened
+security acceptance remain open; overall main workflow still fails on the
+pre-existing native provider state. Future runtime is not guaranteed by ten
+same-evening samples; retain all routine outcomes and review regressions.
