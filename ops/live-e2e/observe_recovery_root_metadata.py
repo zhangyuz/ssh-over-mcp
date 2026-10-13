@@ -210,7 +210,7 @@ def _collect_special_metadata(root_fd: int, *, uid: int) -> tuple[dict[str, int 
                     child_fd = os.open(name, _DIR_FLAGS, dir_fd=fd)
                     try:
                         _COLLECT_PHASE = "directory-identity"
-                        if os.fstat(child_fd) != first:
+                        if _record(child_path, os.fstat(child_fd)) != _record(child_path, first):
                             raise preflight.PreflightError()
                         walk(child_fd, child_path, depth + 1)
                     finally:
@@ -222,10 +222,14 @@ def _collect_special_metadata(root_fd: int, *, uid: int) -> tuple[dict[str, int 
                     # Never open a regular/symlink/FIFO/socket/device leaf.
                     append(child_path, first)
                 _COLLECT_PHASE = "entry-changed"
-                if os.stat(name, dir_fd=fd, follow_symlinks=False) != first:
+                if _record(
+                    child_path, os.stat(name, dir_fd=fd, follow_symlinks=False),
+                ) != _record(child_path, first):
                     raise preflight.PreflightError()
             _COLLECT_PHASE = "directory-changed"
-            if os.fstat(fd) != original:
+            # Compare published fields: reads may change atime; raw tuple equality
+            # can miss nanosecond mtime/ctime drift.
+            if _record(relative, os.fstat(fd)) != _record(relative, original):
                 raise preflight.PreflightError()
 
         walk(root_fd, ".", 0)

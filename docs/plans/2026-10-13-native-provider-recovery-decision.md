@@ -95,8 +95,10 @@ process signals, generic deletion and quarantine rename remain excluded.
 ## Bounded implementation and execution sequence after approval
 
 1. Implement a separate one-incident trusted-main manual UID502 workflow
-   and independently review it. Keep the existing observers and marker-only
-   recovery unchanged. First add a separately reviewed incident ADR:
+   and independently review it. Keep marker-only recovery and all observer
+   safety bounds/non-authority unchanged. The recorded-field consistency
+   correction in ADR0018 excludes read-induced access time and strengthens
+   nanosecond modification/change-time checks without changing manifests. First add a separately reviewed incident ADR:
    ADR0011 excludes root #2 and requires the original eleven-entry staging
    layout and depth12, so its existing apply contract cannot accept these
    depth13 skeletons. Do not relax or reuse it.

@@ -422,17 +422,8 @@ def test_process_crash_journal_prevents_automatic_resume(incident, tmp_path, aft
         journal(module, cache_fd)
 
 
-def test_real_incident_size_and_depth_dispose_with_bounded_journal(incident, tmp_path, monkeypatch):
+def test_real_incident_size_and_depth_dispose_with_bounded_journal(incident, tmp_path):
     module, root, parent_fd, root_fd, cache_fd, _ = incident
-    # Native authority runs on macOS. Model stable metadata on Linux strictatime:
-    # owner-permitted O_NOATIME prevents our own directory reads changing atime.
-    # No identity/mtime/ctime/mode observation or refusal is mocked or relaxed.
-    if sys.platform == "linux":
-        import fcntl
-
-        flags = fcntl.fcntl(root_fd, fcntl.F_GETFL)
-        fcntl.fcntl(root_fd, fcntl.F_SETFL, flags | os.O_NOATIME)
-        monkeypatch.setattr(module.observer, "_DIR_FLAGS", module.DIR_FLAGS | os.O_NOATIME)
     deep = root / "a/deep"
     chain = deep
     for index in range(11):
@@ -469,3 +460,38 @@ def test_journal_name_replacement_refuses_before_intention_and_mutation(incident
             remove(incident, sink)
     assert (root / "a/deep").is_dir()
     assert path.read_text() == "replacement must not receive journal writes"
+
+
+@pytest.mark.parametrize("field", ["atime", "ctime_ns"])
+def test_observer_stability_uses_exact_recorded_fields(incident, monkeypatch, field):
+    module, _, _, root_fd, _, _ = incident
+    original_fstat = os.fstat
+    original = original_fstat(root_fd)
+    values = list(original)
+    fields = {name: getattr(original, name) for name in (
+        "st_atime", "st_mtime", "st_ctime", "st_atime_ns", "st_mtime_ns", "st_ctime_ns",
+    )}
+    if field == "atime":
+        values[7] += 1
+        fields["st_atime"] += 1
+        fields["st_atime_ns"] += 1_000_000_000
+    else:
+        fields["st_ctime_ns"] += 1
+    changed = os.stat_result(values, fields)
+    calls = 0
+
+    def fstat(fd):
+        nonlocal calls
+        if fd != root_fd:
+            return original_fstat(fd)
+        calls += 1
+        return original if calls <= 2 else changed
+
+    monkeypatch.setattr(os, "fstat", fstat)
+    if field == "atime":
+        entries = module.observer._collect_special_metadata(root_fd, uid=os.geteuid())
+        assert entries[0] == module.observer._record(".", original)
+    else:
+        assert changed == original  # Raw tuple equality misses this one-nanosecond drift.
+        with pytest.raises(module.preflight.PreflightError):
+            module.observer._collect_special_metadata(root_fd, uid=os.geteuid())

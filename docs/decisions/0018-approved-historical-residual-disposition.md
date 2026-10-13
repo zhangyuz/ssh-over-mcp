@@ -139,3 +139,18 @@ product security gates or confer native success from hosted tests.
 
 Future temp-root alignment stays separate. Do not hide historical roots by
 moving staging or disabling the OS cleaner.
+
+## Recorded metadata consistency correction
+
+Exact-head Linux stress exposed the shared special-metadata collector
+rejecting directory reads that changed only access time. A controlled
+strictatime filesystem reproduced the same guard with stable mtime/ctime and
+identity. The collector now compares its existing published _record fields
+at directory-open, child-edge and final-directory stability checks. This
+keeps kind/device/inode/UID/GID/mode/nlink/size and exact nanosecond mtime/ctime
+pinned, excludes unrecorded read-induced atime, and catches nanosecond drift
+that raw stat_result tuple equality can miss. No schema, canonical digests,
+path/depth/budget, owner/mode checks, strict staging collector or observer
+non-authority changes. The Linux O_NOATIME fixture workaround is removed;
+real strictatime stress must pass with the production comparison. Two RED
+tests prove atime-only acceptance and one-nanosecond ctime rejection.
