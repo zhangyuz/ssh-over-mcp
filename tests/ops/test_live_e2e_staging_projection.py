@@ -6280,3 +6280,2314 @@ def test_dispute_overlap_union_one_long_window_across_disjoint_queries(
     assert facts.matched_windows == 1
     assert facts.matched_hops == 2
     assert facts.source_index_sha256 == source.sha256
+
+
+@pytest.fixture
+def dispute_gap_page_module(dispute_overlap_union_module):
+    return importlib.import_module("staging_dispute_gap_page")
+
+
+def test_dispute_gap_page_source_bound_disjoint_gaps_and_cursor(
+    dispute_gap_page_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    # Disputed intervals [0,1) and [2,4) leave precisely [1,2).
+    snapshots = ((b, c, b, c), (a, a, a, a), (b, b, b, b), (a, a, b, b), (a, a, b, b))
+    runs = tuple(
+        (tuple(row[member] for row in snapshots[:3]), tuple(row[member] for row in snapshots[2:]))
+        for member in range(4)
+    )
+    m = dispute_gap_page_module
+    source = m.index.build_public_dispute_index(runs)
+    built = m.build_public_dispute_gap_page(runs, 0, 4, 0, 1)
+    body = json.loads(built.payload)
+    assert body["query"] == {"start_hop": 0, "end_hop_exclusive": 4}
+    assert body["source_dispute_index_sha256"] == source.sha256
+    assert body["total_gaps"] == 1
+    assert body["gaps"] == [{"start_hop": 1, "end_hop_exclusive": 2}]
+    assert body["next_offset"] is None
+    assert body["offset"] == 0 and body["limit"] == 1
+    assert len(built.payload) <= m.MAX_PUBLIC_DISPUTE_GAP_PAGE_BYTES
+    facts = m.verify_public_dispute_gap_page(
+        runs, 0, 4, 0, 1, built.payload, expected_sha256=built.sha256
+    )
+    assert facts.source_index_sha256 == source.sha256
+    assert facts.gap_ranges == ((1, 2),)
+    empty = m.build_public_dispute_gap_page(runs, 0, 4, 1, 1)
+    assert json.loads(empty.payload)["gaps"] == []
+    assert json.loads(empty.payload)["next_offset"] is None
+
+
+def test_dispute_gap_page_single_middle_gap_from_mixed_source(
+    dispute_gap_page_module, dispute_index_runs
+):
+    # Source covers all disputed hops; zero gaps and terminal empty page.
+    m = dispute_gap_page_module
+    built = m.build_public_dispute_gap_page(dispute_index_runs, 0, 3, 0, 8)
+    body = json.loads(built.payload)
+    assert body["gaps"] == [] and body["total_gaps"] == 0
+    assert body["next_offset"] is None
+    assert (
+        m.verify_public_dispute_gap_page(
+            dispute_index_runs, 0, 3, 0, 8, built.payload, expected_sha256=built.sha256
+        ).gap_ranges
+        == ()
+    )
+
+
+def test_dispute_gap_page_empty_dispute_source(dispute_gap_page_module, timeline_sources):
+    a, b, c = timeline_sources
+    same = ((a, b), (b, c))
+    runs = (same, same, same)
+    m = dispute_gap_page_module
+    built = m.build_public_dispute_gap_page(runs, 0, 1, 0, 1)
+    body = json.loads(built.payload)
+    assert body["gaps"] == [{"start_hop": 0, "end_hop_exclusive": 1}]
+    assert body["total_gaps"] == 1
+    assert m.verify_public_dispute_gap_page(
+        runs, 0, 1, 0, 1, built.payload, expected_sha256=built.sha256
+    ).gap_ranges == ((0, 1),)
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "offset", "limit"),
+    [
+        (-1, 2, 0, 1),
+        (0, 0, 0, 1),
+        (2, 1, 0, 1),
+        (0, 4, 0, 1),
+        (True, 3, 0, 1),
+        (0, False, 0, 1),
+        (0, 3, True, 1),
+        (0, 3, -1, 1),
+        (0, 3, 0, 0),
+        (0, 3, 0, 9),
+        (0, 3, 0, True),
+        (0, 3, 1.0, 1),
+        (0, 3, 99, 1),
+    ],
+)
+def test_dispute_gap_page_rejects_invalid_inputs(
+    dispute_gap_page_module, dispute_index_runs, start, end, offset, limit
+):
+    m = dispute_gap_page_module
+    with pytest.raises(m.DisputeGapPageError, match="^staging dispute gap page rejected$"):
+        m.build_public_dispute_gap_page(dispute_index_runs, start, end, offset, limit)
+
+
+def test_dispute_gap_page_rejects_rehashed_tamper_and_reordered_source(
+    dispute_gap_page_module, dispute_index_runs
+):
+    m = dispute_gap_page_module
+    built = m.build_public_dispute_gap_page(dispute_index_runs, 0, 3, 0, 2)
+    forged = json.loads(built.payload)
+    forged["total_gaps"] = 99
+    raw = json.dumps(forged, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode(
+        "ascii"
+    )
+    with pytest.raises(m.DisputeGapPageError):
+        m.verify_public_dispute_gap_page(
+            dispute_index_runs, 0, 3, 0, 2, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+    swapped = (dispute_index_runs[1], dispute_index_runs[0], *dispute_index_runs[2:])
+    with pytest.raises(m.DisputeGapPageError):
+        m.verify_public_dispute_gap_page(
+            swapped, 0, 3, 0, 2, built.payload, expected_sha256=built.sha256
+        )
+    duplicate = b'{"audience":"public","audience":"public"}'
+    with pytest.raises(m.DisputeGapPageError):
+        m.verify_public_dispute_gap_page(
+            dispute_index_runs,
+            0,
+            3,
+            0,
+            2,
+            duplicate,
+            expected_sha256=hashlib.sha256(duplicate).hexdigest(),
+        )
+
+
+def test_dispute_gap_page_rejects_oversize_before_parse(dispute_gap_page_module, monkeypatch):
+    m = dispute_gap_page_module
+    raw = b"x" * (m.MAX_PUBLIC_DISPUTE_GAP_PAGE_BYTES + 1)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversized gap page reached JSON parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.DisputeGapPageError):
+            m._checked(raw, hashlib.sha256(raw).hexdigest())
+
+
+def test_dispute_gap_page_advances_across_two_real_source_gaps(
+    dispute_gap_page_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    snapshots = (
+        (b, c, b, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (a, a, b, b),
+        (b, b, b, b),
+        (a, a, a, a),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:4]),
+            tuple(row[member] for row in snapshots[3:]),
+        )
+        for member in range(4)
+    )
+    m = dispute_gap_page_module
+    source = m.index.build_public_dispute_index(runs)
+    expected_gap_ranges = ((1, 2), (4, 5))
+    for offset, gap in enumerate(expected_gap_ranges):
+        built = m.build_public_dispute_gap_page(runs, 0, 5, offset, 1)
+        body = json.loads(built.payload)
+        assert body["source_dispute_index_sha256"] == source.sha256
+        assert body["total_gaps"] == len(expected_gap_ranges), (
+            json.loads(source.payload)["ranked_windows"],
+            body["gaps"],
+        )
+        assert body["gaps"] == [{"start_hop": gap[0], "end_hop_exclusive": gap[1]}]
+        assert body["next_offset"] == (offset + 1 if offset == 0 else None)
+        facts = m.verify_public_dispute_gap_page(
+            runs, 0, 5, offset, 1, built.payload, expected_sha256=built.sha256
+        )
+        assert facts.gap_ranges == (gap,)
+        assert facts.next_offset == body["next_offset"]
+
+
+def test_dispute_gap_page_majority_leading_trailing_and_eight_gap_bound(
+    dispute_gap_page_module, timeline_sources
+):
+    """Eight real majority gaps, including query edges, with source-verifiable clips."""
+    a, b, c = timeline_sources
+    unanimous = (a, a, a, a)
+    majority = (b, b, b, c)
+    disputed = (a, a, c, c)
+    # Twenty-four hops: majority U->M, disputed M->D and D->U,
+    # eight times. Two 13-snapshot original source segments share a
+    # boundary, preserving the complete original four ordered cohorts.
+    snapshots = (unanimous,) + (majority, disputed, unanimous) * 8
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:13]),
+            tuple(row[member] for row in snapshots[12:]),
+        )
+        for member in range(4)
+    )
+    m = dispute_gap_page_module
+    source = m.index.build_public_dispute_index(runs)
+    intervals = json.loads(m.index.intervals.build_public_intervals(runs).payload)
+    assert any(
+        row["classification"] == "majority"
+        and row["start_hop"] == 0
+        and row["end_hop_exclusive"] == 1
+        for row in intervals["intervals"]
+    )
+
+    expected = tuple((3 * hop, 3 * hop + 1) for hop in range(8))
+    # Query ends immediately after the eighth majority gap: both a
+    # leading and trailing gap, plus clipped disputed ranges.
+    built = m.build_public_dispute_gap_page(runs, 0, 22, 0, 8)
+    wire = json.loads(built.payload)
+    assert wire["source_dispute_index_sha256"] == source.sha256
+    assert wire["total_gaps"] == 8
+    assert wire["next_offset"] is None
+    assert wire["gaps"] == [
+        {"start_hop": start, "end_hop_exclusive": end} for start, end in expected
+    ]
+    assert len(built.payload) <= m.MAX_PUBLIC_DISPUTE_GAP_PAGE_BYTES
+    facts = m.verify_public_dispute_gap_page(
+        runs, 0, 22, 0, 8, built.payload, expected_sha256=built.sha256
+    )
+    assert facts.gap_ranges == expected
+    assert facts.total_gaps == 8
+    assert facts.next_offset is None
+    assert facts.source_index_sha256 == source.sha256
+
+    # Both query edges fall *inside* disputed windows. The complement
+    # must return only seven full non-disputed ranges, with no overlap.
+    clipped = m.build_public_dispute_gap_page(runs, 2, 23, 0, 8)
+    clipped_wire = json.loads(clipped.payload)
+    assert clipped_wire["total_gaps"] == 7
+    assert clipped_wire["gaps"] == [
+        {"start_hop": start, "end_hop_exclusive": end} for start, end in expected[1:]
+    ]
+    assert clipped_wire["next_offset"] is None
+    assert (
+        m.verify_public_dispute_gap_page(
+            runs, 2, 23, 0, 8, clipped.payload, expected_sha256=clipped.sha256
+        ).gap_ranges
+        == expected[1:]
+    )
+
+
+@pytest.fixture
+def classified_hop_coverage_module(dispute_gap_page_module):
+    return importlib.import_module("staging_classified_hop_coverage")
+
+
+def test_classified_hop_coverage_original_source_mixed_three_classes(
+    classified_hop_coverage_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, c),  # majority hop [0,1)
+        (a, a, c, c),  # disputed hop [1,2)
+        (a, a, a, a),  # disputed hop [2,3)
+        (b, b, b, b),  # unanimous hop [3,4)
+        (b, b, b, b),  # unanimous hop [4,5)
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:4]),
+            tuple(row[member] for row in snapshots[3:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_coverage_module
+    source = m.intervals.build_public_intervals(runs)
+    original = json.loads(source.payload)
+    assert original["counts"] == {"unanimous": 2, "majority": 1, "disputed": 2}
+    built = m.build_public_classified_hop_coverage(runs, 0, 5)
+    wire = json.loads(built.payload)
+    assert wire["source_intervals_sha256"] == source.sha256
+    assert wire["query"] == {"start_hop": 0, "end_hop_exclusive": 5}
+    assert wire["query_hops"] == 5
+    assert wire["unanimous_hops"] == 2
+    assert wire["majority_hops"] == 1
+    assert wire["disputed_hops"] == 2
+    assert wire["non_disputed_hops"] == 3
+    assert len(built.payload) <= m.MAX_PUBLIC_CLASSIFIED_HOP_COVERAGE_BYTES
+    facts = m.verify_public_classified_hop_coverage(
+        runs, 0, 5, built.payload, expected_sha256=built.sha256
+    )
+    assert facts.classified_hops == (2, 1, 2)
+    assert facts.source_intervals_sha256 == source.sha256
+
+    # Clip majority away and retain both disputed hops plus one unanimous.
+    subset = m.build_public_classified_hop_coverage(runs, 1, 4)
+    report = json.loads(subset.payload)
+    assert (report["unanimous_hops"], report["majority_hops"], report["disputed_hops"]) == (1, 0, 2)
+    assert report["query_hops"] == 3 and report["non_disputed_hops"] == 1
+    assert m.verify_public_classified_hop_coverage(
+        runs, 1, 4, subset.payload, expected_sha256=subset.sha256
+    ).classified_hops == (1, 0, 2)
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [
+        (-1, 1),
+        (0, 0),
+        (2, 1),
+        (0, 4),
+        (True, 1),
+        (0, False),
+        (0.0, 1),
+        (0, 1.0),
+        ("0", 1),
+        (0, "1"),
+        (None, 1),
+        (0, None),
+    ],
+)
+def test_classified_hop_coverage_rejects_invalid_bounds(
+    classified_hop_coverage_module, dispute_index_runs, start, end
+):
+    m = classified_hop_coverage_module
+    with pytest.raises(
+        m.ClassifiedHopCoverageError,
+        match="^staging classified hop coverage rejected$",
+    ):
+        m.build_public_classified_hop_coverage(dispute_index_runs, start, end)
+
+
+def test_classified_hop_coverage_fails_closed_on_rehashed_forgery_and_reordering(
+    classified_hop_coverage_module, dispute_index_runs
+):
+    m = classified_hop_coverage_module
+    built = m.build_public_classified_hop_coverage(dispute_index_runs, 0, 3)
+    body = json.loads(built.payload)
+    body["majority_hops"] = 99
+    raw = json.dumps(body, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("ascii")
+    with pytest.raises(m.ClassifiedHopCoverageError):
+        m.verify_public_classified_hop_coverage(
+            dispute_index_runs, 0, 3, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+    swapped = (
+        dispute_index_runs[2],
+        dispute_index_runs[1],
+        dispute_index_runs[0],
+        dispute_index_runs[3],
+    )
+    with pytest.raises(m.ClassifiedHopCoverageError):
+        m.verify_public_classified_hop_coverage(
+            swapped, 0, 3, built.payload, expected_sha256=built.sha256
+        )
+    duplicate = b'{"audience":"public","audience":"public"}'
+    with pytest.raises(m.ClassifiedHopCoverageError):
+        m.verify_public_classified_hop_coverage(
+            dispute_index_runs,
+            0,
+            3,
+            duplicate,
+            expected_sha256=hashlib.sha256(duplicate).hexdigest(),
+        )
+
+
+def test_classified_hop_coverage_rejects_oversize_before_parse(
+    classified_hop_coverage_module, monkeypatch
+):
+    m = classified_hop_coverage_module
+    raw = b"x" * (m.MAX_PUBLIC_CLASSIFIED_HOP_COVERAGE_BYTES + 1)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversized classified coverage reached JSON parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.ClassifiedHopCoverageError):
+            m._checked(raw, hashlib.sha256(raw).hexdigest())
+
+
+def test_classified_hop_coverage_rebuilds_original_intervals_once_per_call(
+    classified_hop_coverage_module, dispute_index_runs, monkeypatch
+):
+    m = classified_hop_coverage_module
+    original = m.intervals.build_public_intervals
+    calls = []
+
+    def counted(source):
+        calls.append(1)
+        return original(source)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.intervals, "build_public_intervals", counted)
+        built = m.build_public_classified_hop_coverage(dispute_index_runs, 0, 3)
+        assert len(calls) == 1
+        assert (
+            m.verify_public_classified_hop_coverage(
+                dispute_index_runs, 0, 3, built.payload, expected_sha256=built.sha256
+            ).public_sha256
+            == built.sha256
+        )
+        assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    (
+        "start",
+        "end",
+        "expected_unanimous",
+        "expected_majority",
+        "expected_disputed",
+        "expected_gaps",
+    ),
+    [
+        (0, 4, 1, 1, 2, ((0, 1), (3, 4))),
+        (1, 5, 2, 0, 2, ((3, 5),)),
+    ],
+)
+def test_classified_hop_coverage_agrees_with_overlap_and_all_gap_pages(
+    classified_hop_coverage_module,
+    dispute_overlap_coverage_module,
+    dispute_gap_page_module,
+    timeline_sources,
+    start,
+    end,
+    expected_unanimous,
+    expected_majority,
+    expected_disputed,
+    expected_gaps,
+):
+    """Across the same original cohorts, all three public navigation APIs agree."""
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, c, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (b, b, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:4]),
+            tuple(row[member] for row in snapshots[3:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_coverage_module
+    classified = m.build_public_classified_hop_coverage(runs, start, end)
+    classification = json.loads(classified.payload)
+    assert classification["source_intervals_sha256"] == (
+        m.intervals.build_public_intervals(runs).sha256
+    )
+    assert (
+        classification["unanimous_hops"],
+        classification["majority_hops"],
+        classification["disputed_hops"],
+    ) == (expected_unanimous, expected_majority, expected_disputed)
+    assert m.verify_public_classified_hop_coverage(
+        runs, start, end, classified.payload, expected_sha256=classified.sha256
+    ).classified_hops == (expected_unanimous, expected_majority, expected_disputed)
+
+    overlap = dispute_overlap_coverage_module.build_public_dispute_overlap_coverage(
+        runs, start, end
+    )
+    overlap_body = json.loads(overlap.payload)
+    dispute_overlap_coverage_module.verify_public_dispute_overlap_coverage(
+        runs, start, end, overlap.payload, expected_sha256=overlap.sha256
+    )
+    assert classification["disputed_hops"] == overlap_body["matched_disputed_hops"]
+    assert classification["non_disputed_hops"] == overlap_body["unmatched_hops"]
+
+    # Exhaust the genuine gap pages with limit=1; counting only the first
+    # page would silently miss the separate majority/unanimous ranges.
+    all_gaps = []
+    offset = 0
+    for _ in range(8):
+        page = dispute_gap_page_module.build_public_dispute_gap_page(runs, start, end, offset, 1)
+        body = json.loads(page.payload)
+        facts = dispute_gap_page_module.verify_public_dispute_gap_page(
+            runs, start, end, offset, 1, page.payload, expected_sha256=page.sha256
+        )
+        assert body["total_gaps"] == len(expected_gaps)
+        assert body["source_dispute_index_sha256"] == overlap_body["source_dispute_index_sha256"]
+        assert facts.gap_ranges == tuple(
+            (gap["start_hop"], gap["end_hop_exclusive"]) for gap in body["gaps"]
+        )
+        all_gaps.extend(facts.gap_ranges)
+        if body["next_offset"] is None:
+            break
+        assert body["next_offset"] > offset
+        offset = body["next_offset"]
+    else:
+        pytest.fail("bounded gap pagination did not terminate")
+    assert tuple(all_gaps) == expected_gaps
+    assert sum(right - left for left, right in all_gaps) == classification["non_disputed_hops"]
+    assert classification["query_hops"] == (
+        classification["disputed_hops"] + classification["non_disputed_hops"]
+    )
+
+
+@pytest.fixture
+def classified_hop_coverages_module(classified_hop_coverage_module):
+    return importlib.import_module("staging_classified_hop_coverages")
+
+
+def test_classified_hop_coverages_real_source_order_and_single_rebuild(
+    classified_hop_coverages_module, timeline_sources, monkeypatch
+):
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, c, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (b, b, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:4]),
+            tuple(row[member] for row in snapshots[3:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_coverages_module
+    queries = ((0, 5), (1, 4), (0, 1), (3, 5), (0, 1))
+    original = m.intervals.build_public_intervals
+    calls = []
+
+    def counted(r):
+        calls.append(1)
+        return original(r)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.intervals, "build_public_intervals", counted)
+        built = m.build_public_classified_hop_coverages(runs, queries)
+        assert len(calls) == 1
+        facts = m.verify_public_classified_hop_coverages(
+            runs, queries, built.payload, expected_sha256=built.sha256
+        )
+        assert len(calls) == 2
+    wire = json.loads(built.payload)
+    assert wire["source_intervals_sha256"] == original(runs).sha256
+    assert wire["queries"] == [
+        {"start_hop": start, "end_hop_exclusive": end} for start, end in queries
+    ]
+    expected_counts = ((2, 1, 2), (1, 0, 2), (0, 1, 0), (2, 0, 0), (0, 1, 0))
+    assert [
+        (row["unanimous_hops"], row["majority_hops"], row["disputed_hops"])
+        for row in wire["results"]
+    ] == list(expected_counts)
+    assert [row["non_disputed_hops"] for row in wire["results"]] == [3, 1, 1, 2, 1]
+    assert all(
+        row["query_hops"] == row["unanimous_hops"] + row["majority_hops"] + row["disputed_hops"]
+        for row in wire["results"]
+    )
+    assert len(built.payload) <= m.MAX_PUBLIC_CLASSIFIED_HOP_COVERAGES_BYTES
+    assert facts.query_ranges == queries
+    assert facts.classified_counts == expected_counts
+    assert facts.source_intervals_sha256 == original(runs).sha256
+
+
+def test_classified_hop_coverages_eight_valid_query_upper_bound(
+    classified_hop_coverages_module, dispute_index_runs
+):
+    m = classified_hop_coverages_module
+    queries = [[i % 3, i % 3 + 1] for i in range(8)]
+    built = m.build_public_classified_hop_coverages(dispute_index_runs, queries)
+    body = json.loads(built.payload)
+    assert len(body["queries"]) == m.MAX_CLASSIFIED_HOP_COVERAGES == 8
+    assert len(body["results"]) == 8
+    assert (
+        len(
+            m.verify_public_classified_hop_coverages(
+                dispute_index_runs, queries, built.payload, expected_sha256=built.sha256
+            ).classified_counts
+        )
+        == 8
+    )
+
+
+@pytest.mark.parametrize(
+    "queries",
+    [
+        [],
+        (),
+        ((0, 1),) * 9,
+        ((0, 1), "invalid"),
+        "0,1",
+        ((True, 1),),
+        ((0, False),),
+        ((0.0, 1),),
+        ((0, 1.0),),
+        ((-1, 1),),
+        ((0, 0),),
+        ((1, 1),),
+        ((2, 1),),
+        ((0, 4),),
+        ((0, 1, 2),),
+        ((0,),),
+        ([0, 1, 2],),
+        ((0, "1"),),
+        ((None, 1),),
+    ],
+)
+def test_classified_hop_coverages_rejects_invalid_query_shape(
+    classified_hop_coverages_module, dispute_index_runs, queries
+):
+    m = classified_hop_coverages_module
+    with pytest.raises(
+        m.ClassifiedHopCoveragesError,
+        match="^staging classified hop coverages rejected$",
+    ):
+        m.build_public_classified_hop_coverages(dispute_index_runs, queries)
+
+
+def test_classified_hop_coverages_rejects_rehashed_forgery_and_changed_sources(
+    classified_hop_coverages_module, dispute_index_runs
+):
+    m = classified_hop_coverages_module
+    queries = ((0, 2), (1, 3))
+    built = m.build_public_classified_hop_coverages(dispute_index_runs, queries)
+    changed = json.loads(built.payload)
+    changed["results"][0]["disputed_hops"] = 0
+    raw = json.dumps(changed, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode(
+        "ascii"
+    )
+    with pytest.raises(m.ClassifiedHopCoveragesError):
+        m.verify_public_classified_hop_coverages(
+            dispute_index_runs, queries, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+    swapped = (
+        dispute_index_runs[2],
+        dispute_index_runs[1],
+        dispute_index_runs[0],
+        dispute_index_runs[3],
+    )
+    with pytest.raises(m.ClassifiedHopCoveragesError):
+        m.verify_public_classified_hop_coverages(
+            swapped, queries, built.payload, expected_sha256=built.sha256
+        )
+    duplicated = b'{"audience":"public","audience":"public"}'
+    with pytest.raises(m.ClassifiedHopCoveragesError):
+        m.verify_public_classified_hop_coverages(
+            dispute_index_runs,
+            queries,
+            duplicated,
+            expected_sha256=hashlib.sha256(duplicated).hexdigest(),
+        )
+
+
+def test_classified_hop_coverages_rejects_oversize_before_parsing(
+    classified_hop_coverages_module, monkeypatch
+):
+    m = classified_hop_coverages_module
+    raw = b"x" * (m.MAX_PUBLIC_CLASSIFIED_HOP_COVERAGES_BYTES + 1)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversized classified batch parsed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.ClassifiedHopCoveragesError):
+            m._checked(raw, hashlib.sha256(raw).hexdigest())
+
+
+@pytest.mark.parametrize("mutation", ["append_ninth", "change_inner_boundary"])
+@pytest.mark.parametrize("action", ["build", "verify"])
+def test_classified_hop_coverages_freezes_caller_lists_before_source_rebuild(
+    classified_hop_coverages_module,
+    dispute_index_runs,
+    mutation,
+    action,
+    monkeypatch,
+):
+    """Deterministic worker mutation during source rebuilding cannot alter frozen queries."""
+    m = classified_hop_coverages_module
+    initial = tuple((0, 1) for _ in range(m.MAX_CLASSIFIED_HOP_COVERAGES))
+    expected = m.build_public_classified_hop_coverages(dispute_index_runs, initial)
+    expected_facts = m.verify_public_classified_hop_coverages(
+        dispute_index_runs, initial, expected.payload, expected_sha256=expected.sha256
+    )
+    queries = [[start, end] for start, end in initial]
+    ready = threading.Event()
+    mutated = threading.Event()
+
+    def worker():
+        if ready.wait(timeout=5):
+            if mutation == "append_ninth":
+                queries.append([2, 3])
+            else:
+                queries[0][1] = 2
+            mutated.set()
+
+    thread = threading.Thread(target=worker, daemon=True)
+    original_rebuild = m.intervals.build_public_intervals
+    rebuild_calls = []
+
+    def rebuild_with_concurrent_mutation(runs):
+        rebuild_calls.append(1)
+        ready.set()
+        assert mutated.wait(timeout=5), "worker did not modify caller data"
+        return original_rebuild(runs)
+
+    thread.start()
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(m.intervals, "build_public_intervals", rebuild_with_concurrent_mutation)
+            if action == "build":
+                actual = m.build_public_classified_hop_coverages(dispute_index_runs, queries)
+                assert actual == expected
+            else:
+                actual_facts = m.verify_public_classified_hop_coverages(
+                    dispute_index_runs,
+                    queries,
+                    expected.payload,
+                    expected_sha256=expected.sha256,
+                )
+                assert actual_facts == expected_facts
+    finally:
+        ready.set()
+        thread.join(timeout=5)
+    assert mutated.is_set() and not thread.is_alive()
+    assert rebuild_calls == [1]
+    assert len(queries) == (9 if mutation == "append_ninth" else 8)
+    assert queries[0][1] == (2 if mutation == "change_inner_boundary" else 1)
+    assert json.loads(expected.payload)["queries"] == [
+        {"start_hop": start, "end_hop_exclusive": end} for start, end in initial
+    ]
+
+
+@pytest.fixture
+def classified_hop_union_module(classified_hop_coverages_module):
+    return importlib.import_module("staging_classified_hop_union")
+
+
+def test_classified_hop_union_source_verified_mixed_class_and_dedup(
+    classified_hop_union_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, c, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (b, b, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:4]),
+            tuple(row[member] for row in snapshots[3:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_union_module
+    source = m.intervals.build_public_intervals(runs)
+    queries = ((0, 2), (1, 4), (4, 5), (0, 1))
+    built = m.build_public_classified_hop_union(runs, queries)
+    wire = json.loads(built.payload)
+    assert wire["queries"] == [
+        {"start_hop": start, "end_hop_exclusive": end} for start, end in queries
+    ]
+    assert wire["merged_ranges"] == [{"start_hop": 0, "end_hop_exclusive": 5}]
+    assert wire["source_intervals_sha256"] == source.sha256
+    assert wire["unique_hops"] == 5
+    assert wire["unanimous_hops"] == 2
+    assert wire["majority_hops"] == 1
+    assert wire["disputed_hops"] == 2
+    assert wire["non_disputed_hops"] == 3
+    assert len(built.payload) <= m.MAX_PUBLIC_CLASSIFIED_HOP_UNION_BYTES
+    facts = m.verify_public_classified_hop_union(
+        runs, queries, built.payload, expected_sha256=built.sha256
+    )
+    assert facts.merged_ranges == ((0, 5),)
+    assert facts.query_ranges == queries
+    assert facts.classified_hops == (2, 1, 2)
+    assert facts.source_intervals_sha256 == source.sha256
+
+
+def test_classified_hop_union_disjoint_ranges_and_eight_query_boundary(
+    classified_hop_union_module, dispute_index_runs
+):
+    m = classified_hop_union_module
+    queries = [[0, 1], [2, 3]] * 4
+    built = m.build_public_classified_hop_union(dispute_index_runs, queries)
+    body = json.loads(built.payload)
+    assert len(body["queries"]) == 8
+    assert body["merged_ranges"] == [
+        {"start_hop": 0, "end_hop_exclusive": 1},
+        {"start_hop": 2, "end_hop_exclusive": 3},
+    ]
+    assert body["unique_hops"] == 2
+    assert sum(body[key] for key in ("unanimous_hops", "majority_hops", "disputed_hops")) == 2
+    facts = m.verify_public_classified_hop_union(
+        dispute_index_runs, queries, built.payload, expected_sha256=built.sha256
+    )
+    assert facts.merged_ranges == ((0, 1), (2, 3))
+
+
+@pytest.mark.parametrize(
+    "queries",
+    [
+        [],
+        (),
+        ((0, 1),) * 9,
+        ((0, 1, 2),),
+        ((0,),),
+        ((0, 4),),
+        ((-1, 1),),
+        ((1, 1),),
+        ((1, 0),),
+        ((True, 1),),
+        ((0, False),),
+        ((0.0, 1),),
+        ((0, 1.0),),
+        ((0, "1"),),
+        ((None, 1),),
+        ((0, 1), "invalid"),
+    ],
+)
+def test_classified_hop_union_rejects_invalid_inputs(
+    classified_hop_union_module, dispute_index_runs, queries
+):
+    m = classified_hop_union_module
+    with pytest.raises(m.ClassifiedHopUnionError, match="^staging classified hop union rejected$"):
+        m.build_public_classified_hop_union(dispute_index_runs, queries)
+
+
+def test_classified_hop_union_forgery_source_reorder_and_one_rebuild(
+    classified_hop_union_module, dispute_index_runs, monkeypatch
+):
+    m = classified_hop_union_module
+    queries = ((0, 1), (1, 3), (0, 1))
+    original = m.intervals.build_public_intervals
+    calls = []
+
+    def counted(source):
+        calls.append(1)
+        return original(source)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.intervals, "build_public_intervals", counted)
+        built = m.build_public_classified_hop_union(dispute_index_runs, queries)
+        assert len(calls) == 1
+        m.verify_public_classified_hop_union(
+            dispute_index_runs, queries, built.payload, expected_sha256=built.sha256
+        )
+        assert len(calls) == 2
+    altered = json.loads(built.payload)
+    altered["disputed_hops"] = 0
+    forged = json.dumps(altered, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode(
+        "ascii"
+    )
+    with pytest.raises(m.ClassifiedHopUnionError):
+        m.verify_public_classified_hop_union(
+            dispute_index_runs, queries, forged, expected_sha256=hashlib.sha256(forged).hexdigest()
+        )
+    swapped = (
+        dispute_index_runs[2],
+        dispute_index_runs[1],
+        dispute_index_runs[0],
+        dispute_index_runs[3],
+    )
+    with pytest.raises(m.ClassifiedHopUnionError):
+        m.verify_public_classified_hop_union(
+            swapped, queries, built.payload, expected_sha256=built.sha256
+        )
+    repeated_key = b'{"audience":"public","audience":"public"}'
+    with pytest.raises(m.ClassifiedHopUnionError):
+        m.verify_public_classified_hop_union(
+            dispute_index_runs,
+            queries,
+            repeated_key,
+            expected_sha256=hashlib.sha256(repeated_key).hexdigest(),
+        )
+
+
+def test_classified_hop_union_rejects_oversize_before_parsing(
+    classified_hop_union_module, monkeypatch
+):
+    m = classified_hop_union_module
+    raw = b"x" * (m.MAX_PUBLIC_CLASSIFIED_HOP_UNION_BYTES + 1)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversized classified union reached parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.ClassifiedHopUnionError):
+            m._checked(raw, hashlib.sha256(raw).hexdigest())
+
+
+@pytest.mark.parametrize(
+    ("queries", "expected_ranges", "expected_counts"),
+    [
+        (((0, 1), (2, 4), (2, 3)), ((0, 1), (2, 4)), (1, 1, 1)),
+        (((1, 2), (4, 5), (1, 2)), ((1, 2), (4, 5)), (1, 0, 1)),
+    ],
+)
+def test_classified_hop_union_agrees_with_dispute_union_and_single_range_classification(
+    classified_hop_union_module,
+    dispute_overlap_union_module,
+    classified_hop_coverage_module,
+    timeline_sources,
+    queries,
+    expected_ranges,
+    expected_counts,
+):
+    """All three public APIs agree on a real *disjoint* source-derived union."""
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, c),  # majority hop 0
+        (a, a, c, c),  # disputed hop 1
+        (a, a, a, a),  # disputed hop 2
+        (b, b, b, b),  # unanimous hop 3
+        (b, b, b, b),  # unanimous hop 4
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:4]),
+            tuple(row[member] for row in snapshots[3:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_union_module
+    built = m.build_public_classified_hop_union(runs, queries)
+    wire = json.loads(built.payload)
+    facts = m.verify_public_classified_hop_union(
+        runs, queries, built.payload, expected_sha256=built.sha256
+    )
+    assert facts.merged_ranges == expected_ranges
+    assert facts.classified_hops == expected_counts
+    assert wire["source_intervals_sha256"] == m.intervals.build_public_intervals(runs).sha256
+
+    other = dispute_overlap_union_module
+    disputed = other.build_public_dispute_overlap_union(runs, queries)
+    dispute_wire = json.loads(disputed.payload)
+    dispute_facts = other.verify_public_dispute_overlap_union(
+        runs, queries, disputed.payload, expected_sha256=disputed.sha256
+    )
+    assert dispute_facts.merged_ranges == facts.merged_ranges
+    assert wire["unique_hops"] == dispute_wire["requested_hops"]
+    assert wire["disputed_hops"] == dispute_wire["matched_disputed_hops"]
+    assert wire["non_disputed_hops"] == dispute_wire["unmatched_hops"]
+
+    single = classified_hop_coverage_module
+    sums = [0, 0, 0]
+    for start, end in facts.merged_ranges:
+        page = single.build_public_classified_hop_coverage(runs, start, end)
+        page_wire = json.loads(page.payload)
+        page_facts = single.verify_public_classified_hop_coverage(
+            runs, start, end, page.payload, expected_sha256=page.sha256
+        )
+        assert page_facts.source_intervals_sha256 == facts.source_intervals_sha256
+        assert page_wire["source_intervals_sha256"] == facts.source_intervals_sha256
+        assert page_wire["query_hops"] == end - start
+        for i, value in enumerate(page_facts.classified_hops):
+            sums[i] += value
+    assert tuple(sums) == expected_counts
+    assert tuple(sums) == facts.classified_hops
+    assert sum(sums) == wire["unique_hops"]
+
+
+@pytest.mark.parametrize("mutation", ["append_ninth", "change_inner_boundary"])
+@pytest.mark.parametrize("action", ["build", "verify"])
+def test_classified_hop_union_freezes_caller_lists_before_source_rebuild(
+    classified_hop_union_module,
+    dispute_index_runs,
+    mutation,
+    action,
+    monkeypatch,
+):
+    """Freeze eight query pairs before a synchronized worker changes caller lists."""
+    m = classified_hop_union_module
+    initial = tuple((0, 1) for _ in range(m.MAX_CLASSIFIED_HOP_UNION_RANGES))
+    expected = m.build_public_classified_hop_union(dispute_index_runs, initial)
+    expected_facts = m.verify_public_classified_hop_union(
+        dispute_index_runs, initial, expected.payload, expected_sha256=expected.sha256
+    )
+    queries = [[start, end] for start, end in initial]
+    ready = threading.Event()
+    mutated = threading.Event()
+
+    def worker():
+        if ready.wait(timeout=5):
+            if mutation == "append_ninth":
+                queries.append([2, 3])
+            else:
+                queries[0][1] = 2
+            mutated.set()
+
+    thread = threading.Thread(target=worker, daemon=True)
+    original = m.intervals.build_public_intervals
+    calls = []
+
+    def rebuild_during_mutation(runs):
+        calls.append(1)
+        ready.set()
+        assert mutated.wait(timeout=5), "worker did not update caller inputs"
+        return original(runs)
+
+    thread.start()
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(m.intervals, "build_public_intervals", rebuild_during_mutation)
+            if action == "build":
+                assert m.build_public_classified_hop_union(dispute_index_runs, queries) == expected
+            else:
+                assert (
+                    m.verify_public_classified_hop_union(
+                        dispute_index_runs,
+                        queries,
+                        expected.payload,
+                        expected_sha256=expected.sha256,
+                    )
+                    == expected_facts
+                )
+    finally:
+        ready.set()
+        thread.join(timeout=5)
+    assert mutated.is_set() and not thread.is_alive()
+    assert calls == [1]
+    assert len(queries) == (9 if mutation == "append_ninth" else 8)
+    assert queries[0][1] == (2 if mutation == "change_inner_boundary" else 1)
+    assert json.loads(expected.payload)["queries"] == [
+        {"start_hop": start, "end_hop_exclusive": end} for start, end in initial
+    ]
+
+
+@pytest.fixture
+def classified_hop_page_module(classified_hop_union_module):
+    return importlib.import_module("staging_classified_hop_page")
+
+
+def test_classified_hop_page_original_source_all_pages_and_clipped_interval(
+    classified_hop_page_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, c, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (b, b, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:4]),
+            tuple(row[member] for row in snapshots[3:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_page_module
+    source = m.intervals.build_public_intervals(runs)
+    source_doc = json.loads(source.payload)
+    assert source_doc["counts"] == {"unanimous": 2, "majority": 1, "disputed": 2}
+    assert source_doc["hop_count"] == 5
+
+    # Exhaust paginated source intervals, including a majority segment,
+    # disputed transitions, and the terminal unanimous segment.
+    expected = tuple(
+        (item["start_hop"], item["end_hop_exclusive"], item["classification"])
+        for item in source_doc["intervals"]
+    )
+    assert expected[0] == (0, 1, "majority")
+    assert expected[-1] == (3, 5, "unanimous")
+    all_rows = []
+    offset = 0
+    for _ in range(8):
+        page = m.build_public_classified_hop_page(runs, 0, 5, offset, 1)
+        body = json.loads(page.payload)
+        assert body["total_segments"] == len(expected)
+        assert body["source_intervals_sha256"] == source.sha256
+        assert len(page.payload) <= m.MAX_PUBLIC_CLASSIFIED_HOP_PAGE_BYTES
+        facts = m.verify_public_classified_hop_page(
+            runs, 0, 5, offset, 1, page.payload, expected_sha256=page.sha256
+        )
+        chunk = tuple(
+            (row["start_hop"], row["end_hop_exclusive"], row["classification"])
+            for row in body["segments"]
+        )
+        assert facts.segments == chunk
+        all_rows.extend(chunk)
+        if body["next_offset"] is None:
+            break
+        assert body["next_offset"] > offset
+        offset = body["next_offset"]
+    else:
+        pytest.fail("classified hop page cursor failed to terminate")
+    assert tuple(all_rows) == expected
+    assert sum(end - start for start, end, _ in all_rows) == 5
+
+    # Clipping at both query boundaries never leaks out-of-range hops.
+    clipped = m.build_public_classified_hop_page(runs, 1, 4, 0, 8)
+    clipped_doc = json.loads(clipped.payload)
+    clipped_rows = [
+        (row["start_hop"], row["end_hop_exclusive"], row["classification"])
+        for row in clipped_doc["segments"]
+    ]
+    assert clipped_rows[0][0] == 1
+    assert clipped_rows[-1][1] == 4
+    assert sum(end - start for start, end, _ in clipped_rows) == 3
+    assert m.verify_public_classified_hop_page(
+        runs, 1, 4, 0, 8, clipped.payload, expected_sha256=clipped.sha256
+    ).segments == tuple(clipped_rows)
+
+
+def test_classified_hop_page_terminal_empty_and_one_full_class(
+    classified_hop_page_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    same = ((a, b), (b, c))
+    runs = (same, same, same)
+    m = classified_hop_page_module
+    full = m.build_public_classified_hop_page(runs, 0, 1, 0, 8)
+    doc = json.loads(full.payload)
+    assert doc["segments"] == [
+        {"start_hop": 0, "end_hop_exclusive": 1, "classification": "unanimous"}
+    ]
+    assert doc["total_segments"] == 1 and doc["next_offset"] is None
+    assert m.verify_public_classified_hop_page(
+        runs, 0, 1, 0, 8, full.payload, expected_sha256=full.sha256
+    ).segments == ((0, 1, "unanimous"),)
+    terminal = m.build_public_classified_hop_page(runs, 0, 1, 1, 1)
+    tail = json.loads(terminal.payload)
+    assert tail["segments"] == [] and tail["next_offset"] is None
+    assert (
+        m.verify_public_classified_hop_page(
+            runs, 0, 1, 1, 1, terminal.payload, expected_sha256=terminal.sha256
+        ).segments
+        == ()
+    )
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "offset", "limit"),
+    [
+        (-1, 1, 0, 1),
+        (0, 0, 0, 1),
+        (3, 2, 0, 1),
+        (0, 4, 0, 1),
+        (True, 1, 0, 1),
+        (0, False, 0, 1),
+        (0.0, 1, 0, 1),
+        (0, 1.0, 0, 1),
+        (0, 1, True, 1),
+        (0, 1, -1, 1),
+        (0, 1, 1.0, 1),
+        (0, 1, 0, True),
+        (0, 1, 0, 0),
+        (0, 1, 0, 9),
+        (0, 1, 99, 1),
+    ],
+)
+def test_classified_hop_page_rejects_bad_query_or_cursor(
+    classified_hop_page_module, dispute_index_runs, start, end, offset, limit
+):
+    m = classified_hop_page_module
+    with pytest.raises(m.ClassifiedHopPageError, match="^staging classified hop page rejected$"):
+        m.build_public_classified_hop_page(dispute_index_runs, start, end, offset, limit)
+
+
+def test_classified_hop_page_fail_closed_forgery_and_reordered_sources(
+    classified_hop_page_module, dispute_index_runs
+):
+    m = classified_hop_page_module
+    built = m.build_public_classified_hop_page(dispute_index_runs, 0, 3, 0, 8)
+    altered = json.loads(built.payload)
+    altered["total_segments"] = 99
+    raw = json.dumps(altered, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode(
+        "ascii"
+    )
+    with pytest.raises(m.ClassifiedHopPageError):
+        m.verify_public_classified_hop_page(
+            dispute_index_runs, 0, 3, 0, 8, raw, expected_sha256=hashlib.sha256(raw).hexdigest()
+        )
+    swapped = (
+        dispute_index_runs[2],
+        dispute_index_runs[1],
+        dispute_index_runs[0],
+        dispute_index_runs[3],
+    )
+    with pytest.raises(m.ClassifiedHopPageError):
+        m.verify_public_classified_hop_page(
+            swapped, 0, 3, 0, 8, built.payload, expected_sha256=built.sha256
+        )
+    duplicate = b'{"audience":"public","audience":"public"}'
+    with pytest.raises(m.ClassifiedHopPageError):
+        m.verify_public_classified_hop_page(
+            dispute_index_runs,
+            0,
+            3,
+            0,
+            8,
+            duplicate,
+            expected_sha256=hashlib.sha256(duplicate).hexdigest(),
+        )
+
+
+def test_classified_hop_page_rejects_oversize_before_parser(
+    classified_hop_page_module, monkeypatch
+):
+    m = classified_hop_page_module
+    raw = b"x" * (m.MAX_PUBLIC_CLASSIFIED_HOP_PAGE_BYTES + 1)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversized classified page parsed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.ClassifiedHopPageError):
+            m._checked(raw, hashlib.sha256(raw).hexdigest())
+
+
+def test_classified_hop_page_one_original_interval_rebuild_per_call(
+    classified_hop_page_module, dispute_index_runs, monkeypatch
+):
+    m = classified_hop_page_module
+    original = m.intervals.build_public_intervals
+    calls = []
+
+    def counted(source):
+        calls.append(1)
+        return original(source)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.intervals, "build_public_intervals", counted)
+        built = m.build_public_classified_hop_page(dispute_index_runs, 0, 3, 0, 2)
+        assert len(calls) == 1
+        m.verify_public_classified_hop_page(
+            dispute_index_runs, 0, 3, 0, 2, built.payload, expected_sha256=built.sha256
+        )
+        assert len(calls) == 2
+
+
+def test_classified_hop_page_eight_complete_segments_real_source(
+    classified_hop_page_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    # Eight real hop partitions with a different agreement grouping on
+    # every hop; two five-snapshot segments share one original boundary.
+    snapshots = (
+        (a, a, a, a),
+        (b, b, c, c),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+        (c, c, a, a),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:5]),
+            tuple(row[member] for row in snapshots[4:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_page_module
+    original = m.intervals.build_public_intervals(runs)
+    rows = json.loads(original.payload)["intervals"]
+    assert len(rows) == 8
+    page = m.build_public_classified_hop_page(runs, 0, 8, 0, 8)
+    body = json.loads(page.payload)
+    assert body["source_intervals_sha256"] == original.sha256
+    assert len(body["segments"]) == m.MAX_CLASSIFIED_HOP_PAGE_LIMIT == 8
+    assert body["next_offset"] is None
+    assert body["total_segments"] == 8
+    facts = m.verify_public_classified_hop_page(
+        runs, 0, 8, 0, 8, page.payload, expected_sha256=page.sha256
+    )
+    assert facts.segments == tuple(
+        (row["start_hop"], row["end_hop_exclusive"], row["classification"]) for row in rows
+    )
+    assert sum(end - start for start, end, _ in facts.segments) == 8
+
+
+def test_classified_hop_page_clips_inside_both_distinct_source_intervals(
+    classified_hop_page_module, classified_hop_coverage_module, timeline_sources
+):
+    """Both endpoints lie strictly inside different source agreement intervals."""
+    a, b, _ = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, b),
+        (a, a, a, a),
+        (b, b, b, b),
+        (a, a, a, b),
+        (b, b, b, b),
+        (a, a, a, b),
+        (b, b, a, a),
+        (a, a, a, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:5]),
+            tuple(row[member] for row in snapshots[4:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_page_module
+    source = m.intervals.build_public_intervals(runs)
+    rows = json.loads(source.payload)["intervals"]
+    # Not merely coincidentally at a source boundary: both query
+    # boundaries must fall inside original, distinct, positive spans.
+    start, end = 1, 5
+    left_source = next(row for row in rows if row["start_hop"] < start < row["end_hop_exclusive"])
+    right_source = next(row for row in rows if row["start_hop"] < end < row["end_hop_exclusive"])
+    assert left_source is not right_source
+    original_clipped = tuple(
+        (max(start, row["start_hop"]), min(end, row["end_hop_exclusive"]), row["classification"])
+        for row in rows
+        if min(end, row["end_hop_exclusive"]) > max(start, row["start_hop"])
+    )
+    assert len(original_clipped) >= 2
+    assert original_clipped[0][0] == start
+    assert original_clipped[-1][1] == end
+    assert original_clipped[0][0] > left_source["start_hop"]
+    assert original_clipped[-1][1] < right_source["end_hop_exclusive"]
+    assert sum(right - left for left, right, _ in original_clipped) == end - start
+
+    actual = []
+    cursor = 0
+    for _ in range(8):
+        page = m.build_public_classified_hop_page(runs, start, end, cursor, 1)
+        wire = json.loads(page.payload)
+        assert wire["source_intervals_sha256"] == source.sha256
+        assert wire["total_segments"] == len(original_clipped)
+        checked = m.verify_public_classified_hop_page(
+            runs, start, end, cursor, 1, page.payload, expected_sha256=page.sha256
+        )
+        actual.extend(checked.segments)
+        assert (
+            tuple(
+                (item["start_hop"], item["end_hop_exclusive"], item["classification"])
+                for item in wire["segments"]
+            )
+            == checked.segments
+        )
+        if wire["next_offset"] is None:
+            break
+        assert wire["next_offset"] == cursor + len(checked.segments)
+        cursor = wire["next_offset"]
+    else:
+        pytest.fail("source classified segments failed to terminate pagination")
+    assert tuple(actual) == original_clipped
+
+    single = classified_hop_coverage_module
+    summary = single.build_public_classified_hop_coverage(runs, start, end)
+    facts = single.verify_public_classified_hop_coverage(
+        runs, start, end, summary.payload, expected_sha256=summary.sha256
+    )
+    assert facts.source_intervals_sha256 == source.sha256
+    counts = tuple(
+        sum(right - left for left, right, label in actual if label == kind)
+        for kind in ("unanimous", "majority", "disputed")
+    )
+    assert counts == facts.classified_hops
+    assert sum(counts) == end - start
+
+
+@pytest.fixture
+def classified_hop_filtered_page_module(classified_hop_page_module):
+    return importlib.import_module("staging_classified_hop_filtered_page")
+
+
+@pytest.mark.parametrize("classification", ["unanimous", "majority", "disputed"])
+def test_classified_hop_filtered_page_original_source_matches_interval_projection(
+    classified_hop_filtered_page_module,
+    classified_hop_coverage_module,
+    timeline_sources,
+    classification,
+):
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, c, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (b, b, b, b),
+    )
+    runs = tuple(
+        (tuple(row[member] for row in snapshots[:4]), tuple(row[member] for row in snapshots[3:]))
+        for member in range(4)
+    )
+    m = classified_hop_filtered_page_module
+    source = m.intervals.build_public_intervals(runs)
+    rows = json.loads(source.payload)["intervals"]
+    original = tuple(
+        (row["start_hop"], row["end_hop_exclusive"], row["classification"])
+        for row in rows
+        if row["classification"] == classification
+    )
+    assert original, "real source fixture must contain all three public classes"
+    actual = []
+    cursor = 0
+    for _ in range(8):
+        page = m.build_public_classified_hop_filtered_page(runs, 0, 5, classification, cursor, 1)
+        wire = json.loads(page.payload)
+        facts = m.verify_public_classified_hop_filtered_page(
+            runs, 0, 5, classification, cursor, 1, page.payload, expected_sha256=page.sha256
+        )
+        assert wire["classification"] == classification
+        assert wire["total_segments"] == len(original)
+        assert wire["source_intervals_sha256"] == source.sha256
+        assert all(x["classification"] == classification for x in wire["segments"])
+        assert len(page.payload) <= m.MAX_PUBLIC_CLASSIFIED_HOP_FILTERED_PAGE_BYTES
+        actual.extend(facts.segments)
+        if wire["next_offset"] is None:
+            break
+        assert wire["next_offset"] > cursor
+        cursor = wire["next_offset"]
+    else:
+        pytest.fail("class-filtered pagination did not terminate")
+    assert tuple(actual) == original
+
+    single = classified_hop_coverage_module
+    summary = single.build_public_classified_hop_coverage(runs, 0, 5)
+    checked = single.verify_public_classified_hop_coverage(
+        runs, 0, 5, summary.payload, expected_sha256=summary.sha256
+    )
+    index = ("unanimous", "majority", "disputed").index(classification)
+    assert sum(end - start for start, end, _ in actual) == checked.classified_hops[index]
+
+
+def test_classified_hop_filtered_page_clipped_and_empty_filter(
+    classified_hop_filtered_page_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    unanimous = ((a, b), (b, c))
+    runs = (unanimous, unanimous, unanimous)
+    m = classified_hop_filtered_page_module
+    missing = m.build_public_classified_hop_filtered_page(runs, 0, 1, "majority", 0, 8)
+    wire = json.loads(missing.payload)
+    assert wire["total_segments"] == 0
+    assert wire["segments"] == [] and wire["next_offset"] is None
+    assert (
+        m.verify_public_classified_hop_filtered_page(
+            runs, 0, 1, "majority", 0, 8, missing.payload, expected_sha256=missing.sha256
+        ).segments
+        == ()
+    )
+    full = m.build_public_classified_hop_filtered_page(runs, 0, 1, "unanimous", 0, 8)
+    assert m.verify_public_classified_hop_filtered_page(
+        runs, 0, 1, "unanimous", 0, 8, full.payload, expected_sha256=full.sha256
+    ).segments == ((0, 1, "unanimous"),)
+    terminal = m.build_public_classified_hop_filtered_page(runs, 0, 1, "unanimous", 1, 1)
+    assert json.loads(terminal.payload)["segments"] == []
+    assert (
+        m.verify_public_classified_hop_filtered_page(
+            runs, 0, 1, "unanimous", 1, 1, terminal.payload, expected_sha256=terminal.sha256
+        ).segments
+        == ()
+    )
+
+
+@pytest.mark.parametrize("category", [None, True, 1, "", "all", "Disputed", "disputed "])
+def test_classified_hop_filtered_page_rejects_unknown_category(
+    classified_hop_filtered_page_module, dispute_index_runs, category
+):
+    m = classified_hop_filtered_page_module
+    with pytest.raises(
+        m.ClassifiedHopFilteredPageError,
+        match="^staging classified hop filtered page rejected$",
+    ):
+        m.build_public_classified_hop_filtered_page(dispute_index_runs, 0, 3, category, 0, 1)
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "offset", "limit"),
+    [
+        (-1, 1, 0, 1),
+        (0, 0, 0, 1),
+        (0, 4, 0, 1),
+        (True, 1, 0, 1),
+        (0, False, 0, 1),
+        (0.0, 1, 0, 1),
+        (0, 1, True, 1),
+        (0, 1, -1, 1),
+        (0, 1, 0, 0),
+        (0, 1, 0, 9),
+        (0, 1, 99, 1),
+        (0, 1, 0, True),
+    ],
+)
+def test_classified_hop_filtered_page_refuses_bad_ranges_and_cursor(
+    classified_hop_filtered_page_module, dispute_index_runs, start, end, offset, limit
+):
+    m = classified_hop_filtered_page_module
+    with pytest.raises(m.ClassifiedHopFilteredPageError):
+        m.build_public_classified_hop_filtered_page(
+            dispute_index_runs, start, end, "disputed", offset, limit
+        )
+
+
+def test_classified_hop_filtered_page_rejects_rehashed_forgery_reorder_and_duplicates(
+    classified_hop_filtered_page_module, dispute_index_runs
+):
+    m = classified_hop_filtered_page_module
+    built = m.build_public_classified_hop_filtered_page(dispute_index_runs, 0, 3, "disputed", 0, 8)
+    body = json.loads(built.payload)
+    body["total_segments"] = 77
+    raw = json.dumps(body, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("ascii")
+    with pytest.raises(m.ClassifiedHopFilteredPageError):
+        m.verify_public_classified_hop_filtered_page(
+            dispute_index_runs,
+            0,
+            3,
+            "disputed",
+            0,
+            8,
+            raw,
+            expected_sha256=hashlib.sha256(raw).hexdigest(),
+        )
+    swapped = (
+        dispute_index_runs[2],
+        dispute_index_runs[1],
+        dispute_index_runs[0],
+        dispute_index_runs[3],
+    )
+    with pytest.raises(m.ClassifiedHopFilteredPageError):
+        m.verify_public_classified_hop_filtered_page(
+            swapped, 0, 3, "disputed", 0, 8, built.payload, expected_sha256=built.sha256
+        )
+    duplicate = b'{"audience":"public","audience":"public"}'
+    with pytest.raises(m.ClassifiedHopFilteredPageError):
+        m.verify_public_classified_hop_filtered_page(
+            dispute_index_runs,
+            0,
+            3,
+            "disputed",
+            0,
+            8,
+            duplicate,
+            expected_sha256=hashlib.sha256(duplicate).hexdigest(),
+        )
+
+
+def test_classified_hop_filtered_page_preparse_cap_and_one_source_rebuild(
+    classified_hop_filtered_page_module, dispute_index_runs, monkeypatch
+):
+    m = classified_hop_filtered_page_module
+    original = m.intervals.build_public_intervals
+    calls = []
+
+    def counted(r):
+        calls.append(1)
+        return original(r)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.intervals, "build_public_intervals", counted)
+        built = m.build_public_classified_hop_filtered_page(
+            dispute_index_runs, 0, 3, "disputed", 0, 8
+        )
+        assert len(calls) == 1
+        m.verify_public_classified_hop_filtered_page(
+            dispute_index_runs, 0, 3, "disputed", 0, 8, built.payload, expected_sha256=built.sha256
+        )
+        assert len(calls) == 2
+    raw = b"x" * (m.MAX_PUBLIC_CLASSIFIED_HOP_FILTERED_PAGE_BYTES + 1)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("oversize filtered page reached JSON parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbidden)
+        with pytest.raises(m.ClassifiedHopFilteredPageError):
+            m._checked(raw, hashlib.sha256(raw).hexdigest())
+
+
+def test_classified_hop_filtered_page_majority_clips_inside_both_source_segments(
+    classified_hop_filtered_page_module,
+    classified_hop_coverage_module,
+    timeline_sources,
+):
+    """Both query edges are strictly inside separate real majority source intervals."""
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, a, b),
+        (b, b, b, c),
+        (a, a, a, a),
+        (b, b, c, c),
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, a, b),
+        (b, b, b, c),
+        (a, a, a, a),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:6]),
+            tuple(row[member] for row in snapshots[5:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_filtered_page_module
+    source = m.intervals.build_public_intervals(runs)
+    rows = json.loads(source.payload)["intervals"]
+    start, end, category = 1, 9, "majority"
+    first = next(row for row in rows if row["start_hop"] < start < row["end_hop_exclusive"])
+    last = next(row for row in rows if row["start_hop"] < end < row["end_hop_exclusive"])
+    assert first is not last
+    assert first["classification"] == last["classification"] == category
+    clipped_source = tuple(
+        (max(start, item["start_hop"]), min(end, item["end_hop_exclusive"]), category)
+        for item in rows
+        if item["classification"] == category
+        and min(end, item["end_hop_exclusive"]) > max(start, item["start_hop"])
+    )
+    assert len(clipped_source) == 2
+    assert clipped_source[0][0] == start > first["start_hop"]
+    assert clipped_source[-1][1] == end < last["end_hop_exclusive"]
+    assert clipped_source[0][1] < clipped_source[1][0]  # filtered cursor skips disputed gap
+    actual = []
+    offset = 0
+    for _ in range(8):
+        page = m.build_public_classified_hop_filtered_page(runs, start, end, category, offset, 1)
+        wire = json.loads(page.payload)
+        assert wire["source_intervals_sha256"] == source.sha256
+        assert wire["total_segments"] == len(clipped_source)
+        checked = m.verify_public_classified_hop_filtered_page(
+            runs, start, end, category, offset, 1, page.payload, expected_sha256=page.sha256
+        )
+        assert checked.source_intervals_sha256 == source.sha256
+        assert checked.segments == tuple(
+            (segment["start_hop"], segment["end_hop_exclusive"], segment["classification"])
+            for segment in wire["segments"]
+        )
+        actual.extend(checked.segments)
+        if wire["next_offset"] is None:
+            break
+        assert wire["next_offset"] == offset + len(checked.segments)
+        offset = wire["next_offset"]
+    else:
+        pytest.fail("category-filtered cursor did not terminate")
+    assert tuple(actual) == clipped_source
+
+    single = classified_hop_coverage_module
+    summary = single.build_public_classified_hop_coverage(runs, start, end)
+    verified_summary = single.verify_public_classified_hop_coverage(
+        runs, start, end, summary.payload, expected_sha256=summary.sha256
+    )
+    assert verified_summary.source_intervals_sha256 == source.sha256
+    assert sum(right - left for left, right, _ in actual) == (verified_summary.classified_hops[1])
+
+
+def test_classified_hop_filtered_page_keeps_eight_same_class_source_groups(
+    classified_hop_filtered_page_module, timeline_sources
+):
+    """Adjacent disputed rows with changing agreement groups remain distinct."""
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, c, c),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+        (c, c, a, a),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:5]),
+            tuple(row[member] for row in snapshots[4:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_filtered_page_module
+    source = m.intervals.build_public_intervals(runs)
+    rows = json.loads(source.payload)["intervals"]
+    assert len(rows) == 8
+    assert all(row["classification"] == "disputed" for row in rows)
+    assert all(rows[i]["agreement_groups"] != rows[i + 1]["agreement_groups"] for i in range(7))
+    expected = tuple((row["start_hop"], row["end_hop_exclusive"], "disputed") for row in rows)
+    whole = m.build_public_classified_hop_filtered_page(runs, 0, 8, "disputed", 0, 8)
+    wire = json.loads(whole.payload)
+    assert wire["total_segments"] == 8
+    assert len(wire["segments"]) == m.MAX_CLASSIFIED_HOP_FILTERED_PAGE_LIMIT == 8
+    assert wire["next_offset"] is None
+    assert wire["source_intervals_sha256"] == source.sha256
+    checked = m.verify_public_classified_hop_filtered_page(
+        runs, 0, 8, "disputed", 0, 8, whole.payload, expected_sha256=whole.sha256
+    )
+    assert checked.segments == expected
+
+    traversed = []
+    offset = 0
+    for i in range(8):
+        page = m.build_public_classified_hop_filtered_page(runs, 0, 8, "disputed", offset, 1)
+        body = json.loads(page.payload)
+        facts = m.verify_public_classified_hop_filtered_page(
+            runs, 0, 8, "disputed", offset, 1, page.payload, expected_sha256=page.sha256
+        )
+        assert body["total_segments"] == 8
+        assert body["source_intervals_sha256"] == source.sha256
+        assert facts.segments == expected[i : i + 1]
+        traversed.extend(facts.segments)
+        assert body["next_offset"] == (i + 1 if i < 7 else None)
+        offset = i + 1
+    assert tuple(traversed) == expected
+    assert sum(end - start for start, end, _ in traversed) == 8
+
+
+@pytest.fixture
+def classified_hop_multifilter_page_module(classified_hop_filtered_page_module):
+    return importlib.import_module("staging_classified_hop_multifilter_page")
+
+
+@pytest.mark.parametrize(
+    "categories",
+    [("majority", "disputed"), ("disputed",), ("majority", "unanimous", "disputed")],
+)
+def test_classified_hop_multifilter_page_original_source_order_and_category_subset(
+    classified_hop_multifilter_page_module,
+    classified_hop_coverage_module,
+    timeline_sources,
+    categories,
+):
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, c, c),
+        (a, a, a, a),
+        (b, b, b, b),
+        (b, b, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:4]),
+            tuple(row[member] for row in snapshots[3:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_multifilter_page_module
+    source = m.intervals.build_public_intervals(runs)
+    source_rows = json.loads(source.payload)["intervals"]
+    expected = tuple(
+        (r["start_hop"], r["end_hop_exclusive"], r["classification"])
+        for r in source_rows
+        if r["classification"] in categories
+    )
+    assert expected
+    seen = []
+    cursor = 0
+    for _ in range(8):
+        page = m.build_public_classified_hop_multifilter_page(
+            runs, 0, 5, list(categories), cursor, 1
+        )
+        wire = json.loads(page.payload)
+        checked = m.verify_public_classified_hop_multifilter_page(
+            runs, 0, 5, list(categories), cursor, 1, page.payload, expected_sha256=page.sha256
+        )
+        assert wire["selected_classes"] == list(categories)
+        assert wire["total_segments"] == len(expected)
+        assert wire["source_intervals_sha256"] == source.sha256
+        assert checked.source_intervals_sha256 == source.sha256
+        assert all(item["classification"] in categories for item in wire["segments"])
+        seen.extend(checked.segments)
+        if wire["next_offset"] is None:
+            break
+        assert wire["next_offset"] > cursor
+        cursor = wire["next_offset"]
+    else:
+        pytest.fail("bounded multi-class cursor failed to terminate")
+    assert tuple(seen) == expected
+    summary = classified_hop_coverage_module.build_public_classified_hop_coverage(runs, 0, 5)
+    summary_facts = classified_hop_coverage_module.verify_public_classified_hop_coverage(
+        runs, 0, 5, summary.payload, expected_sha256=summary.sha256
+    )
+    by_class = dict(zip(("unanimous", "majority", "disputed"), summary_facts.classified_hops))
+    assert sum(end - start for start, end, _ in seen) == sum(by_class[c] for c in categories)
+
+
+def test_classified_hop_multifilter_page_empty_and_terminal(
+    classified_hop_multifilter_page_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    same = ((a, b), (b, c))
+    runs = (same, same, same)
+    m = classified_hop_multifilter_page_module
+    absent = m.build_public_classified_hop_multifilter_page(
+        runs, 0, 1, ("disputed", "majority"), 0, 8
+    )
+    body = json.loads(absent.payload)
+    assert body["segments"] == [] and body["total_segments"] == 0
+    assert body["next_offset"] is None
+    assert (
+        m.verify_public_classified_hop_multifilter_page(
+            runs,
+            0,
+            1,
+            ("disputed", "majority"),
+            0,
+            8,
+            absent.payload,
+            expected_sha256=absent.sha256,
+        ).segments
+        == ()
+    )
+    first = m.build_public_classified_hop_multifilter_page(
+        runs, 0, 1, ("unanimous", "disputed"), 0, 8
+    )
+    assert m.verify_public_classified_hop_multifilter_page(
+        runs, 0, 1, ("unanimous", "disputed"), 0, 8, first.payload, expected_sha256=first.sha256
+    ).segments == ((0, 1, "unanimous"),)
+    last = m.build_public_classified_hop_multifilter_page(
+        runs, 0, 1, ("unanimous", "disputed"), 1, 8
+    )
+    assert json.loads(last.payload)["segments"] == []
+    assert (
+        m.verify_public_classified_hop_multifilter_page(
+            runs, 0, 1, ("unanimous", "disputed"), 1, 8, last.payload, expected_sha256=last.sha256
+        ).segments
+        == ()
+    )
+
+
+@pytest.mark.parametrize(
+    "categories",
+    [
+        (),
+        [],
+        ("unanimous",) * 2,
+        ("unanimous", "majority", "disputed", "extra"),
+        ("unknown",),
+        ("Unanimous",),
+        ("disputed ",),
+        ("",),
+        (True,),
+        (1,),
+        (None,),
+        "unanimous",
+        (["majority"],),
+        ("majority", "majority"),
+        ("majority", False),
+    ],
+)
+def test_classified_hop_multifilter_page_rejects_invalid_categories(
+    classified_hop_multifilter_page_module, dispute_index_runs, categories
+):
+    m = classified_hop_multifilter_page_module
+    with pytest.raises(
+        m.ClassifiedHopMultifilterPageError,
+        match="^staging classified hop multifilter page rejected$",
+    ):
+        m.build_public_classified_hop_multifilter_page(dispute_index_runs, 0, 3, categories, 0, 1)
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "offset", "limit"),
+    [
+        (True, 1, 0, 1),
+        (0, False, 0, 1),
+        (-1, 1, 0, 1),
+        (0, 0, 0, 1),
+        (0, 4, 0, 1),
+        (0, 3, True, 1),
+        (0, 3, -1, 1),
+        (0, 3, 1.0, 1),
+        (0, 3, 0, True),
+        (0, 3, 0, 0),
+        (0, 3, 0, 9),
+        (0, 3, 99, 1),
+    ],
+)
+def test_classified_hop_multifilter_page_rejects_bad_range_and_cursor(
+    classified_hop_multifilter_page_module, dispute_index_runs, start, end, offset, limit
+):
+    m = classified_hop_multifilter_page_module
+    with pytest.raises(m.ClassifiedHopMultifilterPageError):
+        m.build_public_classified_hop_multifilter_page(
+            dispute_index_runs, start, end, ("disputed",), offset, limit
+        )
+
+
+def test_classified_hop_multifilter_page_rejects_rehashed_forgery_and_source_reorder(
+    classified_hop_multifilter_page_module, dispute_index_runs
+):
+    m = classified_hop_multifilter_page_module
+    categories = ("disputed", "majority")
+    built = m.build_public_classified_hop_multifilter_page(
+        dispute_index_runs, 0, 3, categories, 0, 8
+    )
+    forged = json.loads(built.payload)
+    forged["total_segments"] = 99
+    raw = json.dumps(forged, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode(
+        "ascii"
+    )
+    with pytest.raises(m.ClassifiedHopMultifilterPageError):
+        m.verify_public_classified_hop_multifilter_page(
+            dispute_index_runs,
+            0,
+            3,
+            categories,
+            0,
+            8,
+            raw,
+            expected_sha256=hashlib.sha256(raw).hexdigest(),
+        )
+    swapped = (
+        dispute_index_runs[2],
+        dispute_index_runs[1],
+        dispute_index_runs[0],
+        dispute_index_runs[3],
+    )
+    with pytest.raises(m.ClassifiedHopMultifilterPageError):
+        m.verify_public_classified_hop_multifilter_page(
+            swapped, 0, 3, categories, 0, 8, built.payload, expected_sha256=built.sha256
+        )
+    duplicate = b'{"audience":"public","audience":"public"}'
+    with pytest.raises(m.ClassifiedHopMultifilterPageError):
+        m.verify_public_classified_hop_multifilter_page(
+            dispute_index_runs,
+            0,
+            3,
+            categories,
+            0,
+            8,
+            duplicate,
+            expected_sha256=hashlib.sha256(duplicate).hexdigest(),
+        )
+
+
+def test_classified_hop_multifilter_page_one_rebuild_and_oversize_before_parse(
+    classified_hop_multifilter_page_module, dispute_index_runs, monkeypatch
+):
+    m = classified_hop_multifilter_page_module
+    original = m.intervals.build_public_intervals
+    calls = []
+
+    def counted(source):
+        calls.append(1)
+        return original(source)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.intervals, "build_public_intervals", counted)
+        built = m.build_public_classified_hop_multifilter_page(
+            dispute_index_runs, 0, 3, ("disputed",), 0, 8
+        )
+        assert len(calls) == 1
+        m.verify_public_classified_hop_multifilter_page(
+            dispute_index_runs,
+            0,
+            3,
+            ("disputed",),
+            0,
+            8,
+            built.payload,
+            expected_sha256=built.sha256,
+        )
+        assert len(calls) == 2
+    raw = b"x" * (m.MAX_PUBLIC_CLASSIFIED_HOP_MULTIFILTER_PAGE_BYTES + 1)
+
+    def forbid(*_args, **_kwargs):
+        pytest.fail("oversized page reached parser")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(m.json, "loads", forbid)
+        with pytest.raises(m.ClassifiedHopMultifilterPageError):
+            m._checked(raw, hashlib.sha256(raw).hexdigest())
+
+
+@pytest.mark.parametrize("mutation", ["append_third", "replace_first"])
+@pytest.mark.parametrize("action", ["build", "verify"])
+def test_classified_hop_multifilter_page_freezes_caller_categories(
+    classified_hop_multifilter_page_module,
+    dispute_index_runs,
+    monkeypatch,
+    mutation,
+    action,
+):
+    """After snapshot, source I/O may not consult a mutated caller-owned class list."""
+    m = classified_hop_multifilter_page_module
+    original_categories = ("majority", "disputed")
+    expected = m.build_public_classified_hop_multifilter_page(
+        dispute_index_runs, 0, 3, original_categories, 0, 8
+    )
+    expected_facts = m.verify_public_classified_hop_multifilter_page(
+        dispute_index_runs,
+        0,
+        3,
+        original_categories,
+        0,
+        8,
+        expected.payload,
+        expected_sha256=expected.sha256,
+    )
+    categories = list(original_categories)
+    ready = threading.Event()
+    mutated = threading.Event()
+    rebuild_calls = []
+    original = m.intervals.build_public_intervals
+
+    def worker():
+        if ready.wait(timeout=5):
+            if mutation == "append_third":
+                categories.append("unanimous")
+            else:
+                categories[0] = "unanimous"
+            mutated.set()
+
+    def during_rebuild(source):
+        rebuild_calls.append(1)
+        ready.set()
+        assert mutated.wait(timeout=5), "caller mutation did not complete"
+        return original(source)
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(m.intervals, "build_public_intervals", during_rebuild)
+            if action == "build":
+                assert (
+                    m.build_public_classified_hop_multifilter_page(
+                        dispute_index_runs, 0, 3, categories, 0, 8
+                    )
+                    == expected
+                )
+            else:
+                assert (
+                    m.verify_public_classified_hop_multifilter_page(
+                        dispute_index_runs,
+                        0,
+                        3,
+                        categories,
+                        0,
+                        8,
+                        expected.payload,
+                        expected_sha256=expected.sha256,
+                    )
+                    == expected_facts
+                )
+    finally:
+        ready.set()
+        thread.join(timeout=5)
+    assert mutated.is_set() and not thread.is_alive()
+    assert rebuild_calls == [1]
+    assert json.loads(expected.payload)["selected_classes"] == list(original_categories)
+
+
+def test_classified_hop_multifilter_page_preserves_eight_real_source_groups(
+    classified_hop_multifilter_page_module, timeline_sources
+):
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, c, c),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+        (c, c, a, a),
+        (a, b, a, b),
+        (c, b, c, b),
+        (a, a, b, b),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:5]),
+            tuple(row[member] for row in snapshots[4:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_multifilter_page_module
+    source = m.intervals.build_public_intervals(runs)
+    rows = json.loads(source.payload)["intervals"]
+    assert len(rows) == 8
+    assert all(row["classification"] == "disputed" for row in rows)
+    assert all(rows[i]["agreement_groups"] != rows[i + 1]["agreement_groups"] for i in range(7))
+    built = m.build_public_classified_hop_multifilter_page(
+        runs, 0, 8, ["majority", "disputed"], 0, 8
+    )
+    wire = json.loads(built.payload)
+    assert wire["total_segments"] == 8
+    assert len(wire["segments"]) == m.MAX_CLASSIFIED_HOP_MULTIFILTER_PAGE_LIMIT == 8
+    assert wire["next_offset"] is None
+    assert wire["source_intervals_sha256"] == source.sha256
+    facts = m.verify_public_classified_hop_multifilter_page(
+        runs, 0, 8, ["majority", "disputed"], 0, 8, built.payload, expected_sha256=built.sha256
+    )
+    assert facts.segments == tuple(
+        (row["start_hop"], row["end_hop_exclusive"], row["classification"]) for row in rows
+    )
+
+
+@pytest.mark.parametrize("classes", [("majority",), ("disputed",), ("unanimous",)])
+def test_classified_multifilter_source_clipping_matches_single_class_pages(
+    classified_hop_multifilter_page_module,
+    classified_hop_filtered_page_module,
+    classified_hop_coverage_module,
+    timeline_sources,
+    classes,
+):
+    """Same original clipped source: 1-class multi-page equals single-class page."""
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, a, b),
+        (b, b, b, c),
+        (a, a, a, a),
+        (b, b, c, c),
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, a, b),
+        (b, b, b, c),
+        (a, a, a, a),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:6]),
+            tuple(row[member] for row in snapshots[5:]),
+        )
+        for member in range(4)
+    )
+    start, end = 1, 9
+    multi = classified_hop_multifilter_page_module
+    single = classified_hop_filtered_page_module
+    source = multi.intervals.build_public_intervals(runs)
+    original = json.loads(source.payload)["intervals"]
+    first = next(row for row in original if row["start_hop"] < start < row["end_hop_exclusive"])
+    last = next(row for row in original if row["start_hop"] < end < row["end_hop_exclusive"])
+    assert first is not last
+    assert first["classification"] == last["classification"] == "majority"
+
+    expected = []
+    cursor = 0
+    for _ in range(8):
+        one = single.build_public_classified_hop_filtered_page(
+            runs, start, end, classes[0], cursor, 1
+        )
+        many = multi.build_public_classified_hop_multifilter_page(
+            runs, start, end, classes, cursor, 1
+        )
+        w_one = json.loads(one.payload)
+        w_many = json.loads(many.payload)
+        f_one = single.verify_public_classified_hop_filtered_page(
+            runs, start, end, classes[0], cursor, 1, one.payload, expected_sha256=one.sha256
+        )
+        f_many = multi.verify_public_classified_hop_multifilter_page(
+            runs, start, end, classes, cursor, 1, many.payload, expected_sha256=many.sha256
+        )
+        assert w_one["source_intervals_sha256"] == source.sha256
+        assert w_many["source_intervals_sha256"] == source.sha256
+        assert w_one["total_segments"] == w_many["total_segments"]
+        assert w_one["next_offset"] == w_many["next_offset"]
+        assert f_one.segments == f_many.segments
+        expected.extend(f_many.segments)
+        if w_many["next_offset"] is None:
+            break
+        cursor = w_many["next_offset"]
+    else:
+        pytest.fail("one-class parity pagination never terminated")
+
+    summary = classified_hop_coverage_module.build_public_classified_hop_coverage(runs, start, end)
+    checked = classified_hop_coverage_module.verify_public_classified_hop_coverage(
+        runs, start, end, summary.payload, expected_sha256=summary.sha256
+    )
+    index = ("unanimous", "majority", "disputed").index(classes[0])
+    assert checked.source_intervals_sha256 == source.sha256
+    assert sum(right - left for left, right, _ in expected) == checked.classified_hops[index]
+
+
+def test_classified_multifilter_two_classes_interleave_original_hop_order(
+    classified_hop_multifilter_page_module,
+    classified_hop_filtered_page_module,
+    timeline_sources,
+):
+    """Two single-class lists interleave exactly into multi-class source order."""
+    a, b, c = timeline_sources
+    snapshots = (
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, a, b),
+        (b, b, b, c),
+        (a, a, a, a),
+        (b, b, c, c),
+        (a, a, a, a),
+        (b, b, b, c),
+        (a, a, a, b),
+        (b, b, b, c),
+        (a, a, a, a),
+    )
+    runs = tuple(
+        (
+            tuple(row[member] for row in snapshots[:6]),
+            tuple(row[member] for row in snapshots[5:]),
+        )
+        for member in range(4)
+    )
+    m = classified_hop_multifilter_page_module
+    single = classified_hop_filtered_page_module
+    start, end = 1, 9
+    categories = ("disputed", "majority")
+    source = m.intervals.build_public_intervals(runs)
+
+    def pages_for(selected):
+        rows = []
+        cursor = 0
+        for _ in range(8):
+            if type(selected) is tuple:
+                page = m.build_public_classified_hop_multifilter_page(
+                    runs, start, end, selected, cursor, 1
+                )
+                facts = m.verify_public_classified_hop_multifilter_page(
+                    runs, start, end, selected, cursor, 1, page.payload, expected_sha256=page.sha256
+                )
+            else:
+                page = single.build_public_classified_hop_filtered_page(
+                    runs, start, end, selected, cursor, 1
+                )
+                facts = single.verify_public_classified_hop_filtered_page(
+                    runs, start, end, selected, cursor, 1, page.payload, expected_sha256=page.sha256
+                )
+            body = json.loads(page.payload)
+            assert body["source_intervals_sha256"] == source.sha256
+            assert body["total_segments"] >= len(rows) + len(facts.segments)
+            rows.extend(facts.segments)
+            if body["next_offset"] is None:
+                return tuple(rows)
+            assert body["next_offset"] > cursor
+            cursor = body["next_offset"]
+        pytest.fail("multi-class pagination never terminated")
+
+    actual = pages_for(categories)
+    each = pages_for("majority") + pages_for("disputed")
+    expected = tuple(sorted(each, key=lambda row: (row[0], row[1])))
+    assert actual == expected
+    assert len(actual) == len(each)
+    assert all(start <= left < right <= end for left, right, _ in actual)
+
+
+@pytest.mark.parametrize("action", ["build", "verify"])
+def test_classified_multifilter_freezes_valid_three_classes_before_append_fourth(
+    classified_hop_multifilter_page_module,
+    dispute_index_runs,
+    monkeypatch,
+    action,
+):
+    """The legal three-class source snapshot wins over a concurrent fourth entry."""
+    m = classified_hop_multifilter_page_module
+    original_classes = ("unanimous", "majority", "disputed")
+    expected = m.build_public_classified_hop_multifilter_page(
+        dispute_index_runs, 0, 3, original_classes, 0, 8
+    )
+    expected_facts = m.verify_public_classified_hop_multifilter_page(
+        dispute_index_runs,
+        0,
+        3,
+        original_classes,
+        0,
+        8,
+        expected.payload,
+        expected_sha256=expected.sha256,
+    )
+    categories = list(original_classes)
+    ready = threading.Event()
+    mutated = threading.Event()
+    rebuild_calls = []
+    original_build = m.intervals.build_public_intervals
+
+    def worker():
+        if ready.wait(timeout=5):
+            categories.append("disputed")
+            mutated.set()
+
+    def rebuild_once(source):
+        rebuild_calls.append(1)
+        ready.set()
+        assert mutated.wait(timeout=5), "worker did not append fourth class"
+        return original_build(source)
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(m.intervals, "build_public_intervals", rebuild_once)
+            if action == "build":
+                assert (
+                    m.build_public_classified_hop_multifilter_page(
+                        dispute_index_runs, 0, 3, categories, 0, 8
+                    )
+                    == expected
+                )
+            else:
+                assert (
+                    m.verify_public_classified_hop_multifilter_page(
+                        dispute_index_runs,
+                        0,
+                        3,
+                        categories,
+                        0,
+                        8,
+                        expected.payload,
+                        expected_sha256=expected.sha256,
+                    )
+                    == expected_facts
+                )
+    finally:
+        ready.set()
+        thread.join(timeout=5)
+    assert mutated.is_set() and not thread.is_alive()
+    assert categories == list(original_classes) + ["disputed"]
+    assert rebuild_calls == [1]
+    assert json.loads(expected.payload)["selected_classes"] == list(original_classes)
