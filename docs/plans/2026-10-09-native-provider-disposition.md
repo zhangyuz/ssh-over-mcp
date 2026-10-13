@@ -217,13 +217,17 @@ following symlinks or weakening any selected-root identity requirement.
 
 ### Reviewed next steps (NOT cleanup authorization)
 
-1. Align **future** orchestrator temporary root selection and native
-   preflight to one explicitly validated source: current orchestrator
-   `tempfile.TemporaryDirectory(prefix="ssh-over-mcp-e2e-")` uses Python's
-   selected temp parent, while the pinned forensic authority derives its
-   root exclusively from `getconf`. Design and test a single-parent contract
-   before changing production creation, runner environment or diagnostic
-   trust. Do not solve this by loosening no-follow ancestry checks.
+1. Align **future** orchestrator temporary root creation, recovery's
+   *blocking-root inventory*, and native forensic preflight to a single
+   explicitly validated temp-root source: orchestrator
+   `tempfile.TemporaryDirectory(prefix="ssh-over-mcp-e2e-")` and recovery
+   currently use Python's selected temp parent; forensic uses `getconf`.
+   The recovery guard MUST NOT overlook historical `/private/tmp` trees
+   while a new root is introduced, or consider a marker safe to unlink
+   merely because the new root is empty. Design and test the complete
+   cross-component authority/transition contract before changing runtime
+   creation, environment or diagnostic trust. Do not solve this by
+   loosening no-follow ancestry checks.
 2. Design a separate fixed-identity, read-only residual inventory of the
    actual Python-selected parent, with its own trusted ancestry,
    symlink/owner/device/mode checks and a bounded private artifact.
