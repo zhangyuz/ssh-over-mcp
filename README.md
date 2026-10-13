@@ -26,11 +26,13 @@ admin interface can grant or deny; MCP clients cannot grant themselves access.
 
 **Phase 6** closes the private Cloudflare reference deployment; account
 provisioning remains an operator action. **Phase 7A** closes the disposable
-no-network guest E2E foundation, but **Phase 7B1** native prerequisites and
-fresh native **Level-3** acceptance are not complete. Recent merge-main E2E
-runs fail closed on stale provider state; passing Python 3.13/3.14 CI or a
-skipped PR-level E2E job does **not** establish native acceptance. The A1,
-B8, N1c, UID-502, native N1/Task 3, and provider-disposition gates remain open.
+no-network guest E2E foundation. The historical stale-provider blocker is
+resolved: approved residual disposition and guarded marker recovery completed,
+and real native **Level-3** E2E plus provider cleanup passed on exact main
+`53868a714308273e4f3292483ff3e33299193c1e` in CI run `38437463320`, attempt 2.
+See the [acceptance record](docs/evidence/2026-10-13-native-provider-recovery-acceptance.md).
+This incident acceptance does not automatically close **Phase 7B1** native
+prerequisites or the A1, B8, N1c, UID-502 and native N1/Task 3 roadmap gates.
 
 The origin currently uses one operator-configured **static principal/profile**
 per deployment, not per-user OAuth-claim-to-role mapping. Use separate origins
