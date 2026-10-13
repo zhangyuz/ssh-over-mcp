@@ -1,0 +1,46 @@
+name: Live Local E2E Exact Staging Residual Roots Metadata Observation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-local-e2e
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    name: Observe both exact historical staging roots without recovery
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, macOS, X64, ssh-over-mcp-e2e-orchestrator]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted main exact SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          clean: true
+          fetch-depth: 1
+      - name: Verify exact clean checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1)"
+      - name: Observe both fixed staging roots bounded metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o noclobber
+          python3 -I ops/live-e2e/observe_staging_roots_metadata.py > "$RUNNER_TEMP/staging-roots-metadata-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
+      - name: Retain complete successful private metadata evidence only
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: staging-roots-metadata-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/staging-roots-metadata-${{ github.run_id }}-${{ github.run_attempt }}.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: false

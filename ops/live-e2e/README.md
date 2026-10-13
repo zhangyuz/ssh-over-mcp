@@ -224,3 +224,13 @@ and special-file entries inside the single exact historical recovery root
 never changes the strict inventory refusal or marker-only cleanup gates.
 Raw bounded evidence is retained privately for seven days. Do not dispatch
 before independent review and successful exact-head hosted CI.
+
+## Separate historical staging roots metadata observation
+
+[ADR 0017](../../docs/decisions/0017-historical-staging-roots-metadata-observation.md)
+covers a separate fixed no-follow **read-only** UID-502 inspection of
+historical root #1 and #3 under literal /private/tmp. It gathers two matching
+bounded private metadata snapshots, without file-content reads, link
+following, stale marker clearance, disposition or staging policy changes.
+Only manually dispatch after independent review, exact-head Hosted CI and
+trusted-main merge. Results are not cleanup authorization.
