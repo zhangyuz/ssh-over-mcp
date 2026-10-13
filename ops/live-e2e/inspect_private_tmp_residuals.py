@@ -185,7 +185,8 @@ def inspect_residuals() -> bytes:
         original = []
         roots = []
         count = 0
-        for (name, _, _), chain in zip(_CATALOG, chains, strict=True):
+        for index, ((name, _, _), chain) in enumerate(zip(_CATALOG, chains, strict=True), 1):
+            _REFUSAL_PHASE = f"inventory-a-{index}"
             check_deadline()
             entries = inventory.collect_residual_inventory(chain._fds[-1], uid=_UID)
             count += len(entries)
@@ -202,7 +203,8 @@ def inspect_residuals() -> bytes:
                 "entries": [asdict(entry) for entry in entries],
             })
         _REFUSAL_PHASE = "inventory-b"
-        for chain, entries in zip(chains, original, strict=True):
+        for index, (chain, entries) in enumerate(zip(chains, original, strict=True), 1):
+            _REFUSAL_PHASE = f"inventory-b-{index}"
             check_deadline()
             if inventory.collect_residual_inventory(chain._fds[-1], uid=_UID) != entries:
                 raise preflight.PreflightError()

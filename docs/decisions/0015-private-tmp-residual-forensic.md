@@ -20,3 +20,7 @@ Reuse fixed marker authority, bounded process snapshot and metadata-only recursi
 ## Remaining gates
 
 Even successful evidence is NOT a provenance guarantee, exclusive quiescence assertion, deletion permission or marker-clearance receipt. UID-502 ABA/concurrency and post-observation changes remain possible. Independently review all three inventories, verify owner PID death and absent QEMU, investigate changed historical files, obtain explicit per-exact-identity operator authorization before any destructive action, then use existing marker-only recovery if all guards pass. Only exact-main no-network Level-3 with complete host/guest cleanup closes the issue. Future tempfile convergence requires separate design/review and must not hide these historical /private/tmp roots.
+
+## Refusal-only phase refinement (2026-10-13)
+
+The first trusted-main [private-tmp inspection 38383833045](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38383833045) passed fixed parent, marker and all three catalog root checks but refused at generic inventory-a, exit 70. Separate fixed labels inventory-a-1/2/3 and inventory-b-1/2/3 now identify only which of the three immutable catalog roots failed a complete metadata pass. They do not disclose any observed path, file name, file mode, owner, contents or underlying OS error; do not alter inventory policy or confer disposition authority. Failure still generates no successful artifact.

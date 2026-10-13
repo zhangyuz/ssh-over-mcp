@@ -238,3 +238,38 @@ def test_policy_never_reuses_native_getconf_parent(case, monkeypatch):
         pytest.fail("native getconf parent unexpectedly used")
     monkeypatch.setattr(mod.preflight, "_pin_observed_native_temp_chain", forbidden)
     assert json.loads(mod.inspect_residuals())["recovery_eligible"] is False
+
+@pytest.mark.parametrize("index", [1, 2, 3])
+def test_inventory_first_pass_refusal_label_is_exact_index_only(case, monkeypatch, index, capsys):
+    mod, _, _ = case
+    collect = mod.inventory.collect_residual_inventory
+    count = 0
+    def refuse(*args, **kw):
+        nonlocal count
+        count += 1
+        if count == index:
+            raise mod.inventory.InventoryError()
+        return collect(*args, **kw)
+    monkeypatch.setattr(mod.inventory, "collect_residual_inventory", refuse)
+    with pytest.raises(mod.inventory.InventoryError):
+        mod.main([])
+    assert mod._REFUSAL_PHASE == f"inventory-a-{index}"
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("index", [1, 2, 3])
+def test_inventory_second_pass_refusal_label_is_exact_index_only(case, monkeypatch, index, capsys):
+    mod, _, _ = case
+    collect = mod.inventory.collect_residual_inventory
+    count = 0
+    def refuse(*args, **kw):
+        nonlocal count
+        count += 1
+        if count == 3 + index:
+            raise mod.inventory.InventoryError()
+        return collect(*args, **kw)
+    monkeypatch.setattr(mod.inventory, "collect_residual_inventory", refuse)
+    with pytest.raises(mod.inventory.InventoryError):
+        mod.main([])
+    assert mod._REFUSAL_PHASE == f"inventory-b-{index}"
+    assert capsys.readouterr().out == ""
