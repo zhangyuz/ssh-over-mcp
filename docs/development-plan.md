@@ -1316,7 +1316,7 @@ workflow `38139789927` both PASS before merge. PR-only native
 Level-3 SKIPPED is not native acceptance.
 A1/B8/N1c/UID-502/provider disposition/native Level-3 remain OPEN.
 
-**Next isolated public-only functional slice — disputed-overlap coverage
+**Merged public-only functional slice — disputed-overlap coverage
 summary (PR #202, branch `live-e2e-dispute-overlap-coverage`,
 merged to main as `5f340307b50ed467a458ed230777b8067f1129c8`):**
 Provide a compact canonical ≤4-KiB ASCII source-verified coverage summary
@@ -1343,9 +1343,9 @@ PR-only Level-3 SKIPPED is not native
 acceptance; A1/B8/N1c/UID-502/provider disposition/native Level-3
 remain OPEN.
 
-**In-review isolated public-only functional slice — batch dispute-overlap
+**Merged public-only functional slice — batch dispute-overlap
 coverage (PR #203, branch `live-e2e-dispute-overlap-coverages`,
-retargeted to main after #202 merged):**
+merged to main as `0a17e0fe2d73420f44dd9380273ae6c463b35eb2`):**
 Add canonical ≤8-KiB summary of 1–8 caller-ordered strict exact-int
 half-open hop ranges. A single full index rebuild per build or verify
 from original 3–5 ordered source cohorts serves all independent clipped
@@ -1363,14 +1363,14 @@ build→verify and deterministic worker-thread mutation regressions. Production 
 boundary unchanged: no private/host/provider I/O, authority, chronology,
 severity or provenance. Run focused regression and Ruff, require an
 independent security/docs review and exact-head dual Python 3.13/3.14
-CI on the final main base; #202 merged and #203 now targets main.
-Native
-Level-3 remains OPEN (PR-only skip is not acceptance), alongside
+CI run `38144439187` Python 3.13/3.14 PASS on final main base;
+#203 merged as `0a17e0fe2d73420f44dd9380273ae6c463b35eb2`.
+Native Level-3 remains OPEN (PR-only skip is not acceptance), alongside
 A1/B8/N1c/UID-502/provider disposition.
 
-**Next isolated public-only functional slice — query-union disputed
-coverage (PR #204, branch `live-e2e-dispute-overlap-union`,
-stacked on open PR #203):**
+**Merged public-only functional slice — query-union disputed
+coverage (PR #204, branch `live-e2e-dispute-overlap-union`, merged
+to main as `30770c4a3652f9da0f74985bb929b695e1e03e05`):**
 Extend navigation with an independent canonical ≤4-KiB union summary
 over 1–8 strict exact-int caller-ordered half-open ranges. Freeze bounded
 outer and inner inputs once; sorted merged intervals deduplicate all
@@ -1387,9 +1387,9 @@ changed source order. Independent PR #204 review found 0 Critical,
 split by two non-touching query clips, which must count 1 distinct
 window/2 disputed hops, with build→verify; updated #201 merged status, #202 now merged status, #203 main-base
 retarget and current #203→#204 stack and CI gates. Require independent
-review and exact-head Ubuntu
-Python 3.13/3.14 CI after upstream PR #203 is merged
-and PR retargeted to main; PR-only Level-3 skip is not native approval.
+review and exact-head Ubuntu Python 3.13/3.14 CI run
+`38149588161` both PASS on main-base, then #204 merged as `30770c4`.
+PR-only Level-3 skip is not native approval.
 A1/B8/N1c/UID-502/provider disposition/native Level-3 remain OPEN.
 
 
@@ -1466,3 +1466,315 @@ UID-502 partial/unbound directory identities. The user approved the separate
 to obtain complete bounded metadata evidence before a reviewed disposition.
 Implementation/review/live observation remain pending. No deletion, marker
 clearance, provenance recovery or native Level-3/A1/B8/N1c closure is claimed.
+
+**In-review isolated public-only slice — source-verified
+non-disputed gap pages (PR #205, branch `live-e2e-dispute-gap-page`,
+now targeting main after #204 merged):** Add a separate bounded canonical ≤4-KiB ASCII API that
+returns complement spans of disputed windows inside one strict exact-int
+half-open hop query. The list is sorted by hop location, not by ranked
+window position. `offset` identifies matching gap number (0..total),
+`limit` is 1..8; each full-page gap has positive width and
+`next_offset` advances until terminal null, with empty terminal
+page when offset==total. Every build and independent verify rebuilds
+the original ordered 3–5 source cohorts' full public dispute index;
+no detached index, private I/O, cache or host/provider authority.
+Strict preparse ≤4-KiB/digest/canonical checks and byte-for-byte
+original-source verification refuse malformed/duplicated/oversized/
+rehashed-forged output, invalid/bool hop/cursor/limit or reorder.
+TDD includes mixed disputed/unanimous sources, real two-page gap cursor
+fixture, empty-source/all-disputed cases, invalid inputs, and forgery
+refusal. Independent PR #205 review (0 Critical/Important, 2 Minor)
+requested original-source majority-not-unanimous gap and leading/trailing
+clipped query coverage including the valid 8-gap limit, plus historic
+roadmap repair. Added a 4-cohort, 2-segment 24-hop original source fixture
+with eight majority gaps and independently verified build→verify; updated
+#202 to Merged, #203 to merged commit `0a17e0f`, and #204 to
+main-base. A gap is unanimous or majority, **not** certified safety
+or native observation. Independent review and final exact-head Ubuntu Python
+3.13/3.14 CI required on final HEAD/main-base; #204 merged,
+#205 is retargeted to main and remains open.
+A1/B8/N1c/UID-502/stale provider/native Level-3 remain OPEN;
+PR-only Level-3 skip does not certify native acceptance.
+
+**Next isolated public-only functional slice — three-class hop coverage
+(branch `live-e2e-classified-hop-coverage`, stacked on PR #205):**
+Add canonical ≤4-KiB ASCII original-source-verifiable count summary for
+one strict exact-int half-open hop query: positive-width counts of
+unanimous, majority, disputed hops, their sum and the non-disputed
+(unanimous+majority) count. The return is navigation only, not trust.
+Each build and independent verify reconstructs complete ordered 3–5
+cohort `staging_consensus_intervals` once and clips their source
+intervals. Include full original interval digest; SHA-256 provides
+consistency only, not authenticated source provenance. Fail closed on
+bool/invalid/out-of-bounds, oversize/digest-before-parse, duplicate-key,
+noncanonical, rehashed forgery and source reorder. TDD exercises a
+single real source fixture with majority, disputed and unanimous hops,
+clipped subset, bad inputs/tamper, and one source interval rebuild per
+call. Keep modules path-free and entirely offline: no host/provider/
+private I/O, detached or cached summaries, native authorization,
+severity, or trustworthy chronology. Independent PR #206 review
+(0 Critical/Important, 2 Minor) requested cross-API parity from the
+same original cohorts and roadmap gate correction: compare disputed hops
+against #202 single-range coverage and exhaustive gap-page non-disputed
+length against unanimous+majority, including clipped queries and majority
+hops. PR #204 merged as `30770c4`; #205 must merge first, then retarget
+#206 to main and verify exact final-head Python 3.13/3.14 CI and
+independent review before merging. PR-only Level-3 SKIPPED
+is not native acceptance; A1/B8/N1c/UID-502/provider native Level-3
+remain OPEN.
+
+**Next isolated public-only slice — source-verified classified-hop batches
+(branch `live-e2e-classified-hop-coverages`, stacked on PR #206):**
+Add a separate ≤8-KiB canonical ASCII builder/verifier for 1–8
+caller-ordered (possibly duplicate/overlapping) strict exact-int
+half-open queries. One complete original 3–5 cohort intervals rebuild
+per build/verify call serves per-query clipped unanimous/majority/disputed
+counts and non-disputed sum, with exact width identity and complete
+source-interval SHA. Bounded caller-list capture must precede all
+validation/use; reject malformed/boolean/out-of-range queries, oversize,
+noncanonical/duplicate/rehashed forged wire, and reordered cohort
+sources by fixed sanitized failures. Keep source fully public and
+offline: no detached index/cache, host/provider/private I/O, trusted
+time, severity, provenance or authorization inference. RED→GREEN tests
+cover real mixed-class two-segment original cohorts, caller-order and
+duplicates, legal eight-query upper bound, invalid shape/type/bounds,
+one rebuilt full source per invocation, rehashed forgery/source
+reordering and parsing size cap. Independent security/docs review and
+**final exact-head dual Python 3.13/3.14 CI** after PR #205 and PR #206
+have merged and this stacked branch retargets main are required.
+PR-only Level-3 skipped is not native acceptance; A1/B8/N1c/UID-502/
+stale provider/native Level-3 remain OPEN.
+
+Independent PR #207 review (exact initial HEAD `f1bd728`, 0 Critical,
+0 Important, 1 Minor) requested deterministic mutable-input snapshot
+regression. A synchronized worker thread now mutates either an outer
+8-pair list by appending a ninth query or one existing inner range's
+boundary *during* original-source rebuild. For both build and verify,
+the canonical payload and verified facts must stay bound to the eight
+original frozen pairs. Production logic already freezes before source
+I/O; this is a forward regression guard, not an observed runtime bug.
+#205 and #206 remain upstream merge gates; the final exact-HEAD/main
+Python 3.13/3.14 CI plus independent review remain required.
+
+**Next isolated public-only slice — classified hop union coverage
+(branch `live-e2e-classified-hop-union`, stacked on PR #207):**
+Add bounded 1–8 original caller-ordered strict-int half-open hop queries
+with sorted merged unique intervals (overlapping, duplicate and
+touching segments coalesce). Return canonical ≤4-KiB ASCII one-shot
+source-verified unique unanimous/majority/disputed and non-disputed
+hop counts with the complete original source-interval SHA-256.
+Independent build/verify each reconstruct the original ordered 3–5
+cohort public intervals exactly once; never use detached/cached data.
+Bounded frozen outer/inner input capture, original-query echo, disjoint
+sorted merged ranges, strict sum=unique width and byte-for-byte
+original-source verifier are mandatory. Invalid/bool/shape/oversized,
+duplicate-key/noncanonical/rehashed forgery and reordered originals
+fail with fixed sanitized errors. RED→GREEN focused tests include
+real mixed-class source fixture, duplicates/touching queries, disjoint
+8-input bound, one rebuild for build and verify, invalid shape/type/
+bounds and tampered/reordered/oversized before parse. No host/provider/
+private I/O, trusted time, provenance, severity or authority. Independent
+security/docs review and final exact-head dual Python 3.13/3.14 CI are
+required after #205→#206→#207 merge and final main retarget; PR-only
+Level-3 SKIPPED is not native acceptance. A1/B8/N1c/UID-502/stale
+provider/native Level-3 remain OPEN.
+
+Independent PR #208 review at initial HEAD `4bb22cc` found
+**0 Critical / 0 Important / 2 Minor**: requested a real
+four-cohort, two-segment source fixture with disjoint union queries
+cross-checked against original-source rebuilt disputed overlap union
+and the per-merged-range one-query classified coverage; and deterministic
+build/verify worker-thread mutation after the new batch's bounded freeze.
+Two parametrized parity queries cover majority, unanimous and disputed
+hop mixes and clipped gaps, asserting unique, disputed and non-disputed
+counts are identical across API layers and summing every classified
+merged range exactly reconstructs the union totals. Four deterministic
+snapshot tests cover append-ninth outer mutation and a changed inner
+hop boundary during source rebuild in both build and verify. No
+production change: independent reviewer found existing algorithm and
+security invariants sound. Exact final-head dual Python 3.13/3.14 CI,
+independent final review and upstream #205→#206→#207 merges remain gates.
+
+**New isolated public-only slice — source-verified classified hop interval
+pages (branch `live-e2e-classified-hop-page`, stacked on PR #208):**
+Add source-bound canonical ≤4-KiB ASCII per-page navigation of the
+original `staging_consensus_intervals` rows clipped by one strict
+exact-int half-open hop query. The public projection includes only
+classification (unanimous/majority/disputed) and clipped start/end
+bounds, not sensitive group or host metadata. Preserve original
+interval boundaries and chronological **hop index navigation only**,
+not verified time, security severity, provenance or authority.
+`offset` counts clipped source segments (0..total) and `limit` is
+1..8, with full positive-width segments, monotonic nonterminal cursor
+and explicit empty terminal pages. Build/verify each rebuild complete
+original ordered 3–5 cohorts' public intervals once, bind their full
+SHA-256 and compare exact canonical bytes. Reject bool/invalid/
+out-of-bounds query/cursor/limit, oversize/digest-before-parse,
+duplicate-key/noncanonical/rehashed forgery and changed original order
+with sanitized errors. TDD includes mixed real source segments and
+multi-page cursor verification, valid 8-segment upper bound, query
+clipping, empty terminal, invalid type/bound, tamper and one complete
+source rebuild per call. Independent security/docs review and final
+exact-head dual Python 3.13/3.14 CI required after #205→#206→#207→#208
+merge and this branch retargets main. PR-only Level-3 skip does not
+equal native acceptance; A1/B8/N1c/UID-502/stale provider/native
+Level-3 remain OPEN.
+
+Independent PR #209 review at initial HEAD `0ccbb46`: **0 Critical,
+0 Important, 1 Minor**, concerning a test that asserted both-end
+clipping although its query start was exactly at a source interval
+boundary. Added real original four-cohort/two-segment source
+build→verify parity: query endpoints strictly inside two *different*
+underlying source intervals, `limit=1` traversal through all clipped
+segments, preservation of full original intervals SHA and precise
+unanimous/majority/disputed hop totals matching the original-source
+#206 single-query classified summary. No production algorithm change.
+Final exact-head dual Python 3.13/3.14 CI and independent review
+remain mandatory after #205→#206→#207→#208 merge and main retarget.
+
+**New isolated public-only slice — class-filtered classified hop interval
+pages (branch `live-e2e-classified-filter-page`, stacked on PR #209):**
+Add canonical ≤4-KiB ASCII per-page source-bound projection of
+original classified intervals for one strict exact class selected from
+`unanimous/majority/disputed` and one strict exact-int half-open hop
+query. Filter *before* cursor navigation; `offset` counts only
+matching clipped original interval rows (0..total); `limit` 1..8,
+monotonic nonterminal cursor or terminal null, including zero-match
+and explicit offset-total empty page. Preserve original source
+agreement boundaries and stable hop ordering; do not treat majority or
+unanimous as certified safe. Independently build/verify from the full
+original ordered 3–5 cohorts' interval index exactly once per call,
+bind complete source interval SHA and compare byte-exact canonical
+bytes. Fail closed on malformed/bool/invalid class or bounds,
+oversized/digest-before-parse, duplicate keys, noncanonical and
+rehashed forgery, source reorder via fixed sanitized errors.
+RED→GREEN tests cover all three real source classes, paging,
+independent one-query class length parity, empty terminal,
+strict invalid input, forged wire and one rebuild per invocation.
+No host/provider/private I/O, cache/detached index, trustworthy time,
+severity, authorization or authenticated provenance. Independent
+security/docs review and final exact-head dual Python CI after
+upstream #205→#206→#207→#208→#209 merge and #210 main retarget
+remain mandatory. PR-only Level-3 skipped is not native acceptance;
+A1/B8/N1c/UID-502/stale provider/native Level-3 remain OPEN.
+
+Independent PR #210 review (original HEAD d2ed1c7, 0 Critical /
+0 Important / 2 Minor) requested stronger source-derived pagination
+tests, not a change to production algorithm. Added exact real
+four-cohort/two-segment source regression with a filtered majority query
+whose *both* boundaries fall strictly inside separate source intervals;
+page cursor/length and full source SHA cross-check against independently
+verified #206 classified coverage. Added a separate real eight-hop
+disputed-only original source with changing agreement groups across
+all eight adjacent same-category intervals; verified one legal
+limit=8 page and complete limit=1 cursor traversal without
+coalescing source identities. This is navigation evidence only,
+not provenance/safety/host authority. Exact-head 3.13/3.14 CI
+and upstream merges #205→#206→#207→#208→#209 remain gates.
+
+**New isolated public-only slice — source-verified multi-class filtered
+classified interval pages (branch live-e2e-classified-multifilter-page,
+stacked on PR #210):** Allow 1–3 distinct exact selected public classes
+(unanimous/majority/disputed), captured immutably from bounded
+caller-owned tuples/lists. Return original-source hop-ordered matching
+interval pages (offset=0..total, limit=1..8), preserving agreement-group
+boundaries rather than coalescing equal-class rows. Output is canonical
+≤4-KiB ASCII, binds full original source-interval SHA-256, and demands
+independent byte-exact rebuild of the entire ordered 3–5 cohort intervals
+once per build or verify. Strict exact-int query/cursor/limit and
+category duplicate/type/unknown input refusal, preparse size+digest,
+duplicate-key/noncanonical/rehashed forgery and source reordering
+must fail closed with fixed sanitized errors. TDD covers original
+mixed classes, selected category order and source order, full eight
+segments, empty terminal page, independent one-query class sum parity,
+invalid input/rehashed fraud/source reorder, and deterministic caller
+list mutation during rebuild for both build and verify. Navigation
+does not certify safety or privilege, chronology, severity, provenance
+or host/provider/private authority. After upstream
+#205→#206→#207→#208→#209→#210 merges, require retarget to main,
+exact-final-head Python 3.13+3.14 CI and independent comprehensive
+review. PR-only Level-3 SKIPPED is not native acceptance; A1/B8/N1c/
+UID-502/stale provider/native Level-3 remain OPEN.
+
+Independent #211 deep review (initial HEAD e9bb141, 0 Critical,
+0 Important, 2 Minor) requested extra regression—not production
+algorithm changes—for source-bound 1-class vs #210 paging and
+2-class source-hop interleaving after strict interior clipping at both
+query ends, including original interval SHA and #206 class-count
+consistency. Added both real original cohort coverage and deterministic
+3-to-4 category-list worker race during original interval rebuild
+for build and verify, preserving the first immutable legal triple
+and exactly one original rebuild per call. Final HEAD/source-specific
+dual Python CI and independent review remain necessary; #205→#210
+upstream stacked merges are still blocked.
+
+
+### Classified hop public-only APIs — consolidated integration (2026-10-13)
+
+Historical slices #205–#211 were independently reviewed, with all reported
+Minor source-derived regression/doc corrections incorporated at their final
+stacked heads. The seven PRs are being reconciled with the latest main
+through a single consolidated integration candidate, not treated as seven
+independent green merges. Each module is still offline public-only
+projection over original ordered source cohorts; hashes prove content
+equality and source reconstruction only, never host provenance, safety,
+authorization, absence of tampering or native Level-3 acceptance.
+
+The original pre-migration #205–#211 checks were incomplete/cancelled and
+cannot authorize this integration. Require the consolidated exact-head
+GitHub-hosted full six-shard Python 3.13/3.14 validation, both historical
+required gates and fresh combined source/security/docs review before
+integration. Preserve immutable main-source replay, bounded exact-integer
+input, deterministic frozen caller parameters, at-most-4/8-KiB canonical
+ASCII, digest/size-before-parse and fail-closed rejection contracts. The
+original stacked PRs are superseded only after the consolidated patch is
+verified on main and merged; do not claim earlier missing checks passed.
+
+CI performance acceptance remains 10/10 under 10 minutes for the earlier
+ordinary suite, but the additional projection tests require separate runtime
+measurement. PRs #221, #224 and #225 have since merged on main; the
+trusted-main read-only forensic run 38331323606 refused with exit 70
+without evidence, and fresh marker-only inspection 38331933826
+reconfirmed the same three UID-502 residual identities, all without valid
+expected_commit. No directory deletion, marker clearance, process signal,
+privilege escalation, E2E guest launch or disposition is authorized. Native
+Level-3, A1/B8/N1c provenance and exact cleanup remain OPEN.
+
+
+### Source-heavy CI rebalance during classified-stack integration (2026-10-13)
+
+The first updated-main integration CI run 38333335954 proved that adding
+#205–#211 source-bound regression cases can make Python 3.14 projection-rest
+exceed the original under-ten-minute end-to-end budget, although the other
+five partitions passed. This is a measured runtime regression, not a proven
+assertion failure or native E2E clearance. To rebalance without changing
+scope, move 15 exact nodes selected from the source-heavy Python 3.13
+projection-rest hosted slowest-call evidence in run 38332697221 to the
+existing projection-hot shard. Preserve all four original hot nodes and
+all remaining projection tests; exact IDs are deselected from projection-rest
+while every other test stays in its existing partition. Both historical
+Python required checks still require all six hosted partitions to succeed.
+The changed routing must be revalidated by new exact-head hosted CI for
+both Python versions. Prior 10/10 speed acceptance remains historical and
+does not imply this expanded suite has met the latency target.
+
+
+### Complementary projection-rest hosted shards (2026-10-13)
+
+Exact-node collection on the #227 integration checkout records **795**
+projection parametrized nodes. The four original plus 15 additional
+hosted-measured hot IDs select 19 unique nodes. Two complementary pytest
+keyword filters applied to the remaining collection select **408**
+'classified or dispute' and **368** 'not (classified or dispute)' nodes.
+Disposable local --collect-only proof confirmed all **795 = 19 + 408 + 368**
+nodes are covered once, with zero overlap or omissions. Neither source
+tests nor assertions changed. The general rest partition continues to
+exclude only the projection source module. The new workflow has eight
+parallel hosted partitions (four per Python) and retains both historical
+required check names; each aggregate fails closed unless all eight pass.
+Only the native main-push Level-3 stage uses the non-admin Intel Mac runner.
+
+The preceding six-partition integration run passed functional checks but
+exceeded the 10-minute latency target due to expanded projection-rest work.
+This eight-way layout is an improvement candidate, not a new speed PASS
+before its exact-head hosted CI validation and measurement.

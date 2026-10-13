@@ -23,7 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
-        partition: ["projection-hot", "projection-rest", "rest"]
+        partition: ["projection-hot", "projection-rest-classified", "projection-rest-other", "rest"]
     steps:
       - name: Verify Ubuntu 26.04 non-root x86
         shell: bash
@@ -70,14 +70,30 @@ jobs:
           PARTITION: ${{ matrix.partition }}
         run: |
           set -euo pipefail
-          # Exact node IDs selected from the four longest real GitHub-hosted
-          # projection tests. The hot and projection-rest sets are disjoint;
-          # any future tests in the module fall into projection-rest.
+          # Fixed original hot IDs plus 15 slowest measured source-verified
+          # projection nodes from hosted PR #227 Python 3.13 run.
+          # Each exact ID runs only in hot and is deselected from rest;
+          # all future source-module tests default to projection-rest.
           hot_tests=(
             "tests/ops/test_live_e2e_staging_projection.py::test_dispute_overlap_page_paginates_real_valid_overflow"
             "tests/ops/test_live_e2e_staging_projection.py::test_private_series_max_eight_segments_and_128_hops"
             "tests/ops/test_live_e2e_staging_projection.py::test_dispute_overlap_valid_source_index_can_exceed_wire_capacity"
             "tests/ops/test_live_e2e_staging_projection.py::test_dispute_overlap_coverage_remains_bounded_on_valid_large_index"
+            "tests/ops/test_live_e2e_staging_projection.py::test_classified_hop_filtered_page_keeps_eight_same_class_source_groups"
+            "tests/ops/test_live_e2e_staging_projection.py::test_dispute_gap_page_majority_leading_trailing_and_eight_gap_bound"
+            "tests/ops/test_live_e2e_staging_projection.py::test_classified_multifilter_source_clipping_matches_single_class_pages[classes0]"
+            "tests/ops/test_live_e2e_staging_projection.py::test_classified_multifilter_two_classes_interleave_original_hop_order"
+            "tests/ops/test_live_e2e_staging_projection.py::test_classified_multifilter_source_clipping_matches_single_class_pages[classes1]"
+            "tests/ops/test_live_e2e_staging_projection.py::test_classified_hop_filtered_page_majority_clips_inside_both_source_segments"
+            "tests/ops/test_live_e2e_staging_projection.py::test_series_max_eight_segments_128_hops"
+            "tests/ops/test_live_e2e_staging_projection.py::test_dossier_public_maximum_8x16_on_both_sides"
+            "tests/ops/test_live_e2e_staging_projection.py::test_dispute_ranks_real_sixteen_distinct_windows_upper_bound"
+            "tests/ops/test_live_e2e_staging_projection.py::test_classified_hop_multifilter_page_original_source_order_and_category_subset[categories2]"
+            "tests/ops/test_live_e2e_staging_projection.py::test_classified_hop_page_original_source_all_pages_and_clipped_interval"
+            "tests/ops/test_live_e2e_staging_projection.py::test_classified_hop_page_clips_inside_both_distinct_source_intervals"
+            "tests/ops/test_live_e2e_staging_projection.py::test_portfolio_rejects_mismatched_genuine_pair_and_sources"
+            "tests/ops/test_live_e2e_staging_projection.py::test_dossier_rejects_genuine_mismatched_pair_and_source_splice"
+            "tests/ops/test_live_e2e_staging_projection.py::test_classified_multifilter_source_clipping_matches_single_class_pages[classes2]"
           )
           case "${PARTITION}" in
             projection-hot)
@@ -85,7 +101,14 @@ jobs:
                 --clear-groups "$(command -v python)" -m pytest -q \
                 --durations=15 -n 2 --dist=load "${hot_tests[@]}"
               ;;
-            projection-rest)
+            projection-rest-classified|projection-rest-other)
+              # Fixed complementary selectors. Every non-hot node belongs
+              # to exactly one projection-rest partition.
+              if [[ "$PARTITION" == projection-rest-classified ]]; then
+                keyword_filter="classified or dispute"
+              else
+                keyword_filter="not (classified or dispute)"
+              fi
               deselect_args=()
               for node in "${hot_tests[@]}"; do
                 deselect_args+=("--deselect=${node}")
@@ -93,7 +116,7 @@ jobs:
               sudo /usr/bin/setpriv --reuid "$(id -u)" --regid "$(id -g)" \
                 --clear-groups "$(command -v python)" -m pytest -q \
                 --durations=15 -n 2 --dist=load \
-                tests/ops/test_live_e2e_staging_projection.py "${deselect_args[@]}"
+                -k "$keyword_filter" tests/ops/test_live_e2e_staging_projection.py "${deselect_args[@]}"
               ;;
             rest)
               sudo /usr/bin/setpriv --reuid "$(id -u)" --regid "$(id -g)" \
@@ -106,7 +129,7 @@ jobs:
 
   required-python:
     # Preserve historical required contexts. Each gate fails unless ALL
-    # six dual-Python shards passed (including cancelled and partial reruns).
+    # eight dual-Python shards passed (including cancelled and partial reruns).
     name: Ubuntu 26.04 x86 / Python ${{ matrix.python-version }}
     if: always()
     needs: [validate]
@@ -129,7 +152,7 @@ jobs:
             echo "::error::A Python/partition failed, was skipped or cancelled"
             exit 1
           fi
-          echo "All six full-coverage test partitions passed."
+          echo "All eight full-coverage test partitions passed."
 
   live-local-e2e:
     name: Merge-main no-network Level-3

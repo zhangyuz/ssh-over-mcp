@@ -9,16 +9,19 @@ native/security gates remain explicit.
 ## Current execution topology
 
 Routine `pull_request` (including fork PRs) and `push:main` execute
-the **complete** Python 3.13 and 3.14 pytest collections on six independent
+the **complete** Python 3.13 and 3.14 pytest collections on eight independent
 GitHub-hosted Ubuntu 26.04 x86_64 VMs (private repo standard 2 vCPU /
-8 GB each). Each Python version has three disjoint, jointly exhaustive
-partitions: the four exact long-running projection node IDs; all remaining
-projection tests (currently 607); and all other project tests. Each job has
+8 GB each). Each Python version has four disjoint, jointly exhaustive
+partitions: 19 exact hosted-measured projection-hot node IDs, 408 additional
+projection nodes selected by the fixed `classified or dispute` predicate,
+368 complementary nodes selected by `not (classified or dispute)`, and all
+other project tests. Collection proof: **795 = 19 + 408 + 368** parametrized
+projection nodes, with zero missing or duplicated IDs. Each job has
 a 15-minute fail-closed timeout, `pytest-xdist -n 2 --dist=load`,
 complete Ruff/compile operator coverage, full Git history, strictly non-root
 test identity and immutable SHA-pinned official actions. Two independent
 historical required-check contexts now refer to **aggregate gates**: both
-fail unless **all six jobs** succeed (including partial rerun failure).
+fail unless **all eight jobs** succeed (including partial rerun failure).
 The existing required check **names** are retained:
 
 - `Ubuntu 26.04 x86 / Python 3.13`
@@ -73,14 +76,14 @@ expensive projection node IDs out of the original 611-node projection module.
 Collection was checked: **611 = 4 hot + 607 other projection, 0 missing
 and 0 duplicate**. Its success is an empirical Canary, not proof of
 P95 under ten minutes. The new required-Python aggregate gates keep legacy
-names and independently check the six-job `needs.validate.result` for
+names and independently check the current eight-job `needs.validate.result` for
 `success`; every failure, cancellation and skip must fail closed.
 
 SOM is a **private repository**; standard hosted Linux minutes consume
 account included usage, then bill at the published account-specific rate.
-Six 15-minute shard caps and two 3-minute aggregate caps permit up to
-96 hosted runner-minutes per attempt (excluding other workflows); typical
-usage in the six-way green Canary was substantially lower. Check remaining
+Eight 15-minute shard caps and two 3-minute aggregate caps now permit up to
+126 hosted runner-minutes per attempt (excluding other workflows). This is
+an upper bound, not a cost forecast; measure actual run minutes separately. Check remaining
 Actions quota and monitor billable usage before routine production rollout. Monitor queue time, measured test time, end-to-end
 P95 (target <10 minutes), billing, and security regression outcomes.
 

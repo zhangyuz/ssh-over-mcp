@@ -2413,5 +2413,239 @@ returns 2 requested hops, **1 distinct window**, 2 disputed hops, 0
 unmatched hops, the original full index digest, and successful independent
 build→verify. This guards against double-counting a window across disjoint
 queries. PR #201 merged as `d9273a0`; #202 merged as `5f340307`;
-#203 now targets main; #204 remains stacked on #203, with final
-exact-head CI/review gates still required.
+#203 merged as `0a17e0f`; #204 merged as `30770c4`;
+#205 now targets main, with final exact-head CI/review gates still required.
+
+### Bounded public non-disputed gap pages (new isolated slice)
+
+`staging_dispute_gap_page.build_public_dispute_gap_page(runs, start, end,
+offset, limit)` returns canonical **≤4-KiB ASCII** pages of the complement
+of public disputed windows inside a strict exact-int half-open hop range.
+A gap means **non-disputed** (unanimous or majority), not a trusted safe
+interval. Builder and independent verifier each rebuild the complete
+public ranked index from the original ordered 3–5 source cohorts, then
+sort its disjoint windows by hop position to calculate gap bounds.
+Offset is a gap count from 0 through `total_gaps`; limit is **1–8**.
+Pages include complete nonempty `gaps`, `total_gaps` and an advancing
+`next_offset` or terminal null. Empty source index returns the full
+query as one gap; full disputed coverage returns none. The wire binds
+the complete source index SHA and fails closed on forged/duplicate/
+noncanonical/oversized payloads, invalid/bool bounds, cursor overrun,
+and source reorder. Verification requires exact rebuilt bytes.
+Tests cover a real original-source pair of separate non-disputed gaps
+across `limit=1` build→verify pages, distinct from index rank order.
+This is only public navigation, never time/severity/authentication/
+provenance/provider recovery, with no private/host/provider I/O or cache.
+
+Independent PR #205 Review follow-up: a valid original four-cohort,
+two-segment **24-hop** source alternates majority (three-agree, one-differs)
+and disputed hops. Its eight separate **majority** gaps are accepted as
+non-disputed (not certified safe), including query-leading and
+query-trailing gaps with `limit=8`, terminal cursor and original full
+index digest. A second range whose endpoints clip disputed windows
+returns exactly seven disjoint non-disputed gaps. Both build→verify
+from the unchanged original ordered cohorts.
+
+### Source-verified three-class hop coverage (next public-only slice)
+
+`staging_classified_hop_coverage.build_public_classified_hop_coverage(runs,
+start_hop, end_hop_exclusive)` returns a **≤4-KiB canonical ASCII** count
+summary over a strict exact-int half-open hop query: `unanimous_hops`,
+`majority_hops`, `disputed_hops`, their sum `query_hops`, and
+`non_disputed_hops=unanimous+majority`. Unlike the gap-page complement,
+the summary separates majority from unanimous without calling either
+safe. Each build or independent verify reconstructs the **entire**
+`staging_consensus_intervals` from the original ordered 3–5 cohorts,
+clips disjoint interval classifications, includes the complete source
+intervals SHA-256 and demands exact canonical wire after bounded
+size/SHA-before-parse, duplicate-key/noncanonical and forged-rehashed
+rejection. Any original source reorder fails verification.
+Tests cover all three real source classes in one query, clipped subset,
+exact-int/bool/out-of-range refusal, forged wire and one rebuild per
+builder/verifier. No host/provider/private I/O, detached interval index,
+cache, authenticated provenance, trusted chronology, severity or authority.
+
+Independent PR #206 review cross-API parity: the same original ordered
+four-cohort/two-segment source is queried with both `[0,4)` (majority
+plus disputed plus unanimous) and clipped `[1,5)`. For each query,
+the three-class public summary, source-verified single-range disputed
+coverage, and **all** source-verified gap pages (`limit=1`, followed
+until terminal cursor) must agree: `disputed_hops` equals clipped
+overlap disputed hops; `unanimous_hops+majority_hops` equals the sum
+of the complete non-disputed gap lengths. Distinct gap pages retain the
+same full dispute-index SHA. No provider I/O or trusted safety claim.
+PR #204 merged as `30770c4`; #205 now targets main; #206 stays
+stacked until #205 final gates and merge.
+
+### Canonical public classified-hop coverage batches (new isolated slice)
+
+`staging_classified_hop_coverages.build_public_classified_hop_coverages(runs,
+queries)` accepts **1–8** caller-ordered strict exact-int half-open hop
+ranges. Duplicates/overlaps are retained as **independent** queries;
+the canonical ≤8-KiB ASCII payload binds the full original intervals
+SHA-256, preserves query order and returns per-query `query_hops`,
+`unanimous_hops`, `majority_hops`, `disputed_hops` and
+`non_disputed_hops=unanimous+majority`. Every query's three class
+counts must sum exactly to its width. Mutable outer/inner lists are
+bounded-snapshotted before shape/value validation to avoid races.
+Builder and independent verifier each fully rebuild the original
+ordered 3–5 cohort source intervals exactly once, then verify byte-exact
+canonical output. Refuse bool/invalid/out-of-range inputs, oversized
+or duplicate-key/noncanonical/rehashed-forged wires, and source order
+changes. SHA is consistency, not authenticated provenance; no
+trusted time, host/provider/private I/O, severity, safety/authorization,
+detached source data, or cross-request cache.
+
+Independent PR #207 review addition: deterministic concurrent worker
+mutations during the original cohort-interval rebuild test both builder
+and independent verifier with exactly eight frozen input pairs. Appending
+a ninth outer query or changing an inner hop boundary after capture
+cannot change source-bound canonical query order, classification counts
+or verification facts. A single full intervals rebuild is asserted for
+each invocation. This is test coverage, not a production code change.
+
+### Classified hop union across bounded query ranges (isolated next slice)
+
+`staging_classified_hop_union.build_public_classified_hop_union(runs,
+queries)` accepts **1–8** strict exact-int half-open ranges. Caller
+queries retain their original order (including repetition) but sorted
+merged union ranges remove all overlap and touching boundaries before
+counting unique `unanimous_hops`, `majority_hops`,
+`disputed_hops`, `non_disputed_hops=unanimous+majority`, and
+`unique_hops` (sum of three classifications).
+The canonical ≤4-KiB ASCII payload binds the complete original
+source-interval SHA-256. Builder/verifier each rebuild the complete
+public `staging_consensus_intervals` once from the original ordered
+3–5 cohorts. Bounded outer/inner caller snapshots precede validation
+to prevent validate/use races; strict exact-int/shape/range rejection,
+SHA and size before parsing, duplicate-key/noncanonical/rehashed
+forgery and source reordering refuse with fixed sanitized errors.
+Tests cover mixed-class overlapping/touching/repeated sources,
+disjoint union with the legal eight-range input bound, invalid inputs,
+one full source rebuild per build/verify, tamper and oversize.
+This is public navigation only, never authenticated provenance, native
+provider state, host/private I/O, security severity/authority or
+trusted chronology.
+
+Independent PR #208 review follow-up: on real ordered four-cohort
+two-segment sources, two disjoint (and optionally duplicated) half-open
+union queries with majority/disputed/unanimous mixes must agree with
+`staging_dispute_overlap_union`'s requested/disputed/non-disputed
+hop counts. Independently build→verify each resulting merged range
+with the single-query `staging_classified_hop_coverage` and sum all
+three classes; the total must match the union's unique width and
+full original source-interval digest. A second synchronized test matrix
+mutates caller lists after the union builder/verifier freezes eight pairs
+(outer ninth append, inner boundary change). Neither canonical wire
+nor verified facts can read the later mutation. No production
+algorithm change or inferred host/provider/trust authority.
+
+### Bounded source-verified classified hop interval pages (next slice)
+
+`staging_classified_hop_page.build_public_classified_hop_page(runs, start,
+end, offset, limit)` returns deterministic, canonical **≤4-KiB ASCII**
+pages of clipped original **classified source interval rows** within a
+strict exact-int half-open hop query. A segment includes only
+`start_hop`, `end_hop_exclusive` and public `classification`
+(`unanimous`, `majority` or `disputed`), never private groups or
+paths. Segments preserve original interval boundaries (they do **not**
+necessarily merge adjacent rows with the same class).
+`offset` counts segments from 0 through `total_segments`;
+`limit` is **1–8**, with forward-only `next_offset` and null terminal
+cursor; an offset at the total returns an explicit empty terminal page.
+Each independent build/verify recomputes complete original ordered 3–5
+cohort consensus intervals once, enforces bounded preparse digest+size,
+canonical bytes and exact byte-for-byte source rebuild.
+Tests cover mixed real majority/disputed/unanimous intervals, query
+clipping, page traversal and terminal empty, valid eight-segment page,
+invalid bool/query/cursor, digest-rehashed forgery, duplicate keys,
+source reorder and oversized-before-parser checks.
+No host/provider/private I/O, cached/detached original source,
+authenticated provenance, severity, trust or safety certification.
+
+Independent PR #209 Review: a separate real four-cohort/two-segment
+source fixture has original interval boundaries strictly surrounding
+*both* endpoints of query `[1,5)`. Each returned page (limit 1)
+clips the leading and trailing source intervals at their interior
+points, retains all source interval rows without silently dropping a
+segment, and uses the full original source intervals SHA-256. The
+independently verified sum by unanimous/majority/disputed class is
+identical to #206 one-query classified coverage for the exact same
+original cohorts and half-open query. This specifically repairs a
+prior test that began exactly on a source interval boundary.
+
+### Public class-filtered classified interval pages (next isolated slice)
+
+`staging_classified_hop_filtered_page.build_public_classified_hop_filtered_page(
+runs, start_hop, end_hop_exclusive, classification, offset, limit)`
+returns clipped source interval rows for **one exact public class**:
+`unanimous`, `majority` or `disputed`. Strict exact-int hop query
+uses a positive-width half-open range. Offset counts only **matching**
+segments, including terminal `offset==total_segments`; limit is 1–8.
+Pages preserve source intervals' original hop order and boundaries
+without merging equal-class agreement-group changes. A class with no
+matching segment produces a terminal empty page.
+Canonical ≤4-KiB ASCII output binds the full original intervals SHA;
+every independent build/verify rebuilds original ordered 3–5 cohort
+source intervals once, checks bounded wire size and digest before
+JSON parsing, refuses duplicate keys/noncanonical/rehashed forgery,
+invalid class/bool/out-of-range/cursor and reordered original sources,
+and compares exact canonical rebuilt bytes. Tests include each of the
+three real original-source classes, cursor traversal, empty class,
+terminal cursor, class-length parity against the independent single
+classified coverage API, forged output and preparse cap.
+No cached/detached public or private source, host/provider I/O, trusted
+timeline, authenticated provenance, severity, authorization or safety.
+
+Independent PR #210 review follow-up: an original four-cohort, two-segment
+source fixture has two distinct majority intervals with both query
+endpoints strictly *inside* these respective original source intervals.
+After filtering, limit=1 pages must return the two correctly clipped
+majority segments with no disputed gap leakage, terminal cursor and the
+unchanged full source-interval SHA. The resulting total majority hop
+length is independently cross-verified against #206 single-range
+classified hop coverage on the exact same original cohorts and query.
+A second real 8-hop, 4-cohort fixture has eight adjacent
+disputed intervals but changing agreement_groups. Source-bound
+filtering must preserve all eight identities and hop-order as distinct
+segments, with a legitimate limit=8 full page and complete
+limit=1 build→verify cursor traversal. Equal classification does
+not authorize merging original agreement-group boundaries.
+
+### Multi-class filtered public interval pages (next isolated slice)
+
+staging_classified_hop_multifilter_page.build_public_classified_hop_multifilter_page
+accepts 1–3 **distinct** caller-ordered public classes selected exactly
+from unanimous/majority/disputed (tuple/list bounded-snapshotted before
+source I/O), a strict exact-int half-open hop query, offset=0..total,
+and limit=1..8. It filters source intervals on the selected set
+**before** paging, preserving the original source hop order and
+agreement-group boundaries; category input order is echoed in the
+canonical ≤4-KiB ASCII wire but does not reorder source rows.
+An empty matching set gives a terminal empty page. Verification
+rebuilds original ordered 3–5 cohorts' complete consensus intervals
+independently on every call, binding full source-interval SHA-256 and
+byte-exact canonical output. Refuse repeated/invalid category inputs,
+malformed bool/query/cursor/limit, digest/oversize before parsing,
+duplicate keys/noncanonical/rehashed forgery and original source reorder
+using a fixed sanitized error. Deterministic worker mutations of the
+caller-owned category list during source rebuild may not alter output
+or verification. Valid original-source eight-segment page and
+independent class-count parity tests guard navigation.
+This is public navigation only, never trusted time, authenticated
+provenance, severity, host/provider/private I/O, safety or authority.
+
+Independent PR #211 review follow-up (0 Critical / 0 Important / 2
+Minor): real four-cohort, two-segment original source with a hop query
+strictly inside separate majority intervals now cross-checks a
+single-class multifilter page against #210 class-filtered page
+for each unanimous/majority/disputed class at every cursor, including
+exact full source SHA, source interval boundaries and #206 class hop
+count. The same clipped query also interleaves the source-hop-ordered
+union of independent majority and disputed one-class pages with
+two-class multifilter pages. Build and independent verify are exercised
+at each page. A separate synchronized worker-thread test freezes a
+valid three-class list before source reconstruction, then appends an
+illegal fourth item during rebuild, for both build and verify: original
+three classes and one complete source rebuild remain authoritative.
+All remain public navigation, not authenticated time or source authority.

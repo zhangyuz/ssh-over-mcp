@@ -17,6 +17,21 @@ HOT = {
     "test_private_series_max_eight_segments_and_128_hops",
     "test_dispute_overlap_valid_source_index_can_exceed_wire_capacity",
     "test_dispute_overlap_coverage_remains_bounded_on_valid_large_index",
+    "test_classified_hop_filtered_page_keeps_eight_same_class_source_groups",
+    "test_dispute_gap_page_majority_leading_trailing_and_eight_gap_bound",
+    "test_classified_multifilter_source_clipping_matches_single_class_pages[classes0]",
+    "test_classified_multifilter_two_classes_interleave_original_hop_order",
+    "test_classified_multifilter_source_clipping_matches_single_class_pages[classes1]",
+    "test_classified_hop_filtered_page_majority_clips_inside_both_source_segments",
+    "test_series_max_eight_segments_128_hops",
+    "test_dossier_public_maximum_8x16_on_both_sides",
+    "test_dispute_ranks_real_sixteen_distinct_windows_upper_bound",
+    "test_classified_hop_multifilter_page_original_source_order_and_category_subset[categories2]",
+    "test_classified_hop_page_original_source_all_pages_and_clipped_interval",
+    "test_classified_hop_page_clips_inside_both_distinct_source_intervals",
+    "test_portfolio_rejects_mismatched_genuine_pair_and_sources",
+    "test_dossier_rejects_genuine_mismatched_pair_and_source_splice",
+    "test_classified_multifilter_source_clipping_matches_single_class_pages[classes2]",
 }
 
 
@@ -40,7 +55,7 @@ def test_pr_ci_is_unprivileged_and_main_validation_is_non_cancelling() -> None:
     }
 
 
-def test_complete_dual_python_six_shard_matrix_and_operator_checks() -> None:
+def test_complete_dual_python_eight_shard_matrix_and_operator_checks() -> None:
     job = _workflow(WORKFLOW)["jobs"]["validate"]
     assert (
         job["name"]
@@ -51,10 +66,15 @@ def test_complete_dual_python_six_shard_matrix_and_operator_checks() -> None:
         "fail-fast": "false",
         "matrix": {
             "python-version": ["3.13", "3.14"],
-            "partition": ["projection-hot", "projection-rest", "rest"],
+            "partition": ["projection-hot", "projection-rest-classified", "projection-rest-other", "rest"],
         },
     }
     assert job["timeout-minutes"] == "15"
+    doc = (ROOT / "docs/ci-hosted-primary.md").read_text(encoding="utf-8")
+    assert "eight independent" in doc
+    assert "four disjoint, jointly exhaustive" in doc
+    assert "795 = 19 + 408 + 368" in doc
+    assert "all eight jobs" in doc
     assert "if" not in job
     steps = {step["name"]: step for step in job["steps"]}
     assert "Verify Ubuntu 26.04 non-root x86" in steps
@@ -86,23 +106,25 @@ def test_disjoint_partitions_select_all_exact_hot_tests_without_dropping_others(
     assert run.count("--clear-groups") == 3
     assert run.count("-m pytest -q") == 3
     assert run.count("--durations=15 -n 2 --dist=load") == 3
-    assert "projection-hot)" in run and "projection-rest)" in run and "rest)" in run
+    assert "projection-hot)" in run and "projection-rest-classified|projection-rest-other)" in run and "rest)" in run
     assert '"${hot_tests[@]}"' in run
     assert 'deselect_args+=("--deselect=${node}")' in run
     assert '"${deselect_args[@]}"' in run
     assert run.count("--deselect=") == 1
     assert f"--ignore={PROJECTION}" in run
-    assert " -k " not in run
+    assert '-k "$keyword_filter"' in run
+    assert 'keyword_filter="classified or dispute"' in run
+    assert 'keyword_filter="not (classified or dispute)"' in run
     assert "--ignore=tests/ops/test_live_e2e_staging_projection.py" in run
     source = (ROOT / PROJECTION).read_text(encoding="utf-8")
     for test_name in HOT:
         assert run.count(f'"{PROJECTION}::{test_name}"') == 1
-        assert f"def {test_name}(" in source
+        assert f"def {test_name.partition(chr(91))[0]}(" in source
     assert run.count(f'"{PROJECTION}::') == len(HOT)
     assert "Unknown test partition" in run
 
 
-def test_historical_required_check_names_fail_closed_on_all_six_shards() -> None:
+def test_historical_required_check_names_fail_closed_on_all_eight_shards() -> None:
     jobs = _workflow(WORKFLOW)["jobs"]
     gate = jobs["required-python"]
     assert gate["name"] == "Ubuntu 26.04 x86 / Python ${{ matrix.python-version }}"
