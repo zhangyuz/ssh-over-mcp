@@ -263,3 +263,23 @@ correctly rejects that historical tree. [ADR 0016](../decisions/0016-recovery-ro
 proposes a separate, exact-root, no-follow metadata-only **non-authorizing**
 observer of that root's contents. It never dereferences symlinks or reads
 regular file contents, and is not cleanup or recovery permission.
+
+
+## 2026-10-13 complete manifest reconciliation and operator decision
+
+All three residual roots now have complete matching private metadata
+inventories: 1362 directories, six symlinks, no regular files. Fresh
+UID502 root #2 observation 38427240585 matches the earlier two observations.
+Current main f25117f passes both hosted Python gates but native Level3
+still fails before guest launch on the preserved marker.
+
+The installed macOS tmp_cleaner runs at midnight and deletes old regular
+files and empty directories beneath /tmp; observed residual changes match
+that schedule. This supports a cleanup hypothesis, not historical proof,
+provenance reconstruction or disposition authority.
+
+The [exact operator recovery decision](2026-10-13-native-provider-recovery-decision.md)
+records each root identity, current bounded contents, proposed no-follow
+per-entry disposition, partial-failure handling, and the required operator
+decision before implementation or execution. Existing no-cleanup authority
+and native BLOCKED / FAIL-CLOSED status remain in force.

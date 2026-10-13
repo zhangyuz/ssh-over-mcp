@@ -1778,3 +1778,32 @@ The preceding six-partition integration run passed functional checks but
 exceeded the 10-minute latency target due to expanded projection-rest work.
 This eight-way layout is an improvement candidate, not a new speed PASS
 before its exact-head hosted CI validation and measurement.
+
+
+### Native provider investigation resumed — exact decision pending (2026-10-13)
+
+Main f25117f (merged #239) passes all eight hosted partitions and both
+Python aggregate gates in CI38425538261, but native Level3 fails before
+QEMU because the historical provider marker remains. Reconciled private
+observations cover all three exact roots: 1362 directories and six
+symlinks, no regular files; fresh root #2 observation38427240585 matches
+the earlier two inventories. The Mac's registered midnight tmp_cleaner
+provides a concrete explanation consistent with lost old regular payloads
+and surviving directory/link skeletons, but historical provenance remains
+unproven. The [operator decision plan](plans/2026-10-13-native-provider-recovery-decision.md)
+is proposed only. No disposal implementation, execution, marker recovery,
+or native acceptance is authorized or complete. Future temp-root alignment
+is a separate design task. Preserve both older dirty recovery worktrees.
+
+
+### Approved exact historical disposition implementation (2026-10-13)
+
+The operator approved the exact decision in PR240 at12:18:16 EDT. ADR0018
+and the separate incident tool/workflow bind three full private inventory
+digests and the unchanged marker. Disposable Mac tests exercise opaque-link
+removal, bottom-up directories, drift refusal, journal/replay and I/O
+uncertainty. Actual native recovery and cleanup remain OPEN until fresh
+review, exact-head hosted CI, trusted-main merge/inspection, approved
+disposition, guarded marker recovery and actual exact-main Level3 succeed.
+Future temp-root alignment remains separate. Earlier no-authorization
+statements describe the historical state before this explicit approval.
