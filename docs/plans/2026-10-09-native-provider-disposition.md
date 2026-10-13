@@ -254,3 +254,12 @@ by the UID-502 comparison.
 ## 2026-10-13 proposed fixed private-tmp residual follow-up
 
 [ADR 0015](../decisions/0015-private-tmp-residual-forensic.md) describes a separate bounded private metadata-only inspector for three exact /private/tmp roots. It leaves ADR 0014 and existing marker recovery unchanged. Successful evidence is non-authorizing; all three directory dispositions need later independent review and explicit operator permission. Native Level-3 remains blocked until safe disposition, marker recovery and exact-main guest acceptance.
+
+## 2026-10-13 recovery-root symlink evidence / supplemental authority
+
+Trusted-main [38392113385](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38392113385)
+observed `inventory-a-2-probe-symlink`, exit 70. The strict inventory
+correctly rejects that historical tree. [ADR 0016](../decisions/0016-recovery-root-special-metadata-observation.md)
+proposes a separate, exact-root, no-follow metadata-only **non-authorizing**
+observer of that root's contents. It never dereferences symlinks or reads
+regular file contents, and is not cleanup or recovery permission.

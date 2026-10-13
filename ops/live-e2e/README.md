@@ -214,3 +214,13 @@ explicit per-directory disposition still require their separate gates.
 ## Separate fixed private-tmp residual inspection
 
 [ADR 0015](../../docs/decisions/0015-private-tmp-residual-forensic.md) proposes a second trusted-main read-only workflow for three exact /private/tmp historical roots. It accepts root-owned sticky parent mode 01777 only at that fixed parent, with exact UID-502 0700 child identities. It neither relaxes ADR 0014 getconf preflight nor grants cleanup, marker recovery or tempfile migration authority. Do not dispatch before independently reviewed exact-head CI and trusted-main merge.
+
+## Recovery-root special-node metadata-only observation
+
+[ADR 0016](../../docs/decisions/0016-recovery-root-special-metadata-observation.md)
+adds a separate manual trusted-main workflow that can describe symlinks
+and special-file entries inside the single exact historical recovery root
+**without following or reading them**. It remains non-authorizing and
+never changes the strict inventory refusal or marker-only cleanup gates.
+Raw bounded evidence is retained privately for seven days. Do not dispatch
+before independent review and successful exact-head hosted CI.

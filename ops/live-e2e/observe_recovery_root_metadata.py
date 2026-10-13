@@ -1,0 +1,269 @@
+"""Fixed recovery residual observer: no-follow metadata, never cleanup authority."""
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import re
+import stat
+import sys
+from contextlib import ExitStack
+from dataclasses import asdict
+from pathlib import Path
+from time import monotonic
+
+
+def _sibling(name: str):
+    path = Path(__file__).parent / (name + ".py")
+    spec = importlib.util.spec_from_file_location("_root_observe_" + name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("fixed observer unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+private_tmp = _sibling("inspect_private_tmp_residuals")
+preflight = private_tmp.preflight
+inventory = private_tmp.inventory
+recovery = private_tmp.recovery
+_UID = 502
+_CATALOG = private_tmp._CATALOG[1]
+_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+MAX_ENTRIES = 4096
+MAX_DEPTH = 12
+MAX_PATH_BYTES = 4096
+MAX_EVIDENCE_BYTES = 2 * 1024 * 1024
+MAX_TOTAL_SECONDS = 420
+MAX_PASS_SECONDS = 60
+_REFUSAL_PHASE = "startup"
+
+
+def _validate_context() -> dict[str, str]:
+    recovery._validate_context(os.environ)
+    values = {
+        "authority_sha": os.environ.get("GITHUB_SHA", ""),
+        "run_id": os.environ.get("GITHUB_RUN_ID", ""),
+        "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""),
+    }
+    if (
+        os.geteuid() != _UID
+        or os.environ.get("GITHUB_WORKFLOW_REF") != (
+            "zhangyuz/ssh-over-mcp/.github/workflows/"
+            "live-local-e2e-recovery-root-observe.yml@refs/heads/main"
+        )
+        or os.environ.get("GITHUB_WORKFLOW_SHA") != values["authority_sha"]
+        or re.fullmatch(r"[0-9a-f]{40}", values["authority_sha"]) is None
+        or re.fullmatch(r"[1-9][0-9]{0,19}", values["run_id"]) is None
+        or re.fullmatch(r"[1-9][0-9]{0,4}", values["run_attempt"]) is None
+    ):
+        raise preflight.PreflightError()
+    return values
+
+
+def _kind(mode: int) -> str:
+    if stat.S_ISDIR(mode):
+        return "directory"
+    if stat.S_ISREG(mode):
+        return "regular"
+    if stat.S_ISLNK(mode):
+        return "symlink"
+    if stat.S_ISFIFO(mode):
+        return "fifo"
+    if stat.S_ISSOCK(mode):
+        return "socket"
+    if stat.S_ISCHR(mode) or stat.S_ISBLK(mode):
+        return "device"
+    return "other"
+
+
+def _record(path: str, info: os.stat_result) -> dict[str, int | str]:
+    return {
+        "path": path,
+        "kind": _kind(info.st_mode),
+        "device": info.st_dev,
+        "inode": info.st_ino,
+        "uid": info.st_uid,
+        "gid": info.st_gid,
+        "mode": stat.S_IMODE(info.st_mode),
+        "nlink": info.st_nlink,
+        "size": info.st_size,
+        "mtime_ns": info.st_mtime_ns,
+        "ctime_ns": info.st_ctime_ns,
+    }
+
+
+def _collect_special_metadata(root_fd: int, *, uid: int) -> tuple[dict[str, int | str], ...]:
+    """Borrow pinned root FD; collect no-follow node metadata only.
+
+    All directories must be safe to enter. Symlink and special *leaves*
+    are observed via stat(follow_symlinks=False), never opened or resolved.
+    """
+    entries: list[dict[str, int | str]] = []
+    started = monotonic()
+    used_bytes = 32
+    try:
+        root_dev = os.fstat(root_fd).st_dev
+
+        def append(path: str, info: os.stat_result) -> None:
+            nonlocal used_bytes
+            if monotonic() - started > MAX_PASS_SECONDS or len(entries) >= MAX_ENTRIES:
+                raise preflight.PreflightError()
+            entry = _record(path, info)
+            used_bytes += len(json.dumps(entry, sort_keys=True, separators=(",", ":")).encode()) + 1
+            if used_bytes > MAX_EVIDENCE_BYTES:
+                raise preflight.PreflightError()
+            entries.append(entry)
+
+        def walk(fd: int, relative: str, depth: int) -> None:
+            if monotonic() - started > MAX_PASS_SECONDS or depth > MAX_DEPTH:
+                raise preflight.PreflightError()
+            original = os.fstat(fd)
+            if (
+                not stat.S_ISDIR(original.st_mode)
+                or original.st_uid != uid
+                or original.st_dev != root_dev
+                or stat.S_IMODE(original.st_mode) & 0o022
+            ):
+                raise preflight.PreflightError()
+            append(relative, original)
+            observed: dict[str, os.stat_result] = {}
+            with os.scandir(fd) as iterator:
+                for child in iterator:
+                    name = child.name
+                    child_path = name if relative == "." else relative + "/" + name
+                    # _path_key enforces relative path and depth/length rules.
+                    inventory._path_key(child_path)
+                    if len(os.fsencode(child_path)) > MAX_PATH_BYTES:
+                        raise preflight.PreflightError()
+                    if len(entries) >= MAX_ENTRIES:
+                        raise preflight.PreflightError()
+                    observed[name] = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            for name in sorted(observed, key=os.fsencode):
+                first = observed[name]
+                child_path = name if relative == "." else relative + "/" + name
+                if stat.S_ISDIR(first.st_mode):
+                    if depth >= MAX_DEPTH:
+                        raise preflight.PreflightError()
+                    child_fd = os.open(name, _DIR_FLAGS, dir_fd=fd)
+                    try:
+                        if os.fstat(child_fd) != first:
+                            raise preflight.PreflightError()
+                        walk(child_fd, child_path, depth + 1)
+                    finally:
+                        try:
+                            os.close(child_fd)
+                        except (OSError, ValueError, TypeError, RuntimeError, MemoryError):
+                            raise preflight.PreflightError(cleanup_uncertain=True) from None
+                else:
+                    # Never open a regular/symlink/FIFO/socket/device leaf.
+                    append(child_path, first)
+                if os.stat(name, dir_fd=fd, follow_symlinks=False) != first:
+                    raise preflight.PreflightError()
+            if os.fstat(fd) != original:
+                raise preflight.PreflightError()
+
+        walk(root_fd, ".", 0)
+        return tuple(sorted(entries, key=lambda x: os.fsencode(str(x["path"]))))
+    except preflight.PreflightError:
+        raise
+    except (inventory.InventoryError, OSError, ValueError, TypeError, OverflowError, MemoryError):
+        raise preflight.PreflightError() from None
+
+
+def observe_recovery_root() -> bytes:
+    """A complete stable *observation*, never staging/recovery eligibility."""
+    global _REFUSAL_PHASE
+    _REFUSAL_PHASE = "context"
+    context = _validate_context()
+    started = monotonic()
+
+    def check_time():
+        if monotonic() - started > MAX_TOTAL_SECONDS:
+            raise preflight.PreflightError()
+
+    with ExitStack() as stack:
+        _REFUSAL_PHASE = "private-tmp-parent"
+        parent = stack.enter_context(private_tmp._pin_private_tmp())
+        _REFUSAL_PHASE = "marker-cache"
+        cache = stack.enter_context(preflight._pin_observed_fixed_cache_chain())
+        _REFUSAL_PHASE = "marker"
+        marker = preflight._read_marker(cache._fds[-1], uid=_UID)
+        _REFUSAL_PHASE = "catalog"
+        name, device, inode = _CATALOG
+        chain = stack.enter_context(preflight._pin_directory_chain(
+            parent._fds[-1], (name,), ((_UID, (0o700,)),),
+            post_close_validate=True,
+        ))
+        root = chain.metadata[-1]
+        if (
+            (root.device, root.inode, root.uid, root.mode)
+            != (device, inode, _UID, 0o700)
+            or root.device != parent.metadata[-1].device
+        ):
+            raise preflight.PreflightError()
+        _REFUSAL_PHASE = "process-a"
+        preflight._observe_fixed_process_snapshot_checked()
+        _REFUSAL_PHASE = "inventory-a"
+        first = _collect_special_metadata(chain._fds[-1], uid=_UID)
+        check_time()
+        _REFUSAL_PHASE = "inventory-b"
+        second = _collect_special_metadata(chain._fds[-1], uid=_UID)
+        if second != first:
+            raise preflight.PreflightError()
+        check_time()
+        _REFUSAL_PHASE = "process-b"
+        preflight._observe_fixed_process_snapshot_checked()
+        _REFUSAL_PHASE = "final-namespace"
+        preflight._revalidate_marker(cache._fds[-1], marker, uid=_UID)
+        chain.revalidate()
+        cache.revalidate()
+        parent.revalidate()
+        check_time()
+        _REFUSAL_PHASE = "encode"
+        result = {
+            "schema_version": 1,
+            "kind": "recovery-root-special-node-observation",
+            "workflow": "live-local-e2e-recovery-root-observe.yml",
+            **context,
+            "catalog_identity": {"device": device, "inode": inode, "uid": _UID, "mode": 0o700},
+            "recovery_eligible": False,
+            "snapshot_scope": "metadata-only; no link target or file contents",
+            "process_evidence": "two bounded executable-name snapshots; not exclusive quiescence",
+            "marker": {
+                "target": "47531dadb58d365f74089dd5f52ce1b61bb0fdd1",
+                "owner_pid": 38013,
+                "metadata": asdict(marker.metadata),
+            },
+            "entries": first,
+        }
+        encoded = json.dumps(
+            result, ensure_ascii=True, sort_keys=True, separators=(",", ":"),
+        ).encode()
+        if len(encoded) + 1 > MAX_EVIDENCE_BYTES:
+            raise preflight.PreflightError()
+        _REFUSAL_PHASE = "descriptor-close"
+    check_time()
+    _REFUSAL_PHASE = "complete"
+    return encoded + b"\n"
+
+
+def main(argv: list[str] | None = None) -> int:
+    if list(sys.argv[1:] if argv is None else argv):
+        raise preflight.PreflightError()
+    evidence = observe_recovery_root()
+    sys.stdout.buffer.write(evidence)
+    sys.stdout.buffer.flush()
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (Exception, KeyboardInterrupt):  # noqa: BLE001
+        print(
+            f"recovery root observation refused at {_REFUSAL_PHASE}; "
+            "no disposition authorized", file=sys.stderr,
+        )
+        raise SystemExit(70) from None
