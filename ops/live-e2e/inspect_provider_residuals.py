@@ -85,13 +85,23 @@ def inspect_residuals() -> bytes:
         cache = owned.enter_context(preflight._pin_observed_fixed_cache_chain())
         _REFUSAL_PHASE = "marker"
         marker = preflight._read_marker(cache._fds[-1], uid=_UID)
-        _REFUSAL_PHASE = "catalog-roots"
+        # The fixed labels distinguish a missing/unsafe name from a changed
+        # pinned identity, without ever logging a basename or observed stat.
+        root_phases = (
+            ("catalog-open-1", "catalog-identity-1"),
+            ("catalog-open-2", "catalog-identity-2"),
+            ("catalog-open-3", "catalog-identity-3"),
+        )
         chains = []
-        for name, device, inode in _CATALOG:
+        for (name, device, inode), (open_phase, identity_phase) in zip(
+            _CATALOG, root_phases, strict=True
+        ):
+            _REFUSAL_PHASE = open_phase
             chain = owned.enter_context(preflight._pin_safe_directory_chain(
                 temp._fds[-1], (name,), ((_UID, (0o700,)),),
                 system_uid=_UID, root_mode=0o700, post_close_validate=True,
             ))
+            _REFUSAL_PHASE = identity_phase
             selected = chain.metadata[-1]
             if (selected.device, selected.inode) != (device, inode):
                 raise preflight.PreflightError()
