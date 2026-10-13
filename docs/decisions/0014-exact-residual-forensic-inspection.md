@@ -82,6 +82,11 @@ metadata, all catalog root inventories and non-authorizing classification:
 `directory-only-residual` or `nonempty-or-unknown`. Every result explicitly sets
 `recovery_eligible=false`. No JSON escapes before final descriptor closure and
 namespace checks. Failed or partial inspection supplies no successful artifact.
+A refusal logs only a fixed, non-sensitive phase label in the private workflow
+log, never lower-level exceptions, observed paths, names, metadata, or content.
+The label helps separate workflow-context, native ancestry, catalog inventory
+and descriptor-close refusals; it does not prove the root cause and confers no
+disposition authority.
 The workflow writes only a new non-overwriting job-temp output and retains the
 successful bounded metadata artifact for seven days. Raw relative paths remain
 private investigation data; do not print or broaden their distribution. GitHub

@@ -241,3 +241,23 @@ def test_context_rejects_other_workflow_authority(monkeypatch, key, value):
     monkeypatch.setenv(key, value)
     with pytest.raises(module.preflight.PreflightError):
         module._validate_context()
+
+
+
+def test_refusal_phase_is_fixed_and_does_not_expose_private_details(tmp_path):
+    import subprocess
+
+    source = ROOT / "ops/live-e2e/inspect_provider_residuals.py"
+    result = subprocess.run(
+        [sys.executable, "-I", str(source)],
+        cwd=tmp_path,
+        env={"PATH": os.environ.get("PATH", "")},
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 70
+    assert result.stdout == b""
+    assert result.stderr == (
+        b"provider residual inspection refused at context; no recovery authorized\n"
+    )
