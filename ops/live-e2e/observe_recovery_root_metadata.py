@@ -32,7 +32,7 @@ _UID = 502
 _CATALOG = private_tmp._CATALOG[1]
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 MAX_ENTRIES = 4096
-MAX_DEPTH = 12
+MAX_DEPTH = 64
 MAX_PATH_BYTES = 4096
 MAX_EVIDENCE_BYTES = 2 * 1024 * 1024
 MAX_TOTAL_SECONDS = 420
@@ -108,15 +108,29 @@ def _path_violation_kind(path: str) -> str:
             or any(part in {"", ".", ".."} for part in path.split("/"))
         ):
             return "invalid"
-        if len(path.split("/")) > inventory.MAX_DEPTH:
+        if len(path.split("/")) > MAX_DEPTH:
             return "depth"
-        if len(path) > inventory.MAX_PATH_BYTES:
+        if len(path) > MAX_PATH_BYTES:
             return "bytes"
-        if len(os.fsencode(path)) > inventory.MAX_PATH_BYTES:
+        if len(os.fsencode(path)) > MAX_PATH_BYTES:
             return "bytes"
     except (OSError, ValueError, TypeError, UnicodeError, MemoryError):
         return "unavailable"
     return "unresolved"
+
+
+def _observe_path_key(path: str) -> None:
+    """Observer-only finite path envelope; no effect on staging eligibility."""
+    if (
+        type(path) is not str
+        or not path
+        or len(path) > MAX_PATH_BYTES
+        or "\x00" in path
+        or any(part in {"", ".", ".."} for part in path.split("/"))
+        or len(path.split("/")) > MAX_DEPTH
+        or len(os.fsencode(path)) > MAX_PATH_BYTES
+    ):
+        raise preflight.PreflightError()
 
 
 def _collect_special_metadata(root_fd: int, *, uid: int) -> tuple[dict[str, int | str], ...]:
@@ -169,16 +183,14 @@ def _collect_special_metadata(root_fd: int, *, uid: int) -> tuple[dict[str, int 
                 for child in iterator:
                     name = child.name
                     child_path = name if relative == "." else relative + "/" + name
-                    # _path_key enforces relative path and depth/length rules.
+                    # This separate metadata-only observer has its own
+                    # finite depth envelope. Strict staging remains at 12.
                     _COLLECT_PHASE = "entry-path"
                     try:
-                        inventory._path_key(child_path)
-                    except inventory.InventoryError:
+                        _observe_path_key(child_path)
+                    except preflight.PreflightError:
                         _COLLECT_PHASE = "entry-path-" + _path_violation_kind(child_path)
                         raise
-                    if len(os.fsencode(child_path)) > MAX_PATH_BYTES:
-                        _COLLECT_PHASE = "entry-path-bytes"
-                        raise preflight.PreflightError()
                     _COLLECT_PHASE = "entry-budget"
                     if (
                         discovered >= MAX_ENTRIES or name in observed

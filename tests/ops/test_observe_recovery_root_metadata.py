@@ -266,7 +266,7 @@ def test_rejected_relative_path_reports_only_fixed_limit_kind(
 ):
     mod, root, nested, _ = case
     (nested / "safe-long-leaf").symlink_to("/private/never-follow")
-    monkeypatch.setattr(mod.inventory, limit_name, limit)
+    monkeypatch.setattr(mod, limit_name, limit)
     with pytest.raises(mod.preflight.PreflightError):
         mod.main([])
     assert mod._REFUSAL_PHASE == expected
@@ -279,3 +279,37 @@ def test_relative_path_violation_kinds_do_not_expose_names():
     assert mod._path_violation_kind("a/../b") == "invalid"
     assert mod._path_violation_kind("a/" + "x" * 5000) == "bytes"
     assert mod._path_violation_kind("a/b") == "unresolved"
+
+
+def test_separate_observer_accepts_deep_historical_directory_metadata_only(case):
+    mod, root, nested, _ = case
+    current = nested
+    for n in range(14):
+        current = current / ("d" + str(n))
+        current.mkdir(mode=0o700)
+    target = "/private/link-target-must-never-be-followed"
+    (current / "pointer").symlink_to(target)
+    record = json.loads(mod.observe_recovery_root())
+    assert record["recovery_eligible"] is False
+    assert any(entry["kind"] == "symlink" for entry in record["entries"])
+    assert target not in json.dumps(record)
+    # The existing strict staging/residual collector still rejects >12 levels.
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        with pytest.raises(mod.inventory.InventoryError):
+            mod.inventory.collect_residual_inventory(fd, uid=os.geteuid())
+    finally:
+        os.close(fd)
+
+
+def test_separate_observer_still_refuses_beyond_its_own_finite_depth(case, monkeypatch):
+    mod, root, nested, _ = case
+    current = nested
+    for n in range(5):
+        current = current / ("d" + str(n))
+        current.mkdir(mode=0o700)
+    monkeypatch.setattr(mod, "MAX_DEPTH", 4)
+    with pytest.raises(mod.preflight.PreflightError):
+        mod.observe_recovery_root()
+    assert mod._REFUSAL_PHASE.startswith("inventory-a-")
+    assert root.is_dir()
