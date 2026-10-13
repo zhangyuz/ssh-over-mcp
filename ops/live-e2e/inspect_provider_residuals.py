@@ -35,6 +35,8 @@ _CATALOG = (
 MAX_TOTAL_ENTRIES = 4096
 MAX_EVIDENCE_BYTES = 2 * 1024 * 1024
 MAX_TOTAL_SECONDS = 420
+# Fixed, non-sensitive diagnostic phase; never log exceptions or source paths.
+_REFUSAL_PHASE = "startup"
 
 
 def _validate_context() -> dict[str, str]:
@@ -65,6 +67,8 @@ def _marker_metadata(observation) -> dict[str, int]:
 
 def inspect_residuals() -> bytes:
     """No operator-selected paths or fixture parameters; return only after cleanup."""
+    global _REFUSAL_PHASE
+    _REFUSAL_PHASE = "context"
     context = _validate_context()
     deadline = monotonic() + MAX_TOTAL_SECONDS
 
@@ -75,9 +79,13 @@ def inspect_residuals() -> bytes:
     with ExitStack() as owned:
         # These existing helpers verify pinned authority before native capture,
         # derive T only from fixed getconf, and pin literal / ancestry no-follow.
+        _REFUSAL_PHASE = "native-temp"
         temp = owned.enter_context(preflight._pin_observed_native_temp_chain())
+        _REFUSAL_PHASE = "marker-cache"
         cache = owned.enter_context(preflight._pin_observed_fixed_cache_chain())
+        _REFUSAL_PHASE = "marker"
         marker = preflight._read_marker(cache._fds[-1], uid=_UID)
+        _REFUSAL_PHASE = "catalog-roots"
         chains = []
         for name, device, inode in _CATALOG:
             chain = owned.enter_context(preflight._pin_safe_directory_chain(
@@ -88,7 +96,9 @@ def inspect_residuals() -> bytes:
             if (selected.device, selected.inode) != (device, inode):
                 raise preflight.PreflightError()
             chains.append(chain)
+        _REFUSAL_PHASE = "process-a"
         preflight._observe_fixed_process_snapshot_checked()
+        _REFUSAL_PHASE = "inventory-a"
         records = []
         original = []
         count = 0
@@ -107,13 +117,16 @@ def inspect_residuals() -> bytes:
                 ),
                 "entries": [asdict(entry) for entry in entries],
             })
+        _REFUSAL_PHASE = "inventory-b"
         # Detect changes after a previously collected root, not only while its
         # own walk runs. Same-account ABA/concurrency remains an explicit limit.
         for chain, entries in zip(chains, original, strict=True):
             check_deadline()
             if inventory.collect_residual_inventory(chain._fds[-1], uid=_UID) != entries:
                 raise preflight.PreflightError()
+        _REFUSAL_PHASE = "process-b"
         preflight._observe_fixed_process_snapshot_checked()
+        _REFUSAL_PHASE = "final-namespace"
         preflight._revalidate_marker(cache._fds[-1], marker, uid=_UID)
         for chain in reversed(chains):
             chain.revalidate()
@@ -134,12 +147,15 @@ def inspect_residuals() -> bytes:
             },
             "roots": records,
         }
+        _REFUSAL_PHASE = "encode"
         encoded = json.dumps(result, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode()
         if len(encoded) + 1 > MAX_EVIDENCE_BYTES:
             raise preflight.PreflightError()
+        _REFUSAL_PHASE = "descriptor-close"
     # Context exit runs final namespace checks and closes owned descriptors.
     # Failure during that stage prevents any successful bytes from escaping.
     check_deadline()
+    _REFUSAL_PHASE = "complete"
     return encoded + b"\n"
 
 
@@ -157,5 +173,8 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except (Exception, KeyboardInterrupt):  # noqa: BLE001
         # Never expose paths, file content, child output or lower-level errors.
-        print("provider residual inspection refused; no recovery authorized", file=sys.stderr)
+        print(
+            f"provider residual inspection refused at {_REFUSAL_PHASE}; no recovery authorized",
+            file=sys.stderr,
+        )
         raise SystemExit(70) from None
