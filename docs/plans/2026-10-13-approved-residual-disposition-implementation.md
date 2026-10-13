@@ -36,8 +36,12 @@ tests/ops/test_dispose_historical_residuals.py, ADR0018 and linked operator docs
 - [x] Fresh independent complete code/security/doc review; Important findings
   fixed via failing root/ancestor/inspection regressions and real I/O/crash tests.
   Journal-name replacement was additionally reproduced RED and fixed GREEN.
-- [ ] Update existing PR240 around final implemented scope; exact-head full hosted CI.
-- [ ] Merge reviewed authority; trusted-main inspect-only must match all pins.
-- [ ] Apply approved disposition once; verify journal, exact absence and marker retained.
-- [ ] Existing exact-PID marker recovery; exact-main native E2E + host/guest cleanup.
-- [ ] Record exact evidence and preserve older dirty worktrees.
+- [x] Update existing PR240 around final implemented scope; exact-head full hosted CI.
+- [x] Merge reviewed authority; trusted-main inspect-only must match all pins.
+- [x] Apply approved disposition once; verify journal, exact absence and marker retained.
+- [x] Existing exact-PID marker recovery; exact-main native E2E + host/guest cleanup.
+- [x] Record exact evidence and preserve older dirty worktrees.
+
+Completion evidence: [exact native provider acceptance](../evidence/2026-10-13-native-provider-recovery-acceptance.md).
+The active handoff worktree/progress.md is preserved at the user's request;
+older dirty worktrees are not part of this cleanup.

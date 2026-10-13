@@ -1798,7 +1798,7 @@ is a separate design task. Preserve both older dirty recovery worktrees.
 
 ### Approved exact historical disposition implementation (2026-10-13)
 
-The operator approved the exact decision in PR240 at12:18:16 EDT. ADR0018
+The operator approved the exact decision in PR #240 at12:18:16 EDT. ADR0018
 and the separate incident tool/workflow bind three full private inventory
 digests and the unchanged marker. Disposable Mac tests exercise opaque-link
 removal, bottom-up directories, drift refusal, journal/replay and I/O
@@ -1807,3 +1807,19 @@ review, exact-head hosted CI, trusted-main merge/inspection, approved
 disposition, guarded marker recovery and actual exact-main Level3 succeed.
 Future temp-root alignment remains separate. Earlier no-authorization
 statements describe the historical state before this explicit approval.
+
+
+### Historical native provider incident recovered and verified (2026-10-13)
+
+PR #240 merged as main 53868a714308273e4f3292483ff3e33299193c1e. Approved
+exact-root disposition 38437724175 and existing guarded marker recovery
+38438738523 passed. Exact-main CI 38437463320 attempt 2 passed all eight
+hosted partitions, both Python gates and actual no-network native E2E,
+including guest-run and provider-state absence steps. The earlier first
+native attempt correctly refused the not-yet-recovered marker; retain that
+failure in evidence. The [acceptance record](evidence/2026-10-13-native-provider-recovery-acceptance.md)
+binds the complete 1368-operation private journal and actual revisions.
+The stale-provider blocker is RESOLVED. This does not reconstruct historical
+provenance or automatically close A1/B8/N1c; future temp-root alignment is
+a separate design task. The user's active progress.md handoff and both
+older dirty worktrees remain preserved.

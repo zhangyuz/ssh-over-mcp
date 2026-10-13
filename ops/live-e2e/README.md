@@ -236,7 +236,7 @@ Only manually dispatch after independent review, exact-head Hosted CI and
 trusted-main merge. Results are not cleanup authorization.
 
 
-## Approved October13 historical incident disposition
+## Approved October 13 historical incident disposition
 
 [ADR0018](../../docs/decisions/0018-approved-historical-residual-disposition.md)
 records the operator approval and the new separate manual trusted-main tool.
@@ -249,3 +249,10 @@ uncertain I/O or the midnight-cleaner window refuse. This does not activate
 ADR0011 apply or turn observers into cleanup authority. After reviewed
 exact-head hosted CI and merge, run inspect-only, then approved apply, then
 existing guarded marker-only recovery and exact-main native Level3.
+
+
+The exact October 13 incident is now [recovered and native-verified](../../docs/evidence/2026-10-13-native-provider-recovery-acceptance.md).
+Its historical roots/marker are expected absent and its journal remains
+protected. Do not dispatch that exhausted fixed disposer for normal healthy
+checks or a future incident; normal native E2E uses the existing live-local-e2e
+workflow and its cleanup postconditions.
