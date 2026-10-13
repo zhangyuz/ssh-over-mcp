@@ -210,3 +210,7 @@ is not a race-free assertion of the failure cause.
 Only the new fixed forensic entry point is activated; the other native
 preflight/product/receipt entry points remain dormant. Native acceptance and
 explicit per-directory disposition still require their separate gates.
+
+## Separate fixed private-tmp residual inspection
+
+[ADR 0015](../../docs/decisions/0015-private-tmp-residual-forensic.md) proposes a second trusted-main read-only workflow for three exact /private/tmp historical roots. It accepts root-owned sticky parent mode 01777 only at that fixed parent, with exact UID-502 0700 child identities. It neither relaxes ADR 0014 getconf preflight nor grants cleanup, marker recovery or tempfile migration authority. Do not dispatch before independently reviewed exact-head CI and trusted-main merge.
