@@ -1,4 +1,4 @@
-"""Dormant, metadata-only staging inventory; no CLI or workflow caller."""
+"""Metadata-only inventories; strict staging and non-authorizing residual views."""
 
 from __future__ import annotations
 
@@ -111,6 +111,18 @@ def _encode_entry(entry: InventoryEntry) -> bytes:
 
 
 def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry, ...]:
+    """Preserve the exact eleven-entry staging eligibility contract."""
+    return _collect_inventory(root_fd, uid=uid, required_layout=_LAYOUT)
+
+
+def collect_residual_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry, ...]:
+    """Inspect partial trees as metadata only; never establishes eligibility."""
+    return _collect_inventory(root_fd, uid=uid, required_layout=None)
+
+
+def _collect_inventory(
+    root_fd: int, *, uid: int, required_layout: dict[str, str] | None
+) -> tuple[InventoryEntry, ...]:
     """Borrow a pinned root descriptor; return detached metadata records."""
     if type(root_fd) is not int or type(uid) is not int or uid < 0:
         raise InventoryError(_FAILURE)
@@ -212,7 +224,7 @@ def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry
             raise InventoryError(_FAILURE)
         append(record)
         names = names_at(fd, path)
-        if path == "." and set(names) != set(_LAYOUT):
+        if path == "." and required_layout is not None and set(names) != set(required_layout):
             raise InventoryError(_FAILURE)
         observed: dict[str, InventoryEntry] = {}
         for name in names:
@@ -221,7 +233,7 @@ def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry
             info = os.stat(name, dir_fd=fd, follow_symlinks=False)
             snapshot = _entry(relative, info)
             observed[name] = snapshot
-            if path == "." and snapshot.kind != _LAYOUT[name]:
+            if path == "." and required_layout is not None and snapshot.kind != required_layout[name]:
                 raise InventoryError(_FAILURE)
             if stat.S_ISDIR(info.st_mode):
                 try:

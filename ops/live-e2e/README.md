@@ -189,3 +189,16 @@ type are revalidated. Nonblocking opening also prevents a raced FIFO from
 waiting for a writer. Missing
 metadata reports an unbound directory; malformed or unsafe metadata refuses
 inspection. This read-only binding is not cleanup authorization.
+
+## Fixed residual forensic inspection
+
+[ADR 0014](../../docs/decisions/0014-exact-residual-forensic-inspection.md)
+adds a separate manual trusted-main metadata inspection of the three fixed
+residual directory identities. It uses reviewed native diagnostic/namespace
+helpers but never treats partial trees or missing commit bindings as cleanup
+eligibility. Its successful bounded private artifact explicitly sets
+`recovery_eligible=false`; failed inspection produces no successful evidence.
+The marker-only recovery and exact eleven-entry staging checks are unchanged.
+Only the new fixed forensic entry point is activated; the other native
+preflight/product/receipt entry points remain dormant. Native acceptance and
+explicit per-directory disposition still require their separate gates.
