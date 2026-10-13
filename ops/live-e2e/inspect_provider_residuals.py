@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import re
+import stat
 import sys
 from contextlib import ExitStack
 from dataclasses import asdict
@@ -65,6 +66,29 @@ def _marker_metadata(observation) -> dict[str, int]:
     return asdict(observation.metadata)
 
 
+def _catalog_open_failure_kind(parent_fd: int, name: str, device: int, inode: int) -> str:
+    """Refusal-only fixed taxonomy; detached metadata never grants acceptance.
+
+    Observe one literal child of the already-pinned temp directory without
+    following links. This is deliberately after a failed authoritative pin;
+    a race can change the observation, so no category is recovery authority.
+    """
+    try:
+        info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return "missing"
+    except (OSError, ValueError, TypeError, OverflowError, MemoryError):
+        return "unavailable"
+    try:
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != _UID or stat.S_IMODE(info.st_mode) != 0o700:
+            return "unsafe"
+        if (info.st_dev, info.st_ino) != (device, inode):
+            return "changed"
+    except (AttributeError, ValueError, TypeError, OverflowError, MemoryError):
+        return "unavailable"
+    return "unresolved"
+
+
 def inspect_residuals() -> bytes:
     """No operator-selected paths or fixture parameters; return only after cleanup."""
     global _REFUSAL_PHASE
@@ -97,10 +121,18 @@ def inspect_residuals() -> bytes:
             _CATALOG, root_phases, strict=True
         ):
             _REFUSAL_PHASE = open_phase
-            chain = owned.enter_context(preflight._pin_safe_directory_chain(
-                temp._fds[-1], (name,), ((_UID, (0o700,)),),
-                system_uid=_UID, root_mode=0o700, post_close_validate=True,
-            ))
+            try:
+                chain = owned.enter_context(preflight._pin_safe_directory_chain(
+                    temp._fds[-1], (name,), ((_UID, (0o700,)),),
+                    system_uid=_UID, root_mode=0o700, post_close_validate=True,
+                ))
+            except preflight.PreflightError:
+                _REFUSAL_PHASE = (
+                    open_phase + "-" + _catalog_open_failure_kind(
+                        temp._fds[-1], name, device, inode,
+                    )
+                )
+                raise
             _REFUSAL_PHASE = identity_phase
             selected = chain.metadata[-1]
             if (selected.device, selected.inode) != (device, inode):

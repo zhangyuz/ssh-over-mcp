@@ -93,6 +93,33 @@ successful bounded metadata artifact for seven days. Raw relative paths remain
 private investigation data; do not print or broaden their distribution. GitHub
 artifact retention/upload is evidence transport, not a signature or cleanup receipt.
 
+## Refusal-only catalog-open diagnosis (2026-10-13)
+
+The first trusted-main live forensic attempt
+[38333242069](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38333242069)
+refused at `catalog-open-1` before collecting a residual inventory. This
+label did not distinguish an absent root from rejected owner/mode, a changed
+object or an opening/revalidation failure. No cleanup was authorized.
+
+On *failure only*, the caller now performs one bounded `stat` of the failed
+literal catalog entry relative to the still-pinned native temp-parent
+descriptor, with `follow_symlinks=False`. The printed label is drawn only
+from the fixed set `missing`, `unsafe`, `changed`, `unavailable`,
+`unresolved` after `catalog-open-N-`. These are observations made **after**
+a failed pin, not atomic evidence of the failed operation. Concurrent
+changes can alter their meaning; `unresolved` means the follow-up metadata
+matches but the authoritative operation still refused.
+
+The authoritative no-follow descriptor chain, exact catalog identities,
+two-pass bounds, marker/process checks and successful evidence contract are
+unchanged. No observed name, pathname, owner, mode, inode, exception, file
+contents, or lower-level error is logged. A refusal still exits 70 and
+produces no successful evidence. In particular, neither `missing` nor
+`changed` is permission to unlink the marker or dispose of other roots.
+Run the updated workflow only after independently reviewed hosted CI and
+merge to trusted `main`; require fresh private artifact review and separate
+per-identity operator disposition before any cleanup.
+
 ## Limits and recovery sequencing
 
 Directory-only evidence proves only the complete observed metadata contains no

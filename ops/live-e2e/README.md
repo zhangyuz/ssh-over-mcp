@@ -199,6 +199,10 @@ helpers but never treats partial trees or missing commit bindings as cleanup
 eligibility. Its successful bounded private artifact explicitly sets
 `recovery_eligible=false`; failed inspection produces no successful evidence.
 The marker-only recovery and exact eleven-entry staging checks are unchanged.
+After a failed catalog-root pin, its fixed non-sensitive refusal label can
+distinguish missing, unsafe, changed, unavailable or unresolved metadata,
+without altering acceptance or granting cleanup authority. Such a snapshot
+is not a race-free assertion of the failure cause.
 Only the new fixed forensic entry point is activated; the other native
 preflight/product/receipt entry points remain dormant. Native acceptance and
 explicit per-directory disposition still require their separate gates.
