@@ -159,6 +159,14 @@ def _probe_rejected_inventory(root_fd: int) -> str:
 
         def validate(info: os.stat_result) -> str | None:
             identity = (info.st_dev, info.st_ino)
+            if stat.S_ISLNK(info.st_mode):
+                return "symlink"
+            if stat.S_ISFIFO(info.st_mode):
+                return "fifo"
+            if stat.S_ISSOCK(info.st_mode):
+                return "socket"
+            if stat.S_ISCHR(info.st_mode) or stat.S_ISBLK(info.st_mode):
+                return "device"
             if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
                 return "unsupported-kind"
             if info.st_uid != _UID:
