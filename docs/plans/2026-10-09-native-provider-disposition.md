@@ -40,3 +40,115 @@ workflow, marker, host, or privileged account is changed by this plan.
 Implementation contracts: [`ops/live-e2e/README.md`](../../ops/live-e2e/README.md),
 [`recover_provider.py`](../../ops/live-e2e/recover_provider.py), and the
 [trusted-main recovery workflow](../../.github/workflows/live-local-e2e-recovery.yml).
+
+
+## 2026-10-12 trusted-main reinspection — **still blocked; evidence changed**
+
+This update is read-only evidence for an **explicit subsequent operator decision**,
+not approval to delete, archive or otherwise change any provider artifact.
+
+- [Trusted-main CI 38304470006](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38304470006)
+  on exact main `2a00db8165e5a96ec70f779a3e8925938e1dc462`:
+  GitHub-hosted Python 3.13 and 3.14 both PASS; the native no-network
+  Level-3 stage **FAIL-CLOSED** before QEMU launch on `stale E2E provider
+  state detected` (exit 70). Its postcondition also fails because
+  `active-run.json` is still present. This is a pre-existing host-state
+  blocker, not evidence that native Level-3 passed.
+- [Trusted-main inspect-only workflow 38308355924](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38308355924)
+  ran `workflow_dispatch` on trusted main with **exact stale target**
+  `47531dadb58d365f74089dd5f52ce1b61bb0fdd1`, owner PID
+  **`38013`**, and `expected_owner_pid=0` (inspect only).
+  `RECOVERY_MODE=inspect-only` succeeded with **three UID-502 directories**
+  still present:
+  - `ssh-over-mcp-e2e-i8ow1ni6` (device 16777220, inode 187176421):
+    `bootstrap-wheels`, `payload-content`, `payload-iso`, `seed`,
+    `target.git`, `wheels`. **`expected_commit=null`**.
+  - `ssh-over-mcp-e2e-recover.cc8Del` (device 16777220, inode 186815322):
+    only a `clean` directory reported. **`expected_commit=null`**.
+  - `ssh-over-mcp-e2e-w_kn4rus` (device 16777220, inode 186877220):
+    analogous wheel/payload/seed/checkout directories.
+    **`expected_commit=null`**.
+- The previous 2026-10-10 inspection recorded a valid target-bound
+  `expected_commit` in the first directory; **that value is no longer observed by the same bounded inspector, a
+  material change in the observations**. It does not authorize reassigning the
+  tree, assuming it is disposable, or reconstructing a trusted binding
+  from its name or age. Stop any cleanup pending independent provenance
+  review.
+- A read-only host-wide `ps` scan from the separate developer account
+  did not show a running `qemu-system-x86_64` or E2E orchestrator child,
+  but this **does not establish quiescence** of UID 502 and does not rule
+  out PID reuse. The UID-502 marker is `0600` and cannot be read from
+  the developer account; do not attempt privilege escalation, change
+  permissions, or access provider payload contents to get around it.
+- The existing recovery workflow refuses marker unlink while **any**
+  E2E temp directory remains. Current conditions do not permit recovery.
+  **No marker or directory was deleted, no process signalled, no sudo,
+  no new guest launched, and no recovery with nonzero PID authorized.**
+
+### Independent disposition gates required before any later action
+
+1. Reinspect exact marker and three device/inode identities under the
+   trusted non-admin UID-502 account, with bounded metadata only.
+2. Establish contemporaneous PID identity/death and absence of QEMU or
+   active runner-owned orchestrator, without relying only on historical
+   PID or a different user's process view.
+3. Obtain immutable provenance/ownership for each of the **three**
+   directories. Investigate why the first directory's prior
+   `expected_commit` value is no longer observed by the same bounded
+   inspector, and bound the two unbound trees. Do not infer the cause or
+   nested-file identity continuity from root inode equality.
+   Unknown or changed contents mean **refuse disposition**.
+4. Produce a separately reviewed, *per exact path/identity* action plan
+   with failure/rollback behavior and obtain **explicit human operator
+   authorization** for every destructive step. The existing recovery
+   workflow cannot perform directory cleanup and must not be extended
+   implicitly.
+5. Only after safely resolving **all** orphan state, run fresh
+   trusted-main inspect, invoke marker-only recovery with exact owner
+   PID if its guards allow it, then run exact-main native no-network
+   Level-3 and verify provider-state absence and host/guest cleanup.
+   Until then native Level-3 is **BLOCKED / FAIL-CLOSED**, regardless of
+   GitHub-hosted CI performance.
+
+The hosted six-way CI later merged to main in PR #220 is orthogonal: it
+has verified fast dual-Python test coverage, but neither asserts nor
+repairs host-level native E2E provenance.
+
+
+## 2026-10-12 23:17 UTC current-main inspection and dormant acceptance
+
+Fresh trusted-main [inspect-only run 38321349471](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38321349471)
+on exact main `39a4f868bb77b0391dbeeee5fb56d3cdb4ae3128` completed
+successfully with owner PID input **0** and `RECOVERY_MODE=inspect-only`.
+It reports the same marker target/owner and the same three device/inode
+identities as run 38308355924. All three again report
+`expected_commit=null`; the bounded direct-child inventories are unchanged
+between these two October 12 observations. This establishes no owner-death,
+QEMU-quiescence, provenance, accepted receipt or disposition permission.
+
+Independent source review confirms that both the October 10 authority
+`9e5b94d7` and the October 12 authority inspect the same fixed relative
+`payload-content/expected_commit` path. The first directory's prior valid
+value is no longer observed; regular direct-child artifacts previously
+reported (`git-askpass`, `overlay.qcow2`, `payload.iso`, `seed.iso`,
+`target.bundle`) also no longer appear. The reason and nested-file identity
+continuity are unknown. Do not reconstruct a binding or relax the fixed
+catalog to accept the current partial trees.
+
+The composition plan's old A1 acceptance note needs to be read alongside
+later component evidence: PR #161 already added
+`test_real_pinned_authority_byte_tamper_blocks_getconf_before_capture`,
+parameterized over all three pinned authority documents. Its disposable
+fixtures verify authentic copies, change one byte without changing length,
+call the production dormant getconf adapter and prove zero capture calls.
+Current-main verification of the full fixed-getconf test module plus
+`test_binding_matches_exact_main_blobs` passed **41 checks** on the developer
+account. No existing incident staging or actual UID-502 capture was invoked.
+
+This is narrow authority-byte-before-capture evidence only. **Incident
+recovery A1, B8 trusted-main workflow/receipts, actual UID-502 compatibility,
+changed-state provenance, per-directory human disposition and native
+Level-3/cleanup remain OPEN.** The next live-observation workflow needs its
+separate reviewed integration contract; fixture success cannot activate it.
+No pinned authority document, recovery code, workflow or provider resource
+was changed by this update.
