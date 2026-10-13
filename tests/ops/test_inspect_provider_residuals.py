@@ -109,7 +109,52 @@ def test_catalog_phase_identifies_missing_root_without_exposing_name(
     (temp / name).rename(temp / f"preserved-{index}")
     with pytest.raises(module.preflight.PreflightError):
         module.inspect_residuals()
-    assert module._REFUSAL_PHASE == f"catalog-open-{index}"
+    assert module._REFUSAL_PHASE == f"catalog-open-{index}-missing"
+
+
+@pytest.mark.parametrize("index,name", [(1, "first"), (2, "recovery"), (3, "older")])
+def test_catalog_open_unsafe_directory_is_fixed_label_only(fixture, index, name):
+    module, temp, _ = fixture
+    (temp / name).chmod(0o755)
+    with pytest.raises(module.preflight.PreflightError):
+        module.inspect_residuals()
+    assert module._REFUSAL_PHASE == f"catalog-open-{index}-unsafe"
+
+
+def test_catalog_open_symlink_is_never_followed(fixture):
+    module, temp, _ = fixture
+    (temp / "first").rename(temp / "preserved")
+    (temp / "first").symlink_to(temp / "preserved", target_is_directory=True)
+    with pytest.raises(module.preflight.PreflightError):
+        module.inspect_residuals()
+    assert module._REFUSAL_PHASE == "catalog-open-1-unsafe"
+
+
+def test_catalog_open_failure_with_matching_identity_remains_unresolved(fixture, monkeypatch):
+    module, _, _ = fixture
+    original = module.preflight._pin_safe_directory_chain
+    def refuse(*args, **kwargs):
+        if args[1] == ("first",):
+            raise module.preflight.PreflightError()
+        return original(*args, **kwargs)
+    monkeypatch.setattr(module.preflight, "_pin_safe_directory_chain", refuse)
+    with pytest.raises(module.preflight.PreflightError):
+        module.inspect_residuals()
+    assert module._REFUSAL_PHASE == "catalog-open-1-unresolved"
+
+
+def test_catalog_open_raced_away_remains_non_authorizing(fixture, monkeypatch):
+    module, temp, _ = fixture
+    original = module.preflight._pin_safe_directory_chain
+    def refuse(*args, **kwargs):
+        if args[1] == ("first",):
+            (temp / "first").rename(temp / "preserved")
+            raise module.preflight.PreflightError()
+        return original(*args, **kwargs)
+    monkeypatch.setattr(module.preflight, "_pin_safe_directory_chain", refuse)
+    with pytest.raises(module.preflight.PreflightError):
+        module.inspect_residuals()
+    assert module._REFUSAL_PHASE == "catalog-open-1-missing"
 
 
 def test_nested_symlink_refuses(fixture):
