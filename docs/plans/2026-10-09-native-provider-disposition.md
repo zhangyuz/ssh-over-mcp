@@ -174,3 +174,79 @@ not normalize paths, relocate state, change temp creation, treat missing
 roots as valid forensic evidence, or grant marker/directory cleanup.
 No provider mutation should occur until independent UID-502 observations,
 per-identity reconciliation, and explicit operator authorization.
+
+
+## 2026-10-13 trusted-main UID-502 root divergence confirmed
+
+[Main inspection 38341134143](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38341134143)
+used the already-merged PR #229 read-only probe under the dedicated non-admin
+UID-502 runner at exact main
+`2df644a34dd5eb83ed056898799d74b894c03dc0`. It returned:
+
+```text
+RECOVERY_TEMP_PARENT_RELATION=different
+RECOVERY_INSPECT ... owner_pid=38013 temp_dirs=3
+RECOVERY_MODE=inspect-only
+```
+
+The fixed native `getconf DARWIN_USER_TEMP_DIR` parent and the Python
+`tempfile.gettempdir()` parent therefore **differ under the actual runner**,
+not just on the separate developer account. Python's recovery inspector
+still reported all three catalog roots with unchanged recorded device/inode,
+mode 0700, UID 502 and `expected_commit=null`. Native forensic
+[38338824514](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38338824514)
+returned `catalog-open-1-missing` from the *other* parent. This explains
+why those two inspections disagreed; it **does not** establish whether the
+historical removed regular files were deleted, transferred or changed,
+whether all nested content is harmless, or why the older provider run was
+interrupted. Neither report is a manifest, disposition receipt or
+authorization to clear state.
+
+A separate **read-only UID-501 Mac metadata check**, using no-follow stat of
+only the three fixed known basenames relative to literal `/private/tmp`,
+found all three directories at the exact respective recorded device/inode,
+UID 502 and mode `0700`. The parent `/private/tmp` is root-owned, mode
+`01777` (sticky and world-writable). Thus the historical residual root
+identities are present under `/private/tmp` and not under the getconf-pinned
+forensic parent. No nested directory was opened and no file content was read.
+The metadata-only cross-account check is not an authenticated in-account
+provenance/cleanup receipt. A follow-up trusted UID-502 recursive inspector
+must address the sticky-world-writable **parent** separately from the
+existing strictly non-world-writable getconf ancestor policy, without
+following symlinks or weakening any selected-root identity requirement.
+
+### Reviewed next steps (NOT cleanup authorization)
+
+1. Align **future** orchestrator temporary root creation, recovery's
+   *blocking-root inventory*, and native forensic preflight to a single
+   explicitly validated temp-root source: orchestrator
+   `tempfile.TemporaryDirectory(prefix="ssh-over-mcp-e2e-")` and recovery
+   currently use Python's selected temp parent; forensic uses `getconf`.
+   The recovery guard MUST NOT overlook historical `/private/tmp` trees
+   while a new root is introduced, or consider a marker safe to unlink
+   merely because the new root is empty. Design and test the complete
+   cross-component authority/transition contract before changing runtime
+   creation, environment or diagnostic trust. Do not solve this by
+   loosening no-follow ancestry checks.
+2. Design a separate fixed-identity, read-only residual inventory of the
+   actual Python-selected parent, with its own trusted ancestry,
+   symlink/owner/device/mode checks and a bounded private artifact.
+   Do not silently redirect ADR 0014's approved getconf-catalog to a
+   caller-chosen path, and do not treat earlier root equality as continuity
+   of nested contents. Obtain design/authority review before activation.
+3. Establish fresh owner PID 38013 death and no runner-owned QEMU or
+   active orchestration under the right account. Then independently classify
+   and review **each of the three** exact surviving root identities, including
+   the unbound recovery directory, before proposing per-identity disposition.
+4. Obtain **separate explicit operator approval** for any identity-bound
+   destructive operation. Existing recovery is marker-only and refuses as
+   long as any E2E temp root remains. Do not use sudo, broad deletion,
+   privilege/permission repair, process signals, or bypass flags.
+5. After authorized and verified disposition, run the existing exact-PID
+   marker-only recovery **only if all preconditions pass**, followed by
+   exact-main no-network Level-3 with complete host/guest cleanup evidence.
+   Hosted Python PASS and forensic success alone are not acceptance.
+
+**State:** host/provider recovery remains BLOCKED / FAIL-CLOSED. No
+provider marker, QEMU, residual tree, or privileged account was modified
+by the UID-502 comparison.
