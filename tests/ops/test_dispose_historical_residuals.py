@@ -422,8 +422,17 @@ def test_process_crash_journal_prevents_automatic_resume(incident, tmp_path, aft
         journal(module, cache_fd)
 
 
-def test_real_incident_size_and_depth_dispose_with_bounded_journal(incident, tmp_path):
+def test_real_incident_size_and_depth_dispose_with_bounded_journal(incident, tmp_path, monkeypatch):
     module, root, parent_fd, root_fd, cache_fd, _ = incident
+    # Native authority runs on macOS. Model stable metadata on Linux strictatime:
+    # owner-permitted O_NOATIME prevents our own directory reads changing atime.
+    # No identity/mtime/ctime/mode observation or refusal is mocked or relaxed.
+    if sys.platform == "linux":
+        import fcntl
+
+        flags = fcntl.fcntl(root_fd, fcntl.F_GETFL)
+        fcntl.fcntl(root_fd, fcntl.F_SETFL, flags | os.O_NOATIME)
+        monkeypatch.setattr(module.observer, "_DIR_FLAGS", module.DIR_FLAGS | os.O_NOATIME)
     deep = root / "a/deep"
     chain = deep
     for index in range(11):
