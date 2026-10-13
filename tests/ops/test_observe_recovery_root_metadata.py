@@ -200,3 +200,55 @@ def test_budget_applies_during_enumeration_not_after_all_child_stats(case, monke
     finally:
         os.close(fd)
     assert len(observed) <= 2, "must refuse before probing unbounded child names"
+
+
+@pytest.mark.parametrize(
+    ("fault", "phase"),
+    [
+        ("unsafe-directory", "inventory-a-directory-policy"),
+        ("overflow", "inventory-a-entry-budget"),
+        ("changed-edge", "inventory-a-entry-changed"),
+    ],
+)
+def test_first_pass_refusal_has_fixed_non_sensitive_phase(case, monkeypatch, fault, phase):
+    mod, root, nested, _ = case
+    if fault == "unsafe-directory":
+        nested.chmod(0o777)
+    elif fault == "overflow":
+        monkeypatch.setattr(mod, "MAX_ENTRIES", 1)
+    else:
+        (root / "leaf").symlink_to("/private/never-follow")
+        real_stat = mod.os.stat
+        calls = 0
+        def changing_stat(path, *a, **kw):
+            nonlocal calls
+            info = real_stat(path, *a, **kw)
+            if kw.get("dir_fd") is not None and path == "leaf":
+                calls += 1
+                if calls == 2:
+                    fake = list(info)
+                    fake[6] += 1
+                    return os.stat_result(fake)
+            return info
+        monkeypatch.setattr(mod.os, "stat", changing_stat)
+    with pytest.raises(mod.preflight.PreflightError):
+        mod.observe_recovery_root()
+    assert mod._REFUSAL_PHASE == phase
+    assert root.is_dir()
+
+
+def test_second_pass_refusal_has_fixed_phase_without_partial_output(case, monkeypatch, capsys):
+    mod, _, nested, _ = case
+    original = mod._collect_special_metadata
+    calls = 0
+    def collect(*a, **kw):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            nested.chmod(0o777)
+        return original(*a, **kw)
+    monkeypatch.setattr(mod, "_collect_special_metadata", collect)
+    with pytest.raises(mod.preflight.PreflightError):
+        mod.main([])
+    assert mod._REFUSAL_PHASE == "inventory-b-directory-policy"
+    assert capsys.readouterr().out == ""

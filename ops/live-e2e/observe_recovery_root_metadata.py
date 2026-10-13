@@ -38,6 +38,7 @@ MAX_EVIDENCE_BYTES = 2 * 1024 * 1024
 MAX_TOTAL_SECONDS = 420
 MAX_PASS_SECONDS = 60
 _REFUSAL_PHASE = "startup"
+_COLLECT_PHASE = "start"
 
 
 def _validate_context() -> dict[str, str]:
@@ -100,6 +101,8 @@ def _collect_special_metadata(root_fd: int, *, uid: int) -> tuple[dict[str, int 
     All directories must be safe to enter. Symlink and special *leaves*
     are observed via stat(follow_symlinks=False), never opened or resolved.
     """
+    global _COLLECT_PHASE
+    _COLLECT_PHASE = "root-fstat"
     entries: list[dict[str, int | str]] = []
     started = monotonic()
     used_bytes = 32
@@ -109,6 +112,8 @@ def _collect_special_metadata(root_fd: int, *, uid: int) -> tuple[dict[str, int 
 
         def append(path: str, info: os.stat_result) -> None:
             nonlocal used_bytes
+            global _COLLECT_PHASE
+            _COLLECT_PHASE = "entry-budget"
             if monotonic() - started > MAX_PASS_SECONDS or len(entries) >= MAX_ENTRIES:
                 raise preflight.PreflightError()
             entry = _record(path, info)
@@ -119,9 +124,13 @@ def _collect_special_metadata(root_fd: int, *, uid: int) -> tuple[dict[str, int 
 
         def walk(fd: int, relative: str, depth: int) -> None:
             nonlocal discovered
+            global _COLLECT_PHASE
+            _COLLECT_PHASE = "directory-budget"
             if monotonic() - started > MAX_PASS_SECONDS or depth > MAX_DEPTH:
                 raise preflight.PreflightError()
+            _COLLECT_PHASE = "directory-fstat"
             original = os.fstat(fd)
+            _COLLECT_PHASE = "directory-policy"
             if (
                 not stat.S_ISDIR(original.st_mode)
                 or original.st_uid != uid
@@ -131,20 +140,24 @@ def _collect_special_metadata(root_fd: int, *, uid: int) -> tuple[dict[str, int 
                 raise preflight.PreflightError()
             append(relative, original)
             observed: dict[str, os.stat_result] = {}
+            _COLLECT_PHASE = "entry-enumeration"
             with os.scandir(fd) as iterator:
                 for child in iterator:
                     name = child.name
                     child_path = name if relative == "." else relative + "/" + name
                     # _path_key enforces relative path and depth/length rules.
+                    _COLLECT_PHASE = "entry-path"
                     inventory._path_key(child_path)
                     if len(os.fsencode(child_path)) > MAX_PATH_BYTES:
                         raise preflight.PreflightError()
+                    _COLLECT_PHASE = "entry-budget"
                     if (
                         discovered >= MAX_ENTRIES or name in observed
                         or monotonic() - started > MAX_PASS_SECONDS
                     ):
                         raise preflight.PreflightError()
                     discovered += 1
+                    _COLLECT_PHASE = "entry-stat"
                     observed[name] = os.stat(name, dir_fd=fd, follow_symlinks=False)
             for name in sorted(observed, key=os.fsencode):
                 first = observed[name]
@@ -152,8 +165,10 @@ def _collect_special_metadata(root_fd: int, *, uid: int) -> tuple[dict[str, int 
                 if stat.S_ISDIR(first.st_mode):
                     if depth >= MAX_DEPTH:
                         raise preflight.PreflightError()
+                    _COLLECT_PHASE = "directory-open"
                     child_fd = os.open(name, _DIR_FLAGS, dir_fd=fd)
                     try:
+                        _COLLECT_PHASE = "directory-identity"
                         if os.fstat(child_fd) != first:
                             raise preflight.PreflightError()
                         walk(child_fd, child_path, depth + 1)
@@ -165,8 +180,10 @@ def _collect_special_metadata(root_fd: int, *, uid: int) -> tuple[dict[str, int 
                 else:
                     # Never open a regular/symlink/FIFO/socket/device leaf.
                     append(child_path, first)
+                _COLLECT_PHASE = "entry-changed"
                 if os.stat(name, dir_fd=fd, follow_symlinks=False) != first:
                     raise preflight.PreflightError()
+            _COLLECT_PHASE = "directory-changed"
             if os.fstat(fd) != original:
                 raise preflight.PreflightError()
 
@@ -212,10 +229,18 @@ def observe_recovery_root() -> bytes:
         _REFUSAL_PHASE = "process-a"
         preflight._observe_fixed_process_snapshot_checked()
         _REFUSAL_PHASE = "inventory-a"
-        first = _collect_special_metadata(chain._fds[-1], uid=_UID)
+        try:
+            first = _collect_special_metadata(chain._fds[-1], uid=_UID)
+        except preflight.PreflightError:
+            _REFUSAL_PHASE = "inventory-a-" + _COLLECT_PHASE
+            raise
         check_time()
         _REFUSAL_PHASE = "inventory-b"
-        second = _collect_special_metadata(chain._fds[-1], uid=_UID)
+        try:
+            second = _collect_special_metadata(chain._fds[-1], uid=_UID)
+        except preflight.PreflightError:
+            _REFUSAL_PHASE = "inventory-b-" + _COLLECT_PHASE
+            raise
         if second != first:
             raise preflight.PreflightError()
         check_time()
