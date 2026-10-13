@@ -523,6 +523,58 @@ def test_expected_pid_zero_is_inspect_only_sentinel() -> None:
             module._parse_expected_pid(value)
 
 
+@pytest.mark.parametrize(
+    ("python_root", "expected"),
+    [
+        ("/var/folders/ab/token_xyz/T/", "same"),
+        ("/tmp", "different"),
+    ],
+)
+def test_inspect_only_temp_parent_comparison_is_fixed_non_authorizing(
+    monkeypatch, python_root, expected
+) -> None:
+    module = _load_module()
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *a, **kw: type("Completed", (), {
+            "stdout": b"/var/folders/ab/token_xyz/T/\n",
+        })(),
+    )
+    monkeypatch.setattr(module.tempfile, "gettempdir", lambda: python_root)
+    assert module._inspect_temp_parent_relation() == expected
+
+
+def test_native_getconf_probe_uses_same_isolated_env_as_forensic(monkeypatch):
+    module = _load_module()
+    seen = []
+    def capture(argv, **kwargs):
+        seen.append((argv, kwargs))
+        return type("Completed", (), {
+            "stdout": b"/var/folders/ab/token_xyz/T/\n",
+        })()
+    monkeypatch.setattr(module.subprocess, "run", capture)
+    monkeypatch.setattr(module.tempfile, "gettempdir", lambda: "/tmp")
+    assert module._inspect_temp_parent_relation() == "different"
+    assert seen == [(
+        ("/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"),
+        {"check": True, "capture_output": True, "timeout": 5,
+         "env": {"LC_ALL": "C"}},
+    )]
+
+
+def test_inspect_only_temp_parent_comparison_does_not_expose_failed_getconf(
+    monkeypatch
+) -> None:
+    module = _load_module()
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *a, **kw: type("Completed", (), {"stdout": b"unsafe-secret-output\n"})(),
+    )
+    assert module._inspect_temp_parent_relation() == "unavailable"
+
+
 def test_workflow_is_manual_main_only_and_serialized_with_live_e2e() -> None:
     workflow = yaml.load(WORKFLOW.read_text(), Loader=yaml.BaseLoader)
     assert set(workflow["on"]) == {"workflow_dispatch"}
