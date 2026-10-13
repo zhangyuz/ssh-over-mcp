@@ -70,6 +70,11 @@ def test_complete_dual_python_eight_shard_matrix_and_operator_checks() -> None:
         },
     }
     assert job["timeout-minutes"] == "15"
+    doc = (ROOT / "docs/ci-hosted-primary.md").read_text(encoding="utf-8")
+    assert "eight independent" in doc
+    assert "four disjoint, jointly exhaustive" in doc
+    assert "795 = 19 + 408 + 368" in doc
+    assert "all eight jobs" in doc
     assert "if" not in job
     steps = {step["name"]: step for step in job["steps"]}
     assert "Verify Ubuntu 26.04 non-root x86" in steps
