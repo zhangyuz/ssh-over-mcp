@@ -405,6 +405,7 @@ def _inspect_temp_parent_relation() -> str:
         result = subprocess.run(
             ("/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"),
             check=True, capture_output=True, timeout=5,
+            env={"LC_ALL": "C"},
         )
         if (
             not isinstance(result.stdout, bytes)

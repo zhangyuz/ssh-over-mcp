@@ -545,6 +545,24 @@ def test_inspect_only_temp_parent_comparison_is_fixed_non_authorizing(
     assert module._inspect_temp_parent_relation() == expected
 
 
+def test_native_getconf_probe_uses_same_isolated_env_as_forensic(monkeypatch):
+    module = _load_module()
+    seen = []
+    def capture(argv, **kwargs):
+        seen.append((argv, kwargs))
+        return type("Completed", (), {
+            "stdout": b"/var/folders/ab/token_xyz/T/\n",
+        })()
+    monkeypatch.setattr(module.subprocess, "run", capture)
+    monkeypatch.setattr(module.tempfile, "gettempdir", lambda: "/tmp")
+    assert module._inspect_temp_parent_relation() == "different"
+    assert seen == [(
+        ("/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"),
+        {"check": True, "capture_output": True, "timeout": 5,
+         "env": {"LC_ALL": "C"}},
+    )]
+
+
 def test_inspect_only_temp_parent_comparison_does_not_expose_failed_getconf(
     monkeypatch
 ) -> None:
