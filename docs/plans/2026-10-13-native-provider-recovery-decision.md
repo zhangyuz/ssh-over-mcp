@@ -1,7 +1,8 @@
 # Native provider recovery: exact operator decision
 
 Status: exact disposition approved by the operator at 12:18:16 EDT;
-implementation/test/review gates in progress. Native Level-3 remains blocked.
+implemented and verified. Historical recovery and native E2E/cleanup PASS
+on exact main 53868a7; see the acceptance record below.
 Date: 2026-10-13 (America/Toronto).
 
 ## Verified current state
@@ -46,11 +47,11 @@ snapshots do not establish exclusive process quiescence or lost-file provenance.
 
 The fixed marker is
 `/Users/gha-e2e-orchestrator/Library/Caches/ssh-over-mcp-e2e/active-run.json`:
-UID502, mode0600, device16777220, inode187176420, nlink1, size75;
+UID 502, mode0600, device16777220, inode187176420, nlink1, size75;
 recorded owner PID **38013**, target
 `47531dadb58d365f74089dd5f52ce1b61bb0fdd1`.
-The developer account's process view did not show PID38013 or QEMU, but
-this is not the UID502 exclusive-death proof required for mutation.
+The developer account's process view did not show PID 38013 or QEMU, but
+this is not the UID 502 exclusive-death proof required for mutation.
 
 ## Newly identified scheduled cleanup mechanism
 
@@ -77,7 +78,7 @@ binding or deletion authority. Do not disable the system cleaner.
 
 ## Exact operator decision — approved
 
-The operator explicitly approved this exact decision on October13 at
+The operator explicitly approved this exact decision on October 13 at
 12:18:16 EDT: “Sounds good, let’s just fix it”. It covers whether these three exact residual
 trees may be discarded despite incomplete historical provenance and the
 loss of prior regular-file evidence. Approval applies only to the listed
@@ -94,14 +95,14 @@ process signals, generic deletion and quarantine rename remain excluded.
 
 ## Bounded implementation and execution sequence after approval
 
-1. Implement a separate one-incident trusted-main manual UID502 workflow
+1. Implement a separate one-incident trusted-main manual UID 502 workflow
    and independently review it. Keep marker-only recovery and all observer
    safety bounds/non-authority unchanged. The recorded-field consistency
    correction in ADR0018 excludes read-induced access time and strengthens
    nanosecond modification/change-time checks without changing manifests. First add a separately reviewed incident ADR:
    ADR0011 excludes root #2 and requires the original eleven-entry staging
    layout and depth12, so its existing apply contract cannot accept these
-   depth13 skeletons. Do not relax or reuse it.
+   depth 13 skeletons. Do not relax or reuse it.
    Use pinned actions, exact authority SHA, read-only
    token, the shared non-cancelling `live-local-e2e` concurrency group,
    and a bounded private durable operation journal. Before first mutation,
@@ -121,7 +122,7 @@ process signals, generic deletion and quarantine rename remain excluded.
    device, unsafe mode, live/reused owner PID, active QEMU/orchestration,
    partial operation failure and changed marker. Test that symlink target
    canaries remain untouched and an unexpected regular file blocks mutation.
-3. Before any mutation, establish UID502 process quiescence and an explicit
+3. Before any mutation, establish UID 502 process quiescence and an explicit
    exclusivity/race model. Shared workflow concurrency alone is not a host
    lock and does not serialize the system tmp cleaner. Pin the literal
    root-owned sticky parent and protected marker cache with no-follow
@@ -154,7 +155,7 @@ process signals, generic deletion and quarantine rename remain excluded.
    resume against stale inventories; obtain a fresh reviewed disposition.
 6. After every exact root is absent and fresh inspection finds **no** blocking
    E2E roots, invoke the existing marker-only recovery with the exact target
-   and PID38013. Its dead-PID, no-QEMU, marker identity and repeat-inspection
+   and PID 38013. Its dead-PID, no-QEMU, marker identity and repeat-inspection
    guards must all pass. Approval here covers this separate dispatch only
    after directory disposition and contemporaneous prerequisites succeed.
 7. Run native no-network Level-3 against the reviewed exact main revision.
@@ -170,7 +171,7 @@ See [the implementation checklist](2026-10-13-approved-residual-disposition-impl
 
 A separate reviewed change must align future orchestration, recovery and
 forensic temp-root selection. Current runtime Python temp selection and
-native getconf selection differ under UID502. A protected owner-specific
+native getconf selection differ under UID 502. A protected owner-specific
 staging root outside the system cleaner's namespace is a candidate, but
 must preserve no-follow ancestry, identity, no-host-sharing and historical
 root blocking. Moving roots must never hide these historical residuals
@@ -201,3 +202,14 @@ ADR0011 reuse, explicit maintenance/exclusivity assumptions and POSIX
 replacement-race limits, durable intention/confirmation journal with failure
 tests, and separate guarded marker recovery. This is evidence/plan review,
 not approval of a future implementation or historical provenance.
+
+## Verified completion — 2026-10-13
+
+All applicable implementation/review/hosted gates passed; approved disposal
+38437724175, guarded marker recovery 38438738523, and exact-main native
+CI 38437463320 attempt 2 passed on 53868a7. See the
+[acceptance record](../evidence/2026-10-13-native-provider-recovery-acceptance.md)
+for exact revisions, private journal digest, the earlier stale refusal and
+remaining scope boundaries. Earlier blocked/pending statements above are
+historical planning conditions, not the current incident status. The
+original missing-file provenance remains unknown; this was approved discard.

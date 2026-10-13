@@ -1,6 +1,6 @@
 # ADR 0018: Approved disposal of three exact historical residual inventories
 
-- Status: operator-approved incident design; implementation verification pending
+- Status: implemented; exact incident disposed and native E2E/cleanup verified on main 53868a7
 - Date: 2026-10-13 (America/Toronto)
 - Approval: after reviewing the exact decision in PR #240, the operator replied
   at 12:18:16 EDT: “Sounds good, let’s just fix it”.
@@ -20,7 +20,7 @@ continue to report recovery_eligible=false. Their results alone grant no
 mutation authority.
 
 The new script has no caller-selected paths or catalogs. It accepts only no
-arguments (inspection) or --apply. It must run as the dedicated non-admin UID502
+arguments (inspection) or --apply. It must run as the dedicated non-admin UID 502
 Intel macOS account, workflow_dispatch from exact trusted main under the fixed
 workflow identity. Main must already contain the independently reviewed tool.
 There is no PR-triggered disposal and no host target checkout.
@@ -33,13 +33,13 @@ The fixed /private/tmp root tuples and canonical full-inventory SHA256 pins are:
 | ssh-over-mcp-e2e-recover.cc8Del | 16777220 | 186815322 | 1332 | b331202dbc23cec8341b3f7946df680e730446238968775f7ea84d8007f2a9d1 |
 | ssh-over-mcp-e2e-w_kn4rus | 16777220 | 186877220 | 18 | 008891ec4dfc438809dadac6b64d826498dfac5d39a8c06947382d5272e7d4a8 |
 
-Every root is UID502 mode0700. Digests cover canonical ensure_ascii JSON,
+Every root is UID 502 mode0700. Digests cover canonical ensure_ascii JSON,
 sorted keys, compact separators, ordered entries from the approved private
 observations. Hash equality binds exact metadata; approval comes from the
 operator and reviewed trusted-main authority, not from hashes.
 
-Marker metadata and bytes must match the fixed observed target47531dad,
-ownerPID38013, device16777220/inode187176420/UID502/mode0600/size75 and both
+Marker metadata and bytes must match the fixed observed target 47531dad,
+ownerPID 38013, device16777220/inode187176420/UID 502/mode0600/size75 and both
 nanosecond timestamps1791315629879589515, gid20, nlink1. The existing protected
 cache/marker no-follow helpers and root-owned sticky /private/tmp pin are reused.
 
@@ -56,7 +56,7 @@ Owner PID reuse/presence or active QEMU/orchestration refuses. Before every
 operation, recheck pinned parent/cache identity, marker bytes/metadata,
 owner absence and the 420-second total deadline.
 
-The operation requires an operator-exclusive maintenance window for UID502.
+The operation requires an operator-exclusive maintenance window for UID 502.
 Normal native runs remain blocked by the retained marker; shared workflow
 concurrency serializes trusted jobs, but is not a host-wide lock. The script
 refuses local hours23/0 and requires the registered system tmp_cleaner to be
@@ -154,3 +154,14 @@ path/depth/budget, owner/mode checks, strict staging collector or observer
 non-authority changes. The Linux O_NOATIME fixture workaround is removed;
 real strictatime stress must pass with the production comparison. Two RED
 tests prove atime-only acceptance and one-nanosecond ctime rejection.
+
+## Exact incident acceptance
+
+[Acceptance evidence](../evidence/2026-10-13-native-provider-recovery-acceptance.md)
+records PR #240 hosted exact-head PASS, trusted-main inspection and approved
+disposition PASS, separate guarded marker recovery PASS, and exact-main
+CI 38437463320 attempt 2/native cleanup PASS on 53868a7. The private complete
+journal confirms all 1368 approved operations. This one-incident authority
+is exhausted and refuses replay; do not reuse it for a future orphan.
+Historical unknown provenance was accepted for disposal, not reconstructed.
+Future temp-root alignment and A1/B8/N1c remain separate.
