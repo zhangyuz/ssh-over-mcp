@@ -523,6 +523,40 @@ def test_expected_pid_zero_is_inspect_only_sentinel() -> None:
             module._parse_expected_pid(value)
 
 
+@pytest.mark.parametrize(
+    ("python_root", "expected"),
+    [
+        ("/var/folders/ab/token_xyz/T/", "same"),
+        ("/tmp", "different"),
+    ],
+)
+def test_inspect_only_temp_parent_comparison_is_fixed_non_authorizing(
+    monkeypatch, python_root, expected
+) -> None:
+    module = _load_module()
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *a, **kw: type("Completed", (), {
+            "stdout": b"/var/folders/ab/token_xyz/T/\n",
+        })(),
+    )
+    monkeypatch.setattr(module.tempfile, "gettempdir", lambda: python_root)
+    assert module._inspect_temp_parent_relation() == expected
+
+
+def test_inspect_only_temp_parent_comparison_does_not_expose_failed_getconf(
+    monkeypatch
+) -> None:
+    module = _load_module()
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *a, **kw: type("Completed", (), {"stdout": b"unsafe-secret-output\n"})(),
+    )
+    assert module._inspect_temp_parent_relation() == "unavailable"
+
+
 def test_workflow_is_manual_main_only_and_serialized_with_live_e2e() -> None:
     workflow = yaml.load(WORKFLOW.read_text(), Loader=yaml.BaseLoader)
     assert set(workflow["on"]) == {"workflow_dispatch"}

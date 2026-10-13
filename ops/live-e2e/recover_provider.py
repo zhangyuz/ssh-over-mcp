@@ -394,6 +394,33 @@ def recover(
     return inspection
 
 
+def _inspect_temp_parent_relation() -> str:
+    """Inspect-only, non-authorizing root comparison; log a fixed label only.
+
+    The recovery caller has already selected/cached its tempfile root before
+    this runs. OS getconf is fixed, and neither pathname nor child payload is
+    emitted. No result authorizes recovering the marker or temp contents.
+    """
+    try:
+        result = subprocess.run(
+            ("/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"),
+            check=True, capture_output=True, timeout=5,
+        )
+        if (
+            not isinstance(result.stdout, bytes)
+            or re.fullmatch(rb"/var/folders/[a-z0-9]{2}/[a-z0-9_]+/T/\n", result.stdout)
+            is None
+        ):
+            return "unavailable"
+        native = result.stdout[:-1].decode("ascii")
+        python_root = tempfile.gettempdir()
+        if type(python_root) is not str:
+            return "unavailable"
+        return "same" if os.path.realpath(native) == os.path.realpath(python_root) else "different"
+    except (OSError, subprocess.SubprocessError, RuntimeError, ValueError, TypeError, OverflowError):
+        return "unavailable"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if len(args) != 2:
@@ -411,6 +438,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     for record in _temp_diagnostics(inspection.temp_dirs, os.geteuid()):
         print(f"RECOVERY_TEMP {record}")
     if expected_pid == 0:
+        print(f"RECOVERY_TEMP_PARENT_RELATION={_inspect_temp_parent_relation()}")
         print("RECOVERY_MODE=inspect-only")
         return 0
     recovered = recover(target, expected_pid)

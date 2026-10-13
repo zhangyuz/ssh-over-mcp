@@ -172,6 +172,10 @@ stale provider state automatically.
 same non-admin orchestrator account and shares the `live-local-e2e` concurrency
 group. First use the exact stale target with owner PID `0`; this is inspect-only.
 It reports the marker PID and any fixed-prefix E2E temp directories. Recovery
+The PID-`0` path also reports a fixed `RECOVERY_TEMP_PARENT_RELATION`
+(`same`, `different` or `unavailable`) comparing Python's cached temp
+root with native macOS `getconf`, without logging either path. This
+non-authorizing read-only observation does not prove provenance or permit cleanup.
 requires a second dispatch with that exact PID and is allowed only when the PID
 is dead, no runner-owned QEMU exists, the fixed marker identity/schema/mode are
 unchanged, and **no E2E temp directories remain**. The workflow only unlinks the

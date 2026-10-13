@@ -152,3 +152,25 @@ Level-3/cleanup remain OPEN.** The next live-observation workflow needs its
 separate reviewed integration contract; fixture success cannot activate it.
 No pinned authority document, recovery code, workflow or provider resource
 was changed by this update.
+
+## 2026-10-13 Mac temp-root divergence investigation
+
+Trusted-main forensic run [38338824514](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38338824514)
+refused with `catalog-open-1-missing` when using the strictly pinned native
+getconf temp root. Minutes later, trusted-main inspect-only
+[38338908394](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38338908394)
+reported **all three** catalog identities still present under Python's
+`tempfile.gettempdir()`, unchanged device/inode and missing expected_commit.
+The observations do not prove a race or deletion. The developer UID-501
+Mac shell reproduces a discrepancy between `getconf DARWIN_USER_TEMP_DIR`
+and `tempfile.gettempdir()` when `TMPDIR` is unset. UID-502 runner
+environment comparison is still needed before attributing the incident
+to two temp roots.
+
+The recovery inspector now reports a fixed non-authorizing
+`RECOVERY_TEMP_PARENT_RELATION` (`same`, `different`, `unavailable`)
+only for owner PID input zero, after the existing inspection. This does
+not normalize paths, relocate state, change temp creation, treat missing
+roots as valid forensic evidence, or grant marker/directory cleanup.
+No provider mutation should occur until independent UID-502 observations,
+per-identity reconciliation, and explicit operator authorization.
