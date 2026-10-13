@@ -84,9 +84,10 @@ metadata, all catalog root inventories and non-authorizing classification:
 namespace checks. Failed or partial inspection supplies no successful artifact.
 A refusal logs only a fixed, non-sensitive phase label in the private workflow
 log, never lower-level exceptions, observed paths, names, metadata, or content.
-The label helps separate workflow-context, native ancestry, catalog inventory
+The label helps separate workflow-context, native ancestry, catalog root
+opening versus pinned-identity refusal (by fixed index 1–3), subsequent inventory
 and descriptor-close refusals; it does not prove the root cause and confers no
-disposition authority.
+disposition authority. Index labels do not expose observed basenames or metadata.
 The workflow writes only a new non-overwriting job-temp output and retains the
 successful bounded metadata artifact for seven days. Raw relative paths remain
 private investigation data; do not print or broaden their distribution. GitHub
