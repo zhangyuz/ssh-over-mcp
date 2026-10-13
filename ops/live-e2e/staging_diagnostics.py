@@ -1,4 +1,4 @@
-"""Dormant fixed diagnostics; no CLI, workflow caller or incident-state access."""
+"""Fixed diagnostics; approved forensic caller under ADR 0014, no staging access."""
 
 from __future__ import annotations
 

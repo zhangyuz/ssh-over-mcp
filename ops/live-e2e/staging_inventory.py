@@ -1,4 +1,4 @@
-"""Dormant, metadata-only staging inventory; no CLI or workflow caller."""
+"""Metadata-only inventories; strict staging and non-authorizing residual views."""
 
 from __future__ import annotations
 
@@ -111,8 +111,49 @@ def _encode_entry(entry: InventoryEntry) -> bytes:
 
 
 def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry, ...]:
-    """Borrow a pinned root descriptor; return detached metadata records."""
+    """Preserve strict staging layout and the original owned-root FD boundary."""
     if type(root_fd) is not int or type(uid) is not int or uid < 0:
+        raise InventoryError(_FAILURE)
+    try:
+        os.fstat(root_fd)
+    except (OSError, ValueError, TypeError):
+        raise InventoryError(_FAILURE) from None
+    # Keep acquisition in this original entrypoint, including its failure
+    # classification; existing incident regressions exercise this boundary.
+    try:
+        owned = os.dup(root_fd)
+    except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):  # noqa: BLE001
+        raise InventoryError(cleanup_uncertain=True) from None
+
+    def close_owned(fd: int) -> None:
+        try:
+            os.close(fd)
+        except (
+            OSError, ValueError, TypeError, RuntimeError, MemoryError,
+            KeyboardInterrupt, SystemExit, GeneratorExit,
+        ):
+            raise InventoryError(cleanup_uncertain=True) from None
+
+    try:
+        return _collect_inventory(owned, uid=uid, required_layout=_LAYOUT, root_owned=True)
+    finally:
+        close_owned(owned)
+
+
+def collect_residual_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry, ...]:
+    """Inspect partial trees as metadata only; never establishes eligibility."""
+    return _collect_inventory(root_fd, uid=uid, required_layout=None)
+
+
+def _collect_inventory(
+    root_fd: int, *, uid: int, required_layout: dict[str, str] | None,
+    root_owned: bool = False,
+) -> tuple[InventoryEntry, ...]:
+    """Borrow a pinned root descriptor; return detached metadata records."""
+    if (
+        type(root_fd) is not int or type(uid) is not int or uid < 0
+        or type(root_owned) is not bool
+    ):
         raise InventoryError(_FAILURE)
     entries: list[InventoryEntry] = []
     identities: set[tuple[int, int]] = set()
@@ -212,7 +253,7 @@ def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry
             raise InventoryError(_FAILURE)
         append(record)
         names = names_at(fd, path)
-        if path == "." and set(names) != set(_LAYOUT):
+        if path == "." and required_layout is not None and set(names) != set(required_layout):
             raise InventoryError(_FAILURE)
         observed: dict[str, InventoryEntry] = {}
         for name in names:
@@ -221,7 +262,7 @@ def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry
             info = os.stat(name, dir_fd=fd, follow_symlinks=False)
             snapshot = _entry(relative, info)
             observed[name] = snapshot
-            if path == "." and snapshot.kind != _LAYOUT[name]:
+            if path == "." and required_layout is not None and snapshot.kind != required_layout[name]:
                 raise InventoryError(_FAILURE)
             if stat.S_ISDIR(info.st_mode):
                 try:
@@ -248,16 +289,19 @@ def collect_staging_inventory(root_fd: int, *, uid: int) -> tuple[InventoryEntry
 
     try:
         device = os.fstat(root_fd).st_dev
-        try:
-            owned = os.dup(root_fd)
-        except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):  # noqa: BLE001
-            # A failing duplication may have allocated its FD before
-            # reporting an error. No owned handle escaped for safe closure.
-            raise InventoryError(cleanup_uncertain=True) from None
-        try:
-            walk(owned, ".")
-        finally:
-            close_owned(owned)
+        if root_owned:
+            # The strict caller holds and closes its original owned clone.
+            walk(root_fd, ".")
+        else:
+            try:
+                owned = os.dup(root_fd)
+            except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):  # noqa: BLE001
+                # A failed acquisition cannot establish FD cleanup.
+                raise InventoryError(cleanup_uncertain=True) from None
+            try:
+                walk(owned, ".")
+            finally:
+                close_owned(owned)
         check_deadline()
         result = tuple(sorted(entries, key=lambda entry: _path_key(entry.path)))
         check_deadline()

@@ -1456,3 +1456,13 @@ Level-3/provider cleanup, actual UID-502 provenance and manual hardened
 security acceptance remain open; overall main workflow still fails on the
 pre-existing native provider state. Future runtime is not guaranteed by ten
 same-evening samples; retain all routine outcomes and review regressions.
+
+
+**Next native CI blocker — read-only residual inspection (2026-10-12):**
+CI speed is accepted; exact-main native run 38325534351 still fails closed on
+stale provider state. Fresh inspect-only 38327646572 preserves the three
+UID-502 partial/unbound directory identities. The user approved the separate
+[ADR 0014](decisions/0014-exact-residual-forensic-inspection.md) forensic slice
+to obtain complete bounded metadata evidence before a reviewed disposition.
+Implementation/review/live observation remain pending. No deletion, marker
+clearance, provenance recovery or native Level-3/A1/B8/N1c closure is claimed.

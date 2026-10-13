@@ -1,4 +1,4 @@
-"""Dormant incident preflight building blocks; no CLI or workflow.
+"""Incident preflight building blocks; fixed forensic reuse under ADR 0014.
 
 The private chain seam accepts disposable fixture components only in Slice A.
 The fixed one-snapshot adapter delegates to the separately reviewed diagnostic
