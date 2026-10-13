@@ -253,7 +253,7 @@ def test_inventory_first_pass_refusal_label_is_exact_index_only(case, monkeypatc
     monkeypatch.setattr(mod.inventory, "collect_residual_inventory", refuse)
     with pytest.raises(mod.inventory.InventoryError):
         mod.main([])
-    assert mod._REFUSAL_PHASE == f"inventory-a-{index}"
+    assert mod._REFUSAL_PHASE == f"inventory-a-{index}-probe-unresolved"
     assert capsys.readouterr().out == ""
 
 
@@ -273,3 +273,51 @@ def test_inventory_second_pass_refusal_label_is_exact_index_only(case, monkeypat
         mod.main([])
     assert mod._REFUSAL_PHASE == f"inventory-b-{index}"
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    ("fault", "reason"),
+    [
+        ("mode", "unsafe-mode"),
+        ("symlink", "unsupported-kind"),
+        ("hardlink", "hardlink"),
+        ("fifo", "unsupported-kind"),
+    ],
+)
+def test_catalog_two_first_pass_reports_fixed_nested_metadata_reason_only(
+    case, fault, reason, capsys
+):
+    mod, tmp, _ = case
+    nested = tmp / "recover/empty"
+    if fault == "mode":
+        nested.chmod(0o777)
+    elif fault == "symlink":
+        (nested / "canary").symlink_to(tmp / "first")
+    elif fault == "hardlink":
+        first = nested / "canary"
+        first.write_bytes(b"private-canary")
+        first.chmod(0o600)
+        os.link(first, nested / "canary2")
+    elif fault == "fifo":
+        os.mkfifo(nested / "canary")
+    with pytest.raises(mod.inventory.InventoryError):
+        mod.main([])
+    assert mod._REFUSAL_PHASE == f"inventory-a-2-probe-{reason}"
+    assert capsys.readouterr().out == ""
+    assert (tmp / "recover").is_dir()
+
+
+def test_failed_inventory_diagnostic_never_turns_refusal_into_success(case, monkeypatch):
+    mod, _, _ = case
+    original = mod.inventory.collect_residual_inventory
+    calls = 0
+    def refuse(*a, **kw):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise mod.inventory.InventoryError()
+        return original(*a, **kw)
+    monkeypatch.setattr(mod.inventory, "collect_residual_inventory", refuse)
+    with pytest.raises(mod.inventory.InventoryError):
+        mod.inspect_residuals()
+    assert mod._REFUSAL_PHASE == "inventory-a-2-probe-unresolved"

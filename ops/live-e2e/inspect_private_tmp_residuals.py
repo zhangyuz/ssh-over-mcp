@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import re
+import stat
 import sys
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict
@@ -143,6 +144,86 @@ def _pin_private_tmp():
             raise preflight.PreflightError() from None
 
 
+def _probe_rejected_inventory(root_fd: int) -> str:
+    """Failure-only metadata probe; a later raceable snapshot, never authority.
+
+    Limit traversal, never open regular files, never follow symlinks or print
+    names, paths, values or OS exceptions. The strict collector still refuses.
+    """
+    observed = 0
+    deadline = monotonic() + 10
+    try:
+        root_info = os.fstat(root_fd)
+        device = root_info.st_dev
+        seen: set[tuple[int, int]] = set()
+
+        def validate(info: os.stat_result) -> str | None:
+            identity = (info.st_dev, info.st_ino)
+            if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+                return "unsupported-kind"
+            if info.st_uid != _UID:
+                return "foreign-owner"
+            if info.st_dev != device:
+                return "foreign-device"
+            if stat.S_IMODE(info.st_mode) & 0o022:
+                return "unsafe-mode"
+            if stat.S_ISREG(info.st_mode) and info.st_nlink != 1:
+                return "hardlink"
+            if identity in seen:
+                return "duplicate"
+            seen.add(identity)
+            return None
+
+        def walk(fd: int, depth: int, path_size: int) -> str:
+            nonlocal observed
+            if monotonic() > deadline or observed >= 128 or depth > 12:
+                return "bounds"
+            before = os.fstat(fd)
+            invalid = validate(before)
+            if invalid:
+                return invalid
+            observed += 1
+            with os.scandir(fd) as entries:
+                for item in entries:
+                    name = item.name
+                    if (
+                        type(name) is not str
+                        or name in {"", ".", ".."}
+                        or "/" in name
+                        or "\x00" in name
+                    ):
+                        return "bounds"
+                    size = path_size + len(os.fsencode(name)) + 1
+                    if size > 4096 or depth >= 12 or monotonic() > deadline or observed >= 128:
+                        return "bounds"
+                    child_before = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                    invalid = validate(child_before)
+                    if invalid:
+                        return invalid
+                    observed += 1
+                    if stat.S_ISDIR(child_before.st_mode):
+                        child_fd = os.open(name, _DIR_FLAGS, dir_fd=fd)
+                        try:
+                            if os.fstat(child_fd) != child_before:
+                                return "unstable"
+                            # The directory was validated above; walk checks
+                            # it again without treating the second sighting
+                            # as a duplicate identity.
+                            seen.remove((child_before.st_dev, child_before.st_ino))
+                            result = walk(child_fd, depth + 1, size)
+                            if result != "unresolved":
+                                return result
+                        finally:
+                            os.close(child_fd)
+                    if os.stat(name, dir_fd=fd, follow_symlinks=False) != child_before:
+                        return "unstable"
+            return "unresolved" if os.fstat(fd) == before else "unstable"
+
+        return walk(root_fd, 0, 0)
+    except (OSError, ValueError, TypeError, OverflowError, MemoryError, RuntimeError):
+        return "unavailable"
+
+
 def inspect_residuals() -> bytes:
     """Observe fixed historical roots only; successful evidence denies cleanup."""
     global _REFUSAL_PHASE
@@ -188,7 +269,14 @@ def inspect_residuals() -> bytes:
         for index, ((name, _, _), chain) in enumerate(zip(_CATALOG, chains, strict=True), 1):
             _REFUSAL_PHASE = f"inventory-a-{index}"
             check_deadline()
-            entries = inventory.collect_residual_inventory(chain._fds[-1], uid=_UID)
+            try:
+                entries = inventory.collect_residual_inventory(chain._fds[-1], uid=_UID)
+            except inventory.InventoryError:
+                _REFUSAL_PHASE = (
+                    f"inventory-a-{index}-probe-"
+                    + _probe_rejected_inventory(chain._fds[-1])
+                )
+                raise
             count += len(entries)
             if count > MAX_TOTAL_ENTRIES:
                 raise preflight.PreflightError()
