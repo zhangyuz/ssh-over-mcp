@@ -279,9 +279,9 @@ def test_inventory_second_pass_refusal_label_is_exact_index_only(case, monkeypat
     ("fault", "reason"),
     [
         ("mode", "unsafe-mode"),
-        ("symlink", "unsupported-kind"),
+        ("symlink", "symlink"),
         ("hardlink", "hardlink"),
-        ("fifo", "unsupported-kind"),
+        ("fifo", "fifo"),
     ],
 )
 def test_catalog_two_first_pass_reports_fixed_nested_metadata_reason_only(
