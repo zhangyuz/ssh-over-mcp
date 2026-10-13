@@ -202,6 +202,19 @@ whether all nested content is harmless, or why the older provider run was
 interrupted. Neither report is a manifest, disposition receipt or
 authorization to clear state.
 
+A separate **read-only UID-501 Mac metadata check**, using no-follow stat of
+only the three fixed known basenames relative to literal `/private/tmp`,
+found all three directories at the exact respective recorded device/inode,
+UID 502 and mode `0700`. The parent `/private/tmp` is root-owned, mode
+`01777` (sticky and world-writable). Thus the historical residual root
+identities are present under `/private/tmp` and not under the getconf-pinned
+forensic parent. No nested directory was opened and no file content was read.
+The metadata-only cross-account check is not an authenticated in-account
+provenance/cleanup receipt. A follow-up trusted UID-502 recursive inspector
+must address the sticky-world-writable **parent** separately from the
+existing strictly non-world-writable getconf ancestor policy, without
+following symlinks or weakening any selected-root identity requirement.
+
 ### Reviewed next steps (NOT cleanup authorization)
 
 1. Align **future** orchestrator temporary root selection and native
