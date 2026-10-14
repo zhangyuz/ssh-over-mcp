@@ -141,18 +141,28 @@ class _FixtureOwnedWorkspace:
         if self._closed:
             return
         self._closed = True
+        uncertain = False
         for attr in ("_root_fd", "_staging_fd"):
             fd = getattr(self, attr)
             setattr(self, attr, -1)
             if fd >= 0:
-                os.close(fd)
-        self._permit.close()
+                try:
+                    os.close(fd)
+                except (OSError, RuntimeError):
+                    uncertain = True
+        try:
+            self._permit.close()
+        except (OSError, RuntimeError, NamespaceError):
+            uncertain = True
+        if uncertain:
+            self._cleanup_state = "uncertain"
+            raise NamespaceError("namespace", cleanup_uncertain=True) from None
 
     def __del__(self) -> None:
-        # No filesystem mutation, guest signal, or cleanup retry on finalization.
+        # No filesystem mutation, guest signal or cleanup retry in a destructor.
         try:
             self.close()
-        except (OSError, AttributeError):
+        except (OSError, RuntimeError, AttributeError, NamespaceError):
             pass
 
 

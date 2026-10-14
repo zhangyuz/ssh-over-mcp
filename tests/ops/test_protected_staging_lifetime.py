@@ -266,3 +266,88 @@ def test_lost_root_fd_refuses(tmp_path):
         workspace.close()
     finally:
         os.close(fd)
+
+
+def test_finalizer_closes_only_no_unlink(tmp_path, monkeypatch):
+    import gc
+
+    m = load_module()
+    library, fd = _fixture_library(tmp_path)
+    workspace = m._create_for_fixture(m._claim_disposable_fixture(fd))
+    root = library / "Application Support" / "ssh-over-mcp-e2e" / "staging-v1" / workspace.name
+    calls = []
+    monkeypatch.setattr(os, "unlink", lambda *a, **kw: calls.append(("unlink", a)))
+    monkeypatch.setattr(os, "rmdir", lambda *a, **kw: calls.append(("rmdir", a)))
+    del workspace
+    gc.collect()
+    assert calls == []
+    assert root.is_dir()
+    assert (library / ".adr19-disposable-claim").is_file()
+    os.close(fd)
+
+
+def test_fixture_cross_workspace_receipt_is_not_transferable(tmp_path):
+    m = load_module()
+    (tmp_path / "a").mkdir(mode=0o700)
+    (tmp_path / "b").mkdir(mode=0o700)
+    _la, fd_a = _fixture_library(tmp_path / "a")
+    lb, fd_b = _fixture_library(tmp_path / "b")
+    try:
+        a = m._create_for_fixture(m._claim_disposable_fixture(fd_a))
+        b = m._create_for_fixture(m._claim_disposable_fixture(fd_b))
+        receipt_a = m._fixture_never_started_receipt(a)
+        with pytest.raises(m.NamespaceError):
+            m._dispose_never_started_fixture(b, receipt_a)
+        assert (lb / "Application Support" / "ssh-over-mcp-e2e" / "staging-v1" / b.name).is_dir()
+        m._dispose_never_started_fixture(a, receipt_a)
+        with pytest.raises(m.NamespaceError):
+            m._dispose_never_started_fixture(a, receipt_a)
+        b.close()
+    finally:
+        os.close(fd_a)
+        os.close(fd_b)
+
+
+def test_close_error_fails_uncertain_without_any_delete(tmp_path, monkeypatch):
+    m = load_module()
+    lib, fd = _fixture_library(tmp_path)
+    workspace = m._create_for_fixture(m._claim_disposable_fixture(fd))
+    target_fd = workspace._root_fd
+    original_close = os.close
+    calls = []
+    one = [True]
+
+    def fail_on_root(child_fd):
+        if child_fd == target_fd and one[0]:
+            one[0] = False
+            calls.append("close_failed")
+            raise OSError("could have closed")
+        return original_close(child_fd)
+
+    monkeypatch.setattr(os, "close", fail_on_root)
+    try:
+        with pytest.raises(m.NamespaceError) as exc:
+            workspace.close()
+        assert exc.value.cleanup_uncertain is True
+        assert workspace._cleanup_state == "uncertain"
+        assert calls == ["close_failed"]
+        root = lib / "Application Support" / "ssh-over-mcp-e2e" / "staging-v1" / workspace.name
+        assert root.exists()
+    finally:
+        monkeypatch.setattr(os, "close", original_close)
+        original_close(fd)
+
+
+def test_missing_original_root_refuses_without_retry(tmp_path):
+    m = load_module()
+    library, fd = _fixture_library(tmp_path)
+    try:
+        workspace = m._create_for_fixture(m._claim_disposable_fixture(fd))
+        root = library / "Application Support" / "ssh-over-mcp-e2e" / "staging-v1" / workspace.name
+        root.rmdir()  # disposable fixture only; simulates foreign disappearance
+        with pytest.raises(m.NamespaceError):
+            m._dispose_never_started_fixture(workspace, m._fixture_never_started_receipt(workspace))
+        assert (library / ".adr19-disposable-claim").exists()
+        workspace.close()
+    finally:
+        os.close(fd)
