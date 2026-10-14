@@ -5,6 +5,7 @@ ordinary Yuz.local UID501 tests must never be reported as UID502 results.
 """
 from __future__ import annotations
 
+import ctypes
 import os
 import platform
 import stat
@@ -16,6 +17,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "ops/live-e2e"))
 
+import staging_namespace_native as native
 from staging_namespace_native import read_acl
 from staging_namespace_types import NamespaceError
 from staging_owned_lifetime import (
@@ -40,7 +42,16 @@ def test_real_apfs_disposable_fd_acl_original_owned_root(tmp_path: Path) -> None
         try:
             assert read_acl(owned._staging_fd).tags == ()
             assert read_acl(owned._root_fd).tags == ()
+            # Explicit Darwin64 fstatfs APFS proof, not only Darwin/x86_64.
+            fs = native._Statfs64()
+            libsystem = native._load_acl_library()
+            assert getattr(libsystem, "fstatfs$INODE64")(
+                owned._root_fd, ctypes.byref(fs)
+            ) == 0
+            assert fs.fstypename == b"apfs"
             st = os.fstat(owned._root_fd)
+            assert st.st_dev == os.fstat(fd).st_dev
+            print(f"DISPOSABLE_APFS device={st.st_dev} mount={fs.mntonname.decode()}")
             assert st.st_uid == os.getuid()
             assert stat.S_IMODE(st.st_mode) == 0o700
             receipt = _fixture_never_started_receipt(owned)

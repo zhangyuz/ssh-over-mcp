@@ -1,6 +1,6 @@
 # ADR 0019 Slice 2A — Dormant workspace primitives evidence
 
-**Status:** First scoped implementation candidate for independent review, NOT production activation. Stacked on the still-unmerged [PR #248 plan](../superpowers/plans/2026-10-14-adr19-owned-protected-workspace-lifetime.md).
+**Status:** First scoped implementation candidate for independent review, NOT production activation. Based on the now-merged [PR #248 plan](../superpowers/plans/2026-10-14-adr19-owned-protected-workspace-lifetime.md).
 
 ## Implemented boundary
 
@@ -8,7 +8,7 @@ The public `create_owned_workspace()` always refuses with `NamespaceError('unbou
 
 A **private disposable-fixture-only** adapter tests `O_CREAT|O_EXCL` claim creation (at a different test-only marker), fixed three-literal descendants, fresh 32-hex run directory, original held FD/device/inode/mode, `0700` and APFS ACL checks, exactly-one-owned-child scan, bounded no-follow descriptor-relative cleanup, failed unlink retention and close-only finalization. It is **not** integrated with the production `_PinnedNamespaces` authenticated selector/QEMU/two-pass protected/legacy scan. The production orchestrator, live marker, protected staging root, recovery and CI workflows are untouched.
 
-TDD evidence: missing module, fixture claim, fixture deletion and close-failure uncertainty tests each failed before fixes. Two final hardening tests reproduced a leaked FD on post-claim fsync failure and missing staging ACL revalidation; both passed after fixes. Older protected namespace baseline: **288 passed**. New + existing focused suite before formatting-only change: **312 passed, 1 skipped in 16.05s**. Reverify before treating latest code as green.
+TDD evidence: missing module, fixture claim, fixture deletion and close-failure uncertainty tests each failed before fixes. Two final hardening tests reproduced a leaked FD on post-claim fsync failure and missing staging ACL revalidation; both passed after fixes. Older protected namespace baseline: **288 passed**. New + existing focused suite before formatting-only change: **312 passed, 1 skipped in 16.05s** (original feature HEAD; revised review-fix regression below). Reverify before treating latest code as green.
 
 ## Real-host limitations
 
@@ -23,3 +23,15 @@ Yuz.local command account is UID **501**. Dedicated `gha-e2e-orchestrator` is UI
 5. Exact-head full CI, independent project-wide security review and real native acceptance are required before merge. Independent review is requested **as soon as code self-review completes**, not after CI.
 
 No production filesystem activation, marker deletion, broad cleanup, statuses writing or PR-native dispatch is authorized by this change.
+
+
+## Independent reviewer findings and corrective TDD (PR #249)
+
+The [independent project-wide review](https://github.com/zhangyuz/ssh-over-mcp/pull/249#issuecomment-6174210019) found **3 Important and 1 Minor** issues in the fixture-backed primitives; none were reachable through the permanently unbound production entrypoint. The review changes below are **only to the disposable fixture** and still do not authorize protected staging.
+
+- Original exclusive fixture marker **FD identity, inode, owner, mode and directory entry**, and the complete held original Library → Application Support → provider base → staging edge/ACL/mtime/ctime chain, are now rechecked **before first unlink and while verifying the sole owned child**. Separate negative tests remove/recreate the marker or rename/replace an ancestor and prove no cleanup happens.
+- FD ownership is recorded as soon as each no-follow child FD opens. All child/root/claim FD ownership is explicitly transferred only after final successful validation, otherwise deterministically closed exactly once. Tests inject ACL failure immediately after child FD open and post-construction drift; no leaked FD remains. An injected uncertain marker FD close also closes every other held descriptor, with no retry.
+- All previously unbounded `os.listdir(fd)` and `list(scandir)` paths now use streaming, capped enumeration. An adversarial directory containing 140 test files proves enumeration stops at entry **129** for a per-level cap of 128, returns a refusal and leaves all foreign entries unchanged.
+- The real macOS smoke now explicitly invokes the existing Darwin64 `fstatfs$INODE64` ABI and verifies `fstypename=apfs`, matching the held root and parent device. Observed fixture device **16777220**, mount **/System/Volumes/Data**, in the current UID501 shell. **UID502 remains SKIPPED**; no denial/allow-ACL or production placement UID502 matrix has run.
+
+Final revised feature HEAD regression and GitHub-hosted CI should be referenced only after the actual new revision is tested. POSIX same-UID interleaving remains a documented non-atomic limit, and original real-run claim/reap issuance remains **future Slice 2B**.

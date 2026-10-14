@@ -1963,3 +1963,12 @@ reap proof, existing protected/legacy authenticated admission and production
 placement are not implemented. Real Mac UID502 tests remain pending because
 the command account is UID501 without passwordless switching authority.
 Code-complete review is requested immediately, independent of CI status.
+
+Independent review of this first feature PR found three Important fixture
+safety defects (claim/ancestor drift, partial-open FD leaks, unbounded scans)
+and one Minor macOS APFS evidence gap. The code was amended using negative
+RED→GREEN tests: original marker/ancestor identity before fixture cleanup,
+close-once FD transfer on every failed creation, fully bounded directory
+enumeration, and explicit fstatfs APFS assertion. These changes **do not**
+remove the earlier UID502/native or full protected/legacy scanner integration
+gates; see the evidence document above.

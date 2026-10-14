@@ -400,3 +400,174 @@ def test_owned_scan_rechecks_staging_acl_before_deletion(tmp_path, monkeypatch):
         workspace.close()
     finally:
         os.close(fd)
+
+
+def test_postcreate_claim_marker_swap_refuses_owned_cleanup(tmp_path):
+    m = load_module()
+    library, fd = _fixture_library(tmp_path)
+    try:
+        workspace = m._create_for_fixture(m._claim_disposable_fixture(fd))
+        original = library / ".adr19-disposable-claim"
+        original.rename(library / ".adr19-disposable-claim-moved")
+        original.write_text("forged same-looking claim")
+        staging = library / "Application Support" / "ssh-over-mcp-e2e" / "staging-v1"
+        with pytest.raises(m.NamespaceError):
+            m._dispose_never_started_fixture(workspace, m._fixture_never_started_receipt(workspace))
+        assert (staging / workspace.name).is_dir()
+        workspace.close()
+    finally:
+        os.close(fd)
+
+
+def test_postcreate_original_ancestor_substitution_refuses(tmp_path):
+    m = load_module()
+    library, fd = _fixture_library(tmp_path)
+    try:
+        workspace = m._create_for_fixture(m._claim_disposable_fixture(fd))
+        app = library / "Application Support"
+        app.rename(library / "Application Support-moved")
+        app.mkdir(mode=0o700)
+        with pytest.raises(m.NamespaceError):
+            m._dispose_never_started_fixture(workspace, m._fixture_never_started_receipt(workspace))
+        old = library / "Application Support-moved" / "ssh-over-mcp-e2e" / "staging-v1"
+        assert (old / workspace.name).is_dir()
+        workspace.close()
+    finally:
+        os.close(fd)
+
+
+def test_validation_failure_after_child_open_closes_all_owned_fds(tmp_path, monkeypatch):
+    m = load_module()
+    _library, fd = _fixture_library(tmp_path)
+    permit = m._claim_disposable_fixture(fd)
+    original_open, original_validate = os.open, m._validate_private_dir
+    child_fds = []
+    count = [0]
+
+    def track_open(name, *args, **kwargs):
+        result = original_open(name, *args, **kwargs)
+        if name == "Application Support":
+            child_fds.append(result)
+        return result
+
+    def fail_after_open(child_fd):
+        count[0] += 1
+        if count[0] == 2:
+            raise m.NamespaceError("namespace")
+        return original_validate(child_fd)
+
+    monkeypatch.setattr(os, "open", track_open)
+    monkeypatch.setattr(m, "_validate_private_dir", fail_after_open)
+    try:
+        with pytest.raises(m.NamespaceError):
+            m._create_for_fixture(permit)
+        assert len(child_fds) == 1
+        for owned_fd in (*child_fds, permit.library_fd, permit.claim_fd):
+            with pytest.raises(OSError):
+                os.fstat(owned_fd)
+    finally:
+        os.close(fd)
+
+
+def test_verification_failure_after_handle_created_closes_all_fds(tmp_path, monkeypatch):
+    m = load_module()
+    _library, fd = _fixture_library(tmp_path)
+    permit = m._claim_disposable_fixture(fd)
+    raw_fds = []
+    original_init = m._FixtureOwnedWorkspace.__init__
+
+    def remember_handle(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        raw_fds.extend([self._root_fd, self._staging_fd, self._permit.claim_fd,
+                        self._permit.library_fd])
+
+    def refuse(_self):
+        raise m.NamespaceError("drift")
+
+    monkeypatch.setattr(m._FixtureOwnedWorkspace, "__init__", remember_handle)
+    monkeypatch.setattr(m._FixtureOwnedWorkspace, "verify_single_owned_child", refuse)
+    try:
+        with pytest.raises(m.NamespaceError):
+            m._create_for_fixture(permit)
+        assert len(raw_fds) == 4
+        for owned_fd in raw_fds:
+            with pytest.raises(OSError):
+                os.fstat(owned_fd)
+    finally:
+        os.close(fd)
+
+
+def test_large_fixture_tree_refuses_with_early_bounded_scan(tmp_path, monkeypatch):
+    m = load_module()
+    library, fd = _fixture_library(tmp_path)
+    original_scandir = os.scandir
+    try:
+        workspace = m._create_for_fixture(m._claim_disposable_fixture(fd))
+        root = library / "Application Support" / "ssh-over-mcp-e2e" / "staging-v1" / workspace.name
+        for index in range(140):
+            (root / f"fixture-{index:03}").write_text("keep")
+        receipt = m._fixture_never_started_receipt(workspace)
+        consumed = [0]
+        class CountedScan:
+            def __init__(self, stream):
+                self.stream = stream
+            def __enter__(self):
+                self.stream.__enter__()
+                return self
+            def __exit__(self, *a):
+                return self.stream.__exit__(*a)
+            def __iter__(self):
+                return self
+            def __next__(self):
+                record = next(self.stream)
+                consumed[0] += 1
+                assert consumed[0] <= 129, "unbounded directory consumption"
+                return record
+        def count_scan(target):
+            stream = original_scandir(target)
+            try:
+                match = os.fstat(target).st_ino == workspace.root_identity[1]
+            except (OSError, TypeError):
+                match = False
+            return CountedScan(stream) if match else stream
+        monkeypatch.setattr(os, "scandir", count_scan)
+        with pytest.raises(m.NamespaceError):
+            m._dispose_never_started_fixture(workspace, receipt)
+        assert consumed[0] == 129
+        assert len(list(root.iterdir())) == 140
+        workspace.close()
+    finally:
+        os.close(fd)
+
+
+def test_claim_close_error_closes_other_owned_fd_without_retry(tmp_path, monkeypatch):
+    m = load_module()
+    _library, fd = _fixture_library(tmp_path)
+    permit = m._claim_disposable_fixture(fd)
+    original_close = os.close
+    captured_library, captured_claim = permit.library_fd, permit.claim_fd
+    calls = []
+
+    def fail_claim_once(raw_fd):
+        calls.append(raw_fd)
+        if raw_fd == captured_claim:
+            raise OSError("unknown close outcome")
+        return original_close(raw_fd)
+
+    monkeypatch.setattr(os, "close", fail_claim_once)
+    try:
+        with pytest.raises(m.NamespaceError) as exc:
+            permit.close()
+        assert exc.value.cleanup_uncertain is True
+        assert calls.count(captured_claim) == 1
+        assert calls.count(captured_library) == 1
+        with pytest.raises(OSError):
+            os.fstat(captured_library)
+        assert permit.claim_fd == -1
+        assert permit.library_fd == -1
+    finally:
+        monkeypatch.setattr(os, "close", original_close)
+        # A fixture injected a failure *before* closing this FD; the test
+        # harness, not production, owns its teardown.
+        original_close(captured_claim)
+        original_close(fd)

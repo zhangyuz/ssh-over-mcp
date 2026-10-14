@@ -71,11 +71,17 @@ class _FixtureClaimPermit:
     consumed: bool = False
 
     def close(self) -> None:
+        uncertain = False
         for attr in ("claim_fd", "library_fd"):
             fd = getattr(self, attr)
             if fd >= 0:
                 setattr(self, attr, -1)
-                os.close(fd)
+                try:
+                    os.close(fd)
+                except (OSError, RuntimeError):
+                    uncertain = True
+        if uncertain:
+            raise NamespaceError("namespace", cleanup_uncertain=True) from None
 
 
 def _claim_disposable_fixture(library_fd: int) -> _FixtureClaimPermit:
@@ -90,7 +96,7 @@ def _claim_disposable_fixture(library_fd: int) -> _FixtureClaimPermit:
     try:
         owned_fd = os.open(".", _DIR_FLAGS, dir_fd=library_fd)
         _validate_private_dir(owned_fd)
-        if os.listdir(owned_fd):
+        if _bounded_names(owned_fd, maximum=0):
             raise NamespaceError("residual")
         claim_fd = os.open(_CLAIM_NAME, os.O_RDWR | os.O_CREAT | os.O_EXCL |
                            os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=owned_fd)
@@ -115,14 +121,49 @@ def _claim_disposable_fixture(library_fd: int) -> _FixtureClaimPermit:
                         pass
 
 
+
+@dataclass(frozen=True, slots=True)
+class _FixtureEdge:
+    parent_fd: int
+    name: str
+    child_fd: int
+    identity: tuple[int, ...]
+
+
+def _bounded_names(fd: int, *, maximum: int) -> list[str]:
+    """Enumerate only up to maximum+1, never materialize a whole foreign dir."""
+    if not 0 <= maximum <= 128:
+        raise NamespaceError("budget")
+    scan_fd = os.open(".", _DIR_FLAGS, dir_fd=fd)
+    names: list[str] = []
+    try:
+        with os.scandir(scan_fd) as stream:
+            for entry in stream:
+                if len(names) >= maximum:
+                    raise NamespaceError("budget", cleanup_uncertain=True)
+                if type(entry.name) is not str or not entry.name or "/" in entry.name:
+                    raise NamespaceError("namespace", cleanup_uncertain=True)
+                names.append(entry.name)
+        return names
+    finally:
+        os.close(scan_fd)
+
+
 class _FixtureOwnedWorkspace:
     """Only a disposable, never-launched fixture; NOT a live OwnedWorkspace."""
 
-    def __init__(self, permit: _FixtureClaimPermit, staging_fd: int, root_fd: int,
-                 name: str) -> None:
+    def __init__(
+        self,
+        permit: _FixtureClaimPermit,
+        staging_fd: int,
+        root_fd: int,
+        name: str,
+        ancestors: tuple[_FixtureEdge, ...],
+    ) -> None:
         self._permit = permit
         self._staging_fd = staging_fd
         self._root_fd = root_fd
+        self._ancestors = ancestors
         self.name = name
         self.root_identity = _identity(root_fd)
         self.parent_identity = _identity(staging_fd)
@@ -130,17 +171,66 @@ class _FixtureOwnedWorkspace:
         self._cleanup_state = "new"
         self._receipt_token = object()
 
+    def _verify_claim_and_ancestors(self) -> None:
+        permit = self._permit
+        if self._closed or permit.library_fd < 0 or permit.claim_fd < 0:
+            raise NamespaceError("unbound")
+        if _identity(permit.library_fd) != permit.library_identity:
+            raise NamespaceError("drift")
+        if _identity(permit.claim_fd) != permit.claim_identity:
+            raise NamespaceError("drift")
+        claim = os.stat(_CLAIM_NAME, dir_fd=permit.library_fd, follow_symlinks=False)
+        if (
+            (claim.st_dev, claim.st_ino, claim.st_uid, claim.st_gid, claim.st_mode)
+            != _stable_id(permit.claim_identity)
+            or not stat.S_ISREG(claim.st_mode)
+            or claim.st_nlink != 1
+        ):
+            raise NamespaceError("unbound")
+        if len(self._ancestors) != len(_FIXED_MISSING):
+            raise NamespaceError("unbound")
+        for pos, edge in enumerate(self._ancestors):
+            if edge.name != _FIXED_MISSING[pos]:
+                raise NamespaceError("unbound")
+            parent = permit.library_fd if pos == 0 else self._ancestors[pos - 1].child_fd
+            if parent != edge.parent_fd or edge.child_fd < 0:
+                raise NamespaceError("unbound")
+            if _identity(edge.child_fd) != edge.identity:
+                raise NamespaceError("drift")
+            observed = os.stat(edge.name, dir_fd=parent, follow_symlinks=False)
+            if (
+                (observed.st_dev, observed.st_ino, observed.st_uid,
+                 observed.st_gid, observed.st_mode)
+                != _stable_id(edge.identity)
+                or not stat.S_ISDIR(observed.st_mode)
+            ):
+                raise NamespaceError("drift")
+            _validate_private_dir(edge.child_fd)
+            allowed = {_CLAIM_NAME, _FIXED_MISSING[0]} if pos == 0 else {
+                _FIXED_MISSING[pos]
+            }
+            if set(_bounded_names(parent, maximum=len(allowed))) != allowed:
+                raise NamespaceError("residual")
+        if self._ancestors[-1].child_fd != self._staging_fd:
+            raise NamespaceError("unbound")
+        _validate_private_dir(permit.library_fd)
+
     def verify_single_owned_child(self) -> None:
         if self._closed or self._root_fd < 0 or self._staging_fd < 0:
             raise NamespaceError("unbound")
+        self._verify_claim_and_ancestors()
         if _identity(self._staging_fd) != self.parent_identity:
             raise NamespaceError("drift")
         if _stable_id(_identity(self._root_fd)) != _stable_id(self.root_identity):
             raise NamespaceError("drift")
         actual = os.stat(self.name, dir_fd=self._staging_fd, follow_symlinks=False)
-        if (actual.st_dev, actual.st_ino) != self.root_identity[:2] or not stat.S_ISDIR(actual.st_mode):
+        if (
+            (actual.st_dev, actual.st_ino, actual.st_uid, actual.st_gid, actual.st_mode)
+            != _stable_id(self.root_identity)
+            or not stat.S_ISDIR(actual.st_mode)
+        ):
             raise NamespaceError("drift")
-        if os.listdir(self._staging_fd) != [self.name]:
+        if _bounded_names(self._staging_fd, maximum=1) != [self.name]:
             raise NamespaceError("residual")
         _validate_private_dir(self._staging_fd)
         _validate_private_dir(self._root_fd)
@@ -150,14 +240,18 @@ class _FixtureOwnedWorkspace:
             return
         self._closed = True
         uncertain = False
-        for attr in ("_root_fd", "_staging_fd"):
-            fd = getattr(self, attr)
-            setattr(self, attr, -1)
+        unique_fds: set[int] = set()
+        for fd in (self._root_fd, *(edge.child_fd for edge in self._ancestors)):
             if fd >= 0:
-                try:
-                    os.close(fd)
-                except (OSError, RuntimeError):
-                    uncertain = True
+                unique_fds.add(fd)
+        self._root_fd = -1
+        self._staging_fd = -1
+        self._ancestors = ()
+        for fd in unique_fds:
+            try:
+                os.close(fd)
+            except (OSError, RuntimeError):
+                uncertain = True
         try:
             self._permit.close()
         except (OSError, RuntimeError, NamespaceError):
@@ -175,16 +269,14 @@ class _FixtureOwnedWorkspace:
 
 
 def _create_for_fixture(permit: _FixtureClaimPermit) -> _FixtureOwnedWorkspace:
-    """Internal test adapter: held-FD creation after an actual disposable O_EXCL.
-
-    The user-facing production entrypoint never calls this function.
-    No arbitrary path, production-marker or provider identity is accepted.
-    """
+    """Never a provider capability: fixture-only held-FD create and verify."""
     if type(permit) is not _FixtureClaimPermit or permit.consumed:
         raise NamespaceError("unbound")
-    stage_fd = -1
-    root_fd = -1
     current_fd = permit.library_fd
+    opened: list[int] = []
+    owned: _FixtureOwnedWorkspace | None = None
+    modified = False
+    failure: BaseException | None = None
     try:
         if current_fd < 0 or permit.claim_fd < 0:
             raise NamespaceError("unbound")
@@ -193,52 +285,86 @@ def _create_for_fixture(permit: _FixtureClaimPermit) -> _FixtureOwnedWorkspace:
         if _identity(permit.claim_fd) != permit.claim_identity:
             raise NamespaceError("drift")
         original = os.stat(_CLAIM_NAME, dir_fd=current_fd, follow_symlinks=False)
-        if (original.st_dev, original.st_ino) != permit.claim_identity[:2]:
+        if (
+            (original.st_dev, original.st_ino) != permit.claim_identity[:2]
+            or original.st_mode != permit.claim_identity[4]
+            or original.st_uid != permit.claim_identity[2]
+        ):
             raise NamespaceError("unbound")
-        if os.listdir(current_fd) != [_CLAIM_NAME]:
+        if _bounded_names(current_fd, maximum=1) != [_CLAIM_NAME]:
             raise NamespaceError("residual")
-        permit.consumed = True  # no reuse or collision adoption
+        permit.consumed = True
+        edges: list[_FixtureEdge] = []
         for expected in _FIXED_MISSING:
             _validate_private_dir(current_fd)
-            entries = set(os.listdir(current_fd))
             allowed = {_CLAIM_NAME} if expected == _FIXED_MISSING[0] else set()
-            if entries != allowed:
+            if set(_bounded_names(current_fd, maximum=len(allowed))) != allowed:
                 raise NamespaceError("residual")
-            parent_before = _identity(current_fd)
+            before = _identity(current_fd)
+            modified = True
             os.mkdir(expected, mode=0o700, dir_fd=current_fd)
             next_fd = os.open(expected, _DIR_FLAGS, dir_fd=current_fd)
+            opened.append(next_fd)  # ownership is recorded BEFORE validation
             _validate_private_dir(next_fd)
-            if set(os.listdir(current_fd)) != allowed | {expected}:
-                os.close(next_fd)
+            if set(_bounded_names(current_fd, maximum=len(allowed) + 1)) != (
+                allowed | {expected}
+            ):
                 raise NamespaceError("drift")
-            parent_after = _identity(current_fd)
-            if _stable_id(parent_before) != _stable_id(parent_after):
-                os.close(next_fd)
+            after = _identity(current_fd)
+            if _stable_id(before) != _stable_id(after):
                 raise NamespaceError("drift")
-            if current_fd != permit.library_fd:
-                os.close(current_fd)
+            edges.append(_FixtureEdge(current_fd, expected, next_fd, _identity(next_fd)))
             current_fd = next_fd
-        stage_fd = current_fd
+        staging_fd = current_fd
         name = _RUN_PREFIX + secrets.token_hex(16)
-        os.mkdir(name, mode=0o700, dir_fd=stage_fd)
-        root_fd = os.open(name, _DIR_FLAGS, dir_fd=stage_fd)
+        modified = True
+        os.mkdir(name, mode=0o700, dir_fd=staging_fd)
+        root_fd = os.open(name, _DIR_FLAGS, dir_fd=staging_fd)
+        opened.append(root_fd)
         _validate_private_dir(root_fd)
-        if os.fstat(root_fd).st_dev != os.fstat(stage_fd).st_dev:
+        if os.fstat(root_fd).st_dev != os.fstat(staging_fd).st_dev:
             raise NamespaceError("namespace")
-        workspace = _FixtureOwnedWorkspace(permit, stage_fd, root_fd, name)
-        workspace.verify_single_owned_child()
-        return workspace
-    except NamespaceError:
-        raise
-    except (OSError, ValueError, TypeError):
-        raise NamespaceError("namespace", cleanup_uncertain=True) from None
+        # The only explicitly allowed parent timestamp changes are these
+        # witnessed mkdir operations, followed by exact child inventories.
+        permit.library_identity = _identity(permit.library_fd)
+        refreshed = tuple(
+            _FixtureEdge(e.parent_fd, e.name, e.child_fd, _identity(e.child_fd))
+            for e in edges
+        )
+        owned = _FixtureOwnedWorkspace(permit, staging_fd, root_fd, name, refreshed)
+        owned.verify_single_owned_child()
+        opened.clear()  # transferred to the owned workspace
+        return owned
+    except BaseException as exc:  # noqa: BLE001 - close all FDs even on interrupt
+        failure = exc
+        raise NamespaceError(
+            "namespace" if not isinstance(exc, NamespaceError) else exc.reason,
+            cleanup_uncertain=modified or getattr(exc, "cleanup_uncertain", False),
+        ) from None
     finally:
-        # Failed mutations are intentionally NOT rolled back (uncertain evidence).
-        if "workspace" not in locals():
-            if root_fd >= 0:
-                os.close(root_fd)
-            if current_fd >= 0 and current_fd != permit.library_fd:
-                os.close(current_fd)
+        if failure is not None:
+            close_uncertain = False
+            # Every local FD is tracked when opened, not after its validation.
+            for fd in reversed(opened):
+                try:
+                    os.close(fd)
+                except (OSError, RuntimeError):
+                    close_uncertain = True
+            opened.clear()
+            try:
+                permit.close()
+            except (OSError, RuntimeError, NamespaceError):
+                close_uncertain = True
+            if owned is not None:
+                # All owned FDs were in opened; do not close them a second time.
+                owned._closed = True
+                owned._root_fd = -1
+                owned._staging_fd = -1
+                owned._ancestors = ()
+                owned._cleanup_state = "uncertain"
+            if close_uncertain:
+                # An uncertain close cannot be retried or treated as success.
+                raise NamespaceError("namespace", cleanup_uncertain=True) from None
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,25 +382,16 @@ def _fixture_never_started_receipt(workspace: _FixtureOwnedWorkspace) -> _NeverS
 
 
 def _remove_fixture_descendants(root_fd: int, budget: list[int], depth: int = 0) -> None:
-    """Bounded, no-follow delete of *test-only* original held fixture descendants."""
-    if depth >= 10:
+    """Stream at most 129 names/level, never materialize an unbounded directory."""
+    if depth >= 10 or budget[0] >= 512:
         raise NamespaceError("budget", cleanup_uncertain=True)
     _validate_private_dir(root_fd)
-    scan_fd = os.open(".", _DIR_FLAGS, dir_fd=root_fd)
-    try:
-        with os.scandir(scan_fd) as stream:
-            entries = list(stream)
-    finally:
-        os.close(scan_fd)
-    if len(entries) > 128:
-        raise NamespaceError("budget", cleanup_uncertain=True)
-    for entry in entries:
+    names = _bounded_names(root_fd, maximum=min(128, 512 - budget[0]))
+    for name in names:
         budget[0] += 1
         if budget[0] > 512:
             raise NamespaceError("budget", cleanup_uncertain=True)
-        name = entry.name
-        if (type(name) is not str or not name or name in (".", "..")
-                or "/" in name or "\x00" in name):
+        if name in (".", "..") or "\\x00" in name:
             raise NamespaceError("namespace", cleanup_uncertain=True)
         metadata = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
         if metadata.st_uid != os.getuid():
@@ -324,7 +441,7 @@ def _dispose_never_started_fixture(
         _remove_fixture_descendants(workspace._root_fd, [0])
         workspace.verify_single_owned_child()
         os.rmdir(workspace.name, dir_fd=workspace._staging_fd)
-        if os.listdir(workspace._staging_fd):
+        if _bounded_names(workspace._staging_fd, maximum=0):
             raise NamespaceError("residual", cleanup_uncertain=True)
         workspace._cleanup_state = "disposed"
         workspace.close()
