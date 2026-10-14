@@ -58,9 +58,22 @@ any PR commit status.
   Complete repository source/test/operator **Ruff PASS** and
   `python -m compileall -q src tests ops/systemd ops/live-e2e` PASS.
   This is deliberately *not* the full project pytest suite or native E2E.
-- Full GitHub-hosted exact-PR-head Python 3.13/3.14 CI:
-  **pending implementation PR publication**; verify all 8 full shards and both
-  aggregate required contexts against the PR's exact SHA before merge.
+- For PR #245's reviewed exact HEAD
+  `b4c3e0ac0ee99fb4c6fc6bafb8fafd0a368c0bdd`, full GitHub-hosted
+  Python 3.13/3.14 CI **PASSED** on
+  [run #38567081924](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38567081924)
+  and again after Ready for review on
+  [run #38567775261](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38567775261):
+  all eight full partitions and both aggregate required contexts succeeded.
+  PR-only native Level-3 was SKIPPED (expected, not native evidence).
+  These results apply to that exact *older* HEAD; the review-fix commit
+  must independently pass its own exact-final-head CI before merge.
+- Independent [review #6169205482](https://github.com/zhangyuz/ssh-over-mcp/pull/245#issuecomment-6169205482)
+  found **no Critical or Important defect**, with two Minor findings.
+  Minor 1 adds event-vs-REST upstream identity consistency and missing-field
+  refusal tests. Minor 2 corrects this previously stale CI evidence and
+  the PR's Ready-for-review description. Both changes remain shadow only;
+  the final revised-HEAD CI is pending at the time of this documentation edit.
 - Actual post-merge trusted-main shadow workflow_run **canary: pending**.
   Must confirm a successful eligible canary prints only
   METADATA_MATCH_SHADOW; a fork/stale canary prints REFUSED or is safely

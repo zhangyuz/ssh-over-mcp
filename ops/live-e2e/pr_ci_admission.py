@@ -65,6 +65,13 @@ def _sha(value: object) -> str:
     return value
 
 
+def _same_repo_identity(value: object, repo_id: int) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    candidate = value.get("id")
+    return type(candidate) is int and candidate == repo_id
+
+
 def decide(
     event: Mapping[str, object],
     repository: Mapping[str, object],
@@ -100,6 +107,20 @@ def decide(
         or ci.get("event") != "pull_request"
     ):
         raise Refused("WRONG_WORKFLOW")
+    # The workflow_run payload and the fetched REST run are separate
+    # observations. No conflicting or absent required event identity may
+    # yield a positive shadow result, even though this is not authorization.
+    if (
+        erun.get("event") != ci.get("event")
+        or erun.get("head_branch") != ci.get("head_branch")
+        or erun.get("conclusion") != ci.get("conclusion")
+        or erun.get("status") != ci.get("status")
+        or not _same_repo_identity(erun.get("repository"), repo_id)
+        or not _same_repo_identity(erun.get("head_repository"), repo_id)
+        or ("name" in erun and erun["name"] != ci.get("name"))
+        or ("path" in erun and erun["path"] != ci.get("path"))
+    ):
+        raise Refused("EVENT_REST_IDENTITY_MISMATCH")
     run_id = _id(erun.get("id"))
     attempt = _id(erun.get("run_attempt"))
     target = _sha(erun.get("head_sha"))

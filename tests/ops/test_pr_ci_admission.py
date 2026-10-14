@@ -46,6 +46,14 @@ def _case():
             "workflow_id": 9,
             "run_attempt": 1,
             "head_sha": SHA,
+            "event": "pull_request",
+            "head_branch": "feat/canary",
+            "repository": {"id": 42},
+            "head_repository": {"id": 42},
+            "status": "completed",
+            "conclusion": "success",
+            "name": "CI",
+            "path": ".github/workflows/ci.yml",
         },
     }
     run = {
@@ -234,3 +242,39 @@ def test_invalid_sha_refuses(bad_sha: object) -> None:
     args[3]["head_sha"] = bad_sha
     with pytest.raises(m.Refused):
         m.decide(*args)
+
+@pytest.mark.parametrize(
+    ("key", "new_value"),
+    [
+        ("event", "workflow_dispatch"),
+        ("head_branch", "other-branch"),
+        ("repository", {"id": 999}),
+        ("head_repository", {"id": 999}),
+        ("conclusion", "failure"),
+        ("status", "in_progress"),
+        ("name", "Other Workflow"),
+        ("path", ".github/workflows/untrusted.yml"),
+    ],
+)
+def test_event_rest_upstream_identity_conflicts_refuse(key: str, new_value: object) -> None:
+    """An event may not disagree with independently fetched canonical run fields."""
+    m = _module()
+    args = list(_case())
+    args[0]["workflow_run"][key] = new_value
+    with pytest.raises(m.Refused) as exc:
+        m.decide(*args)
+    assert exc.value.reason_code == "EVENT_REST_IDENTITY_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["event", "head_branch", "repository", "head_repository", "conclusion", "status"],
+)
+def test_missing_required_upstream_event_identity_refuses(key: str) -> None:
+    """An absent required field is not assumed equal to the REST result."""
+    m = _module()
+    args = list(_case())
+    del args[0]["workflow_run"][key]
+    with pytest.raises(m.Refused) as exc:
+        m.decide(*args)
+    assert exc.value.reason_code == "EVENT_REST_IDENTITY_MISMATCH"
