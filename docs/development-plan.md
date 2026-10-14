@@ -1927,15 +1927,28 @@ independent work is ADR 0019 owned lifetime then protected-placement native
 activation; subsequent hosted trusted-main suite verification and scoped
 `workflow_dispatch` broker remain gated by separate plans and reviews.
 
-### ADR 0019 — owned protected workspace lifetime (planned; awaiting approval)
+### ADR 0019 — dormant protected workspace primitives (revised plan; awaiting approval)
 
-The next security-scoped slice after accepted Shadow Admission is the
-[dormant owned workspace lifetime implementation plan](superpowers/plans/2026-10-14-adr19-owned-protected-workspace-lifetime.md):
-original FD-bound protected parent and run-root identity, exclusive creation,
-single-use descriptor-relative owned-only cleanup, non-deleting finalization
-and real UID-502/APFS ACL/race evidence. **This plan is proposed, not approved
-or implemented.** The existing legacy native E2E, recovery and workflow
-remain unchanged; protected-placement activation still requires its own
-separate approved plan. After implementation code is complete, independent
-review is requested **immediately**, in parallel with exact-head CI rather
-than waiting for CI before requesting review.
+[Independent security/design review #6172447419](https://github.com/zhangyuz/ssh-over-mcp/pull/248#issuecomment-6172447419)
+found three Important authority/order gaps in the first
+[owned-workspace plan](superpowers/plans/2026-10-14-adr19-owned-protected-workspace-lifetime.md):
+re-reading a same-PID marker does NOT prove the original O_EXCL claim,
+a guest-reaped Boolean is not a trusted QEMU completion receipt, and no
+mkdir can occur before the marker/cleanliness gate. Two Minor findings
+required distinct pre-create/owned-child/post-dispose scan phases and an
+explicit single-writer assumption for timestamp attribution.
+
+The revised **Slice 2A** plan is deliberately narrower: production
+workspace entrypoints refuse as unbound, while test-owned disposable
+marker permits exercise pinned FD-bound exclusive creation, exactly-one-owned
+child observation, no-follow owned-only deletion, close-only finalization
+and real UID-502/APFS fixture behavior. **This plan is proposed, not approved
+or implemented. No live claim or QEMU completion authority is granted.**
+
+A separate reviewed **Slice 2B** must bind the real trusted-main O_EXCL
+marker-claim handoff and one-shot run-bound QEMU reap receipt before any
+live provider directory creation or deletion. Only a later separately
+approved **Slice 3** may activate protected placement, recovery and native
+workflow changes. Current legacy E2E and marker wire formats remain
+unchanged. After implementation code and author self-review finish, request
+independent review **immediately**, in parallel with exact-head CI.
