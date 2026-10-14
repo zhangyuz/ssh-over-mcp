@@ -41,7 +41,8 @@ understand current invariants
 → full regression
 → live/E2E when the touched boundary requires it
 → commit
-→ exact-head PR CI
+→ request independent review immediately when coding/self-review finish
+→ exact-head PR CI (may run concurrently with review)
 → fresh final review
 → merge
 → exact merge-main CI
@@ -167,6 +168,12 @@ The reference Phase 7A provider is a dedicated native macOS x86 orchestrator usi
 ## 8. Review discipline
 
 Review happens repeatedly, not only at the end.
+
+**Review request timing:** once implementation code, focused GREEN tests and author
+self-review are complete, open the PR and request independent review promptly.
+**Do not wait for full CI to pass before requesting review.** CI and independent
+review may proceed in parallel; both exact-head verification and a clean final
+review still block merge. A subsequent fix requires rechecking the new SHA.
 
 At minimum:
 - review after each meaningful GREEN;
