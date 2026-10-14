@@ -134,6 +134,9 @@ Each numbered delivery is independently reviewable with its own feature branch/P
 
 Performance targets are not completion claims: L0 focused <60 seconds, hosted feedback queue-inclusive P95 <10 minutes, healthy native stage execution P95 <=5 minutes plus separate queue time. Report sample size, all failures and percentiles. Do not weaken the trust boundary to make the target.
 
+
+The implementation is decomposed into a [staged rollout roadmap](../plans/2026-10-14-local-live-e2e-vnext-rollout.md) and a [Task-by-Task shadow-admission plan](../plans/2026-10-14-pr-native-e2e-shadow-admission.md). Both are review proposals, not authority to enable native PR dispatch.
+
 ## 7. Alternatives and rejected shortcuts
 
 - Direct pull_request or pull_request_target -> persistent Mac: rejected; PR control over host execution or elevated workflow is unacceptable.

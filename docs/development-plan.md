@@ -1860,7 +1860,11 @@ retain the trusted-main no-network native provider while proposing a separate
 hosted completed-CI admission, exact-PR-head proof, bounded native queue and
 post-clean PR status reporter. Current repository visibility is public.
 The initial implementation candidate is **shadow admission only**: no native
-dispatch or success status. Existing main-push/native CI is unchanged.
+dispatch or success status. The [vNext staged implementation roadmap]
+(superpowers/plans/2026-10-14-local-live-e2e-vnext-rollout.md) and
+[first detailed RED→GREEN plan]
+(superpowers/plans/2026-10-14-pr-native-e2e-shadow-admission.md) are available
+for joint operator review; neither is implementation authorization. Existing main-push/native CI is unchanged.
 Owned staging lifetime, already-main protected placement activation, actual
 UID-502 protected-path acceptance and A1/B8/N1c remain independent open gates
 under ADR 0019. Neither this proposed design nor its draft PR authorizes an
