@@ -1,6 +1,6 @@
 # Protected native E2E staging design
 
-Status: written design approved 2026-10-13; first implementation plan review pending; no code or activation approved.
+Status: written design approved 2026-10-13; first dormant-inspection plan approved for native execution 2026-10-13; no activation approved.
 Date: 2026-10-13 (America/Toronto).
 Baseline: main b39e08aa31355e8c0abc441a501e5546279ecb46; full hosted/native
 CI 38466541180 passed. The October historical incident is already resolved.
@@ -19,8 +19,9 @@ The operator approved this written design on 2026-10-13 at 20:21:38
 America/Toronto after its Chinese explanation. The first
 [implementation plan](../plans/2026-10-13-protected-staging-health-inspection.md)
 delivers dormant namespace health inspection; owned lifetime and activation
-follow in separately reviewed iterations. Written-plan review and
-execution-method selection still precede implementation.
+follow in separately reviewed iterations. The operator approved the revised
+written first plan and recommended native execution on 2026-10-13 at21:55:05
+America/Toronto; this does not approve later lifetime/activation plans.
 
 Success requires actual creation, guest use and explicit verified cleanup in
 the proposed namespace on the dedicated non-admin Intel Mac, plus refusal of

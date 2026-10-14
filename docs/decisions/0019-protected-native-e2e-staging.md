@@ -1,6 +1,6 @@
 # ADR 0019: Protected native E2E staging namespace
 
-- Status: written design approved 2026-10-13; first implementation plan review pending, no activation authority
+- Status: written design approved 2026-10-13; first implementation plan approved 2026-10-13 for native execution, no activation authority
 - Date: 2026-10-13 (America/Toronto)
 - Baseline: main b39e08aa31355e8c0abc441a501e5546279ecb46
 
@@ -77,8 +77,9 @@ The [written design](../superpowers/specs/2026-10-13-protected-native-e2e-stagin
 defines the proposed bounds, lifetime, migration, rollback and acceptance rows.
 The operator approved the written design on 2026-10-13. The first
 [implementation plan](../superpowers/plans/2026-10-13-protected-staging-health-inspection.md)
-is limited to dormant shared namespace health inspection and awaits plan review
-and execution-method selection. The rollout has three separately reviewed
+is limited to dormant shared namespace health inspection. The operator approved
+the revised written plan and recommended native execution on 2026-10-13 at
+21:55:05 America/Toronto; independent security review remains required. The rollout has three separately reviewed
 deliveries: dormant shared inspection, dormant owned workspace lifetime, then
 already-main activation.
 The [source-linked activation checklist](../superpowers/specs/2026-10-13-protected-native-e2e-staging-design.md#required-activation-checklist)

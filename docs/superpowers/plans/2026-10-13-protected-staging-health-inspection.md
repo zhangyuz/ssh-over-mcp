@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python >=3.13; stdlib descriptor-relative POSIX APIs and ctypes; Intel Darwin/APFS; pytest and ruff; existing dual-Python hosted CI.
 
-**Spec:** [approved design](../specs/2026-10-13-protected-native-e2e-staging-design.md), reviewed at ef8961cca7fd546b476b9685fc8e44a435149831. The operator approved the written design on 2026-10-13 at 20:21:38 America/Toronto. This implementation plan still requires review and execution-method selection.
+**Spec:** [approved design](../specs/2026-10-13-protected-native-e2e-staging-design.md), reviewed at ef8961cca7fd546b476b9685fc8e44a435149831. The operator approved the written design on 2026-10-13 at 20:21:38 America/Toronto. The operator approved this revised implementation plan and recommended native execution on 2026-10-13 at21:55:05 America/Toronto. Later lifecycle/activation plans remain separately gated.
 
 ## Global Constraints
 

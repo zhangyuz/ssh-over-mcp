@@ -1837,7 +1837,8 @@ protected+legacy blocking checks and explicit owned lifetime. It changes no
 behavior yet and grants no activation, generic deletion or historical receipt
 authority. The operator approved the written design on 2026-10-13; the
 [first implementation plan](superpowers/plans/2026-10-13-protected-staging-health-inspection.md)
-awaits review/execution-method selection and delivers only dormant shared
+was approved by the operator on 2026-10-13 at 21:55:05 America/Toronto for
+native execution with independent review and delivers only dormant shared
 namespace health inspection. Three separate deliveries are required: dormant
 inspection, dormant owned lifetime, then already-main activation. The design
 pins all existing tempfile/free-space/recovery replacements and deliberately
