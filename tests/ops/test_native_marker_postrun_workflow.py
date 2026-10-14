@@ -261,3 +261,63 @@ def test_production_main_rejects_cli_root_injection_without_probing(
     assert module.main() == 1
     assert called == []
     assert "::error::" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("moment", ["after_provider_open", "after_leaf_enoent"])
+def test_replaced_provider_directory_cannot_prove_marker_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, moment: str
+) -> None:
+    """Swapping the held directory must not validate the canonical replacement."""
+    module = _module()
+    home = tmp_path / "home"
+    marker = home / MARKER
+    marker.parent.mkdir(parents=True)
+    detached = marker.parent.with_name("ssh-over-mcp-e2e-detached")
+    original_open = os.open
+    original_stat = os.stat
+    did_swap = False
+
+    def swap() -> None:
+        nonlocal did_swap
+        if did_swap:
+            return
+        marker.parent.rename(detached)
+        marker.parent.mkdir()
+        marker.write_text("new canonical provider marker")
+        did_swap = True
+
+    def intercept_open(path, flags, *args, **kwargs):
+        fd = original_open(path, flags, *args, **kwargs)
+        if path == "ssh-over-mcp-e2e" and moment == "after_provider_open":
+            swap()
+        return fd
+
+    def intercept_stat(path, *args, **kwargs):
+        if path == "active-run.json" and moment == "after_leaf_enoent":
+            try:
+                return original_stat(path, *args, **kwargs)
+            except FileNotFoundError:
+                swap()
+                raise
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(module.os, "open", intercept_open)
+    monkeypatch.setattr(module.os, "stat", intercept_stat)
+    with pytest.raises((OSError, ValueError)):
+        module.assert_marker_absent_at(home)
+    monkeypatch.undo()
+    assert did_swap
+    assert marker.read_text() == "new canonical provider marker"
+    assert detached.is_dir()
+    assert not (detached / "active-run.json").exists()
+
+
+def test_frozen_helper_hash_detects_modified_trusted_authority() -> None:
+    from . import test_protected_staging_dormant as frozen
+
+    key = "ops/live-e2e/verify_native_provider_absence.py"
+    assert key in frozen.FROZEN
+    original = (ROOT / key).read_bytes()
+    frozen.assert_frozen_bytes_match(key, original)
+    with pytest.raises(AssertionError):
+        frozen.assert_frozen_bytes_match(key, original + b"\n# unreviewed modification")

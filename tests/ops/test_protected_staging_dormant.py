@@ -12,6 +12,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 FROZEN = {
     'scripts/run-live-local-e2e-orchestrator.py': '38cb1d7638bb69aa4000300a75aa3a95cd9cc34f327ebe425e96b4364e2ddfd5',
+    'ops/live-e2e/verify_native_provider_absence.py': '4d54f8a8fa807794a71d8896271c93ba49577ba972743441ac53af4b50a4206c',
     'ops/live-e2e/recover_provider.py': '312e8d11295bc1cdac6b116d9fbbb9302f596dde4a379bbf6c8b03cd6bca4068',
     'ops/live-e2e/staging_preflight.py': 'ad48c5483f42cfcc09d49f4f48f79315a298e1df735649ba4b172369fc8ae342',
     'ops/live-e2e/staging_diagnostics.py': '79d1c8bbc54503d3a3ae6d6b14e821d18fc2a498534cb9ae5e5ce83431116a6a',
@@ -48,8 +49,15 @@ def test_module_is_dormant(monkeypatch, file):
     assert calls == []
 
 
+def assert_frozen_bytes_match(path: str, contents: bytes) -> None:
+    """Require explicit reviewed SHA changes for every trusted-native authority."""
+    assert path in FROZEN
+    assert hashlib.sha256(contents).hexdigest() == FROZEN[path]
+
+
 @pytest.mark.parametrize('path,expected', FROZEN.items())
 def test_existing_authority_and_callers_remain_byte_identical(path, expected):
+    assert_frozen_bytes_match(path, (ROOT / path).read_bytes())
     assert hashlib.sha256((ROOT / path).read_bytes()).hexdigest() == expected
 
 

@@ -2002,10 +2002,24 @@ os.stat(..., dir_fd=..., follow_symlinks=False) for the marker leaf. Only a genu
 symlinked or inaccessible parent and every existing marker entry refuse.
 The guard does not recover, delete, adopt or repair anything.
 
-Local RED→GREEN contract tests execute the real YAML step with a
-disposable HOME: ordinary file, dangling/live leaf symlink, directory,
-dangling/live cache parent link and absent/non-directory cache parent,
-alongside a clean empty-marker success. Existing runner labels, checkout,
-trigger, no-network guest and marker wire format remain unchanged.
+Local RED→GREEN contract tests exercise **the original importable
+helper** against disposable filesystem roots (normal and missing marker,
+valid/dangling leaf and ancestor links, permission/lookup failures).
+A **separate real production YAML shell-step test** verifies refusal for
+a divergent disposable HOME; it cannot perform a positive production
+UID502 CLI test on the UID501 developer shell. The true postmerge
+trusted-main native Level-3 run remains the positive host acceptance gate.
+New adversarial tests rename/replace the held provider cache directory
+after open and immediately after marker ENOENT, then plant a marker in
+the canonical replacement: both must refuse on original FD/edge drift.
+Checks compare original home + each pinned parent/child dev, inode,
+uid, gid and full mode, before and after marker absence observation.
+POSIX lookup is not atomic against hostile concurrent same-UID writers:
+this acceptance assumes a serialized single-writer provider context,
+not proof of unconditional race immunity. The helper is itself added to
+the SHA-256 frozen native authority inventory. Any future executable
+helper change requires a deliberate independent review and hash update.
+Existing runner labels, checkout, trigger, no-network guest and
+marker wire format remain unchanged.
 This is not evidence of a passed protected UID502 staging fixture;
 final exact-HEAD CI and independent review are required before merge.

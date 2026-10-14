@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import pwd
+import stat
 import sys
 from contextlib import ExitStack
 from pathlib import Path
@@ -24,19 +25,59 @@ def assert_marker_absent_at(home: Path) -> None:
 
     For actual host calls, main() always passes FIXED_PROVIDER_HOME. This
     argument exists for isolated tests, not the production CLI/workflow.
+    Exact edge revalidation detects observed parent swaps but cannot make
+    POSIX directory lookup atomic against a malicious same-UID concurrent
+    writer; native provider execution assumes a serialized single-writer context.
     """
     if not home.is_absolute():
         raise ValueError("provider home must be absolute")
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+    def identity(observation: os.stat_result) -> tuple[int, int, int, int, int]:
+        return (
+            observation.st_dev,
+            observation.st_ino,
+            observation.st_uid,
+            observation.st_gid,
+            observation.st_mode,
+        )
+
     with ExitStack() as opened:
         fd = os.open(home, flags)
         opened.callback(os.close, fd)
+        home_identity = identity(os.fstat(fd))
+        # Retain every originally opened parent and child FD/identity. A no-follow
+        # open alone is NOT proof that the current canonical directory name
+        # continues to refer to the opened inode after a concurrent rename.
+        edges: list[tuple[int, str, int, tuple[int, int, int, int, int]]] = []
         for component in _CACHE_COMPONENTS:
-            fd = os.open(component, flags, dir_fd=fd)
+            parent_fd = fd
+            fd = os.open(component, flags, dir_fd=parent_fd)
             opened.callback(os.close, fd)
+            edges.append((parent_fd, component, fd, identity(os.fstat(fd))))
+
+        def verify_canonical_chain() -> None:
+            root = os.stat(home, follow_symlinks=False)
+            if not stat.S_ISDIR(root.st_mode) or identity(root) != home_identity:
+                raise ValueError("fixed provider home identity drift")
+            if identity(os.fstat(edges[0][0])) != home_identity:
+                raise ValueError("opened provider home FD drift")
+            for parent_fd, name, child_fd, pinned in edges:
+                observed = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+                if (
+                    not stat.S_ISDIR(observed.st_mode)
+                    or identity(observed) != pinned
+                    or identity(os.fstat(child_fd)) != pinned
+                ):
+                    raise ValueError(f"provider directory entry drift: {name}")
+
+        # Check before and after observing ENOENT to detect a renamed/replaced
+        # parent. This is not an atomic snapshot against hostile same-UID writes.
+        verify_canonical_chain()
         try:
             os.stat(_MARKER, dir_fd=fd, follow_symlinks=False)
         except FileNotFoundError:
+            verify_canonical_chain()
             return
         raise ValueError("provider marker entry still present")
 
