@@ -65,6 +65,12 @@ any PR commit status.
   Must confirm a successful eligible canary prints only
   METADATA_MATCH_SHADOW; a fork/stale canary prints REFUSED or is safely
   excluded; in both cases zero self-hosted Mac jobs and zero status writes.
+- Separate **design baseline**: after PR #244 was merged at
+  `18baf09d31a2610c2ce4359bd04a9ebf85cbb62f`, GitHub Actions
+  [main CI #38563974688](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38563974688)
+  completed SUCCESS including both required Python aggregates and the
+  actual `Merge-main no-network Level-3 / No-network Ubuntu 26.04 local E2E`
+  native job SUCCESS. This does not verify this new first-slice feature.
 - Actual Level-3 native post-merge gate for the implementation commit:
   **pending**; this slice does not alter the native provider, but normal
   main-push exact-main E2E/cleanup remains required by project methodology.
