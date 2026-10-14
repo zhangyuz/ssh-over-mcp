@@ -1902,3 +1902,27 @@ This slice **does not** attest trusted test execution because a PR may
 alter the upstream CI, **does not** start a Mac E2E, and **does not** write
 a merge status. Post-merge shadow canary and exact-main CI/native cleanup
 remain separate acceptance evidence, not local-test assumptions.
+
+### Local Live E2E vNext — Shadow Admission slice acceptance (2026-10-14)
+
+[Implementation PR #245](https://github.com/zhangyuz/ssh-over-mcp/pull/245)
+was independently reviewed with no Important/Critical findings, its two Minor
+requests were addressed with 14 additional RED→GREEN event-identity cases,
+and it was squash-merged at `7ec63ec7a39803518eda628b95021b46e666899e`.
+[Exact merged-main CI #38580710142](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38580710142)
+PASSED eight hosted partitions, both Python aggregates and real native Level-3
+no-network E2E plus cleanup. The
+[actual `workflow_run` shadow canary #38581841150](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38581841150)
+PASSED on temporary non-draft
+[PR #246](https://github.com/zhangyuz/ssh-over-mcp/pull/246)
+with `METADATA_MATCH_SHADOW` and all proof/dispatch flags `false`. No extra
+Mac dispatch or commit status write occurred; the canary was closed without
+merging and its temporary branches/worktree cleaned. Exact evidence:
+[shadow acceptance](evidence/2026-10-14-pr-native-e2e-shadow.md).
+
+**Boundary remains unchanged:** Shadow output records Github-reported metadata
+only; it does NOT prove a trusted-main regression manifest, authorize native
+PR execution, require a SHA status, or provide a PR-bound merge gate. Next
+independent work is ADR 0019 owned lifetime then protected-placement native
+activation; subsequent hosted trusted-main suite verification and scoped
+`workflow_dispatch` broker remain gated by separate plans and reviews.

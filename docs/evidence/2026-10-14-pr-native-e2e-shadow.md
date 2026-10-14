@@ -1,6 +1,6 @@
 # PR Native E2E Shadow Admission — implementation evidence
 
-Status: **unmerged first-slice implementation; integration canary pending**.
+Status: **merged; real same-repo positive-path shadow canary and main-push skip verified only; no PR-native authority**.
 Implementation branch: `feat/pr-native-shadow-admission-oct14`.
 Trusted base: `main` `18baf09d31a2610c2ce4359bd04a9ebf85cbb62f` after approved design PR #244.
 Authority: [vNext design](../superpowers/specs/2026-10-14-local-live-e2e-vnext-design.md),
@@ -66,27 +66,61 @@ any PR commit status.
   [run #38567775261](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38567775261):
   all eight full partitions and both aggregate required contexts succeeded.
   PR-only native Level-3 was SKIPPED (expected, not native evidence).
-  These results apply to that exact *older* HEAD; the review-fix commit
-  must independently pass its own exact-final-head CI before merge.
+  These runs apply only to that earlier HEAD. The final review-fix HEAD
+  `5cee586116a65b0f005d68d67d67f17c19b92776` separately passed
+  [exact-head CI #38579608215](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38579608215)
+  and the trusted-main manual exact-target
+  [Level-3 #38580133773](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38580133773)
+  (including provider-marker absence).
 - Independent [review #6169205482](https://github.com/zhangyuz/ssh-over-mcp/pull/245#issuecomment-6169205482)
   found **no Critical or Important defect**, with two Minor findings.
   Minor 1 adds event-vs-REST upstream identity consistency and missing-field
   refusal tests. Minor 2 corrects this previously stale CI evidence and
-  the PR's Ready-for-review description. Both changes remain shadow only;
-  the final revised-HEAD CI is pending at the time of this documentation edit.
-- Actual post-merge trusted-main shadow workflow_run **canary: pending**.
-  Must confirm a successful eligible canary prints only
-  METADATA_MATCH_SHADOW; a fork/stale canary prints REFUSED or is safely
-  excluded; in both cases zero self-hosted Mac jobs and zero status writes.
+  the PR's Ready-for-review description. Both changes remained shadow only;
+  exact-final-head CI and manual trusted-main Level-3 later passed as linked above.
+- **Actual post-merge trusted-main shadow `workflow_run` canary: PASS for the same-repository, non-draft positive path only.**
+  A disposable, same-repository, non-draft
+  [PR #246](https://github.com/zhangyuz/ssh-over-mcp/pull/246) at
+  `69c88b4c38374dc3d9ec9a608d68292db8af6648` completed
+  [full hosted CI #38581233248](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38581233248)
+  with eight shards and both aggregate gates SUCCESS. The separate
+  [trusted-main shadow #38581841150](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38581841150)
+  ran its hosted-only read-only job, and the **actual logged JSON** included
+  `pr_number=246`, `ci_run_id=38581233248`, `ci_attempt=1`,
+  `verdict=METADATA_MATCH_SHADOW` and all three flags
+  `base_freshness_proven=false`, `trusted_suite_proven=false`,
+  `dispatch_authorized=false`. A completed push-main upstream instead
+  produced expected [SKIPPED #38581813613](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38581813613).
+  REST `GET /commits/<canary-sha>/statuses` returned `[]` (no custom
+  commit-status writes), and the workflow_run job used GitHub-hosted Ubuntu,
+  not any self-hosted Mac label; the recent standalone native dispatch list
+  contained only the earlier authorized manual run, not a new shadow dispatch.
+  The canary PR was CLOSED **without merge** and its own temporary branch
+  and worktree removed; acceptance was also recorded in
+  [canary comment #6170897124](https://github.com/zhangyuz/ssh-over-mcp/pull/246#issuecomment-6170897124).
+  This success is only an observation of current same-repo metadata, not
+  verified trusted-test execution, fork admission or PR-bound merge enforcement.
+  **Coverage limit:** this live canary and the expected main-push skip do not
+  exercise a real fork denial, stale-head update race, duplicate run-attempt
+  replay, GitHub API outage/refusal or adversarial native-allocation attempt.
+  The relevant refusal logic is covered by isolated code/fixture contracts;
+  no additional live adversarial canary has been claimed. The absence of a
+  native-dispatch path is a static trust-boundary property of this slice,
+  not proof that future automatic PR-native dispatch is safe.
 - Separate **design baseline**: after PR #244 was merged at
   `18baf09d31a2610c2ce4359bd04a9ebf85cbb62f`, GitHub Actions
   [main CI #38563974688](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38563974688)
   completed SUCCESS including both required Python aggregates and the
   actual `Merge-main no-network Level-3 / No-network Ubuntu 26.04 local E2E`
   native job SUCCESS. This does not verify this new first-slice feature.
-- Actual Level-3 native post-merge gate for the implementation commit:
-  **pending**; this slice does not alter the native provider, but normal
-  main-push exact-main E2E/cleanup remains required by project methodology.
+- **Actual native post-merge acceptance: PASS.** PR #245 was squash-merged
+  at `7ec63ec7a39803518eda628b95021b46e666899e`; GitHub
+  [main CI #38580710142](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38580710142)
+  completed SUCCESS for the exact merged-main SHA, including all eight
+  hosted partitions, both required Python aggregates, and the genuine
+  `Merge-main no-network Level-3 / No-network Ubuntu 26.04 local E2E`
+  native job SUCCESS with the provider-absence check. This is the legacy
+  Level-3 placement path, **not** ADR 0019 protected-placement activation.
 - Separate protected staging owned lifetime, protected activation, pinned
   trusted-main hosted test-manifest verifier, workflow_dispatch broker,
   informational SHA reporter and PR-bound merge enforcement all remain
