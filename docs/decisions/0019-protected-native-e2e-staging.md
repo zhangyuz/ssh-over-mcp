@@ -1,6 +1,6 @@
 # ADR 0019: Protected native E2E staging namespace
 
-- Status: proposed; written design review pending, no implementation/activation authority
+- Status: written design approved 2026-10-13; first implementation plan review pending, no activation authority
 - Date: 2026-10-13 (America/Toronto)
 - Baseline: main b39e08aa31355e8c0abc441a501e5546279ecb46
 
@@ -17,7 +17,7 @@ A reliable staging lifecycle is a prerequisite to returning to Phase 7B1
 native-toolchain and Ledger sandbox work. Recovery must continue to fail closed
 on unknown state; changing placement cannot hide older roots.
 
-## Proposed decision
+## Approved design decision
 
 For future runs only, use the literal private staging namespace:
 `/Users/gha-e2e-orchestrator/Library/Application Support/ssh-over-mcp-e2e/staging-v1`.
@@ -71,8 +71,11 @@ provider; no fallback or automatic repair is allowed.
 
 The [written design](../superpowers/specs/2026-10-13-protected-native-e2e-staging-design.md)
 defines the proposed bounds, lifetime, migration, rollback and acceptance rows.
-It requires written review before implementation planning/approval.
-After approval, ship dormant contracts before already-main activation;
+The operator approved the written design on 2026-10-13. The first
+[implementation plan](../superpowers/plans/2026-10-13-protected-staging-health-inspection.md)
+is limited to dormant shared namespace health inspection and awaits plan review
+and execution-method selection. Owned workspace lifetime and already-main
+activation follow as separately reviewed small deliverables;
 require fresh independent review, exact-head hosted/legacy gates and actual
 post-merge protected-placement native E2E/cleanup. A docs proposal, fixture PASS
 or old-namespace legacy PASS cannot certify this new namespace.

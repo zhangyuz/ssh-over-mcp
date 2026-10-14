@@ -1,6 +1,6 @@
 # Protected native E2E staging design
 
-Status: proposed written design; implementation and activation are not approved.
+Status: written design approved 2026-10-13; first implementation plan review pending; no code or activation approved.
 Date: 2026-10-13 (America/Toronto).
 Baseline: main b39e08aa31355e8c0abc441a501e5546279ecb46; full hosted/native
 CI 38466541180 passed. The October historical incident is already resolved.
@@ -15,9 +15,12 @@ tmp cleaner's selection, and startup/recovery cannot overlook supported legacy
 residuals. This prepares reliable infrastructure for Phase 7B1 native inputs;
 it does not implement the native compiler or Ledger sandbox.
 
-The continuation approves preparing this proposal, not code that has not been
-reviewed. Written-spec review precedes the written implementation plan and its
-review/execution-method selection.
+The operator approved this written design on 2026-10-13 at 20:21:38
+America/Toronto after its Chinese explanation. The first
+[implementation plan](../plans/2026-10-13-protected-staging-health-inspection.md)
+delivers dormant namespace health inspection; owned lifetime and activation
+follow in separately reviewed iterations. Written-plan review and
+execution-method selection still precede implementation.
 
 Success requires actual creation, guest use and explicit verified cleanup in
 the proposed namespace on the dedicated non-admin Intel Mac, plus refusal of
