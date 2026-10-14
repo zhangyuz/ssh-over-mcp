@@ -1,6 +1,6 @@
 # Protected native E2E staging design
 
-Status: written design approved 2026-10-13; first dormant-inspection plan approved for native execution 2026-10-13; no activation approved.
+Status: first shared inspection implemented dormant; no lifecycle or activation approved.
 Date: 2026-10-13 (America/Toronto).
 Baseline: main b39e08aa31355e8c0abc441a501e5546279ecb46; full hosted/native
 CI 38466541180 passed. The October historical incident is already resolved.
@@ -27,6 +27,10 @@ Success requires actual creation, guest use and explicit verified cleanup in
 the proposed namespace on the dedicated non-admin Intel Mac, plus refusal of
 new or legacy residual state. Local fixtures and source contracts alone cannot
 satisfy that runtime acceptance.
+
+## First dormant implementation
+
+The [inspection slice evidence](../../evidence/2026-10-13-protected-staging-health-inspection.md) records this implementation and its pre-merge limits. The internal zero-argument inspect_namespace returns detached evidence, with no production caller, CLI, marker/QEMU judgement or create/remove API. Ancestors conservatively support empty or deny-only ACLs; private provider-base/staging require zero ACEs. FD-bound APFS evidence uses fixed Darwin64 fstatfs/ACL bindings and validates serialized ACE count/order. Each observation opens a fixed dot relative to its original held parent to obtain an independent directory cursor. Final reverse edge checks close/recheck one edge at a time via its still-held original parent, avoiding joined-path intermediate symlink traversal. Neither fixtures nor legacy E2E certify protected placement; lifecycle and activation remain separately gated.
 
 ## Observed defect and existing contracts
 

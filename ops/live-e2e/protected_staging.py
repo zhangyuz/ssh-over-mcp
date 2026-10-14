@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import errno
+import grp
 import hashlib
 import importlib.util
 import os
+import platform
+import pwd
 import re
 import stat
 import sys
@@ -19,8 +22,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from staging_namespace_types import (
         DirectoryIdentity,
+        NamespaceSnapshot,
         NativeTempParent,
         ParentSnapshot,
+        ProviderContext,
         SelectorSnapshot,
     )
 
@@ -30,6 +35,9 @@ _PROTECTED_PARTS = ('Users', 'gha-e2e-orchestrator', 'Library', 'Application Sup
                     'ssh-over-mcp-e2e', 'staging-v1')
 _OPEN_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _METADATA_SECONDS = 10.0
+_PREFIX = 'ssh-over-mcp-e2e-'
+_CONTEXT_KEYS = ('GITHUB_ACTIONS', 'GITHUB_REPOSITORY', 'GITHUB_REF',
+                 'GITHUB_EVENT_NAME', 'GITHUB_SHA')
 _HOST_ERRORS = (OSError, RuntimeError, TypeError, ValueError, AttributeError,
                 LookupError, OverflowError, MemoryError,
                 KeyboardInterrupt, SystemExit, GeneratorExit)
@@ -380,3 +388,141 @@ def _pin_namespaces(native: NativeTempParent):
                 failure = error
     if failure is not None:
         raise _types().NamespaceError(getattr(failure, 'reason', 'namespace'), cleanup_uncertain=getattr(failure, 'cleanup_uncertain', False)) from None
+
+
+def _validate_context() -> ProviderContext:
+    types = _types()
+    try:
+        if (os.environ.get('GITHUB_ACTIONS') != 'true'
+            or os.environ.get('GITHUB_REPOSITORY') != 'zhangyuz/ssh-over-mcp'
+            or os.environ.get('GITHUB_REF') != 'refs/heads/main'
+            or os.environ.get('GITHUB_EVENT_NAME') not in ('push', 'workflow_dispatch')
+            or re.fullmatch('[0-9a-f]{40}', os.environ.get('GITHUB_SHA', '')) is None
+            or platform.system() != 'Darwin' or platform.machine() != 'x86_64'):
+            raise ValueError()
+        uid, euid, gid, egid = os.getuid(), os.geteuid(), os.getgid(), os.getegid()
+        groups = tuple(sorted(os.getgroups()))
+        if uid != 502 or euid != 502 or any(type(x) is not int or x < 0 for x in (uid, euid, gid, egid, *groups)):
+            raise ValueError()
+        account = pwd.getpwuid(uid)
+        admin = grp.getgrnam('admin').gr_gid
+        if (account.pw_uid != 502 or account.pw_name != 'gha-e2e-orchestrator'
+            or account.pw_dir != '/Users/gha-e2e-orchestrator'
+            or admin in (gid, egid, account.pw_gid, *groups)):
+            raise ValueError()
+        return types.ProviderContext(uid, euid, gid, egid, groups)
+    except _HOST_ERRORS:
+        raise types.NamespaceError('context') from None
+
+
+def _context_environment() -> tuple[str | None, ...]:
+    return tuple(os.environ.get(key) for key in _CONTEXT_KEYS)
+
+
+def _scan_parent(pinned: _PinnedNamespaces, parent_fd: int, *, private: bool,
+                 shared: bool, counts: list[int]) -> None:
+    types = _types()
+    pinned._check_budget()
+    edge = next(edge for edge in pinned._edges.values() if edge.fd == parent_fd)
+    # scandir(fd) duplicates an open description and can share its cursor.
+    # A fixed '.' open obtains an independent description for each observation.
+    fd = _open_directory('.', parent_fd)
+    iterator = None
+    scan_attempted = False
+    scan_returned = False
+    failure = None
+    uncertain = False
+    try:
+        if _identity(os.fstat(fd)) != edge.identity or _native_module().read_acl(fd) != edge.acl:
+            raise types.NamespaceError('drift')
+        pinned._check_budget()
+        scan_attempted = True
+        iterator = os.scandir(fd)
+        scan_returned = True
+        count = 0
+        for entry in iterator:
+            pinned._check_budget()
+            count += 1
+            if count > (64 if private else 4096):
+                raise types.NamespaceError('budget')
+            name = entry.name
+            if type(name) is not str or name in ('.', '..') or '/' in name or '\x00' in name:
+                raise types.NamespaceError('namespace')
+            if private:
+                raise types.NamespaceError('residual')
+            if not name.startswith(_PREFIX):
+                continue
+            counts[0] += 1
+            if counts[0] > 64:
+                raise types.NamespaceError('budget')
+            value = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            pinned._check_budget()
+            if value.st_uid == _ACCOUNT_UID:
+                counts[1] += 1
+                if counts[1] > 16:
+                    raise types.NamespaceError('budget')
+                raise types.NamespaceError('residual')
+            if not shared:
+                raise types.NamespaceError('residual')
+        if _identity(os.fstat(fd)) != edge.identity:
+            raise types.NamespaceError('drift')
+        pinned._check_budget()
+    except _HOST_ERRORS as error:
+        failure = error
+        uncertain = getattr(error, 'cleanup_uncertain', False) or scan_attempted and not scan_returned
+    finally:
+        if iterator is not None:
+            owned_iterator, iterator = iterator, None
+            try:
+                owned_iterator.close()
+            except _HOST_ERRORS:
+                uncertain = True
+        try:
+            os.close(fd)
+        except _HOST_ERRORS:
+            uncertain = True
+    if failure is not None or uncertain:
+        raise types.NamespaceError(getattr(failure, 'reason', 'namespace'), cleanup_uncertain=uncertain) from None
+
+
+def _scan_observation(pinned: _PinnedNamespaces) -> None:
+    counts = [0, 0]
+    if pinned.protected_fd is not None:
+        _scan_parent(pinned, pinned.protected_fd, private=True, shared=False, counts=counts)
+    for index, fd in enumerate(pinned.legacy_fds):
+        _scan_parent(pinned, fd, private=False, shared=index == 0, counts=counts)
+
+
+def inspect_namespace() -> NamespaceSnapshot:
+    """Return detached contemporaneous evidence; no creation/removal authority."""
+    types = _types()
+    try:
+        context = _validate_context()  # Before discovery or provider access.
+        environment = _context_environment()
+        selectors = _capture_selectors()
+        native = _native_module().discover_native_temp()
+        _validate_selectors(selectors, native)
+
+        def unchanged() -> None:
+            if (_capture_selectors() != selectors or _context_environment() != environment
+                or _validate_context() != context):
+                raise types.NamespaceError('drift')
+
+        with _pin_namespaces(native) as pinned:
+            for _ in range(2):
+                unchanged()
+                pinned.revalidate()
+                _scan_observation(pinned)
+                pinned.revalidate()
+                unchanged()
+            parents = pinned.snapshot()
+            missing = pinned.protected_missing
+            deadline = pinned._deadline
+        # No borrowed descriptor escapes; close/post-close failures already
+        # refused. Recheck scalars/context after closing all owned resources.
+        unchanged()
+        if time.monotonic() >= deadline:
+            raise types.NamespaceError('budget')
+        return types.NamespaceSnapshot(native, selectors, context, missing, parents)
+    except _HOST_ERRORS as error:
+        raise types.NamespaceError(getattr(error, 'reason', 'namespace'), cleanup_uncertain=getattr(error, 'cleanup_uncertain', False)) from None

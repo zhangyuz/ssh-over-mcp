@@ -1,6 +1,6 @@
 # ADR 0019: Protected native E2E staging namespace
 
-- Status: written design approved 2026-10-13; first implementation plan approved 2026-10-13 for native execution, no activation authority
+- Status: first shared inspection implemented dormant; no lifecycle or activation authority
 - Date: 2026-10-13 (America/Toronto)
 - Baseline: main b39e08aa31355e8c0abc441a501e5546279ecb46
 
@@ -88,3 +88,5 @@ a shared scanner beside legacy selection;
 require fresh independent review, exact-head hosted/legacy gates and actual
 post-merge protected-placement native E2E/cleanup. A docs proposal, fixture PASS
 or old-namespace legacy PASS cannot certify this new namespace.
+
+The first inspection implementation is documented in the [slice evidence](../evidence/2026-10-13-protected-staging-health-inspection.md). It accepts only fixed context and lexical selectors, acquires bounded native discovery/FD ACL evidence, pins each edge and requires two bounded clean observations with strict timestamp/ACL/identity revalidation and settled owned-resource closure. Ancestors support empty/deny-only ACLs; private provider-base/staging require zero ACEs. Reverse post-close checks use single basenames through original held parents; joined paths are not used. Exact-head hosted/legacy gates and independent final review remain pre-merge requirements. Owned lifetime and already-main activation remain separate plans.

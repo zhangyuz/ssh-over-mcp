@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import os
+import socket
 import sys
+import tempfile
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -362,3 +366,390 @@ def test_interrupted_open_without_captured_fd_is_uncertain(namespace, monkeypatc
         pass
     assert error.value.cleanup_uncertain is True
 
+
+@pytest.fixture
+def health(namespace, monkeypatch):
+    p, root, native = namespace
+    for key in ('TMPDIR', 'TEMP', 'TMP'):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(tempfile, 'tempdir', None)
+    context = p.ProviderContext(os.getuid(), os.getuid(), os.getgid(), os.getgid(), tuple(sorted(os.getgroups())))
+    monkeypatch.setattr(p, '_validate_context', lambda: context, raising=False)
+    monkeypatch.setattr(p, '_native_module', lambda: SimpleNamespace(read_acl=lambda fd: p.AclSnapshot(b'', ()), discover_native_temp=lambda: native))
+    return p, root, native, context
+
+
+def test_clean_inspection_requires_two_real_observations(health, monkeypatch):
+    p, root, native, context = health
+    calls = []
+    original = getattr(p, '_scan_observation', lambda *_a: None)
+
+    def observe(pinned):
+        calls.append(True)
+        return original(pinned)
+    monkeypatch.setattr(p, '_scan_observation', observe, raising=False)
+    result = p.inspect_namespace()
+    assert calls == [True, True]
+    assert result.native == native and result.context == context
+    assert tuple(x.label for x in result.parents) == ('protected', 'private-tmp', 'native-temp')
+    assert root.joinpath(*PROTECTED).is_dir()
+
+
+@pytest.mark.parametrize('count', [1, 64, 65])
+def test_marker_free_protected_entry_blocks(health, count):
+    p, root, *_ = health
+    for i in range(count):
+        root.joinpath(*PROTECTED, f'unrelated-{i}').write_bytes(b'private-canary')
+    with pytest.raises(p.NamespaceError) as error:
+        p.inspect_namespace()
+    assert error.value.reason == 'residual'
+
+
+@pytest.mark.parametrize('parts', [('private', 'tmp'), NATIVE])
+@pytest.mark.parametrize('kind', ['directory', 'file', 'link', 'fifo', 'socket'])
+def test_legacy_owned_entry_blocks_without_read(health, monkeypatch, parts, kind):
+    p, root, *_ = health
+    parent = root.joinpath(*parts)
+    entry = parent / 'ssh-over-mcp-e2e-canary'
+    held_socket = None
+    if kind == 'directory':
+        entry.mkdir(mode=0o700)
+    elif kind == 'file':
+        entry.write_bytes(b'preserve-me')
+    elif kind == 'link':
+        entry.symlink_to('/nonexistent/unrelated-canary')
+    elif kind == 'fifo':
+        os.mkfifo(entry)
+    else:
+        # Short basename avoids Darwin sun_path limits; fixture cwd only.
+        monkeypatch.chdir(parent)
+        held_socket = socket.socket(socket.AF_UNIX)
+        held_socket.bind(entry.name)
+    reads = []
+    original = os.open
+
+    def directories_only(path, flags, *a, **k):
+        if not flags & os.O_DIRECTORY:
+            reads.append(path)
+            pytest.fail('payload open')
+        return original(path, flags, *a, **k)
+    monkeypatch.setattr(os, 'open', directories_only)
+    try:
+        with pytest.raises(p.NamespaceError) as error:
+            p.inspect_namespace()
+        assert error.value.reason == 'residual'
+        assert reads == []
+        assert os.path.lexists(entry)
+    finally:
+        if held_socket:
+            held_socket.close()
+
+
+def foreign_stat(monkeypatch, inodes):
+    original = os.stat
+
+    def foreign(*a, **k):
+        value = original(*a, **k)
+        if value.st_ino not in inodes:
+            return value
+        values = {name: getattr(value, name) for name in dir(value) if name.startswith('st_')}
+        values['st_uid'] += 10000
+        return SimpleNamespace(**values)
+    monkeypatch.setattr(os, 'stat', foreign)
+
+
+@pytest.mark.parametrize('count,accepted', [(64, True), (65, False)])
+def test_foreign_prefix_bound_and_second_cursor_pass(health, monkeypatch, count, accepted):
+    p, root, *_ = health
+    entries = [root.joinpath('private', 'tmp', f'ssh-over-mcp-e2e-foreign-{i}') for i in range(count)]
+    for entry in entries:
+        entry.write_bytes(b'preserve-me')
+    foreign_stat(monkeypatch, {x.stat().st_ino for x in entries})
+    seen = []
+    original = os.stat
+
+    def record(path, *a, **k):
+        if isinstance(path, str) and path.startswith('ssh-over-mcp-e2e-foreign-'):
+            assert k.get('follow_symlinks') is False and type(k.get('dir_fd')) is int
+            seen.append(path)
+        return original(path, *a, **k)
+    monkeypatch.setattr(os, 'stat', record)
+    if accepted:
+        p.inspect_namespace()
+        assert len(seen) == 128 and len(set(seen)) == 64
+    else:
+        with pytest.raises(p.NamespaceError) as error:
+            p.inspect_namespace()
+        assert error.value.reason == 'budget'
+        assert len(seen) <= 64
+    assert all(x.read_bytes() == b'preserve-me' for x in entries)
+
+
+@pytest.mark.parametrize('count,accepted', [(4096, True), (4097, False)])
+def test_legacy_direct_entry_bound(health, count, accepted):
+    p, root, *_ = health
+    for i in range(count):
+        root.joinpath('private', 'tmp', f'unrelated-{i}').touch()
+    if accepted:
+        p.inspect_namespace()
+    else:
+        with pytest.raises(p.NamespaceError) as error:
+            p.inspect_namespace()
+        assert error.value.reason == 'budget'
+
+
+@pytest.mark.parametrize('count', [16, 17])
+def test_owned_inventory_refuses_early(health, monkeypatch, count):
+    p, root, *_ = health
+    for i in range(count):
+        root.joinpath('private', 'tmp', f'ssh-over-mcp-e2e-{i}').touch()
+    seen = []
+    original = os.stat
+
+    def record(path, *a, **k):
+        if isinstance(path, str) and path.startswith('ssh-over-mcp-e2e-'):
+            seen.append(path)
+        return original(path, *a, **k)
+    monkeypatch.setattr(os, 'stat', record)
+    with pytest.raises(p.NamespaceError) as error:
+        p.inspect_namespace()
+    assert error.value.reason == 'residual' and len(seen) == 1
+
+
+@pytest.mark.parametrize('owned,remove', [(False, False), (False, True), (True, True), (True, False)])
+def test_between_pass_churn_refuses_and_preserves_canaries(health, monkeypatch, owned, remove):
+    p, root, *_ = health
+    original = getattr(p, '_scan_observation', lambda *_: None)
+    parent = root.joinpath('private', 'tmp')
+    entry = parent / ('ssh-over-mcp-e2e-transient' if owned else 'foreign-unrelated')
+    calls = []
+    changed = []
+
+    def observe(pinned):
+        original(pinned)
+        calls.append(True)
+        if len(calls) == 1:
+            before = parent.stat()
+            entry.write_bytes(b'preserve-me')
+            if remove:
+                entry.unlink()  # Test owns this exact injected entry.
+            after = parent.stat()
+            assert (before.st_mtime_ns, before.st_ctime_ns) != (after.st_mtime_ns, after.st_ctime_ns)
+            changed.append(True)
+    monkeypatch.setattr(p, '_scan_observation', observe, raising=False)
+    with pytest.raises(p.NamespaceError) as error:
+        p.inspect_namespace()
+    assert error.value.reason == 'drift' and changed == [True]
+    if not remove:
+        assert entry.read_bytes() == b'preserve-me'
+
+
+def test_concurrent_foreign_churn_uses_barriers(health, monkeypatch):
+    p, root, *_ = health
+    original = getattr(p, '_scan_observation', lambda *_: None)
+    ready, complete = threading.Event(), threading.Event()
+    parent = root.joinpath('private', 'tmp')
+    canary = parent / 'foreign-live-canary'
+    before = parent.stat()
+
+    def writer():
+        assert ready.wait(3)
+        canary.write_bytes(b'preserve-me')
+        complete.set()
+    thread = threading.Thread(target=writer)
+    thread.start()
+
+    def observe(pinned):
+        original(pinned)
+        ready.set()
+        assert complete.wait(3)
+        after = parent.stat()
+        assert before.st_ctime_ns != after.st_ctime_ns or before.st_mtime_ns != after.st_mtime_ns
+    monkeypatch.setattr(p, '_scan_observation', observe, raising=False)
+    try:
+        with pytest.raises(p.NamespaceError) as error:
+            p.inspect_namespace()
+        assert error.value.reason == 'drift'
+        assert canary.read_bytes() == b'preserve-me'
+    finally:
+        ready.set()
+        thread.join(timeout=3)
+        assert not thread.is_alive()
+
+
+@pytest.mark.parametrize('fault', ['selector', 'context', 'groups', 'budget'])
+def test_interpass_context_selector_and_budget_drift_refuse(health, monkeypatch, fault):
+    p, _, _, context = health
+    original = getattr(p, '_scan_observation', lambda *_: None)
+
+    def observe(pinned):
+        original(pinned)
+        if fault == 'selector':
+            monkeypatch.setenv('TMP', '/tmp')  # Supported value, changed snapshot.
+        elif fault == 'budget':
+            monkeypatch.setattr(p.time, 'monotonic', lambda: pinned._deadline)
+        else:
+            changed = p.ProviderContext(context.uid + int(fault == 'context'), context.euid, context.gid, context.egid, context.groups + (99999,))
+            monkeypatch.setattr(p, '_validate_context', lambda: changed)
+    monkeypatch.setattr(p, '_scan_observation', observe, raising=False)
+    with pytest.raises(p.NamespaceError) as error:
+        p.inspect_namespace()
+    assert error.value.reason == ('budget' if fault == 'budget' else 'drift')
+
+
+def test_public_inspection_has_no_path_override(health):
+    p, *_ = health
+    assert inspect.signature(p.inspect_namespace).parameters == {}
+    with pytest.raises(TypeError):
+        p.inspect_namespace('/untrusted')
+
+
+def test_inspection_never_mutates_or_probes_tempfile(health, monkeypatch):
+    p, *_ = health
+    operations = []
+
+    def forbidden(*a, **k):
+        operations.append(True)
+        pytest.fail('unauthorized mutation/payload/probe')
+    for name in ('mkdir', 'unlink', 'rmdir', 'chmod', 'chown', 'read', 'kill'):
+        monkeypatch.setattr(os, name, forbidden)
+    for name in ('gettempdir', 'gettempdirb', '_get_default_tempdir'):
+        monkeypatch.setattr(tempfile, name, forbidden)
+    p.inspect_namespace()
+    assert operations == []
+
+
+def test_final_supported_workflow_sha_drift_refuses(health, monkeypatch):
+    p, *_ = health
+    monkeypatch.setenv('GITHUB_SHA', 'a' * 40)
+    original = getattr(p, '_scan_observation', lambda *_: None)
+
+    def observe(pinned):
+        original(pinned)
+        monkeypatch.setenv('GITHUB_SHA', 'b' * 40)
+    monkeypatch.setattr(p, '_scan_observation', observe, raising=False)
+    with pytest.raises(p.NamespaceError) as error:
+        p.inspect_namespace()
+    assert error.value.reason == 'drift'
+
+
+def test_foreign_native_prefix_evidence_refuses(health, monkeypatch):
+    p, root, *_ = health
+    canary = root.joinpath(*NATIVE, 'ssh-over-mcp-e2e-foreign')
+    canary.write_bytes(b'preserve-me')
+    foreign_stat(monkeypatch, {canary.stat().st_ino})
+    with pytest.raises(p.NamespaceError) as error:
+        p.inspect_namespace()
+    assert error.value.reason == 'residual'
+    assert canary.read_bytes() == b'preserve-me'
+
+
+def test_observed_owned_match_removed_cannot_become_success(health, monkeypatch):
+    p, root, *_ = health
+    canary = root.joinpath('private', 'tmp', 'ssh-over-mcp-e2e-disappearing')
+    canary.touch()
+    original = os.stat
+    removed = []
+
+    def remove_after_stat(path, *a, **k):
+        value = original(path, *a, **k)
+        if path == canary.name and k.get('dir_fd') is not None:
+            canary.unlink()  # This fixture owns only this injected entry.
+            removed.append(True)
+        return value
+    monkeypatch.setattr(os, 'stat', remove_after_stat)
+    with pytest.raises(p.NamespaceError) as error:
+        p.inspect_namespace()
+    assert error.value.reason == 'residual' and removed == [True]
+
+
+def test_scandir_close_uncertainty_is_not_retried(health, monkeypatch):
+    p, *_ = health
+    original = os.scandir
+    closes = []
+
+    class AmbiguousIterator:
+        def __init__(self, fd):
+            self.inner = original(fd)
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return next(self.inner)
+
+        def close(self):
+            closes.append(True)
+            self.inner.close()
+            raise OSError('close committed')
+    monkeypatch.setattr(os, 'scandir', AmbiguousIterator)
+    with pytest.raises(p.NamespaceError) as error:
+        p.inspect_namespace()
+    assert error.value.cleanup_uncertain is True and closes == [True]
+
+
+@pytest.mark.parametrize('fault', ['acl', 'ancestor-link', 'cache', 'missing-suffix'])
+def test_health_integration_revalidates_interpass_boundaries(health, monkeypatch, fault, tmp_path):
+    p, root, *_ = health
+    original = p._scan_observation
+    changed = []
+    raw = [b'']
+    if fault == 'acl':
+        backend = p._native_module()
+        backend.read_acl = lambda fd: p.AclSnapshot(raw[0], ())
+        monkeypatch.setattr(p, '_native_module', lambda: backend)
+    if fault == 'missing-suffix':
+        root.joinpath(*PROTECTED).rmdir()
+
+    def observe(pinned):
+        original(pinned)
+        if changed:
+            return
+        if fault == 'acl':
+            raw[0] = b'changed-acl'
+        elif fault == 'cache':
+            monkeypatch.setattr(tempfile, 'tempdir', '/tmp')
+        elif fault == 'missing-suffix':
+            root.joinpath(*PROTECTED).mkdir(mode=0o700)
+        else:
+            outside = tmp_path / 'unrelated'
+            outside.mkdir()
+            edge = root.joinpath(*PROTECTED[:4])
+            edge.rename(edge.with_name('old-support'))
+            edge.symlink_to(outside, target_is_directory=True)
+        changed.append(True)
+    monkeypatch.setattr(p, '_scan_observation', observe)
+    with pytest.raises(p.NamespaceError) as error:
+        p.inspect_namespace()
+    assert changed == [True] and error.value.reason == 'drift'
+
+
+def test_health_missing_suffix_is_evidence_only(health, monkeypatch):
+    p, root, *_ = health
+    for i in range(6, 3, -1):
+        root.joinpath(*PROTECTED[:i]).rmdir()
+    mutations = []
+    monkeypatch.setattr(os, 'mkdir', lambda *a, **k: mutations.append(True))
+    result = p.inspect_namespace()
+    assert result.protected_missing == PROTECTED[3:]
+    assert mutations == []
+
+
+def test_health_last_close_swap_refuses(health, monkeypatch):
+    p, root, *_ = health
+    original = os.close
+    inode = root.joinpath(*PROTECTED).stat().st_ino
+    changed = []
+
+    def swap(fd):
+        match = os.fstat(fd).st_ino == inode
+        original(fd)
+        if match and not changed:
+            edge = root.joinpath(*PROTECTED)
+            edge.rename(edge.with_name('former-staging'))
+            edge.mkdir(mode=0o700)
+            changed.append(True)
+    monkeypatch.setattr(os, 'close', swap)
+    with pytest.raises(p.NamespaceError) as error:
+        p.inspect_namespace()
+    assert changed == [True] and error.value.reason == 'drift'
