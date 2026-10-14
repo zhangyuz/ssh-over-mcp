@@ -1926,3 +1926,16 @@ PR execution, require a SHA status, or provide a PR-bound merge gate. Next
 independent work is ADR 0019 owned lifetime then protected-placement native
 activation; subsequent hosted trusted-main suite verification and scoped
 `workflow_dispatch` broker remain gated by separate plans and reviews.
+
+### ADR 0019 — owned protected workspace lifetime (planned; awaiting approval)
+
+The next security-scoped slice after accepted Shadow Admission is the
+[dormant owned workspace lifetime implementation plan](superpowers/plans/2026-10-14-adr19-owned-protected-workspace-lifetime.md):
+original FD-bound protected parent and run-root identity, exclusive creation,
+single-use descriptor-relative owned-only cleanup, non-deleting finalization
+and real UID-502/APFS ACL/race evidence. **This plan is proposed, not approved
+or implemented.** The existing legacy native E2E, recovery and workflow
+remain unchanged; protected-placement activation still requires its own
+separate approved plan. After implementation code is complete, independent
+review is requested **immediately**, in parallel with exact-head CI rather
+than waiting for CI before requesting review.
