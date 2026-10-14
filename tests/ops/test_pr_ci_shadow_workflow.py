@@ -74,3 +74,20 @@ def test_shadow_no_status_write_and_no_native_caller() -> None:
     assert steps[-1]["env"] == {"GITHUB_TOKEN": "${{ github.token }}"}
     assert "github.event" not in steps[-1]["run"]
     assert "GITHUB_EVENT_PATH" in steps[-1]["run"]
+
+
+def test_shadow_is_documented_not_an_e2e_gate() -> None:
+    evidence = ROOT / "docs/evidence/2026-10-14-pr-native-e2e-shadow.md"
+    assert evidence.is_file(), "first-slice evidence must exist before review"
+    note = evidence.read_text(encoding="utf-8").lower()
+    for phrase in (
+        "shadow only",
+        "no native dispatch",
+        "no status write",
+        "fork",
+        "stale",
+        "rollback",
+        "canary",
+        "trusted_suite_proven",
+    ):
+        assert phrase in note
