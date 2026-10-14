@@ -1972,3 +1972,54 @@ close-once FD transfer on every failed creation, fully bounded directory
 enumeration, and explicit fstatfs APFS assertion. These changes **do not**
 remove the earlier UID502/native or full protected/legacy scanner integration
 gates; see the evidence document above.
+
+**PR #251 security-frozen workflow exception.** The original trusted-main
+workflow is byte-frozen under `test_protected_staging_dormant.py`. After
+independently auditing the **only workflow diff** against its trusted base,
+the finalizer's one command is deliberately replaced with a no-follow
+verification helper; the **single corresponding SHA-256 freeze entry** is
+updated. All other frozen authorities, triggers, SHA-pinned checkout,
+shared concurrency, guest admission, runner permissions and recovery paths
+remain unchanged. The helper hard-pins the same literal
+`/Users/gha-e2e-orchestrator` as the original orchestrator, verifies the
+dedicated UID502 account and current HOME match, and offers **no CLI
+override** for its root. The pure Python check accepts disposable fixture
+directories only as a directly imported test interface; production
+workflow always invokes the fixed-root CLI.
+
+### Native Level-3 cleanup guard — dangling-marker symlink hardening (review pending)
+
+A small, separately reviewed security follow-up hardens the existing
+Verify provider state is absent step in the native workflow
+(.github/workflows/live-local-e2e.yml).
+Previously a plain shell test ! -e followed the leaf link: a dangling
+active-run.json symlink could be silently reported as an absent marker.
+The new read-only postrun helper first verifies the dedicated UID502
+account and HOME match its **fixed provider root**, then opens that fixed
+home and three literal cache directories through
+O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC FDs, and uses
+os.stat(..., dir_fd=..., follow_symlinks=False) for the marker leaf. Only a genuinely missing leaf is accepted; a missing,
+symlinked or inaccessible parent and every existing marker entry refuse.
+The guard does not recover, delete, adopt or repair anything.
+
+Local RED→GREEN contract tests exercise **the original importable
+helper** against disposable filesystem roots (normal and missing marker,
+valid/dangling leaf and ancestor links, permission/lookup failures).
+A **separate real production YAML shell-step test** verifies refusal for
+a divergent disposable HOME; it cannot perform a positive production
+UID502 CLI test on the UID501 developer shell. The true postmerge
+trusted-main native Level-3 run remains the positive host acceptance gate.
+New adversarial tests rename/replace the held provider cache directory
+after open and immediately after marker ENOENT, then plant a marker in
+the canonical replacement: both must refuse on original FD/edge drift.
+Checks compare original home + each pinned parent/child dev, inode,
+uid, gid and full mode, before and after marker absence observation.
+POSIX lookup is not atomic against hostile concurrent same-UID writers:
+this acceptance assumes a serialized single-writer provider context,
+not proof of unconditional race immunity. The helper is itself added to
+the SHA-256 frozen native authority inventory. Any future executable
+helper change requires a deliberate independent review and hash update.
+Existing runner labels, checkout, trigger, no-network guest and
+marker wire format remain unchanged.
+This is not evidence of a passed protected UID502 staging fixture;
+final exact-HEAD CI and independent review are required before merge.

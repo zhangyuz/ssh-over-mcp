@@ -83,4 +83,4 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test ! -e "$HOME/Library/Caches/ssh-over-mcp-e2e/active-run.json"
+          python3 ops/live-e2e/verify_native_provider_absence.py
