@@ -83,4 +83,35 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test ! -e "$HOME/Library/Caches/ssh-over-mcp-e2e/active-run.json"
+          python3 - <<'PYMARKER'
+          import os
+          import sys
+          from contextlib import ExitStack
+
+          # Check the fixed provider chain without following symlinks.
+          # Only an absent *leaf* is success; unknown parents fail closed.
+          flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+          try:
+              home = os.environ["HOME"]
+              if not os.path.isabs(home):
+                  raise ValueError("HOME must be absolute")
+              with ExitStack() as opened:
+                  parent_fd = os.open(home, flags)
+                  opened.callback(os.close, parent_fd)
+                  for component in ("Library", "Caches", "ssh-over-mcp-e2e"):
+                      parent_fd = os.open(component, flags, dir_fd=parent_fd)
+                      opened.callback(os.close, parent_fd)
+                  try:
+                      os.stat(
+                          "active-run.json",
+                          dir_fd=parent_fd,
+                          follow_symlinks=False,
+                      )
+                  except FileNotFoundError:
+                      pass
+                  else:
+                      raise ValueError("provider marker still exists (including symlink)")
+          except (OSError, KeyError, ValueError) as exc:
+              print(f"::error::Unable to prove provider marker absent: {exc}", file=sys.stderr)
+              sys.exit(1)
+          PYMARKER

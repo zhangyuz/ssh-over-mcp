@@ -1972,3 +1972,25 @@ close-once FD transfer on every failed creation, fully bounded directory
 enumeration, and explicit fstatfs APFS assertion. These changes **do not**
 remove the earlier UID502/native or full protected/legacy scanner integration
 gates; see the evidence document above.
+
+### Native Level-3 cleanup guard — dangling-marker symlink hardening (review pending)
+
+A small, separately reviewed security follow-up hardens the existing
+Verify provider state is absent step in the native workflow
+(.github/workflows/live-local-e2e.yml).
+Previously a plain shell test ! -e followed the leaf link: a dangling
+active-run.json symlink could be silently reported as an absent marker.
+The new read-only postrun guard opens the dedicated home and three
+literal cache directories through O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+FDs, then uses os.stat(..., dir_fd=..., follow_symlinks=False) for the
+marker leaf. Only a genuinely missing leaf is accepted; a missing,
+symlinked or inaccessible parent and every existing marker entry refuse.
+The guard does not recover, delete, adopt or repair anything.
+
+Local RED→GREEN contract tests execute the real YAML step with a
+disposable HOME: ordinary file, dangling/live leaf symlink, directory,
+dangling/live cache parent link and absent/non-directory cache parent,
+alongside a clean empty-marker success. Existing runner labels, checkout,
+trigger, no-network guest and marker wire format remain unchanged.
+This is not evidence of a passed protected UID502 staging fixture;
+final exact-HEAD CI and independent review are required before merge.
