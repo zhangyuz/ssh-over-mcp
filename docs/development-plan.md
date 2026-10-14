@@ -1973,6 +1973,20 @@ enumeration, and explicit fstatfs APFS assertion. These changes **do not**
 remove the earlier UID502/native or full protected/legacy scanner integration
 gates; see the evidence document above.
 
+**PR #251 security-frozen workflow exception.** The original trusted-main
+workflow is byte-frozen under `test_protected_staging_dormant.py`. After
+independently auditing the **only workflow diff** against its trusted base,
+the finalizer's one command is deliberately replaced with a no-follow
+verification helper; the **single corresponding SHA-256 freeze entry** is
+updated. All other frozen authorities, triggers, SHA-pinned checkout,
+shared concurrency, guest admission, runner permissions and recovery paths
+remain unchanged. The helper hard-pins the same literal
+`/Users/gha-e2e-orchestrator` as the original orchestrator, verifies the
+dedicated UID502 account and current HOME match, and offers **no CLI
+override** for its root. The pure Python check accepts disposable fixture
+directories only as a directly imported test interface; production
+workflow always invokes the fixed-root CLI.
+
 ### Native Level-3 cleanup guard — dangling-marker symlink hardening (review pending)
 
 A small, separately reviewed security follow-up hardens the existing
@@ -1980,10 +1994,11 @@ Verify provider state is absent step in the native workflow
 (.github/workflows/live-local-e2e.yml).
 Previously a plain shell test ! -e followed the leaf link: a dangling
 active-run.json symlink could be silently reported as an absent marker.
-The new read-only postrun guard opens the dedicated home and three
-literal cache directories through O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
-FDs, then uses os.stat(..., dir_fd=..., follow_symlinks=False) for the
-marker leaf. Only a genuinely missing leaf is accepted; a missing,
+The new read-only postrun helper first verifies the dedicated UID502
+account and HOME match its **fixed provider root**, then opens that fixed
+home and three literal cache directories through
+O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC FDs, and uses
+os.stat(..., dir_fd=..., follow_symlinks=False) for the marker leaf. Only a genuinely missing leaf is accepted; a missing,
 symlinked or inaccessible parent and every existing marker entry refuse.
 The guard does not recover, delete, adopt or repair anything.
 
