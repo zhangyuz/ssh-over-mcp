@@ -148,3 +148,121 @@ def test_interleaved_foreign_mkdir_refuses(tmp_path, monkeypatch):
         assert (library / "foreign-entry").exists()
     finally:
         os.close(fd)
+
+
+def test_fixture_original_root_only_cleanup(tmp_path):
+    m = load_module()
+    library, fd = _fixture_library(tmp_path)
+    try:
+        workspace = m._create_for_fixture(m._claim_disposable_fixture(fd))
+        staging = library / "Application Support" / "ssh-over-mcp-e2e" / "staging-v1"
+        target = staging / workspace.name
+        (target / "nested").mkdir(mode=0o700)
+        (target / "nested" / "test.txt").write_text("fixture-only")
+        receipt = m._fixture_never_started_receipt(workspace)
+        m._dispose_never_started_fixture(workspace, receipt)
+        assert not target.exists()
+        assert list(staging.iterdir()) == []
+        assert (library / ".adr19-disposable-claim").exists()
+    finally:
+        os.close(fd)
+
+
+def test_bool_and_foreign_receipt_never_delete(tmp_path):
+    m = load_module()
+    library, fd = _fixture_library(tmp_path)
+    try:
+        workspace = m._create_for_fixture(m._claim_disposable_fixture(fd))
+        staging = library / "Application Support" / "ssh-over-mcp-e2e" / "staging-v1"
+        for invalid in (True, None, object(), {"reaped": True}):
+            with pytest.raises(m.NamespaceError):
+                m._dispose_never_started_fixture(workspace, invalid)
+        with pytest.raises(m.NamespaceError):
+            m.OwnedWorkspace.__new__(m.OwnedWorkspace).dispose(True)
+        assert (staging / workspace.name).is_dir()
+        workspace.close()
+    finally:
+        os.close(fd)
+
+
+def test_original_run_root_swap_refuses(tmp_path):
+    m = load_module()
+    library, fd = _fixture_library(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("keep")
+    try:
+        workspace = m._create_for_fixture(m._claim_disposable_fixture(fd))
+        staging = library / "Application Support" / "ssh-over-mcp-e2e" / "staging-v1"
+        (staging / workspace.name).rename(staging / (workspace.name + "-moved"))
+        (staging / workspace.name).symlink_to(outside, target_is_directory=True)
+        with pytest.raises(m.NamespaceError):
+            m._dispose_never_started_fixture(workspace, m._fixture_never_started_receipt(workspace))
+        assert (outside / "keep.txt").read_text() == "keep"
+        assert (staging / (workspace.name + "-moved")).is_dir()
+        workspace.close()
+    finally:
+        os.close(fd)
+
+
+def test_nested_symlink_target_preserved(tmp_path):
+    m = load_module()
+    library, fd = _fixture_library(tmp_path)
+    outside = tmp_path / "untouched"
+    outside.mkdir()
+    (outside / "keep").write_text("safe")
+    try:
+        workspace = m._create_for_fixture(m._claim_disposable_fixture(fd))
+        root = library / "Application Support" / "ssh-over-mcp-e2e" / "staging-v1" / workspace.name
+        (root / "link").symlink_to(outside, target_is_directory=True)
+        m._dispose_never_started_fixture(workspace, m._fixture_never_started_receipt(workspace))
+        assert (outside / "keep").read_text() == "safe"
+        assert not root.exists()
+    finally:
+        os.close(fd)
+
+
+def test_uncertain_unlink_never_clears_marker(tmp_path, monkeypatch):
+    m = load_module()
+    library, fd = _fixture_library(tmp_path)
+    try:
+        workspace = m._create_for_fixture(m._claim_disposable_fixture(fd))
+        root = library / "Application Support" / "ssh-over-mcp-e2e" / "staging-v1" / workspace.name
+        (root / "fixture-file").write_text("present")
+        receipt = m._fixture_never_started_receipt(workspace)
+        calls = []
+        original_unlink = os.unlink
+
+        def fail_once(*args, **kwargs):
+            calls.append(args)
+            raise OSError("refuse only this unlink")
+
+        monkeypatch.setattr(os, "unlink", fail_once)
+        with pytest.raises(m.NamespaceError) as exc:
+            m._dispose_never_started_fixture(workspace, receipt)
+        assert exc.value.cleanup_uncertain is True
+        with pytest.raises(m.NamespaceError):
+            m._dispose_never_started_fixture(workspace, receipt)
+        assert len(calls) == 1
+        monkeypatch.setattr(os, "unlink", original_unlink)
+        assert (library / ".adr19-disposable-claim").exists()
+        assert (root / "fixture-file").exists()
+        workspace.close()
+    finally:
+        os.close(fd)
+
+
+def test_lost_root_fd_refuses(tmp_path):
+    m = load_module()
+    library, fd = _fixture_library(tmp_path)
+    try:
+        workspace = m._create_for_fixture(m._claim_disposable_fixture(fd))
+        root_fd = workspace._root_fd
+        os.close(root_fd)
+        workspace._root_fd = -1
+        with pytest.raises(m.NamespaceError):
+            m._dispose_never_started_fixture(workspace, m._fixture_never_started_receipt(workspace))
+        assert (library / ".adr19-disposable-claim").exists()
+        workspace.close()
+    finally:
+        os.close(fd)

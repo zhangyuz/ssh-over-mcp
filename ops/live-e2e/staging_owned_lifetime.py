@@ -120,6 +120,8 @@ class _FixtureOwnedWorkspace:
         self.root_identity = _identity(root_fd)
         self.parent_identity = _identity(staging_fd)
         self._closed = False
+        self._cleanup_state = "new"
+        self._receipt_token = object()
 
     def verify_single_owned_child(self) -> None:
         if self._closed or self._root_fd < 0 or self._staging_fd < 0:
@@ -219,3 +221,95 @@ def _create_for_fixture(permit: _FixtureClaimPermit) -> _FixtureOwnedWorkspace:
                 os.close(root_fd)
             if current_fd >= 0 and current_fd != permit.library_fd:
                 os.close(current_fd)
+
+
+@dataclass(frozen=True, slots=True)
+class _NeverStartedEvidence:
+    """Unexported, fixture-only token: not a real QEMU reaping witness."""
+    token: object
+
+
+def _fixture_never_started_receipt(workspace: _FixtureOwnedWorkspace) -> _NeverStartedEvidence:
+    if type(workspace) is not _FixtureOwnedWorkspace or workspace._closed:
+        raise NamespaceError("unbound")
+    if workspace._cleanup_state != "new":
+        raise NamespaceError("unbound")
+    return _NeverStartedEvidence(workspace._receipt_token)
+
+
+def _remove_fixture_descendants(root_fd: int, budget: list[int], depth: int = 0) -> None:
+    """Bounded, no-follow delete of *test-only* original held fixture descendants."""
+    if depth >= 10:
+        raise NamespaceError("budget", cleanup_uncertain=True)
+    _validate_private_dir(root_fd)
+    scan_fd = os.open(".", _DIR_FLAGS, dir_fd=root_fd)
+    try:
+        with os.scandir(scan_fd) as stream:
+            entries = list(stream)
+    finally:
+        os.close(scan_fd)
+    if len(entries) > 128:
+        raise NamespaceError("budget", cleanup_uncertain=True)
+    for entry in entries:
+        budget[0] += 1
+        if budget[0] > 512:
+            raise NamespaceError("budget", cleanup_uncertain=True)
+        name = entry.name
+        if (type(name) is not str or not name or name in (".", "..")
+                or "/" in name or "\x00" in name):
+            raise NamespaceError("namespace", cleanup_uncertain=True)
+        metadata = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+        if metadata.st_uid != os.getuid():
+            raise NamespaceError("namespace", cleanup_uncertain=True)
+        if stat.S_ISDIR(metadata.st_mode):
+            child_fd = os.open(name, _DIR_FLAGS, dir_fd=root_fd)
+            try:
+                child = os.fstat(child_fd)
+                if (child.st_dev, child.st_ino) != (metadata.st_dev, metadata.st_ino):
+                    raise NamespaceError("drift", cleanup_uncertain=True)
+                _remove_fixture_descendants(child_fd, budget, depth + 1)
+                check = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+                if (check.st_dev, check.st_ino) != (child.st_dev, child.st_ino):
+                    raise NamespaceError("drift", cleanup_uncertain=True)
+                os.rmdir(name, dir_fd=root_fd)
+            finally:
+                os.close(child_fd)
+        elif stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+            if stat.S_ISREG(metadata.st_mode) and metadata.st_nlink != 1:
+                raise NamespaceError("namespace", cleanup_uncertain=True)
+            check = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+            if (check.st_dev, check.st_ino, check.st_mode) != (
+                metadata.st_dev, metadata.st_ino, metadata.st_mode
+            ):
+                raise NamespaceError("drift", cleanup_uncertain=True)
+            os.unlink(name, dir_fd=root_fd)
+        else:
+            raise NamespaceError("namespace", cleanup_uncertain=True)
+
+
+def _dispose_never_started_fixture(
+    workspace: _FixtureOwnedWorkspace,
+    receipt: _NeverStartedEvidence,
+) -> None:
+    """Single-use test cleanup; NEVER a guest-run or production provider API."""
+    if (
+        type(workspace) is not _FixtureOwnedWorkspace
+        or type(receipt) is not _NeverStartedEvidence
+        or receipt.token is not workspace._receipt_token
+        or workspace._cleanup_state != "new"
+    ):
+        raise NamespaceError("unbound")
+    workspace.verify_single_owned_child()
+    # No marker deletion and no automatic retry, even if one unlink succeeded.
+    workspace._cleanup_state = "disposing"
+    try:
+        _remove_fixture_descendants(workspace._root_fd, [0])
+        workspace.verify_single_owned_child()
+        os.rmdir(workspace.name, dir_fd=workspace._staging_fd)
+        if os.listdir(workspace._staging_fd):
+            raise NamespaceError("residual", cleanup_uncertain=True)
+        workspace._cleanup_state = "disposed"
+        workspace.close()
+    except BaseException:  # noqa: BLE001 - even interrupt must prohibit cleanup retry
+        workspace._cleanup_state = "uncertain"
+        raise NamespaceError("namespace", cleanup_uncertain=True) from None
