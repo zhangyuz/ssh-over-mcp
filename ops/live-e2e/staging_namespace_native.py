@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ctypes
+import errno
 import hashlib
 import importlib.util
 import os
@@ -9,6 +11,7 @@ import platform
 import re
 import selectors
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -19,7 +22,7 @@ from types import ModuleType
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from staging_namespace_types import NativeTempParent
+    from staging_namespace_types import AclSnapshot, NativeTempParent
 
 _EXECUTE_SECONDS = 5.0
 _CLEANUP_SECONDS = 2.0
@@ -243,3 +246,131 @@ def discover_native_temp() -> NativeTempParent:
         raise types.NamespaceError("native-discovery", cleanup_uncertain=uncertain) from None
     source = bytes(stdout[:-1]).decode("ascii")
     return types.NativeTempParent(source, "/private" + source)
+
+
+class _Statfs64(ctypes.Structure):
+    # XNU mount.h __DARWIN_STRUCT_STATFS64; use the INODE64 symbol, never
+    # the legacy unsuffixed ABI. No pathname or mount-name lookup is needed.
+    _fields_ = [
+        ('bsize', ctypes.c_uint32), ('iosize', ctypes.c_int32),
+        ('blocks', ctypes.c_uint64), ('bfree', ctypes.c_uint64),
+        ('bavail', ctypes.c_uint64), ('files', ctypes.c_uint64),
+        ('ffree', ctypes.c_uint64), ('fsid', ctypes.c_int32 * 2),
+        ('owner', ctypes.c_uint32), ('type', ctypes.c_uint32),
+        ('flags', ctypes.c_uint32), ('subtype', ctypes.c_uint32),
+        ('fstypename', ctypes.c_char * 16), ('mntonname', ctypes.c_char * 1024),
+        ('mntfromname', ctypes.c_char * 1024), ('flags_ext', ctypes.c_uint32),
+        ('reserved', ctypes.c_uint32 * 7),
+    ]
+
+
+def _load_acl_library():
+    try:
+        _require_platform()
+        if ctypes.sizeof(_Statfs64) != 2168 or _Statfs64.fstypename.offset != 72:
+            raise ValueError()
+        lib = ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True)
+        declarations = (
+            ('acl_get_fd_np', [ctypes.c_int, ctypes.c_int], ctypes.c_void_p),
+            ('acl_size', [ctypes.c_void_p], ctypes.c_ssize_t),
+            ('acl_copy_ext', [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ssize_t], ctypes.c_ssize_t),
+            ('acl_get_entry', [ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)], ctypes.c_int),
+            ('acl_get_tag_type', [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)], ctypes.c_int),
+            ('acl_free', [ctypes.c_void_p], ctypes.c_int),
+            ('fstatfs$INODE64', [ctypes.c_int, ctypes.POINTER(_Statfs64)], ctypes.c_int),
+        )
+        for name, args, result in declarations:
+            function = getattr(lib, name)
+            function.argtypes, function.restype = args, result
+        return lib
+    except _LIFECYCLE_ERRORS:
+        raise _types().NamespaceError('namespace') from None
+
+
+def _require_apfs_fd(fd: int, lib) -> None:
+    value = _Statfs64()
+    ctypes.set_errno(0)
+    if getattr(lib, 'fstatfs$INODE64')(fd, ctypes.byref(value)) != 0 or value.fstypename != b'apfs':
+        raise _types().NamespaceError('namespace') from None
+
+
+def _acl_identity(fd: int) -> tuple[int, ...]:
+    value = os.fstat(fd)
+    if not stat.S_ISDIR(value.st_mode):
+        raise _types().NamespaceError('namespace') from None
+    return (value.st_dev, value.st_ino, value.st_uid, value.st_gid,
+            value.st_mode, value.st_mtime_ns, value.st_ctime_ns)
+
+
+def read_acl(fd: int) -> AclSnapshot:
+    """Acquire bounded FD-bound Darwin/APFS evidence; never close caller FD."""
+    types = _types()
+    acl = None
+    failure = None
+    uncertain = False
+    result = None
+    lib = None
+    acquisition_attempted = False
+    acquisition_returned = False
+    try:
+        if type(fd) is not int or fd < 0:
+            raise ValueError()
+        before = _acl_identity(fd)
+        lib = _load_acl_library()
+        _require_apfs_fd(fd, lib)
+        ctypes.set_errno(0)
+        acquisition_attempted = True
+        acl = lib.acl_get_fd_np(fd, 0x100)
+        acquisition_returned = True
+        if not acl:
+            if ctypes.get_errno() != errno.ENOENT:
+                raise ValueError()
+            result = types.AclSnapshot(b'', ())
+        else:
+            size = lib.acl_size(acl)
+            if type(size) is not int or not 44 <= size <= 16384:
+                raise ValueError()
+            buffer = ctypes.create_string_buffer(size)
+            if lib.acl_copy_ext(buffer, acl, size) != size:
+                raise ValueError()
+            raw = buffer.raw
+            count = int.from_bytes(raw[36:40], 'big')
+            if raw[:4] != b'\x01\x2c\xc1\x6d' or count > 128 or size != 44 + count * 24:
+                raise ValueError()
+            tags = []
+            # One extra iteration proves exact end; premature EINVAL refuses.
+            for index in range(count + 1):
+                entry = ctypes.c_void_p()
+                ctypes.set_errno(0)
+                rc = lib.acl_get_entry(acl, 0 if index == 0 else -1, ctypes.byref(entry))
+                if index == count:
+                    if rc != -1 or ctypes.get_errno() != errno.EINVAL:
+                        raise ValueError()
+                    break
+                if rc != 0 or not entry.value:
+                    raise ValueError()
+                tag = ctypes.c_uint32()
+                if lib.acl_get_tag_type(entry, ctypes.byref(tag)) != 0 or tag.value not in (1, 2):
+                    raise ValueError()
+                wire_tag = int.from_bytes(raw[44 + index * 24 + 16:44 + index * 24 + 20], 'big') & 0xf
+                if wire_tag != tag.value:
+                    raise ValueError()
+                tags.append(tag.value)
+            result = types.AclSnapshot(raw, tuple(tags))
+        if _acl_identity(fd) != before:
+            raise ValueError()
+    except _LIFECYCLE_ERRORS:
+        uncertain = acquisition_attempted and not acquisition_returned
+        failure = types.NamespaceError('namespace')
+    finally:
+        if acl and lib is not None:
+            owned_acl, acl = acl, None  # One attempt even if free committed.
+            try:
+                if lib.acl_free(owned_acl) != 0:
+                    raise ValueError()
+            except _LIFECYCLE_ERRORS:
+                uncertain = True
+                failure = types.NamespaceError('namespace')
+    if failure is not None or result is None:
+        raise types.NamespaceError('namespace', cleanup_uncertain=uncertain) from None
+    return result

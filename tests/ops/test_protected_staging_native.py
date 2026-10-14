@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ctypes
+import errno
 import importlib.util
 import os
 import signal
@@ -273,3 +275,229 @@ def test_committed_stream_close_error_is_not_retried(native, child_factory, monk
     assert error.value.cleanup_uncertain is True
     assert children[0].returncode is not None
     assert closed == [True]
+
+
+class AclApi:
+    def __init__(self, tags=()):
+        self.tags = tags
+        self.wire = (0x012cc16d).to_bytes(4, 'big') + bytes(32) + len(tags).to_bytes(4, 'big') + bytes(4)
+        self.wire += b''.join(bytes(16) + tag.to_bytes(4, 'big') + bytes(4) for tag in tags)
+        self.cursor = 0
+        self.freed = []
+        self.null_errno = None
+        self.size_override = None
+        self.free_result = 0
+        self.iter_result = None
+
+    def acl_get_fd_np(self, fd, kind):
+        assert kind == 0x100
+        if self.null_errno is not None:
+            ctypes.set_errno(self.null_errno)
+            return None
+        return 123
+
+    def acl_size(self, acl):
+        assert acl == 123
+        return self.size_override if self.size_override is not None else len(self.wire)
+
+    def acl_copy_ext(self, buffer, acl, size):
+        assert acl == 123 and size >= len(self.wire)
+        ctypes.memmove(buffer, self.wire, len(self.wire))
+        return len(self.wire)
+
+    def acl_get_entry(self, acl, selector, out):
+        assert acl == 123 and selector == (0 if self.cursor == 0 else -1)
+        if self.iter_result is not None:
+            ctypes.set_errno(errno.EINVAL)
+            return self.iter_result
+        if self.cursor == len(self.tags):
+            ctypes.set_errno(errno.EINVAL)
+            return -1
+        ctypes.cast(out, ctypes.POINTER(ctypes.c_void_p))[0] = self.cursor + 1
+        self.cursor += 1
+        return 0
+
+    def acl_get_tag_type(self, entry, out):
+        ctypes.cast(out, ctypes.POINTER(ctypes.c_uint32))[0] = self.tags[entry.value - 1]
+        return 0
+
+    def acl_free(self, acl):
+        self.freed.append(acl)
+        return self.free_result
+
+
+@pytest.fixture
+def acl_fixture(native, tmp_path, monkeypatch):
+    directory = tmp_path / 'acl-dir'
+    directory.mkdir(mode=0o700)
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    monkeypatch.setattr(native, '_require_apfs_fd', lambda fd, lib: None, raising=False)
+    api = AclApi()
+    monkeypatch.setattr(native, '_load_acl_library', lambda: api, raising=False)
+    yield native, fd, api
+    os.close(fd)
+
+
+@pytest.mark.parametrize('tags', [(), (1,), (2,), (2, 1), (2,) * 128])
+def test_acl_export_and_darwin_iteration_preserve_order(acl_fixture, tags):
+    n, fd, api = acl_fixture
+    api.__init__(tags)
+    snapshot = n.read_acl(fd)
+    assert snapshot.tags == tags and snapshot.serialized == api.wire
+    assert api.freed == [123]
+    assert os.fstat(fd)  # The caller still owns its descriptor.
+
+
+@pytest.mark.parametrize('code,accepted', [(errno.ENOENT, True), (0, False), (errno.EACCES, False), (errno.EINVAL, False), (errno.ENOTSUP, False)])
+def test_null_acl_errno_is_not_guessed(acl_fixture, code, accepted):
+    n, fd, api = acl_fixture
+    api.null_errno = code
+    if accepted:
+        assert n.read_acl(fd) == n.AclSnapshot(b'', ())
+    else:
+        with pytest.raises(n.NamespaceError):
+            n.read_acl(fd)
+    assert api.freed == []
+
+
+@pytest.mark.parametrize('size', [-1, 0, 43, 16385])
+def test_acl_export_bound_refuses_before_copy(acl_fixture, size):
+    n, fd, api = acl_fixture
+    api.size_override = size
+    with pytest.raises(n.NamespaceError):
+        n.read_acl(fd)
+    assert api.freed == [123]
+
+
+@pytest.mark.parametrize('tags', [(3,), (0,), (2,) * 129])
+def test_unknown_tag_or_entry_bound_refuses(acl_fixture, tags):
+    n, fd, api = acl_fixture
+    api.__init__(tags)
+    with pytest.raises(n.NamespaceError):
+        n.read_acl(fd)
+    assert api.freed == [123]
+
+
+@pytest.mark.parametrize('result', [1, -1])
+def test_linux_iteration_or_premature_end_refuses(acl_fixture, result):
+    n, fd, api = acl_fixture
+    api.__init__((2,))
+    api.iter_result = result
+    with pytest.raises(n.NamespaceError):
+        n.read_acl(fd)
+    assert api.freed == [123]
+
+
+def test_acl_free_failure_is_uncertain_not_retried(acl_fixture):
+    n, fd, api = acl_fixture
+    api.free_result = -1
+    with pytest.raises(n.NamespaceError) as error:
+        n.read_acl(fd)
+    assert error.value.cleanup_uncertain is True
+    assert api.freed == [123]
+
+
+@pytest.mark.parametrize('fault', ['magic', 'count', 'wire-tag', 'copy-result', 'apfs', 'tag-result'])
+def test_ambiguous_acl_evidence_refuses_and_frees_once(acl_fixture, monkeypatch, fault):
+    n, fd, api = acl_fixture
+    api.__init__((2,))
+    if fault == 'magic':
+        api.wire = bytes(4) + api.wire[4:]
+    elif fault == 'count':
+        api.wire = api.wire[:36] + bytes(4) + api.wire[40:]
+    elif fault == 'wire-tag':
+        api.wire = api.wire[:60] + (1).to_bytes(4, 'big') + api.wire[64:]
+    elif fault == 'copy-result':
+        monkeypatch.setattr(api, 'acl_copy_ext', lambda *a: -1)
+    elif fault == 'tag-result':
+        monkeypatch.setattr(api, 'acl_get_tag_type', lambda *a: -1)
+    else:
+        def non_apfs(fd, lib):
+            raise n.NamespaceError('namespace')
+        monkeypatch.setattr(n, '_require_apfs_fd', non_apfs)
+    with pytest.raises(n.NamespaceError):
+        n.read_acl(fd)
+    assert api.freed == ([] if fault == 'apfs' else [123])
+
+
+def test_acl_identity_changes_during_retrieval_refuse(acl_fixture, monkeypatch):
+    n, fd, api = acl_fixture
+    original = api.acl_get_fd_np
+
+    def change(fd, kind):
+        os.fchmod(fd, 0o755)
+        return original(fd, kind)
+    monkeypatch.setattr(api, 'acl_get_fd_np', change)
+    with pytest.raises(n.NamespaceError):
+        n.read_acl(fd)
+
+
+@pytest.mark.parametrize('exception', [OSError, KeyboardInterrupt])
+def test_uncaptured_acl_acquisition_is_cleanup_uncertain(acl_fixture, monkeypatch, exception):
+    n, fd, api = acl_fixture
+
+    def interrupted(*_):
+        raise exception()
+    monkeypatch.setattr(api, 'acl_get_fd_np', interrupted)
+    with pytest.raises(n.NamespaceError) as error:
+        n.read_acl(fd)
+    assert error.value.cleanup_uncertain is True
+    assert api.freed == []  # No captured pointer may be guessed or freed.
+
+
+def test_fixed_library_missing_symbol_refuses(native, monkeypatch):
+    monkeypatch.setattr(ctypes, 'CDLL', lambda *a, **k: object())
+    with pytest.raises(native.NamespaceError):
+        native._load_acl_library()
+
+
+@pytest.mark.skipif(sys.platform != 'darwin', reason='actual Mac ACL evidence required separately')
+@pytest.mark.parametrize('entry,tags', [(None, ()), ('everyone deny delete', (2,)), ('everyone allow write', (1,)), ('everyone allow write,file_inherit,directory_inherit', (1,))])
+def test_real_mac_fd_acl_and_renamed_directory(tmp_path, entry, tags):
+    n = load_module()
+    directory = tmp_path / 'real-acl'
+    directory.mkdir(mode=0o700)
+    subprocess.run(['/bin/chmod', '-N', str(directory)], check=True, capture_output=True)
+    if entry:
+        subprocess.run(['/bin/chmod', '+a', entry, str(directory)], check=True, capture_output=True)
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    current = directory
+    try:
+        first = n.read_acl(fd)
+        assert first.tags == tags
+        if tags == (2,):
+            with pytest.raises(PermissionError):
+                directory.rename(tmp_path / 'renamed')
+            subprocess.run(['/bin/chmod', '-N', str(directory)], check=True, capture_output=True)
+        directory.rename(tmp_path / 'renamed')
+        current = tmp_path / 'renamed'
+        directory.mkdir(mode=0o700)
+        if tags == (2,):
+            subprocess.run(['/bin/chmod', '+a', entry, str(current)], check=True, capture_output=True)
+        assert n.read_acl(fd).tags == tags
+        assert directory.stat().st_ino != os.fstat(fd).st_ino
+        subprocess.run(['/bin/chmod', '-N', str(tmp_path / 'renamed')], check=True, capture_output=True)
+        assert n.read_acl(fd).tags == ()
+        assert os.fstat(fd)
+    finally:
+        subprocess.run(['/bin/chmod', '-N', str(current)], check=True, capture_output=True)
+        os.close(fd)
+
+
+@pytest.mark.skipif(sys.platform != 'darwin', reason='actual Mac empty ACL evidence')
+def test_real_mac_explicit_empty_acl(tmp_path):
+    n = load_module()
+    directory = tmp_path / 'explicit-empty-acl'
+    directory.mkdir(mode=0o700)
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    lib = ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True)
+    lib.acl_init.argtypes, lib.acl_init.restype = [ctypes.c_int], ctypes.c_void_p
+    lib.acl_set_fd_np.argtypes, lib.acl_set_fd_np.restype = [ctypes.c_int, ctypes.c_void_p, ctypes.c_int], ctypes.c_int
+    lib.acl_free.argtypes, lib.acl_free.restype = [ctypes.c_void_p], ctypes.c_int
+    acl = lib.acl_init(0)
+    try:
+        assert acl and lib.acl_set_fd_np(fd, acl, 0x100) == 0
+        assert n.read_acl(fd).tags == ()
+    finally:
+        assert lib.acl_free(acl) == 0
+        os.close(fd)
