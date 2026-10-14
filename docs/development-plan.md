@@ -1832,10 +1832,11 @@ in run 38466541180. The historical provider incident is resolved. Future staging
 retention/selector alignment remains a separate architectural change; see
 [ADR 0019](decisions/0019-protected-native-e2e-staging.md) and
 [written design](superpowers/specs/2026-10-13-protected-native-e2e-staging-design.md).
-The proposal uses a fixed private Application Support namespace with shared
-protected+legacy blocking checks and explicit owned lifetime. It changes no
-behavior yet and grants no activation, generic deletion or historical receipt
-authority. The operator approved the written design on 2026-10-13; the
+The approved design uses a fixed private Application Support namespace with
+shared protected+legacy blocking checks and explicit owned lifetime. The first
+implementation supplies dormant inspection only: existing runtime callers and
+workspace placement are unchanged. It grants no activation, generic deletion
+or historical receipt authority. The operator approved the written design on 2026-10-13; the
 [first implementation plan](superpowers/plans/2026-10-13-protected-staging-health-inspection.md)
 was approved by the operator on 2026-10-13 at 21:55:05 America/Toronto for
 native execution with independent review and delivers only dormant shared
@@ -1846,3 +1847,7 @@ refuses shared /private/tmp timestamp drift even from unrelated foreign activity
 see its activation checklist and shared-parent availability ruling. After verified activation, reconcile A1/B8 pause conditions before N1c, complete
 N1–N4 native proof, then return to Ledger systemd Task 3. Do not claim the
 remaining native toolchain/sandbox gates closed by incident recovery.
+
+### First protected-staging delivery — dormant namespace inspection
+
+The [slice evidence](evidence/2026-10-13-protected-staging-health-inspection.md) records selector/discovery, FD-bound Darwin/APFS ACL and fixed-chain inspection, and two metadata-only clean observations. This implementation has no production caller or workspace mutation. Pre-merge full/exact-head hosted and legacy E2E gates plus independent final review remain required. Next is a separately reviewed owned-workspace lifetime plan, followed by already-main activation and actual protected-placement acceptance. A1/B8/N1c and Ledger gates remain open.
