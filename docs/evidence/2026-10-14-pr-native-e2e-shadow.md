@@ -1,6 +1,6 @@
 # PR Native E2E Shadow Admission — implementation evidence
 
-Status: **merged and acceptance-verified (metadata-only); no PR-native authority**.
+Status: **merged; real same-repo positive-path shadow canary and main-push skip verified only; no PR-native authority**.
 Implementation branch: `feat/pr-native-shadow-admission-oct14`.
 Trusted base: `main` `18baf09d31a2610c2ce4359bd04a9ebf85cbb62f` after approved design PR #244.
 Authority: [vNext design](../superpowers/specs/2026-10-14-local-live-e2e-vnext-design.md),
@@ -78,7 +78,7 @@ any PR commit status.
   refusal tests. Minor 2 corrects this previously stale CI evidence and
   the PR's Ready-for-review description. Both changes remained shadow only;
   exact-final-head CI and manual trusted-main Level-3 later passed as linked above.
-- **Actual post-merge trusted-main shadow `workflow_run` canary: PASS.**
+- **Actual post-merge trusted-main shadow `workflow_run` canary: PASS for the same-repository, non-draft positive path only.**
   A disposable, same-repository, non-draft
   [PR #246](https://github.com/zhangyuz/ssh-over-mcp/pull/246) at
   `69c88b4c38374dc3d9ec9a608d68292db8af6648` completed
@@ -100,6 +100,13 @@ any PR commit status.
   [canary comment #6170897124](https://github.com/zhangyuz/ssh-over-mcp/pull/246#issuecomment-6170897124).
   This success is only an observation of current same-repo metadata, not
   verified trusted-test execution, fork admission or PR-bound merge enforcement.
+  **Coverage limit:** this live canary and the expected main-push skip do not
+  exercise a real fork denial, stale-head update race, duplicate run-attempt
+  replay, GitHub API outage/refusal or adversarial native-allocation attempt.
+  The relevant refusal logic is covered by isolated code/fixture contracts;
+  no additional live adversarial canary has been claimed. The absence of a
+  native-dispatch path is a static trust-boundary property of this slice,
+  not proof that future automatic PR-native dispatch is safe.
 - Separate **design baseline**: after PR #244 was merged at
   `18baf09d31a2610c2ce4359bd04a9ebf85cbb62f`, GitHub Actions
   [main CI #38563974688](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38563974688)
