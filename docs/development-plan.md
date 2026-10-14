@@ -1956,7 +1956,7 @@ independent review **immediately**, in parallel with exact-head CI.
 ### ADR 0019 Slice 2A — dormant unbound FD primitives (implementation review)
 
 A first [Slice 2A implementation evidence](evidence/2026-10-14-protected-staging-owned-lifetime.md)
-candidate is stacked on [plan PR #248](superpowers/plans/2026-10-14-adr19-owned-protected-workspace-lifetime.md).
+candidate now targets `main` after the approved [plan PR #248](superpowers/plans/2026-10-14-adr19-owned-protected-workspace-lifetime.md) was squash-merged.
 Only disposable fixture original-FD creation/owned-only cleanup is exercised;
 production entrypoints always refuse as unbound. Real marker handoff, QEMU
 reap proof, existing protected/legacy authenticated admission and production
