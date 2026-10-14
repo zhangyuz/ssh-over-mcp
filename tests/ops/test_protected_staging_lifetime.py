@@ -351,3 +351,52 @@ def test_missing_original_root_refuses_without_retry(tmp_path):
         workspace.close()
     finally:
         os.close(fd)
+
+
+def test_failed_fixture_claim_closes_descriptors_and_preserves_evidence(tmp_path, monkeypatch):
+    m = load_module()
+    library, fd = _fixture_library(tmp_path)
+    original_open = os.open
+    observed = []
+
+    def track_open(name, *args, **kwargs):
+        result = original_open(name, *args, **kwargs)
+        if name == ".adr19-disposable-claim":
+            observed.append(result)
+        return result
+
+    def fail_fsync(_fd):
+        raise OSError("simulated fsync failure after exclusive claim")
+
+    monkeypatch.setattr(os, "open", track_open)
+    monkeypatch.setattr(os, "fsync", fail_fsync)
+    try:
+        with pytest.raises(m.NamespaceError):
+            m._claim_disposable_fixture(fd)
+        assert len(observed) == 1
+        with pytest.raises(OSError):
+            os.fstat(observed[0])  # failed claim must NOT leak a raw FD
+        assert (library / ".adr19-disposable-claim").is_file()
+        assert not (library / "Application Support").exists()
+    finally:
+        os.close(fd)
+
+
+def test_owned_scan_rechecks_staging_acl_before_deletion(tmp_path, monkeypatch):
+    m = load_module()
+    _library, fd = _fixture_library(tmp_path)
+    try:
+        workspace = m._create_for_fixture(m._claim_disposable_fixture(fd))
+        original = m._validate_private_dir
+        checked = []
+
+        def check_acl(fd_value):
+            checked.append(fd_value)
+            return original(fd_value)
+
+        monkeypatch.setattr(m, "_validate_private_dir", check_acl)
+        workspace.verify_single_owned_child()
+        assert workspace._staging_fd in checked
+        workspace.close()
+    finally:
+        os.close(fd)

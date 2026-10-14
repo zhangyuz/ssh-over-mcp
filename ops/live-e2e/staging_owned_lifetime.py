@@ -86,6 +86,7 @@ def _claim_disposable_fixture(library_fd: int) -> _FixtureClaimPermit:
     """
     owned_fd = -1
     claim_fd = -1
+    transferred = False
     try:
         owned_fd = os.open(".", _DIR_FLAGS, dir_fd=library_fd)
         _validate_private_dir(owned_fd)
@@ -97,15 +98,21 @@ def _claim_disposable_fixture(library_fd: int) -> _FixtureClaimPermit:
         if not stat.S_ISREG(claimed[4]) or claimed[2] != os.getuid() or stat.S_IMODE(claimed[4]) != 0o600:
             raise NamespaceError("namespace")
         os.fsync(claim_fd)
-        return _FixtureClaimPermit(owned_fd, claim_fd, _identity(owned_fd), claimed)
+        permit = _FixtureClaimPermit(owned_fd, claim_fd, _identity(owned_fd), claimed)
+        transferred = True
+        return permit
     except (OSError, ValueError, TypeError) as exc:
         raise NamespaceError("namespace", cleanup_uncertain=not isinstance(exc, OSError)) from None
     finally:
-        # An exception after O_EXCL leaves a test-only marker as evidence.
-        if claim_fd >= 0 and "claimed" not in locals():
-            os.close(claim_fd)
-        if owned_fd >= 0 and "claimed" not in locals():
-            os.close(owned_fd)
+        # On failure, close FDs but keep the O_EXCL marker as forensic evidence.
+        if not transferred:
+            for fd in (claim_fd, owned_fd):
+                if fd >= 0:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        # Descriptor state unknown; never retry or delete a marker.
+                        pass
 
 
 class _FixtureOwnedWorkspace:
@@ -135,6 +142,7 @@ class _FixtureOwnedWorkspace:
             raise NamespaceError("drift")
         if os.listdir(self._staging_fd) != [self.name]:
             raise NamespaceError("residual")
+        _validate_private_dir(self._staging_fd)
         _validate_private_dir(self._root_fd)
 
     def close(self) -> None:

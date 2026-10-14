@@ -1952,3 +1952,14 @@ approved **Slice 3** may activate protected placement, recovery and native
 workflow changes. Current legacy E2E and marker wire formats remain
 unchanged. After implementation code and author self-review finish, request
 independent review **immediately**, in parallel with exact-head CI.
+
+### ADR 0019 Slice 2A — dormant unbound FD primitives (implementation review)
+
+A first [Slice 2A implementation evidence](evidence/2026-10-14-protected-staging-owned-lifetime.md)
+candidate is stacked on [plan PR #248](superpowers/plans/2026-10-14-adr19-owned-protected-workspace-lifetime.md).
+Only disposable fixture original-FD creation/owned-only cleanup is exercised;
+production entrypoints always refuse as unbound. Real marker handoff, QEMU
+reap proof, existing protected/legacy authenticated admission and production
+placement are not implemented. Real Mac UID502 tests remain pending because
+the command account is UID501 without passwordless switching authority.
+Code-complete review is requested immediately, independent of CI status.
