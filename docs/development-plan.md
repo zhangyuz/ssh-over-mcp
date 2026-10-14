@@ -1851,3 +1851,40 @@ remaining native toolchain/sandbox gates closed by incident recovery.
 ### First protected-staging delivery — dormant namespace inspection
 
 The [slice evidence](evidence/2026-10-13-protected-staging-health-inspection.md) records selector/discovery, FD-bound Darwin/APFS ACL and fixed-chain inspection, and two metadata-only clean observations. This implementation has no production caller or workspace mutation. Pre-merge full/exact-head hosted and legacy E2E gates plus independent final review remain required. Next is a separately reviewed owned-workspace lifetime plan, followed by already-main activation and actual protected-placement acceptance. A1/B8/N1c and Ledger gates remain open.
+
+### Proposed Local Live E2E vNext architecture (2026-10-14; design review only)
+
+The [written design proposal](superpowers/specs/2026-10-14-local-live-e2e-vnext-design.md)
+and [proposed ADR 0020](decisions/0020-trusted-pr-native-e2e-admission.md)
+retain the trusted-main no-network native provider while proposing a separate
+hosted completed-CI admission, exact-PR-head proof, bounded native queue and
+post-clean PR status reporter. Current repository visibility is public.
+The initial implementation candidate is **shadow admission only**: no native
+dispatch or success status. The [vNext staged implementation roadmap]
+(superpowers/plans/2026-10-14-local-live-e2e-vnext-rollout.md) and
+[first detailed RED→GREEN plan]
+(superpowers/plans/2026-10-14-pr-native-e2e-shadow-admission.md) are available
+for joint operator review; neither is implementation authorization. Existing main-push/native CI is unchanged.
+Owned staging lifetime, already-main protected placement activation, actual
+UID-502 protected-path acceptance and A1/B8/N1c remain independent open gates
+under ADR 0019. Neither this proposed design nor its draft PR authorizes an
+automatic Mac run or required-check/ruleset change.
+
+
+### PR #244 independent design review disposition — 2026-10-14
+
+[Independent review comment 6166828549](https://github.com/zhangyuz/ssh-over-mcp/pull/244#issuecomment-6166828549)
+identified three blocking proposed-design issues: (1) the live trusted Mac
+orchestrator rejects `workflow_run` context; (2) ten green PR-CI job names are
+not proof of the trusted-main test procedure because the PR can edit CI;
+(3) a SHA-scoped status cannot enforce per-PR fork authorization.
+The revised [vNext spec](superpowers/specs/2026-10-14-local-live-e2e-vnext-design.md),
+[proposed ADR 0020](decisions/0020-trusted-pr-native-e2e-admission.md) and
+[rollout](superpowers/plans/2026-10-14-local-live-e2e-vnext-rollout.md)
+now require a metadata-only shadow verdict (never CI authority), a separately
+pinned trusted-main hosted verification gate, a main-only `workflow_dispatch`
+broker with fresh identity/proof checks (not a `workflow_run` direct caller),
+separate informational SHA reporting, and a separately reviewed PR-bound merge
+authorization with a two-PR/same-SHA fork refusal proof.
+No native workflow, permission, status, branch-rule or provider behavior
+has been changed or authorized. Existing main-push E2E is unchanged.

@@ -30,4 +30,6 @@ Current ADRs:
 
 - [0018: Approved historical residual disposition](0018-approved-historical-residual-disposition.md) — implemented; approved incident recovery and exact-main native E2E/cleanup verified. See the [acceptance record](../evidence/2026-10-13-native-provider-recovery-acceptance.md).
 
-- [0019 — Protected native E2E staging namespace](0019-protected-native-e2e-staging.md) — written design approved; first implementation plan approved for native execution, no activation.
+- [0019 — Protected native E2E staging namespace](0019-protected-native-e2e-staging.md) — first dormant shared inspection implemented (PR #243); owned workspace lifetime and actual protected-placement activation remain unimplemented and separately gated.
+
+- [0020 — Trusted PR native E2E admission (proposed; not activated)](0020-trusted-pr-native-e2e-admission.md) — staged default-branch identity gate, no present workflow changes.

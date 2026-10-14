@@ -10,8 +10,9 @@ native/security gates remain explicit.
 
 Routine `pull_request` (including fork PRs) and `push:main` execute
 the **complete** Python 3.13 and 3.14 pytest collections on eight independent
-GitHub-hosted Ubuntu 26.04 x86_64 VMs (private repo standard 2 vCPU /
-8 GB each). Each Python version has four disjoint, jointly exhaustive
+GitHub-hosted Ubuntu 26.04 x86_64 VMs. Runner size and quota depend on
+the current GitHub-hosted plan; verify actual allocation. Each Python
+version has four disjoint, jointly exhaustive
 partitions: 19 exact hosted-measured projection-hot node IDs, 408 additional
 projection nodes selected by the fixed `classified or dispute` predicate,
 368 complementary nodes selected by `not (classified or dispute)`, and all
@@ -79,8 +80,10 @@ P95 under ten minutes. The new required-Python aggregate gates keep legacy
 names and independently check the current eight-job `needs.validate.result` for
 `success`; every failure, cancellation and skip must fail closed.
 
-SOM is a **private repository**; standard hosted Linux minutes consume
-account included usage, then bill at the published account-specific rate.
+SOM is currently a **public repository** (GitHub metadata verified
+2026-10-14), and external fork PRs are possible. Hosted Actions minutes,
+quotas and charges depend on current GitHub policy and account settings;
+verify before estimating costs.
 Eight 15-minute shard caps and two 3-minute aggregate caps now permit up to
 126 hosted runner-minutes per attempt (excluding other workflows). This is
 an upper bound, not a cost forecast; measure actual run minutes separately. Check remaining
