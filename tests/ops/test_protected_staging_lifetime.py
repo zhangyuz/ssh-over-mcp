@@ -67,3 +67,84 @@ def test_all_startup_blockers_precede_mkdir(monkeypatch):
             module.create_owned_workspace()
         assert exc.value.reason == "unbound"
         assert not calls
+
+
+def _fixture_library(tmp_path):
+    lib = tmp_path / "Library"
+    lib.mkdir(mode=0o700)
+    fd = os.open(lib, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    return lib, fd
+
+
+def test_fixture_exclusive_claim_required_before_first_descendant_mkdir(tmp_path):
+    module = load_module()
+    library, fd = _fixture_library(tmp_path)
+    try:
+        preexisting = library / ".adr19-disposable-claim"
+        preexisting.write_text("pretend claim owned by current PID")
+        with pytest.raises(module.NamespaceError):
+            module._claim_disposable_fixture(fd)
+        assert not (library / "Application Support").exists()
+    finally:
+        os.close(fd)
+
+
+def test_fixture_fixed_descendants_mode_acl_and_unique_run_child(tmp_path):
+    module = load_module()
+    library, fd = _fixture_library(tmp_path)
+    try:
+        permit = module._claim_disposable_fixture(fd)
+        workspace = module._create_for_fixture(permit)
+        assert workspace.name.startswith("ssh-over-mcp-e2e-")
+        assert len(workspace.name) == len("ssh-over-mcp-e2e-") + 32
+        assert all(c in "0123456789abcdef" for c in workspace.name[len("ssh-over-mcp-e2e-"):])
+        path = library / "Application Support" / "ssh-over-mcp-e2e" / "staging-v1" / workspace.name
+        assert path.is_dir()
+        assert path.stat().st_ino == workspace.root_identity[1]
+        assert path.stat().st_dev == workspace.root_identity[0]
+        for ancestor in (path.parent, path.parent.parent, path.parent.parent.parent, path):
+            assert (ancestor.stat().st_mode & 0o777) == 0o700
+        with pytest.raises(module.NamespaceError):
+            module._create_for_fixture(permit)
+        workspace.close()
+    finally:
+        os.close(fd)
+
+
+def test_postcreate_exact_original_child_only(tmp_path):
+    module = load_module()
+    library, fd = _fixture_library(tmp_path)
+    try:
+        workspace = module._create_for_fixture(module._claim_disposable_fixture(fd))
+        workspace.verify_single_owned_child()
+        staging = library / "Application Support" / "ssh-over-mcp-e2e" / "staging-v1"
+        (staging / "foreign-entry").write_text("foreign")
+        with pytest.raises(module.NamespaceError):
+            workspace.verify_single_owned_child()
+        workspace.close()
+    finally:
+        os.close(fd)
+
+
+def test_interleaved_foreign_mkdir_refuses(tmp_path, monkeypatch):
+    module = load_module()
+    library, fd = _fixture_library(tmp_path)
+    original_mkdir = os.mkdir
+    try:
+        permit = module._claim_disposable_fixture(fd)
+        triggered = False
+
+        def interleave(name, *args, **kwargs):
+            nonlocal triggered
+            if name == "Application Support" and not triggered:
+                triggered = True
+                original_mkdir("foreign-entry", mode=0o700, dir_fd=kwargs["dir_fd"])
+            return original_mkdir(name, *args, **kwargs)
+
+        monkeypatch.setattr(os, "mkdir", interleave)
+        with pytest.raises(module.NamespaceError):
+            module._create_for_fixture(permit)
+        assert triggered
+        assert (library / "foreign-entry").exists()
+    finally:
+        os.close(fd)
