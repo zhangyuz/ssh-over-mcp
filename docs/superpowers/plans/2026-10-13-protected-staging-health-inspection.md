@@ -23,6 +23,7 @@
 - Metadata scans: <=4096 direct entries per legacy parent, <=64 matching names, <=16 dedicated-owner matches across legacy parents; protected enumeration <=64 entries; aggregate 10-second metadata deadline.
 - Protected provider base/staging-v1 require mode `0700` and no extended ACL entries. Existing Application Support permits `0700`/`0755`; Library must exist and validate.
 - Only legacy `/private/tmp` permits root-owned sticky `1777`; never apply this exception to protected ancestors.
+- Strict drift policy includes mtime_ns/ctime_ns even on shared /private/tmp; unrelated foreign churn deliberately refuses this inspection, with no automatic retry or timestamp exemption.
 - Pin every no-follow directory edge; ordinary APFS system/data transitions are allowed, subsequently observed edge/device changes refuse.
 - Errors, unsupported evidence and ambiguous resource cleanup refuse; no blind retries, no foreign process signals, no deleting destructor.
 - Freeze ADRs 0011/0012, incident-pinned helpers/spec bytes, old envelopes/receipts, ADR0018 disposer/journal and historical provenance. No A1/B8/N1c closure.
@@ -30,7 +31,7 @@
 
 ## Review Focus
 
-1. Missing optional protected descendants: stable absence is inspectable, but a missing Library, inaccessible ancestor or substituted entry refuses; health evidence never authorizes later creation.
+1. Shared-parent foreign churn: /private/tmp timestamps change even for unrelated entries; deliberately refuse, preserve objects and never relax timestamps or silently retry. Missing optional protected descendants: stable absence is inspectable, but a missing Library, inaccessible ancestor or substituted entry refuses; health evidence never authorizes later creation.
 2. Mode-safe directory with ACL grants: private entries must be ACL-free; ancestor grant/ACL drift must not be mistaken for safety.
 3. Cached Python selector differs from environment or appears during inspection: refuse unsupported values and later drift before any candidate-path access.
 4. Marker-free residuals and matching non-directory entries: protected and both legacy parents still block; foreign shared-parent entries stay untouched.
@@ -67,12 +68,16 @@ All test filenames above live under `tests/ops/`. Use the existing fixed sibling
 Shared frozen dataclasses:
 - `NativeTempParent(source: str, canonical: str)`.
 - `SelectorSnapshot(overrides: tuple[str | None, str | None, str | None], module_loaded: bool, cached: str | None)`; override order TMPDIR, TEMP, TMP; preserve unset versus empty.
-- `DirectoryIdentity(device: int, inode: int, uid: int, gid: int, mode: int, mtime_ns: int, ctime_ns: int)`; exclude atime.
+- `DirectoryIdentity(device: int, inode: int, uid: int, gid: int, mode: int, mtime_ns: int, ctime_ns: int)`; mode retains full st_mode including type/special bits. Compare every field, including timestamps, on every pinned edge and /private/tmp; exclude atime only. Compare ACL snapshots separately.
 - `AclSnapshot(serialized: bytes, tags: tuple[int, ...])`; tags preserve ACE order.
 - `ParentSnapshot(label: str, chain: tuple[DirectoryIdentity, ...], acls: tuple[AclSnapshot, ...])`; labels fixed protected/private-tmp/native-temp.
 - `ProviderContext(uid: int, euid: int, gid: int, egid: int, groups: tuple[int, ...])`.
 - `NamespaceSnapshot(native: NativeTempParent, selectors: SelectorSnapshot, context: ProviderContext, protected_missing: tuple[str, ...], parents: tuple[ParentSnapshot, ...])`.
 - `NamespaceError(reason: str, *, cleanup_uncertain: bool = False)`; fixed reason labels only: context, selector, native-discovery, namespace, residual, budget, drift. Message fixed `protected staging inspection rejected`, no raw path/env/child payload/exception text.
+
+## Explicit shared-parent availability ruling
+
+Follow the spec's [shared-parent drift rule](../specs/2026-10-13-protected-native-e2e-staging-design.md#shared-parent-drift-rule): foreign nonmatching create/remove in /private/tmp can alter mtime_ns/ctime_ns and must refuse as drift even if both prefix scans are empty. This is an intentional availability trade-off, not evidence of an owned residual and not permission to delete foreign data. No quiet-period retry, timestamp reset, field exclusion or fallback is included. The two scans and full owner/type/mode/ACL/edge pinning remain required. A future tolerance policy requires its own reviewed design. Finite observations cannot certify unseen transient events or past/future absence.
 
 ## Task 1: Bounded selector and native-discovery contract
 
@@ -135,7 +140,7 @@ Shared frozen dataclasses:
 - Private `_validate_context() -> ProviderContext` validates current context and snapshots real/effective IDs and sorted actual group IDs; no caller identity input.
 - No CLI, marker/QEMU judgement, create/remove helper, new receipt or replacement of existing recovery APIs. Later trusted callers must separately validate exact trusted-main checkout, marker/process state and perform inspection at the required lifecycle boundary.
 
-- [ ] **Step 1: Write health/dormancy tests.** `test_marker_free_protected_entry_blocks`: any private entry, even wrong prefix/owner/type, raises residual. `test_legacy_owned_entry_blocks_without_read`: directory/file/link/FIFO/socket matches in either legacy parent block without reading content/traversing targets; foreign shared-parent matches remain untouched. Parametrize4096/4097 direct entries and64/65 foreign prefix matches (aggregate conservative limit) in otherwise clean legacy scans, plus10-second scan budget. Owned inventories of16/17 and private inventories of64/65 must refuse without exceeding bounds; early residual refusal is permitted and must not enumerate the rest just for reporting. Clean checks require two passes; inter-pass entry insertion, selector/group/context drift, ACL or ancestor replacement and last-revalidation swaps refuse.
+- [ ] **Step 1: Write health/dormancy tests.** `test_marker_free_protected_entry_blocks`: any private entry, even wrong prefix/owner/type, raises residual. `test_legacy_owned_entry_blocks_without_read`: directory/file/link/FIFO/socket matches in either legacy parent block without reading content/traversing targets; foreign shared-parent matches remain untouched. Parametrize4096/4097 direct entries and64/65 foreign prefix matches (aggregate conservative limit) in otherwise clean legacy scans, plus10-second scan budget. Owned inventories of16/17 and private inventories of64/65 must refuse without exceeding bounds; early residual refusal is permitted and must not enumerate the rest just for reporting. Clean checks require two passes; foreign nonmatching create and create-then-remove between passes both refuse as drift after the test establishes a parent timestamp change. UID502 prefixed entries present in either scan refuse as residual; an owned matching entry inserted then removed between scans refuses on observed parent timestamp drift. An owned match removed after its first observation must not turn refusal into success. Add concurrent foreign activity with explicit barriers (not flaky sleeps), preserve foreign canaries and verify no deletion/payload read. Also cover inter-pass entry insertion, selector/group/context drift, ACL or ancestor replacement and last-revalidation swaps refuse.
   `test_public_inspection_has_no_path_override`: signature has zero parameters and supplied arguments raise TypeError.
   `test_module_is_dormant`: imports have no host operations; existing orchestrator/recovery/workflow bytes and pinned historical helpers remain identical to baseline. Patch unlink/rmdir/chmod/chown/mkdir/tempfile probes and unrelated signal paths to fail during inspection. Pin representative Task3 assertions:
   ```python
@@ -147,7 +152,7 @@ Shared frozen dataclasses:
 - [ ] **Step 2: Run RED.** Run selectors/native/namespace/dormant files; expected missing inspect_namespace or missing refusal FAIL. For each fault, first prove the fixture actually reaches the intended race/boundary.
 - [ ] **Step 3: Implement inspect_namespace and context.** Require GITHUB_ACTIONS=true, GITHUB_REPOSITORY exact, GITHUB_REF=refs/heads/main, event push/workflow_dispatch, canonical GITHUB_SHA, Intel Darwin, real/effective UID502, fixed passwd identity/home, no admin membership; snapshot/recheck real/effective GIDs and supplementary IDs as well as UID context before success. No extra context child or arbitrary process inventory is added.
   Freeze selectors, complete/reap fixed discovery, validate selectors lexically, pin all declared parents (deduplicate native aliases), then perform two bounded metadata-only scans under one10-second monotonic metadata deadline. Use os.scandir on held directory FDs and os.stat(single_name, dir_fd=..., follow_symlinks=False); never allocate an unbounded entry list. Matching legacy objects owned by502 always refuse; any private entry refuses, including unsupported names. Foreign private/native-boundary evidence refuses when it defeats private ownership rules. Treat every scan error or elapsed-budget edge as refusal.
-  Revalidate edges/ACLs and stable missing suffix before/between/after scans, recheck selectors/context/groups and return detached snapshot only after owned-FD close success and final fixed-edge drift checks. Follow existing reviewed two-pass/reverse reject-only post-close drift strategy in new code; do not import frozen incident helpers. POSIX observations are not atomic and do not protect against root or compromised same-account concurrent writers.
+  Compare all DirectoryIdentity fields and ACL bytes for every edge, including shared /private/tmp mtime_ns/ctime_ns; never mask shared-parent timestamp drift just because prefix scans are empty. Revalidate edges/ACLs and stable missing suffix before/between/after scans, recheck selectors/context/groups and return detached snapshot only after owned-FD close success and final fixed-edge drift checks. Follow existing reviewed two-pass/reverse reject-only post-close drift strategy in new code; do not import frozen incident helpers. POSIX observations are not atomic and do not protect against root or compromised same-account concurrent writers.
 - [ ] **Step 4: Run focused GREEN, applicable full regression and review.** Run all new tests and existing tests/ops/test_live_e2e_orchestrator_contract.py, tests/ops/test_live_e2e_recovery.py, tests/ops/test_live_e2e_preflight_native_temp_chain.py and tests/ops/test_project_status_docs.py. Run ruff check src tests ops/systemd ops/live-e2e and compileall with existing Python. Fresh independent security review must cover all tasks, authority/TOCTOU/resource uncertainty and five Review Focus classes; blocking findings get their own RED→GREEN fix.
   Record actual evidence only; never label mock/fixture checks actual provider admission or new-placement native acceptance.
 - [ ] **Step 5: Commit.** Commit `feat: add dormant shared E2E namespace health inspection` with matching docs and actual pre-merge evidence.
@@ -159,6 +164,10 @@ Shared frozen dataclasses:
 - [ ] Merge only after gates and fresh independent final review pass. Verify exact merge-main hosted plus actual native legacy E2E and cleanup. Existing native placement remains legacy; do not claim protected placement proof.
 - [ ] Record external CI/review/cleanup evidence in ignored progress/private handoff after merge; do not start an evidence-only commit loop or certify future SHAs. Audit/remove only this completed implementation worktree/branch after authoritative checks. Preserve all historical data and foreign worktrees.
 - [ ] Present the single delivered dormant inspection capability and its limits; then prepare the next separately reviewable owned-workspace lifecycle plan.
+
+## Future activation contract: all current tempfile routes must be replaced
+
+The later activation plan MUST implement the spec's [source-linked activation checklist](../specs/2026-10-13-protected-native-e2e-staging-design.md#required-activation-checklist). It covers verify_host's two path-based capacity calls, _ensure_temp/TemporaryDirectory, inspect_recovery's selected scan root, the extra _inspect_temp_parent_relation gettempdir/realpath/getconf route, startup, post-run cleanup and the workflow's always-run check. Replace these routes rather than supplementing them. Free-space measurement uses the validated protected-parent FD and preserves the current16GiB floor; all namespace consumers use the same scanner and marker/process gates. New live-call-site tests must fail on tempfile probes or TMPDIR/TEMP/TMP/cache-derived path selection. None of these runtime/caller changes belong to this dormant inspection delivery.
 
 ## Following iteration boundary: creation/removal must not creep into this slice
 

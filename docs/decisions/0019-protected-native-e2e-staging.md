@@ -23,6 +23,10 @@ For future runs only, use the literal private staging namespace:
 `/Users/gha-e2e-orchestrator/Library/Application Support/ssh-over-mcp-e2e/staging-v1`.
 
 Keep the current image cache and active-run marker path/schema unchanged.
+Use strict mtime_ns/ctime_ns drift refusal on all pinned edges, including shared
+/private/tmp; even unrelated foreign churn blocks the current inspection. This
+explicit availability cost never permits timestamp masking, foreign deletion
+or automatic namespace-check retries.
 A shared trusted internal namespace module validates/pins fixed ancestors,
 creates only fixed missing owned descendants and fresh exclusive run children,
 and supplies bounded protected/legacy admission, recovery and post-run checks.
@@ -74,8 +78,12 @@ defines the proposed bounds, lifetime, migration, rollback and acceptance rows.
 The operator approved the written design on 2026-10-13. The first
 [implementation plan](../superpowers/plans/2026-10-13-protected-staging-health-inspection.md)
 is limited to dormant shared namespace health inspection and awaits plan review
-and execution-method selection. Owned workspace lifetime and already-main
-activation follow as separately reviewed small deliverables;
+and execution-method selection. The rollout has three separately reviewed
+deliveries: dormant shared inspection, dormant owned workspace lifetime, then
+already-main activation.
+The [source-linked activation checklist](../superpowers/specs/2026-10-13-protected-native-e2e-staging-design.md#required-activation-checklist)
+requires replacing every existing tempfile/free-space/recovery route, not adding
+a shared scanner beside legacy selection;
 require fresh independent review, exact-head hosted/legacy gates and actual
 post-merge protected-placement native E2E/cleanup. A docs proposal, fixture PASS
 or old-namespace legacy PASS cannot certify this new namespace.

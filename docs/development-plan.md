@@ -1838,7 +1838,10 @@ behavior yet and grants no activation, generic deletion or historical receipt
 authority. The operator approved the written design on 2026-10-13; the
 [first implementation plan](superpowers/plans/2026-10-13-protected-staging-health-inspection.md)
 awaits review/execution-method selection and delivers only dormant shared
-namespace health inspection. Owned lifetime and activation are later small
-iterations. After verified activation, reconcile A1/B8 pause conditions before N1c, complete
+namespace health inspection. Three separate deliveries are required: dormant
+inspection, dormant owned lifetime, then already-main activation. The design
+pins all existing tempfile/free-space/recovery replacements and deliberately
+refuses shared /private/tmp timestamp drift even from unrelated foreign activity;
+see its activation checklist and shared-parent availability ruling. After verified activation, reconcile A1/B8 pause conditions before N1c, complete
 N1–N4 native proof, then return to Ledger systemd Task 3. Do not claim the
 remaining native toolchain/sandbox gates closed by incident recovery.

@@ -206,6 +206,35 @@ At least two observations and final parent-edge revalidation are required
 before success. This is contemporaneous bounded evidence, not authenticated
 historical provenance or proof of absence outside the declared locations.
 
+## Shared-parent drift rule
+
+Use one strict drift rule for the protected and native private chains and the
+inspection-only shared /private/tmp parent: device, inode, directory type,
+owner/group, full mode, ACL snapshot, mtime_ns and ctime_ns must remain unchanged
+across pinning, both observations and final edge revalidation. Atime is excluded
+because our directory inspection can update it. Neither matching-prefix counts
+nor a stable basename replace edge/identity/ACL evidence.
+
+For /private/tmp, a foreign nonmatching create/remove can change mtime/ctime.
+This deliberately refuses the current inspection even when both matching-prefix
+scans are empty. The availability cost is explicit: unrelated host activity can
+temporarily block admission, marker recovery or post-run acceptance. There is no
+automatic quiet-period retry, timestamp reset, ignored drift or fallback parent.
+Keep the two bounded scans and all owner/type/mode/ACL/edge checks; do not relax
+this shared-parent rule during implementation. A future churn-tolerant design
+would need separate review and evidence.
+
+Required adversaries include a foreign nonmatching entry created between
+observations, a foreign entry created then removed before the second scan, an
+owned UID502 matching entry visible to either scan, and an owned matching entry
+inserted then deleted between scans. The first two refuse as drift; a visible
+owned match refuses as residual, and a between-scan insertion/deletion refuses
+when its parent timestamp change is observed. Tests must establish that the
+injected event changed recorded metadata, preserve foreign objects and prove
+no payload reads or deletion. No finite sampling detects every transient event
+outside its observations; unchanged evidence is contemporaneous bounded absence,
+not a certificate that no past or future object exists.
+
 ## Explicit live cleanup and failure semantics
 
 Replace implicit TemporaryDirectory finalization with explicit owned handles.
@@ -240,16 +269,55 @@ disposer/journal. The historical getconf-bound preflight stays historical.
 Future observers must explicitly consume this new namespace contract;
 this proposal does not activate them, B8 receipts or N1c.
 
-After design and plan approval, stage two independently verified slices:
-1. Dormant shared namespace/ownership/compatibility contracts with disposable
-   fixtures and no workflow caller or production placement change.
-2. Trusted-main activation for orchestrator, marker-only recovery and a fixed
-   no-argument namespace-health check used by the E2E workflow.
+After the applicable written-plan approval, stage three separately reviewed
+and independently verified deliveries:
+1. Dormant shared namespace health inspection with disposable fixtures and no
+   workflow caller, creation/removal API or production placement change.
+2. Dormant owned workspace lifetime: exclusive creation, original-root scoped
+   cleanup and no deleting finalizer, with its own reviewed plan, removal
+   primitive and adversarial evidence; no production caller activation.
+3. Trusted-main activation for orchestrator, marker-only recovery and a fixed
+   no-argument namespace-health check used by the E2E workflow. Its separate
+   plan must satisfy the activation checklist below; do not combine lifetime
+   implementation with activation.
    Already-main authority must judge a target; no PR target helper executes on
    the persistent host. Pre-merge legacy E2E does not prove the new placement;
    first actual new-placement proof is an additional post-merge gate.
 A failed activation stays open for a separate narrow repair, not a fallback
 to /tmp. No native toolchain or Ledger target certification is inferred.
+
+## Required activation checklist
+
+This checklist pins the current routes at baseline b39e08a. The activation
+implementer must audit the then-current source too, replace each route below
+and record every new equivalent call site. Adding inspect_namespace beside
+an old tempfile route does not satisfy this contract. These are later activation
+requirements, not permission to change callers in the first dormant delivery.
+
+| Baseline route | Required replacement and gate |
+| --- | --- |
+| [orchestrator verify_host and _require_host_free_space](https://github.com/zhangyuz/ssh-over-mcp/blob/b39e08aa31355e8c0abc441a501e5546279ecb46/scripts/run-live-local-e2e-orchestrator.py#L490-L498), [both path calls](https://github.com/zhangyuz/ssh-over-mcp/blob/b39e08aa31355e8c0abc441a501e5546279ecb46/scripts/run-live-local-e2e-orchestrator.py#L603-L635) | Remove both the HOME path-based and gettempdir-based free-space checks from the pre-validation sequence. After trusted context and namespace pinning, use os.fstatvfs on the validated protected parent FD (or nearest existing fixed allowed ancestor if descendants are absent); compare f_bavail * f_frsize against the unchanged HOST_MIN_FREE_BYTES = 16 * 1024**3. Recheck the actual staging-parent FD before materializing run artifacts; no pathname/selector fallback. Unsupported/error/mismatched or changed FD evidence refuses. |
+| [orchestrator _ensure_temp and callers](https://github.com/zhangyuz/ssh-over-mcp/blob/b39e08aa31355e8c0abc441a501e5546279ecb46/scripts/run-live-local-e2e-orchestrator.py#L699-L718) | Replace default TemporaryDirectory selection with the invocation's explicit owned handle from the separately reviewed lifetime deliverable. Check marker/QEMU/shared namespaces, claim the marker exclusively, then create only validated fixed descendants/fresh run child; recheck before guest startup. No parallel temp route, environment-selected workspace or finalizer cleanup. |
+| [recovery inspect_recovery/recover](https://github.com/zhangyuz/ssh-over-mcp/blob/b39e08aa31355e8c0abc441a501e5546279ecb46/ops/live-e2e/recover_provider.py#L336-L394) | Replace gettempdir root discovery and the legacy-only _temp_dirs path with the bounded shared protected+both-legacy scanner. Retain exact target/PID, owner-death/no-QEMU, repeated observation and unchanged marker guards. A temp_root/uid test seam or historical diagnostic cannot choose a production scan root or authorize deletion. |
+| [recovery inspect-only relation and main](https://github.com/zhangyuz/ssh-over-mcp/blob/b39e08aa31355e8c0abc441a501e5546279ecb46/ops/live-e2e/recover_provider.py#L397-L468) | Retire _inspect_temp_parent_relation from the activated recovery entrypoint; its gettempdir, realpath comparison and separate getconf are not shared-health evidence. Use only validated captured lexical selector/native evidence for any retained relation label; do not invoke the old _temp_diagnostics payload reader as part of new namespace health. Preserve historical evidence without extending frozen incident helpers. |
+| [orchestrator provider_state_exists/startup and cleanup_host](https://github.com/zhangyuz/ssh-over-mcp/blob/b39e08aa31355e8c0abc441a501e5546279ecb46/scripts/run-live-local-e2e-orchestrator.py#L686-L705), [orchestration/cleanup](https://github.com/zhangyuz/ssh-over-mcp/blob/b39e08aa31355e8c0abc441a501e5546279ecb46/scripts/run-live-local-e2e-orchestrator.py#L916-L968) | Wire pre-claim startup and post-guest/post-workspace verification to the same scanner even without a marker. Owned cleanup retains QEMU reap, original-root/edge/ACL verification and uncertainty semantics. Clear only the unchanged owned marker after repeated shared absence; no parallel legacy-only success route. |
+| [workflow always-run provider check](https://github.com/zhangyuz/ssh-over-mcp/blob/b39e08aa31355e8c0abc441a501e5546279ecb46/.github/workflows/live-local-e2e.yml#L81-L86) | Replace the marker-absence-only test with the fixed no-argument trusted-main namespace-health command plus the existing marker/process absence conditions. A skipped, failed or uncertain cleanup must fail the job; the check cannot erase residual state or infer success from marker absence. |
+
+Activation tests must patch gettempdir, gettempdirb and _get_default_tempdir to
+fail if reached through live startup/free-space/workspace allocation, normal
+cleanup, marker-only recovery (including inspect-only diagnostics) or the
+always-run workflow health route. Cover supported selector aliases and
+unsupported TMPDIR/TEMP/TMP/cache values; these values may be lexically checked
+but must never select a workspace, free-space object or replacement scan parent.
+Unsupported candidates refuse before candidate stat/access/resolve/open or
+probe-file writes. Pin all production call sites and the fixed command's
+zero-argument surface, FD-based capacity/error/identity gates, shared drift
+adversaries and absence when no marker exists. Frozen historical diagnostics
+remain historical and cannot bypass these activation assertions.
+
+The separate activation plan must retain exact-head/full legacy gates and
+actual post-merge trusted-host protected-placement/guest/cleanup evidence.
+Old-placement PASS does not close this checklist or certify the new root.
 
 Rollback stops new dispatches and preserves marker/workspace evidence.
 The retained legacy route cannot silently resume while protected residuals
