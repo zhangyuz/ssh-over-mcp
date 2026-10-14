@@ -508,6 +508,7 @@ def inspect_namespace() -> NamespaceSnapshot:
                 or _validate_context() != context):
                 raise types.NamespaceError('drift')
 
+        unchanged()  # Discovery-time drift refuses before provider paths.
         with _pin_namespaces(native) as pinned:
             for _ in range(2):
                 unchanged()

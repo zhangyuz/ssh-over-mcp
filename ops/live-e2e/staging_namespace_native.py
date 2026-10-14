@@ -26,13 +26,23 @@ if TYPE_CHECKING:
 
 _EXECUTE_SECONDS = 5.0
 _CLEANUP_SECONDS = 2.0
-_POPEN_TYPE = subprocess.Popen
+
 _TYPE_NAMES = {"NamespaceError", "NativeTempParent", "AclSnapshot", "DirectoryIdentity"}
 _LIFECYCLE_ERRORS = (
     OSError, RuntimeError, TypeError, ValueError, AttributeError, LookupError,
     OverflowError, MemoryError, subprocess.SubprocessError,
     KeyboardInterrupt, SystemExit, GeneratorExit,
 )
+
+
+class _DiscoveryChild(subprocess.Popen[bytes]):
+    def __del__(self) -> None:
+        # Only explicit owner handling may consume status. Never let Popen
+        # poll or enqueue this child for later stdlib housekeeping after loss.
+        pass
+
+
+_POPEN_TYPE = _DiscoveryChild
 
 
 def _types():
@@ -77,12 +87,13 @@ def _require_owned_child_context() -> None:
         threading.current_thread() is not threading.main_thread()
         or threading.active_count() != 1
         or signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL
+        or type(subprocess._active) is not list or subprocess._active
     ):
         raise _types().NamespaceError("native-discovery") from None
 
 
 def _spawn_getconf() -> subprocess.Popen[bytes]:
-    return subprocess.Popen(
+    return _DiscoveryChild(
         ("/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"),
         env={"LC_ALL": "C", "LANG": "C"}, shell=False, close_fds=True,
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -211,6 +222,8 @@ def discover_native_temp() -> NativeTempParent:
                     raise types.NamespaceError("native-discovery")
                 else:
                     buffer.extend(chunk)
+        if time.monotonic() >= until:
+            raise types.NamespaceError("native-discovery")
         if owner.child.returncode != 0:
             raise types.NamespaceError("native-discovery")
         raw = bytes(stdout)

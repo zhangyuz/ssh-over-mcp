@@ -125,3 +125,45 @@ concurrent writers remain outside these guarantees. Healthy evidence is
 contemporaneous, not a persistent certificate or historical provenance.
 Historical exhausted journals, incident helpers, receipts and A1/B8/N1c
 remain unchanged. Next delivery is separately reviewed owned lifetime.
+
+
+## Fresh whole-branch review and single fix pass
+
+Fresh-context independent review of14b989f..369f592 identified discovery-time
+drift ordering and default Popen finalization as Important. The executor
+regraded the missing final deadline check from Minor to Important because it
+violated the explicit bounded-success contract. All three entered one fix pass.
+
+Nine drift/reaper/deadline regressions failed before fixes. The first three
+destruction regressions accidentally retained ExceptionInfo traceback
+references; that fixture failure was not product RED. After clearing that
+reference, the same tests against exact pre-fix369f592 source observed three
+hidden-wait failures: destructor and subsequent housekeeping polled the
+artificial canary after ECHILD, context loss or cleanup timeout. No real child,
+foreign PID, signal or provider access was used in those canaries.
+
+The fix rechecks all frozen context/selectors immediately before provider
+pinning, uses an internal Popen subtype with inert finalizer and truthful
+returncode, refuses pending stdlib implicit-reaper records, and checks the
+execution deadline after the final successful iteration. Explicit real-child
+fixture cleanup remains owned and verified. Fresh460focused/regression cases
+passed in17.26s, including five real Mac ACL cases; full ruff/compile checks
+passed. Exact-head ordinary Linux CI/legacy E2E and post-CI review remain gates.
+
+An exploratory complete Mac collection of3831cases had57failures confined
+to existing Linux host-agent suites and zero new namespace failures. Three
+representatives reproduced on clean baseline main14b989f: unavailable file
+capability inspection and missing Linux prctl. This is not full-suite GREEN.
+Complete ordinary regression acceptance uses the supported exact-head hosted
+Linux Python3.13/3.14 matrix; no tests, platform guards or security rules were
+weakened to manufacture a Mac PASS.
+
+Ruling: managed child finalization stays inert and an exact empty stdlib
+_active list is required before its lifecycle. Cost if wrong: callers with
+pending stdlib reaper records refuse. Actual CPython3.13.5 and published3.14
+subprocess code plus destruction/housekeeping canaries support this narrowing.
+
+Ruling: complete ordinary acceptance uses supported hosted Linux, retaining
+the failed Mac exploration and baseline reproductions. Cost if wrong: a
+platform-specific regression could be misclassified; complete exact-head
+Linux CI, legacy E2E and actual Mac ACL/relevant tests remain mandatory.

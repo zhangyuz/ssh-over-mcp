@@ -753,3 +753,44 @@ def test_health_last_close_swap_refuses(health, monkeypatch):
     with pytest.raises(p.NamespaceError) as error:
         p.inspect_namespace()
     assert changed == [True] and error.value.reason == 'drift'
+
+
+@pytest.mark.parametrize('fault', ['supported-selector', 'unsupported-selector', 'cache-value', 'cache-presence', 'context', 'groups', 'workflow'])
+def test_discovery_drift_refuses_before_any_provider_path(health, monkeypatch, fault):
+    p, _, native, context = health
+    monkeypatch.setenv('GITHUB_SHA', 'a' * 40)
+    opened, stated, discovered = [], [], []
+    original_open, original_stat = p._open_literal_root, p._stat_literal_root
+
+    def opened_root():
+        opened.append(True)
+        return original_open()
+
+    def stated_root():
+        stated.append(True)
+        return original_stat()
+
+    def discovery():
+        discovered.append(True)
+        if fault.endswith('selector'):
+            monkeypatch.setenv('TMP', '/tmp' if fault == 'supported-selector' else '/untrusted')
+        elif fault == 'cache-value':
+            monkeypatch.setattr(tempfile, 'tempdir', '/var/tmp')
+        elif fault == 'cache-presence':
+            monkeypatch.delitem(sys.modules, 'tempfile')
+        elif fault == 'workflow':
+            monkeypatch.setenv('GITHUB_SHA', 'b' * 40)
+        else:
+            changed = p.ProviderContext(context.uid + int(fault == 'context'),
+                                        context.euid, context.gid, context.egid,
+                                        context.groups + (99999,))
+            monkeypatch.setattr(p, '_validate_context', lambda: changed)
+        return native
+    backend = p._native_module()
+    backend.discover_native_temp = discovery
+    monkeypatch.setattr(p, '_native_module', lambda: backend)
+    monkeypatch.setattr(p, '_open_literal_root', opened_root)
+    monkeypatch.setattr(p, '_stat_literal_root', stated_root)
+    with pytest.raises(p.NamespaceError):
+        p.inspect_namespace()
+    assert discovered == [True] and opened == [] and stated == []

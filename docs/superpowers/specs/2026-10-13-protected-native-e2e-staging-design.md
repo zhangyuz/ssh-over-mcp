@@ -354,3 +354,5 @@ The final tracked evidence protocol must not guess future head/main PASS.
 Collect actual post-merge acceptance externally without another evidence-only
 commit loop. N1c resumption additionally needs explicit reconciliation of its
 A1/B8 pause conditions; this namespace change does not close them automatically.
+
+The dormant discovery implementation uses a managed internal Popen subtype with an inert finalizer, truthful returncode and explicit owned wait/termination. Pending stdlib implicit-reaper records refuse without polling them. Discovery-time selector/context drift is rechecked before provider path acquisition, and the final execution iteration must meet the same five-second deadline. This narrows the standalone-caller contract; it adds no caller-selected process/backend or automatic cleanup retry.

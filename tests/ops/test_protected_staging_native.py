@@ -45,7 +45,7 @@ def child_factory(native, monkeypatch):
 
     def install(script):
         def spawn():
-            child = subprocess.Popen(
+            child = native._POPEN_TYPE(
                 [sys.executable, "-I", "-c", script], stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True,
             )
@@ -187,7 +187,7 @@ def test_fixed_spawn_has_no_environment_or_descriptor_inheritance(native, monkey
         observed.append((argv, kwargs))
         raise OSError("pre-spawn fixture refusal")
 
-    monkeypatch.setattr(native.subprocess, "Popen", record)
+    monkeypatch.setattr(native, "_DiscoveryChild", record)
     with pytest.raises(native.NamespaceError):
         native.discover_native_temp()
     assert observed[0][0] == ("/usr/bin/getconf", "DARWIN_USER_TEMP_DIR")
@@ -501,3 +501,129 @@ def test_real_mac_explicit_empty_acl(tmp_path):
     finally:
         assert lib.acl_free(acl) == 0
         os.close(fd)
+
+
+@pytest.mark.parametrize('cause', ['echild', 'context', 'cleanup-timeout'])
+def test_uncertain_managed_child_has_no_implicit_wait_or_active_retry(native, monkeypatch, cause):
+    import gc
+    import weakref
+
+    canary = 999999991
+    child = native._POPEN_TYPE.__new__(native._POPEN_TYPE)
+    child.pid, child.returncode, child._child_created = canary, None, True
+    child.stdout = child.stderr = child.stdin = None
+    child._waitpid_lock = native.threading.Lock()
+    owner = native._OwnedChild(child, canary)
+    explicit, implicit, signals = [], [], []
+    active = []
+    monkeypatch.setattr(native.subprocess, '_active', active)
+
+    def wait(pid, flags):
+        assert pid == canary and flags == os.WNOHANG
+        explicit.append(pid)
+        if cause == 'echild':
+            raise ChildProcessError(errno.ECHILD, 'fixture external reap')
+        return 0, 0
+
+    def hidden_wait(pid, flags):
+        assert pid == canary and flags == os.WNOHANG
+        implicit.append(pid)
+        return 0, 0
+
+    monkeypatch.setattr(native.os, 'waitpid', wait)
+    monkeypatch.setattr(native.subprocess._del_safe, 'waitpid', hidden_wait)
+    monkeypatch.setattr(native.os, 'kill', lambda pid, sig: signals.append((pid, sig)))
+    if cause == 'context':
+        def lost_context():
+            raise native.NamespaceError('native-discovery')
+        monkeypatch.setattr(native, '_require_owned_child_context', lost_context)
+    elif cause == 'cleanup-timeout':
+        clock = iter((0.0, 3.0))
+        monkeypatch.setattr(native.time, 'monotonic', lambda: next(clock))
+    with pytest.raises(native.NamespaceError) as error:
+        if cause == 'cleanup-timeout':
+            native._cleanup_child(owner)
+        else:
+            native._wait_owned(owner)
+    assert error.value.cleanup_uncertain and owner.lost and child.returncode is None
+    before = list(explicit), list(signals)
+    del error  # ExceptionInfo traceback otherwise retains owner and child.
+    witness = weakref.ref(child)
+    del owner, child
+    gc.collect()
+    native.subprocess._cleanup()  # Later stdlib housekeeping must not retry it.
+    try:
+        assert implicit == [] and explicit == before[0] and signals == before[1]
+        assert active == [] and witness() is None
+    finally:
+        active.clear()  # Only artificial in-memory records, never a real child.
+
+
+def test_pending_stdlib_reaper_refuses_before_new_child(native, monkeypatch):
+    calls = []
+    active = [object()]
+    monkeypatch.setattr(native.subprocess, '_active', active)
+
+    def spawn():
+        calls.append(True)
+        raise OSError('fixture should never spawn')
+    monkeypatch.setattr(native, '_spawn_getconf', spawn)
+    with pytest.raises(native.NamespaceError):
+        native.discover_native_temp()
+    assert calls == [] and len(active) == 1
+
+
+def test_final_successful_iteration_must_still_meet_execution_deadline(native, monkeypatch):
+    from types import SimpleNamespace
+
+    clock = [0.0]
+    canary = 999999992
+
+    class Stream:
+        def __init__(self, fd):
+            self.fd = fd
+            self.closed = False
+
+        def fileno(self):
+            return self.fd
+
+        def close(self):
+            self.closed = True
+            if self.fd == 50101:
+                clock[0] = 5.0  # Last EOF lands exactly on the fixed deadline.
+
+    class Selector:
+        def __init__(self):
+            self.keys = {}
+
+        def register(self, fd, events, data):
+            self.keys[fd] = SimpleNamespace(fd=fd, data=data)
+
+        def unregister(self, fd):
+            self.keys.pop(fd)
+
+        def select(self, timeout):
+            return [(key, 1) for key in self.keys.values()]
+
+        def close(self):
+            pass
+
+    child = native._POPEN_TYPE.__new__(native._POPEN_TYPE)
+    child.pid, child.returncode, child._child_created = canary, None, True
+    child.stdout, child.stderr, child.stdin = Stream(50101), Stream(50102), None
+    child._waitpid_lock = native.threading.Lock()
+    chunks = {50101: [b'/var/folders/ab/token/T/\n', b''], 50102: [b'']}
+    monkeypatch.setattr(native, '_spawn_getconf', lambda: child)
+    monkeypatch.setattr(native.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(native.selectors, 'DefaultSelector', Selector)
+    monkeypatch.setattr(native.os, 'set_blocking', lambda *a: None)
+    monkeypatch.setattr(native.os, 'read', lambda fd, count: chunks[fd].pop(0))
+
+    def reap(pid, flags):
+        assert pid == canary and flags == os.WNOHANG
+        return canary, 0
+    monkeypatch.setattr(native.os, 'waitpid', reap)
+    with pytest.raises(native.NamespaceError) as error:
+        native.discover_native_temp()
+    assert error.value.reason == 'native-discovery'
+    assert child.returncode == 0 and child.stdout.closed and child.stderr.closed
