@@ -14,7 +14,7 @@ Success is independent of rollout order:
 
 - Developer can run focused checks locally without affecting the dedicated native provider, with a target of under 60 seconds for the focused path. This is NOT Level-3 acceptance.
 - Normal PR CI remains on unprivileged GitHub-hosted Ubuntu 26.04, with all eight exhaustive partitions and both Python aggregate gates. Target: measured queue-inclusive P95 under 10 minutes; no coverage cuts.
-- Eligible, current, same-repository non-draft PRs with successful exact-head hosted CI can be admitted by already-merged trusted-main code. Public fork PRs receive hosted CI but NOT automatic persistent-Mac execution.
+- Eligible, current, same-repository non-draft PRs with a reported successful hosted CI run can be **observed in shadow mode** by already-merged trusted-main code. CI job names and success alone do not prove that the expected trusted procedure executed. Public fork PRs receive hosted CI but NOT automatic persistent-Mac execution.
 - Native Level-3 runs the specified exact PR HEAD inside a new disposable, no-network, no-host-share QEMU guest; the persistent Mac account never checks out or executes candidate product/workflow code.
 - PR status is reported against its exact tested SHA, only after the trusted guest gate, business assertions, and host/guest cleanup pass. No status or ambiguous result is never success.
 - Every accepted merge still receives exact merged-main hosted CI plus native Level-3 and cleanup evidence. The result must be independently reviewable by run URL, SHA, authority version and immutable provider facts.
@@ -38,7 +38,7 @@ Non-goals: a new externally hosted orchestration service, elastic Mac fleet, reu
 | --- | --- | --- |
 | L0 fast development | Normal local developer account; focused unit/contracts, native disposable ACL fixtures if applicable | Exact tests and local worktree identity; never call it Level-3 |
 | L1 hosted CI | Unprivileged GitHub pull_request VM; entire 3.13 and 3.14 suite and lint | All 8 named shards and both required aggregate jobs genuinely pass |
-| L2 admission/queue | Default-branch-only trusted GitHub-hosted workflow_run validator; read-only token | Verified CI workflow/run/attempt, current single same-repo PR and exact head |
+| L2 metadata + trusted verification | Default-branch trusted hosted metadata observer; later separate already-main verification gate | Shadow only matches GitHub metadata; actual trusted suite execution must be independently proven before dispatch |
 | L3 native Level-3 | Existing trusted main reusable workflow on dedicated non-admin UID-502 Intel Mac | No candidate code on host; new no-network VM; bounded trusted serial result |
 | L4 result/status | Separate trusted hosted reporter with commit-status write only | Status for tested PR HEAD, correct context, live state recheck and evidence URL |
 | L5 merge-main acceptance | Unchanged trusted main-push hosted + native acceptance | Exact merge-main job success and resource absence |
@@ -47,17 +47,29 @@ The actual local developer machine and the persistent Mac E2E runner might be ph
 
 ### 3.1 Trust graph
 
-PR author-controlled code or text -> unprivileged hosted CI. Hostile PR data is NOT executable authority. The resulting GitHub CI run metadata is read as data through bounded authenticated GitHub API calls by a workflow whose definition is already on the default branch. Successful admission yields only (repository identity, PR number, exact immutable 40-hex head SHA, CI run/attempt, trusted orchestrator revision). It never yields a host path, command, runner label, environment override or candidate workflow script.
+PR author-controlled code or text -> unprivileged hosted CI. Hostile PR data is NOT executable authority. The resulting GitHub CI run metadata is read as data through bounded authenticated GitHub API calls by a workflow whose definition is already on the default branch. Successful **shadow matching** yields only (repository identity, PR number, exact immutable 40-hex head SHA, CI run/attempt) and fixed flags `trusted_suite_proven=false`, `base_freshness_proven=false`, `dispatch_authorized=false`. It never yields a host path, command, runner label, environment override or candidate workflow script.
 
-Trusted main reusable workflow -> pre-existing trusted main orchestrator on Mac -> candidate source transferred through a bounded Git bundle into the disposable guest. No guest NIC, host share, or secret/token transfer. Trusted read-only root guest gate validates the target's results; product code cannot redefine the gate that accepts itself. Guest and host disposal are mandatory and not inferred from green application output.
+Trusted hosted verifier -> dedicated **trusted-main `workflow_dispatch` broker** -> pre-existing trusted-main reusable native workflow -> Mac orchestrator -> candidate source transferred through a bounded Git bundle into the disposable guest. No guest NIC, host share, or secret/token transfer. Trusted read-only root guest gate validates the target's results; product code cannot redefine the gate that accepts itself. Guest and host disposal are mandatory and not inferred from green application output.
 
-Only the L4 hosted reporter gets statuses:write; the L3 Mac caller/job retains contents:read and must not inherit a write token or be granted repository secrets.
+Only the L4 hosted reporter gets `statuses: write`; a separate trusted hosted dispatch step MAY receive narrowly scoped `actions: write` after slice-4 approval. The L3 Mac job retains `contents: read` and receives neither write permission nor repository secrets.
 
 ### 3.2 Exact-sha admission and TOCTOU
 
 Admission accepts only a **completed successful** CI workflow_run event whose canonical workflow ID/path, repository ID/name, triggering event type (pull_request), attempt number and complete run metadata match independently fetched GitHub API records. The workflow_run payload can have an empty pull_requests list. Resolve candidate PRs independently from the exact commit via bounded paginated API, then fetch each live PR. Require exactly one matching currently open non-draft PR whose base is this repository/main, head repository ID matches this repository, head ref matches the run branch, and head SHA exactly matches the immutable run SHA. Zero, more than one, inability to exhaust pages, API failure, absent identity, changed PR, fork, or stale run: refuse. Do not derive the target from github.sha (the trusted default branch for workflow_run), from a user-supplied PR number, or from a mutable branch name.
 
 Re-read the complete upstream CI job set for that run/attempt (paginate or fail closed). Require exactly eight separately named successful test partitions, both historical required Python aggregate jobs, and no duplicated/missing/failed/cancelled/skipped required job; ensure the run conclusion is success. The PR-only merge-main native job being skipped is expected and not native evidence. Treat partial reruns/attempt mixing as unsafe unless an explicit complete-attempt proof is implemented and tested.
+
+### 3.2.1 CI metadata is not trusted-suite attestation
+
+A same-repository PR may edit `.github/workflows/ci.yml` and invoked test commands, retain the workflow identity plus all eight shard/two aggregate job names, and return green without running the intended suite. The GitHub `workflow_run`/jobs API proves **reported metadata**, not trusted test execution. The first shadow slice MUST emit `METADATA_MATCH_SHADOW` (never `FULL_CI_PROVEN`), with immutable `trusted_suite_proven=false` and `dispatch_authorized=false`; even a modified-CI/ten-green-names fixture remains **non-authoritative**. Do not promote a shadow verdict or GitHub status to native authorization.
+
+Before native auto-dispatch, a separately reviewed **trusted-main verification gate** MUST execute a pinned main-owned workflow and trusted regression-case manifest against the exact candidate source in a disposable GitHub-hosted VM (never on Mac). Fetch the candidate as untrusted source; do not let PR-controlled workflow/test scripts replace or shrink the trusted-main procedure. Candidate-supplied new tests are supplemental only. Persist and authenticate (repository ID, PR number, candidate HEAD SHA, current base revision, main verifier SHA, trusted manifest digest, verification run ID/attempt and pass/fail + complete required case set). Re-fetch and bind these values in the later broker; base/HEAD/verified manifest drift, hostile PR workflow edits, missing cases, or any unverifiable result MUST block. A green PR workflow by itself is insufficient even when steps or job names look normal. The exact trusted-verifier implementation requires its own reviewed plan/PR, and its full test fixtures must demonstrate modified candidate CI remaining ineligible for auto dispatch.
+
+### 3.2.2 Approved future transport matches the current Mac event allow-list
+
+The current trusted Mac orchestrator `_validated_workflow_context` accepts `GITHUB_EVENT_NAME` only `push` or `workflow_dispatch`, and additionally requires `GITHUB_REF=refs/heads/main`, expected repository/source and a checked-out trusted main SHA. A reusable workflow retains the caller's event context: **direct `workflow_run -> workflow_call -> live-local-e2e.yml` would fail before guest creation** and MUST NOT be used or worked around by adding blanket `workflow_run` support on the Mac.
+
+After the independently verified hosted gate, use one step-scoped `actions: write` token **only in a trusted GitHub-hosted dispatcher** to trigger a separate, already-main **`workflow_dispatch` broker workflow**. Its input values (PR number, SHA, CI/verifier run IDs and attempts) are untrusted hints, not proof. The broker runs read-only hosted revalidation of live PR, current HEAD/base, complete CI metadata, and trusted-main verifier identity/manifest/evidence. Only after this fresh authentication may it call `live-local-e2e.yml` as a reusable job with the exact pinned commit SHA; the called Mac job then sees allowed `workflow_dispatch` event and trusted `main` GITHUB_SHA. Keep its token `contents: read` only and checkout trusted main code only. A forged, PR-origin, replayed, stale or manually dispatched broker input without all evidence MUST fail before Mac allocation. The existing manual trusted-main dispatch remains a separate human-reviewed flow. Test both accepted event-context inheritance and `workflow_run`/forged-broker refusal against real orchestrator context contract in that future slice.
 
 Repeat live PR/head and run checks immediately before allocating the native runner. A HEAD change after that does not change what the VM tests: the target remains the pinned old SHA and can never certify a newer SHA. Re-check current PR/head when emitting success. If stale, report the old run honestly without claiming success for the new SHA; deny any update directed at the new SHA.
 
@@ -67,7 +79,7 @@ Do not use PR-controlled artifacts, path/environment, issue comments, labels or 
 
 Initial automatic admission is deliberately **same-repository only**; the required head repo ID must equal the base repo ID. A branch on the base repository is not thereby trusted to execute on the Mac: candidate code stays guest-only. A malicious collaborator PR can still exploit a VM vulnerability; use one serial run, bounded guest time/resources, provider refusal on unknown state and optional policy throttles without silent bypass.
 
-Fork PRs are not automatically dispatched on the persistent Mac. A future separately reviewed operator authorization must bind **PR identity + immutable exact SHA + repository identity + expiry + trusted actor** and recheck all on admission; a mutable label alone is insufficient. Until that capability exists, no native success claim for fork PRs and no implicit waiver of required gates. If required status is globally enabled, this intentionally blocks fork merges pending the separate authorization workflow.
+Fork PRs are not automatically dispatched on the persistent Mac. A future separately reviewed operator authorization must bind **PR identity + immutable exact SHA + repository identity + expiry + trusted actor** and recheck all on admission; a mutable label alone is insufficient. Until that capability exists, no native success claim for fork PRs and no implicit waiver of required gates. A global SHA-scoped native status MUST NOT be required as a substitute for PR authorization: an unauthorized fork can share that SHA with an eligible PR.
 
 GitHub commit statuses are scoped to **commit SHA, not PR identity**: the same commit may appear in multiple PRs. A native result on a SHA is evidence for those exact bytes and the recorded trusted gate, not proof that a fork PR is authorized to use the Mac. Ruleset/administrative authorizations must not treat an inherited status as approval for another PR.
 
@@ -79,14 +91,14 @@ Record queue-time separately from native execution. Native timeout/refusal/stale
 
 ### 3.5 Status semantics and branch protection
 
-Reserve one status context, for example pr-native-e2e/level-3, to be established before rollout; never overload the existing two Python required contexts. The reporter posts pending for an admitted exact SHA, then:
+Reserve one status context, for example pr-native-e2e/level-3, to be established before rollout; never overload the existing two Python required contexts. After an independently verified trusted-suite gate, broker authorization and an actual native run, the informational reporter posts pending for the exact tested SHA, then:
 - success only if exact target guest assertion, trusted validator, marker absence, VM/process/overlay/owned workspace cleanup and post-run namespace checks all pass;
 - failure for verified test failure; error for unknown provider status, failed cleanup, timeouts, exceptions, ambiguous/stale evidence; never success on skipped/cancelled;
 - records targeted SHA, PR, event/run ID+attempt, provider authority revision, immutable image/lock digests, bounded timestamps and direct run URL in an auditable artifact or trusted GitHub run summary.
 
-The writer never runs PR code and re-fetches latest live PR/head before success. When the PR changes, the earlier status remains on the old SHA; it cannot certify the new SHA. A missing status is an unfulfilled requirement, not implicit permission.
+The writer never runs PR code and re-fetches latest live PR/head before success. When the PR changes, the earlier status remains on the old SHA; it cannot certify the new SHA. A missing status is missing evidence, never an implicit native PASS; before a separate PR-bound enforcement mechanism exists it is **not yet** an enforceable merge requirement.
 
-Before enabling enforcement, maintainers MUST verify with administrative access that a specific ruleset or branch protection rule actually requires the new context and is bound to the intended status source, then exercise a real test PR through pass/fail/cancel/new-head/merge. The current connection cannot read main branch protection; no enforcement is assumed. If a required status is absent on forks, these forks stay blocked rather than bypassing security.
+**Native SHA status remains informational, not an enforceable PR authorization.** A required status context and restricted source still certify a commit SHA, not (repository, PR number, SHA). No ruleset may treat a green `pr-native-e2e/level-3` SHA status as sufficient authorization. A future independent ADR/plan must define and implement a **separately verifiable PR-bound merge gate**, using a trusted receipt binding repository ID, PR number, immutable HEAD SHA, live base/ref, trusted-verifier evidence and native-clean evidence. Its check/run attachment, actor/permissions and actual branch-rule semantics need separate security and admin review; do not assume `pull_request_target` or a generic commit status provides PR identity. A live **two-PR/same-SHA** canary (one eligible, one fork) MUST show the fork remains unable to merge despite a green SHA status, plus pass/fail/cancel/rebase cases. Until then SHA status remains evidence only and the existing manual review/CI merge process remains authoritative. Current connection cannot read branch protection; ruleset list was empty.
 
 ### 3.6 Protected staging and true local evidence
 
@@ -96,11 +108,11 @@ Recommended ordering: shadow CI admission first (no Mac); ADR 0019 owned-workspa
 
 ## 4. State machine, failure policy and audit
 
-NEW -> HOSTED_PENDING -> HOSTED_PASS -> ELIGIBILITY_VERIFIED -> QUEUED -> RUNNING -> POST_CLEAN_CHECK -> PASSED.
+NEW -> HOSTED_PENDING -> CI_REPORTED_PASS -> METADATA_MATCHED_SHADOW -> TRUSTED_MAIN_SUITE_VERIFIED -> BROKER_REVALIDATED -> QUEUED -> RUNNING -> POST_CLEAN_CHECK -> NATIVE_EVIDENCE_PASSED. Only the first four states are in the initial shadow slice; later states each require a separately approved security boundary. NATIVE_EVIDENCE_PASSED is **not** a PR-specific merge authorization.
 
 Alternative terminal states: REJECTED (ineligible/ambiguous), FAILED (verified test failure), BLOCKED (provider/security uncertainty), STALE (PR head changed), TIMED_OUT, CANCELLED. None authorizes merge.
 
-Store minimum fields: repository ID; PR number; exact PR head SHA; CI run ID and attempt; trusted main authority SHA; guest image digest; test scenario/schema version; native run/job ID; start/end/queue timestamps; gate outputs; cleanup and status result. Preserve artifact access controls and bounded retention; never persist GitHub tokens or host secrets. The evidence format is not itself an approval token.
+Store minimum fields: repository ID; PR number; exact PR head SHA; verified base ref/revision; PR-reported CI run ID and attempt (metadata only); independent trusted-main verifier SHA + required-test manifest digest + trusted verification run/attempt; dispatch broker run/attempt and recheck result; trusted main native authority SHA; guest image digest; test scenario/schema version; native run/job ID; start/end/queue timestamps; gate outputs; cleanup and informational SHA-status result. Preserve artifact access controls and bounded retention; never persist GitHub tokens or host secrets. The evidence format is not itself an approval token.
 
 The status writer does not automatically retry a possibly half-completed guest, delete historical data, or repair unknown provider state. Retry requires a fresh independently verified admission and explicit provider-clean evidence.
 
@@ -110,13 +122,13 @@ The status writer does not automatically retry a possibly half-completed guest, 
 | --- | --- | --- |
 | Identity | wrong repo ID/name, fork, empty/multi PR association, ref/base mismatch | REJECT; zero Mac jobs |
 | State | draft/closed PR, changed head, stale run, malformed SHA, replay | REJECT; no success for newer SHA |
-| CI integrity | all 8 shards + 2 aggregate success; one job missing/duplicate/failed/skipped; mixed run attempt | Accept only genuine complete success |
+| CI integrity | ten green names but modified PR CI workflow skips all intended tests; missing/duplicate/skipped jobs or mixed attempt | Shadow metadata may match; `trusted_suite_proven=false`; no Mac dispatch until separate trusted-main verifier |
 | Privilege boundary | malicious PR changes workflow, scripts or reporting payload | Candidate code never executes on persistent Mac or writer |
 | Guest isolation | no NIC, host shares, secrets; pinned QEMU/image; distinct overlay | Gate verifies unchanged isolation |
 | Lifecycle | crash/timeout at each create/start/guest/cleanup phase, stale marker, ACL drift | FAIL/BLOCK; no silent retry/delete |
-| Reporting | pending, success, failure, cancellation, permission denial, stale PR HEAD | Accurate exact SHA context; missing success blocks |
+| Reporting | pending, success, failure, cancellation, permission denial, stale PR HEAD | Exact SHA evidence is truthful; missing success is not native PASS but is not PR enforcement without a separate PR-bound gate |
 | Admission races | synchronize during queued/running/after E2E; duplicate ready events | No new HEAD certified by old run; no unsafe cancellation |
-| Ruleset | fail/pending/success on real test PR and fork | Real GitHub merge policy demonstrated, not merely configured |
+| PR-bound enforcement | two PRs with identical HEAD SHA, one eligible and one fork; green native SHA status | Fork must not inherit merge permission; separate PR-bound gate + actual GitHub ruleset canary required |
 | Main acceptance | exact post-merge SHA, hosted + actual native guest + cleanup | Completed main run and complete audit evidence |
 
 Tests MUST use RED -> GREEN on each implementation slice, targeted focused/regression suites plus ordinary full hosted CI, fresh independent security/code/doc review and exact-head native evidence when the boundary is touched. Mac-specific ACL and child-reaper work requires actual disposable Mac fixtures, not Linux mocks. Do not run duplicate full suites concurrently with other developer agents.
@@ -127,8 +139,10 @@ Tests MUST use RED -> GREEN on each implementation slice, targeted focused/regre
 2. **Admission shadow slice**: new trusted-main CI-completion listener and pure bounded identity/CI proof module; hosted-only dry-run decision/logging; NO native dispatch and NO PR success status. Source-backed adversarial tests and fresh independent review.
 3. **ADR 0019 lifetime slice**: fixed owned private workspace creation and explicit cleanup, real UID-502 ACL/discovery/drift/regression evidence; no activation yet.
 4. **ADR 0019 activation slice**: trusted-main-only use of fixed protected staging for all live/probe/recovery routes, exact-main protected-placement native pass and cleanup; rollback/refusal documented.
-5. **Automatic native caller + status slice**: from trusted hosted admission only, invoke existing reusable workflow on main; protected guest target exactly current PR SHA; separate minimal hosted status writer, full failure+staleness tests. Roll out first to a canary PR without a required context.
-6. **Enforcement slice**: operator/admin ruleset verification; require exact context only after end-to-end pass/fail/stale/cancel and fork policy proven; verify a merge-main run. Roll back admission workflow and new required context deliberately if unhealthy; do not disable ordinary CI, manual trusted native E2E or main-push E2E.
+5. **Trusted-suite verification slice**: independently reviewed main-pinned procedure and test manifest on hosted disposable runners; authenticate exact PR SHA/base/verifier/run evidence; modified PR CI with ten successful names cannot bypass this gate.
+6. **Trusted native broker/caller slice**: narrow hosted `actions: write` dispatch of a main-only `workflow_dispatch` broker, fresh API/attestation revalidation and existing native reusable workflow call. Verify actual allowed event propagation plus forged/direct/PR-origin refusal; no Mac write token.
+7. **Informational hosted SHA reporter slice**: only after true native and cleanup PASS; separate narrowly scoped hosted `statuses: write`, failure and stale receipts, no required PR context yet.
+8. **PR-specific enforcement design then implementation**: separate ADR/plan specifying a trusted PR-bound authorization/merge gate; live same-SHA two-PR/fork test and admin-confirmed ruleset enforcement. Never make SHA status alone the required authorization. Keep ordinary/manual/main-push CI intact.
 
 Each numbered delivery is independently reviewable with its own feature branch/PR and exact-head gates. Do not bundle protected-placement activation, trust admission and status writing into one unreviewable PR.
 
