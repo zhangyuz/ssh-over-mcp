@@ -1888,3 +1888,17 @@ separate informational SHA reporting, and a separately reviewed PR-bound merge
 authorization with a two-PR/same-SHA fork refusal proof.
 No native workflow, permission, status, branch-rule or provider behavior
 has been changed or authorized. Existing main-push E2E is unchanged.
+
+### Local Live E2E vNext — first implementation slice: metadata shadow
+
+The reviewed design from PR #244 was merged at
+`18baf09d31a2610c2ce4359bd04a9ebf85cbb62f`. The next isolated
+feature branch implements only the
+[Shadow Admission first-slice plan](superpowers/plans/2026-10-14-pr-native-e2e-shadow-admission.md)
+using a pure PR/CI metadata observer, bounded read-only GitHub REST adapter,
+informational-only CLI and hosted `workflow_run` YAML, with adversarial
+TDD and [implementation evidence](evidence/2026-10-14-pr-native-e2e-shadow.md).
+This slice **does not** attest trusted test execution because a PR may
+alter the upstream CI, **does not** start a Mac E2E, and **does not** write
+a merge status. Post-merge shadow canary and exact-main CI/native cleanup
+remain separate acceptance evidence, not local-test assumptions.

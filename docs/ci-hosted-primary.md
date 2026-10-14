@@ -107,3 +107,25 @@ may appear until the base branch adopts the new workflow. Confirm branch
 protection still requires both historical Python checks and inspect **all**
 checks at exact PR HEAD before merging, including any legacy checks.
 After merge, the main branch contains only the new pull-request CI trigger.
+
+### PR CI metadata shadow observer (first vNext slice)
+
+The separately introduced `.github/workflows/pr-native-e2e-shadow.yml`
+is an **informational-only** default-branch `workflow_run: completed`
+observer for `CI` events originating in PRs. The observed upstream CI
+is lower-trust: PR code may edit its own test commands/workflow yet retain
+ten apparently passing job names. The hosted observer fetches only bounded
+read-only GitHub API metadata for the exact run attempt, checks a current
+same-repo non-draft PR association, and emits `METADATA_MATCH_SHADOW` or
+a fixed refusal/error reason. Its immutable flags `trusted_suite_proven`,
+`base_freshness_proven` and `dispatch_authorized` all remain false.
+
+This is **not** a Level-3 test or trusted full-suite attestation and has
+**no native dispatch**, **no status write**, no Mac runner, no new
+required context and no merge protection authority. The Mac orchestrator's
+existing `push`/`workflow_dispatch` context allow-list and main-push
+E2E are unchanged. Independent security-reviewed future slices (trusted-main
+hosted test procedure, protected staging, workflow_dispatch broker, native
+status evidence, and PR-bound authorization) are required for genuine
+automatic pre-merge native acceptance. See the
+[first-slice evidence](evidence/2026-10-14-pr-native-e2e-shadow.md).
