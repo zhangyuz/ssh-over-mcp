@@ -33,12 +33,20 @@ def c():
 def _node(c, node_id, rel, kind, *, mode=None, arch=None, abi=DIR, py=None):
     directory = kind in ("directory", "framework_bundle", "stdlib_dir")
     return c.ProvenanceNode(
-        node_id, ROOT + ("/" + rel if rel else ""), kind,
-        1, 100 + len(rel), 0, 0,
+        node_id,
+        ROOT + ("/" + rel if rel else ""),
+        kind,
+        1,
+        100 + len(rel),
+        0,
+        0,
         (0o40755 if directory else 0o100755) if mode is None else mode,
-        "verified_safe", DIR if directory else "b" * 64, False,
+        "verified_safe",
+        DIR if directory else "b" * 64,
+        False,
         DIR if directory or kind == "stdlib_file" else ("x86_64" if arch is None else arch),
-        abi, py,
+        abi,
+        py,
     )
 
 
@@ -74,29 +82,46 @@ def fixture(c, *, framework=False):
             c.DependencyEdge("bundle", "frameworklib", "contains"),
             c.DependencyEdge("exe", "frameworklib", "macho_load"),
         ]
-    entries = tuple(sorted(
-        (c.ManifestEntry(n.node_id, n.path[len(ROOT):].lstrip("/"),
-                         n.kind, n.digest_sha256) for n in nodes),
-        key=lambda entry: entry.relative_path,
-    ))
+    entries = tuple(
+        sorted(
+            (
+                c.ManifestEntry(n.node_id, n.path[len(ROOT) :].lstrip("/"), n.kind, n.digest_sha256)
+                for n in nodes
+            ),
+            key=lambda entry: entry.relative_path,
+        )
+    )
     manifest = c.PackageManifest(PKG, entries)
     payload = {
-        "schema_version": 1, "package_sha256": PKG,
+        "schema_version": 1,
+        "package_sha256": PKG,
         "entries": [
-            {"node_id": e.node_id, "relative_path": e.relative_path,
-             "kind": e.kind, "digest_sha256": e.digest_sha256}
+            {
+                "node_id": e.node_id,
+                "relative_path": e.relative_path,
+                "kind": e.kind,
+                "digest_sha256": e.digest_sha256,
+            }
             for e in entries
         ],
     }
     manifest_sha = hashlib.sha256(
-        json.dumps(payload, ensure_ascii=True, sort_keys=True,
-                   separators=(",", ":")).encode("utf-8")
+        json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
     ).hexdigest()
-    artifact = c.ArtifactClaim(PKG, manifest_sha, ROOT,
-                               "framework" if framework else "standalone",
-                               (3, 13, 16), "Darwin", "x86_64", "REVIEW.TEST", True)
-    runtime = c.RuntimeClaim("exe", ROOT + "/python3.13", (ROOT + "/lib",),
-                             True, True, True)
+    artifact = c.ArtifactClaim(
+        PKG,
+        manifest_sha,
+        ROOT,
+        "framework" if framework else "standalone",
+        (3, 13, 16),
+        "Darwin",
+        "x86_64",
+        "REVIEW.TEST",
+        True,
+    )
+    runtime = c.RuntimeClaim("exe", ROOT + "/python3.13", (ROOT + "/lib",), True, True, True)
     return c.ProvenanceEvidence(artifact, manifest, runtime, tuple(nodes), tuple(edges))
 
 
@@ -113,17 +138,22 @@ def _refuses(c, evidence):
 
 
 def _replace_node(e, target_id, **values):
-    return replace(e, nodes=tuple(
-        replace(n, **values) if n.node_id == target_id else n for n in e.nodes
-    ))
+    return replace(
+        e, nodes=tuple(replace(n, **values) if n.node_id == target_id else n for n in e.nodes)
+    )
 
 
 def _replace_entry(e, target_id, **values):
     # Deliberately do NOT recompute the manifest checksum: discordance must refuse.
-    return replace(e, manifest=replace(e.manifest, entries=tuple(
-        replace(n, **values) if n.node_id == target_id else n
-        for n in e.manifest.entries
-    )))
+    return replace(
+        e,
+        manifest=replace(
+            e.manifest,
+            entries=tuple(
+                replace(n, **values) if n.node_id == target_id else n for n in e.manifest.entries
+            ),
+        ),
+    )
 
 
 def test_standalone_fictional_schema_unattested(c):
@@ -140,95 +170,116 @@ def test_framework_fictional_nested_schema_unattested(c):
     )
 
 
-@pytest.mark.parametrize("field,bad", [
-    ("package_sha256", "c" * 64),
-    ("manifest_sha256", "c" * 64),
-    ("package_sha256", "Z" * 64),
-    ("python_version", (3, 12, 16)),
-    ("platform", "Linux"),
-    ("arch", "arm64"),
-    ("layout", "other"),
-    ("approval_ref", "x" * 65),
-    ("approval_ref", "x" * 2_000_000),
-    ("approval_ref", "a b"),
-    ("complete", False),
-    ("install_root", "../unsafe"),
-])
+@pytest.mark.parametrize(
+    "field,bad",
+    [
+        ("package_sha256", "c" * 64),
+        ("manifest_sha256", "c" * 64),
+        ("package_sha256", "Z" * 64),
+        ("python_version", (3, 12, 16)),
+        ("platform", "Linux"),
+        ("arch", "arm64"),
+        ("layout", "other"),
+        ("approval_ref", "x" * 65),
+        ("approval_ref", "x" * 2_000_000),
+        ("approval_ref", "a b"),
+        ("complete", False),
+        ("install_root", "../unsafe"),
+    ],
+)
 def test_package_and_budget_mutation_refuses(c, field, bad):
     e = fixture(c)
     _refuses(c, replace(e, artifact=replace(e.artifact, **{field: bad})))
 
 
-@pytest.mark.parametrize("field,bad", [
-    ("package_sha256", "c" * 64),
-    ("entries", ()),
-])
+@pytest.mark.parametrize(
+    "field,bad",
+    [
+        ("package_sha256", "c" * 64),
+        ("entries", ()),
+    ],
+)
 def test_manifest_changes_refuse(c, field, bad):
     e = fixture(c)
     _refuses(c, replace(e, manifest=replace(e.manifest, **{field: bad})))
 
 
-@pytest.mark.parametrize("field,bad", [
-    ("digest_sha256", "c" * 64),
-    ("kind", "directory"),
-    ("relative_path", "../other"),
-    ("node_id", "not_the_original_id"),
-])
+@pytest.mark.parametrize(
+    "field,bad",
+    [
+        ("digest_sha256", "c" * 64),
+        ("kind", "directory"),
+        ("relative_path", "../other"),
+        ("node_id", "not_the_original_id"),
+    ],
+)
 def test_manifest_member_changes_refuse(c, field, bad):
     _refuses(c, _replace_entry(fixture(c), "dyld", **{field: bad}))
 
 
-@pytest.mark.parametrize("field,bad", [
-    ("uid", 501),
-    ("gid", 80),
-    ("mode", 0o100775),
-    ("mode", 0o40755),
-    ("acl_state", "unknown"),
-    ("writable_by_uid502", True),
-    ("digest_sha256", "c" * 64),
-    ("path", ROOT + "/different"),
-    ("macho_arch", "arm64"),
-    ("kind", "stdlib_file"),
-    ("node_id", "X" * 65),
-])
+@pytest.mark.parametrize(
+    "field,bad",
+    [
+        ("uid", 501),
+        ("gid", 80),
+        ("mode", 0o100775),
+        ("mode", 0o40755),
+        ("acl_state", "unknown"),
+        ("writable_by_uid502", True),
+        ("digest_sha256", "c" * 64),
+        ("path", ROOT + "/different"),
+        ("macho_arch", "arm64"),
+        ("kind", "stdlib_file"),
+        ("node_id", "X" * 65),
+    ],
+)
 def test_node_malformed_or_mutable_refuses(c, field, bad):
     _refuses(c, _replace_node(fixture(c), "dyld", **{field: bad}))
 
 
-@pytest.mark.parametrize("field,bad", [
-    ("macho_arch", "arm64"),
-    ("python_abi", "cpython-312-darwin"),
-    ("python_major_minor", (3, 12)),
-    ("python_major_minor", (True, 13)),
-])
+@pytest.mark.parametrize(
+    "field,bad",
+    [
+        ("macho_arch", "arm64"),
+        ("python_abi", "cpython-312-darwin"),
+        ("python_major_minor", (3, 12)),
+        ("python_major_minor", (True, 13)),
+    ],
+)
 def test_extension_abi_refuses(c, field, bad):
     _refuses(c, _replace_node(fixture(c), "ext", **{field: bad}))
 
 
-@pytest.mark.parametrize("field,bad", [
-    ("binary_node_id", "missing"),
-    ("sys_executable", "/different/python"),
-    ("module_search_paths", ()),
-    ("module_search_paths", (ROOT + "/lib",) * 2),
-    ("module_search_paths", (ROOT + "/lib",) * 65),
-    ("module_search_paths", (ROOT + "/lib",) * 200000),
-    ("module_search_paths", ("/tmp",)),
-    ("dyld_environment_clean", False),
-    ("python_environment_clean", False),
-    ("graph_complete", False),
-])
+@pytest.mark.parametrize(
+    "field,bad",
+    [
+        ("binary_node_id", "missing"),
+        ("sys_executable", "/different/python"),
+        ("module_search_paths", ()),
+        ("module_search_paths", (ROOT + "/lib",) * 2),
+        ("module_search_paths", (ROOT + "/lib",) * 65),
+        ("module_search_paths", (ROOT + "/lib",) * 200000),
+        ("module_search_paths", ("/tmp",)),
+        ("dyld_environment_clean", False),
+        ("python_environment_clean", False),
+        ("graph_complete", False),
+    ],
+)
 def test_runtime_input_budget_and_environment_refuse(c, field, bad):
     e = fixture(c)
     _refuses(c, replace(e, runtime=replace(e.runtime, **{field: bad})))
 
 
-@pytest.mark.parametrize("parent,child,kind", [
-    ("root", "missing", "contains"),
-    ("root", "exe", "unknown"),
-    ("exe", "os", "macho_load"),
-    ("lib", "exe", "contains"),
-    ("exe", "root", "contains"),
-])
+@pytest.mark.parametrize(
+    "parent,child,kind",
+    [
+        ("root", "missing", "contains"),
+        ("root", "exe", "unknown"),
+        ("exe", "os", "macho_load"),
+        ("lib", "exe", "contains"),
+        ("exe", "root", "contains"),
+    ],
+)
 def test_bad_graph_edges_refuse(c, parent, child, kind):
     e = fixture(c)
     e = replace(e, edges=(*e.edges, c.DependencyEdge(parent, child, kind)))
@@ -271,13 +322,16 @@ class Trap:
         raise AssertionError("must not stringify untrusted object")
 
 
-@pytest.mark.parametrize("part,field", [
-    ("artifact", "approval_ref"),
-    ("artifact", "package_sha256"),
-    ("manifest", "package_sha256"),
-    ("runtime", "sys_executable"),
-    ("runtime", "module_search_paths"),
-])
+@pytest.mark.parametrize(
+    "part,field",
+    [
+        ("artifact", "approval_ref"),
+        ("artifact", "package_sha256"),
+        ("manifest", "package_sha256"),
+        ("runtime", "sys_executable"),
+        ("runtime", "module_search_paths"),
+    ],
+)
 def test_untrusted_comparison_never_invoked(c, part, field):
     calls = []
     e = fixture(c)
@@ -291,9 +345,16 @@ def test_trap_nested_manifest_node_and_edge(c):
     e = fixture(c)
     for modified in (
         replace(e, nodes=(*e.nodes[:1], replace(e.nodes[1], path=Trap(calls)), *e.nodes[2:])),
-        replace(e, manifest=replace(e.manifest, entries=(
-            replace(e.manifest.entries[0], node_id=Trap(calls)), *e.manifest.entries[1:]
-        ))),
+        replace(
+            e,
+            manifest=replace(
+                e.manifest,
+                entries=(
+                    replace(e.manifest.entries[0], node_id=Trap(calls)),
+                    *e.manifest.entries[1:],
+                ),
+            ),
+        ),
         replace(e, edges=(replace(e.edges[0], loader_kind=Trap(calls)), *e.edges[1:])),
     ):
         _refuses(c, modified)
@@ -309,6 +370,7 @@ def test_malformed_outer_shape_refuses(c):
 
 def test_no_host_side_effect_or_authority_surface(c):
     import ast
+
     tree = ast.parse(SOURCE.read_text())
     blocked = {"os", "subprocess", "socket", "urllib", "requests", "pathlib", "ctypes", "shutil"}
     for node in ast.walk(tree):
@@ -319,3 +381,99 @@ def test_no_host_side_effect_or_authority_surface(c):
     for export in ("dispatch", "execute", "approve", "main", "run", "PASS_CLEAN"):
         assert not hasattr(c, export)
     assert _status(c, fixture(c)).status.endswith("UNATTESTED")
+
+
+def _rebind_fictional_claim(c, evidence):
+    """Test-only recomputation: all attacker-controlled claims remain fabricated."""
+    entries = tuple(
+        sorted(
+            (
+                c.ManifestEntry(n.node_id, n.path[len(ROOT) :].lstrip("/"), n.kind, n.digest_sha256)
+                for n in evidence.nodes
+            ),
+            key=lambda entry: entry.relative_path,
+        )
+    )
+    manifest = c.PackageManifest(PKG, entries)
+    payload = {
+        "schema_version": 1,
+        "package_sha256": PKG,
+        "entries": [
+            {
+                "node_id": v.node_id,
+                "relative_path": v.relative_path,
+                "kind": v.kind,
+                "digest_sha256": v.digest_sha256,
+            }
+            for v in entries
+        ],
+    }
+    new_digest = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    return replace(
+        evidence, artifact=replace(evidence.artifact, manifest_sha256=new_digest), manifest=manifest
+    )
+
+
+def test_floating_framework_dylib_even_with_coherent_manifest_refuses(c):
+    e = fixture(c, framework=True)
+    # Every self-report is made coherent and reachability preserved.
+    e = _replace_node(e, "frameworklib", path=ROOT + "/Frameworks/stray.dylib")
+    e = replace(
+        e,
+        edges=tuple(
+            replace(link, parent_id="frameparent")
+            if link.parent_id == "bundle" and link.child_id == "frameworklib"
+            else link
+            for link in e.edges
+        ),
+    )
+    e = _rebind_fictional_claim(c, e)
+    _refuses(c, e)
+
+
+def test_framework_valid_only_when_contains_chain_reaches_bundle(c):
+    e = fixture(c, framework=True)
+    _refuses(
+        c,
+        replace(
+            e,
+            edges=tuple(
+                link
+                for link in e.edges
+                if not (link.parent_id == "bundle" and link.child_id == "frameworklib")
+            ),
+        ),
+    )
+
+
+def test_standalone_rejects_extra_framework_roles_even_if_manifest_coherent(c):
+    e = fixture(c, framework=True)
+    e = replace(e, artifact=replace(e.artifact, layout="standalone"))
+    _refuses(c, e)
+
+
+def test_forged_coherent_manifest_remains_unattested(c):
+    e = fixture(c)
+    # A hypothetical malicious caller may fabricate new digests in all
+    # synthetic declarations. This cannot prove actual source authenticity.
+    replacement = "f" * 64
+    nodes = tuple(
+        replace(n, digest_sha256=replacement) if n.node_id == "exe" else n for n in e.nodes
+    )
+    e = _rebind_fictional_claim(c, replace(e, nodes=nodes))
+    result = _status(c, e)
+    assert result.status == "PROVENANCE_SCHEMA_CONSISTENT_UNATTESTED"
+    assert not hasattr(result, "approved")
+
+
+def test_over_budget_manifest_tuple_and_nodes_refuse_early(c):
+    e = fixture(c)
+    for invalid in (
+        replace(e, manifest=replace(e.manifest, entries=e.manifest.entries * 12)),
+        replace(e, nodes=e.nodes * 12),
+    ):
+        _refuses(c, invalid)
