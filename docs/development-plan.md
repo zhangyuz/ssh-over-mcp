@@ -2097,3 +2097,53 @@ unattested and belong to separately approved Gate B.
 See [Gate A implementation evidence](evidence/2026-10-14-adr19-interpreter-provenance-contract.md)
 for review/CI gates. A green synthetic schema fixture or old-path
 trusted-main Level-3 run is NOT real UID502/APFS acceptance.
+
+### Issue #256 — Proposed cross-platform provenance profile architecture (2026-10-15)
+
+[Issue #256](https://github.com/zhangyuz/ssh-over-mcp/issues/256)
+calls for portable **synthetic** evidence invariants and separate Darwin
+and Linux ABI/loader profiles. Product/managed target, Ubuntu CI host,
+macOS native E2E orchestrator and Ubuntu QEMU guest are distinct roles.
+The merged [Gate A PR #255](https://github.com/zhangyuz/ssh-over-mcp/pull/255)
+remains Darwin-specific and explicitly UNATTESTED; it is not a
+SOM-wide Darwin requirement or a real UID502/APFS acceptance proof.
+
+The current work is documentation-only:
+[design](superpowers/specs/2026-10-15-issue256-cross-platform-provenance-profiles-design.md)
+and [future **Slice B1 (Darwin-only router)** TDD plan](superpowers/plans/2026-10-15-issue256-portable-provenance-profile-slice-b.md).
+[PR #257 independent review #6191154142](https://github.com/zhangyuz/ssh-over-mcp/pull/257#issuecomment-6191154142)
+clarified that **B1 is only explicit static Darwin routing**, not the
+promised portable shared invariant contract. **B2** is a separately reviewed
+and explicitly approved future extraction of the pure OS-neutral
+input/manifest/graph core, with direct-versus-routed Darwin status and
+violations parity tests. **Slice C Linux synthetic ELF profile is blocked
+on B2**; B1 must REFUSE all Linux selectors. Declared Linux/Darwin
+selector-to-evidence contradictions can refuse, but perfectly forged
+Darwin claims may remain **UNATTESTED**: no pure synthetic router
+can identify unobserved real ELF or Mach-O bytes.
+
+B1's caller-facing API must re-export the **same seven frozen
+Gate A evidence constructor class objects** from the cached canonical
+module. Evidence instantiated through separate module imports is
+intentionally refused when routed; the original direct API remains
+unchanged. The pre-existing Gate A source and tests are **immutable
+in B1** (zero-diff requirement). Linux selector REFUSAL belongs to
+prelaunch B1/B2 tests; positive Linux synthetic-profile tests are
+**Slice C only**, following the Mac-first launch and B2 gates.
+
+**Mac-first release sequence (operator decision, 2026-10-15):**
+Prioritize completing and launching the approved macOS functionality.
+**Do not begin Linux Slice C implementation until macOS full-feature
+release/launch has been completed and confirmed by the operator AND
+the B2 shared-core parity/refactor has separately passed review.**
+Actual macOS release/UID502 physical acceptance and Gate B trust
+evidence remain unverified here and require their own authorization;
+CI or synthetic Gate A success is not macOS launch proof. B1/B2 may
+remain future planning work, but should not displace the Mac release
+critical path. Linux native E2E orchestration (D) stays separately
+deferred.
+
+B1, B2, C and future Linux native E2E orchestration/Runner (Slice D)
+and Gate B actual interpreter trust all require separate operator and
+independent security approvals. Green Ubuntu CI, or a synthetic
+Darwin-positive, is never native host or source verification.
