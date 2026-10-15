@@ -12,6 +12,7 @@ import hashlib
 import os
 import re
 import stat
+import threading
 from dataclasses import dataclass, field
 
 _MAX_BYTES = 4 * 1024 * 1024
@@ -46,6 +47,12 @@ class SealedMeasurement:
     sha256: str
     length: int
     witness_ref: str
+
+
+# Retain the exact issued object until authenticated one-time close.
+# Matching public fields do not prove possession of this descriptor.
+_LIVE_LOCK = threading.Lock()
+_LIVE_MEASUREMENTS: dict[int, tuple[SealedMeasurement, int, int, int, int]] = {}
 
 
 def fixture_from_trusted_bytes(
@@ -133,6 +140,10 @@ def ingest_fixed_fixture(
             length=count,
             witness_ref=f"synthetic-memfd:{final.st_dev}:{final.st_ino}",
         )
+        with _LIVE_LOCK:
+            _LIVE_MEASUREMENTS[id(result)] = (
+                result, fd, final.st_dev, final.st_ino, final.st_size
+            )
         transferred = True
         return result
     except (OSError, ValueError) as exc:
@@ -145,6 +156,34 @@ def ingest_fixed_fixture(
 
 
 def close_measurement(measurement: SealedMeasurement) -> None:
+    """Close one still-owned sealed FD, never an arbitrary reused integer.
+
+    Borrowers must not close or replace this FD externally. The registry
+    serializes its own closes, not hostile same-process descriptor mutations.
+    """
     if type(measurement) is not SealedMeasurement or type(measurement.fd) is not int:
         raise B0aInputRefused("SEALED_MEASUREMENT_INVALID")
-    os.close(measurement.fd)
+    with _LIVE_LOCK:
+        owned = _LIVE_MEASUREMENTS.get(id(measurement))
+        if owned is None or owned[0] is not measurement or measurement.fd != owned[1]:
+            raise B0aInputRefused("SEALED_MEASUREMENT_NOT_OWNED")
+        _, fd, original_dev, original_ino, original_size = owned
+        try:
+            current = os.fstat(fd)
+            seals = fcntl.fcntl(fd, fcntl.F_GET_SEALS)
+        except OSError:
+            del _LIVE_MEASUREMENTS[id(measurement)]
+            raise B0aInputRefused("SEALED_MEASUREMENT_STALE") from None
+        if (
+            current.st_dev != original_dev
+            or current.st_ino != original_ino
+            or current.st_size != original_size
+            or (seals & _REQUIRED_SEALS) != _REQUIRED_SEALS
+        ):
+            del _LIVE_MEASUREMENTS[id(measurement)]
+            raise B0aInputRefused("SEALED_MEASUREMENT_SUBSTITUTED")
+        del _LIVE_MEASUREMENTS[id(measurement)]
+        try:
+            os.close(fd)
+        except OSError:
+            raise B0aInputRefused("SEALED_MEASUREMENT_STALE") from None
