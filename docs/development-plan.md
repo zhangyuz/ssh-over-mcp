@@ -2122,6 +2122,15 @@ selector-to-evidence contradictions can refuse, but perfectly forged
 Darwin claims may remain **UNATTESTED**: no pure synthetic router
 can identify unobserved real ELF or Mach-O bytes.
 
+B1's caller-facing API must re-export the **same seven frozen
+Gate A evidence constructor class objects** from the cached canonical
+module. Evidence instantiated through separate module imports is
+intentionally refused when routed; the original direct API remains
+unchanged. The pre-existing Gate A source and tests are **immutable
+in B1** (zero-diff requirement). Linux selector REFUSAL belongs to
+prelaunch B1/B2 tests; positive Linux synthetic-profile tests are
+**Slice C only**, following the Mac-first launch and B2 gates.
+
 **Mac-first release sequence (operator decision, 2026-10-15):**
 Prioritize completing and launching the approved macOS functionality.
 **Do not begin Linux Slice C implementation until macOS full-feature

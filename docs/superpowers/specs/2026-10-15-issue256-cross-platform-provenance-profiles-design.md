@@ -85,6 +85,21 @@ assess_provenance(evidence) remains unchanged, callable separately and
 the sole Darwin schema checker. Ordinary fixed import of trusted source
 code is not a host-provenance or physical-file attestation.
 
+**Supported B1 caller-facing constructor API (review #6191869044):**
+the public router module MUST export *identity aliases*, not copies,
+of the exact seven frozen Gate A INPUT dataclasses: ArtifactClaim,
+ManifestEntry, PackageManifest, ProvenanceNode, DependencyEdge,
+RuntimeClaim and ProvenanceEvidence. They MUST all originate from
+the router's one cached fixed Gate A module. An external consumer
+constructs routed evidence via these **public router exports**.
+Do not relax exact type(evidence) or nested-record identity checks,
+adapt untrusted lookalike objects, or load a caller-selected module.
+Separately imported copies of the existing Gate A source remain valid
+for their own original DIRECT API but are intentionally UNSUPPORTED
+as B1 routed evidence, and MUST REFUSE. This is an explicit fail-closed
+compatibility decision. No deployed code calls B1 yet; it is proposed.
+
+
 Selector fields MUST be exact built-in strings and nonempty ASCII;
 check lengths before comparisons, regex, hashing or examining evidence:
 
@@ -102,12 +117,15 @@ runtime OS inference or fallback. Invalid selector returns exactly
 ProfileResult(status="PROVENANCE_REFUSED",
 violations=("EVIDENCE_INVALID",)) WITHOUT invoking the Darwin checker.
 
-For a valid selector, the router returns a new frozen ProfileResult with
-status AND violations exactly equal to direct legacy
-assess_provenance(evidence), including every bounded fixed refusal
-reason. Never truncate, normalize or replace valid-delegation results;
-passing a role is only contextual metadata, never authorization.
-The original API is preserved, and Linux remains unregistered in B1.
+For a valid selector with public router-export evidence, the router
+returns a frozen ProfileResult whose (status, violations) exactly
+equal the result of direct assess_provenance(evidence) in the SAME
+cached module. Preserve every fixed reason unmodified. For a
+foreign-import record, both the canonical module direct call and
+the B1 router must REFUSE even if the foreign module's own direct
+call would accept it. This is an intentional unsupported import
+identity, not an exception to parity. The existing legacy direct
+API remains callable and unchanged; roles never grant authority.
 
 ## Threats and safety boundaries
 
@@ -146,6 +164,10 @@ synthetic router can detect an undisclosed real format.
   Slice C is **deferred until macOS full-feature release and launch**
   confirmed by the operator, AND independent B2 parity/review and
   separate explicit Slice C approval. No pre-launch Linux C work.
+- A future B1 router must publicly re-export all seven canonical frozen
+  input classes with identical class object identity. Foreign-module
+  evidence must refuse; direct old calls remain unchanged. Both the
+  existing Gate A module and its test expectations are frozen in B1.
 - A future B1 router must preserve every Darwin Gate A direct status
   AND violations through the new router, reject declared inconsistencies,
   unregistered Linux and role authority claims, and preserve coherent

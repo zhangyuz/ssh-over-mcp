@@ -23,7 +23,7 @@ never silently skip B2 or describe router-only as portable.
 - Main baseline [PR #255](https://github.com/zhangyuz/ssh-over-mcp/pull/255), f3a39b3594951defae4b31e6fdcf252b2503a507.
 - Preserve existing Darwin assess_provenance API and all current test results; no synthetic result can be host authority.
 - No .github/workflows, UID502 preflight, QEMU provider, protected staging, incident recovery, CI runner or physical fixture modifications.
-- No OS/network/process/file I/O; no platform detection or user-chosen dynamic imports.
+- No OS/network/process/file I/O **while validating untrusted provenance claims**. Importing the trusted fixed sibling Python module may read its own source at initialization, but must never probe claimed installed interpreter paths; no runtime platform detection or user-chosen imports.
 - Keep 64 nodes/entries, 128 edges, 64 paths, 1024 ASCII-byte paths, 64-byte approval labels, no NUL, no special mode bits and duplicate claimed identity refusal.
 - Existing full-profile result PROVENANCE_SCHEMA_CONSISTENT_UNATTESTED remains unauthenticated. Linux deliberately refuses until separately reviewed Slice C. **C requires B2 complete AND the operator-confirmed macOS full-feature release/launch milestone**; neither is yet established.
 - macOS full-feature development, actual verified acceptance and launch are the delivery priority. Neither a green Ubuntu CI nor the existing legacy native Level-3 test is sufficient launch evidence. Future Gate B and real UID502/APFS acceptance must be separately authorized before being used to support a release claim; none is authorized by this plan.
@@ -35,11 +35,26 @@ never silently skip B2 or describe router-only as portable.
 ## Proposed exact interfaces and changed files
 
 - Create ops/live-e2e/provenance_profile_router.py with frozen ProfileSelector(os_family: str, machine_arch: str, python_abi: str, role: str, profile_id: str); frozen ProfileResult(status: str, violations: tuple[str,...]); assess_profile_claim(selector: ProfileSelector, evidence: object) -> ProfileResult.
-- Create tests/ops/test_provenance_profile_router.py, importing the router via a fixed trusted source path and reusing fictional Gate A fixtures for regression.
-- DO NOT modify existing ops/live-e2e/interpreter_provenance_contract.py
-  in B1. Its public assess_provenance(evidence) and result shapes are
-  frozen; call via a fixed trusted adapter in the router.
-- Update docs/development-plan.md and add docs/evidence/2026-10-15-issue256-portable-profile-router.md after implementing. No other tracked paths permitted.
+- Publicly re-export **the same exact class objects** for all seven
+  Gate A input dataclasses from the fixed cached module: ArtifactClaim,
+  ManifestEntry, PackageManifest, ProvenanceNode, DependencyEdge,
+  RuntimeClaim and ProvenanceEvidence. They are a supported caller-
+  facing evidence-construction API; never create copies or use
+  structural conversion to bypass exact-type identity.
+- Create tests/ops/test_provenance_profile_router.py. Build valid
+  routed records using public router-exported constructors, and test
+  an external consumer importing ONLY the router.
+- Update docs/development-plan.md and add
+  docs/evidence/2026-10-15-issue256-portable-profile-router.md.
+- **HARD tracked-file allowlist:** exactly (1) new router,
+  (2) new router tests, (3) docs/development-plan.md, and
+  (4) new evidence note. Existing
+  ops/live-e2e/interpreter_provenance_contract.py AND
+  tests/ops/test_interpreter_provenance_contract.py are FROZEN.
+  All CI/workflow/provider/staging code is frozen. Task 2/3 cannot
+  grant exceptions; if an edit becomes necessary, stop and obtain
+  a separately reviewed plan and fresh operator authorization.
+  Check zero Git diff against the B1 baseline for both frozen files.
 
 **Selector schema (locked and exact, before any equality/hash/regex):**
 ProfileSelector must be an exact dataclass identity (no subclass),
@@ -71,22 +86,34 @@ with a fixed module name (e.g. _som_gate_a_darwin_v1), and the fixed
 sibling module source path, with sys.modules registration before
 exec_module for dataclass identity. Cache the one module instance
 per interpreter, do not reload per call, and do not expose a source
-path or loader override in the public API. Importing trusted code
+path or loader override in the public API.
+
+**One canonical evidence class identity:** re-export the seven fixed
+Gate A frozen INPUT classes from that SAME cached module as public
+router attributes. Every supported routed caller, including a
+separate external test consumer, MUST construct its records from
+these exported constructors; classes copied from separately named
+importlib instances of identical Gate A source remain intentionally
+unsupported and REFUSE through the router. The legacy direct
+assess_provenance API still accepts its own class instances.
+No field-by-field bridge, reload or lowering of type(evidence)
+checks is permitted. The proposed B1 API must not require a caller
+to access the router's private module handle to construct evidence.
+ Importing trusted code
 itself may load the source file; the no-host-I/O restriction applies
 to **processing untrusted provenance evidence** and does not permit
 stat/FD/probe/open of claimed installed interpreter paths.
 
-**Return parity:** for VALID selector and any evidence E, the
-router MUST return ProfileResult with
-(status, violations) == original fixed imported
-Darwin module.assess_provenance(E).(status, violations).
-Preserve exact refusal strings, order and bounded shape; a valid
-selector never converts a legacy denial to a new generic denial,
-and never changes positive UNATTESTED to a privileged state.
-To build parity fixtures, use the router's **same fixed Gate A module
-object** for constructing the frozen records, not a second
-importlib-loaded copy: exact dataclass type identity otherwise
-makes a valid record falsely refuse.
+**Return parity:** with a valid selector and any supported evidence
+E constructed from public router exports, require exact equality
+of (status, violations) with direct assess_provenance(E) in the
+router's cached Gate A module. Test every positive and adversarial
+class. For evidence from an independent importlib alias, the router
+and its cached Gate A module MUST REFUSE even when the alternate
+module's original direct API accepts it. Include explicit external
+consumer + cross-module regression; do not disguise an import
+identity problem by building all fixtures through private handles.
+No new privileged status and no mutated refusal diagnostics.
 
 Cross-profile negative pairs are **declared mismatches only**:
 Linux selector + declared Darwin evidence -> REFUSE at selector;
@@ -110,7 +137,8 @@ This belongs solely to separately approved Gate B.
 - Missing, overlong, mis-cased, aliased or unknown IDs fail closed, without OS autodetection or fallback.
 - A table-driven NEW-router parity matrix must assert
   (status, violations) identical to direct Gate A results on
-  the **same module object** for both synthetic positives and all
+  the **same module object**, with evidence from PUBLIC router-
+  exported canonical types, for both synthetic positives and all
   existing negative fixture classes: standalone/framework valid;
   coherent forged SHA still UNATTESTED; NUL with coherent rehash;
   setuid/setgid/sticky; duplicate dev+ino; mode/int over-budget;
@@ -118,6 +146,14 @@ This belongs solely to separately approved Gate B.
   framework dylib outside bundle; duplicate/bad loader edges;
   over-budget search paths/labels; custom comparator objects.
   Merely rerunning old direct-call tests does NOT prove router parity.
+  Include test_router_public_evidence_constructor_identity to check
+  each export uses is identity with its cached class; an external
+  consumer must import only the public router and obtain a
+  positive UNATTESTED result. Include
+  test_foreign_imported_record_refuses: an independent second
+  Gate A import constructs a direct-positive record in its own
+  module but the router and canonical module refuse it.
+
 
 ## Task 1 — Frozen explicit profile selector
 
@@ -128,24 +164,28 @@ This belongs solely to separately approved Gate B.
   using the router's single fixed Gate A module object for dataclasses,
   asserting status and violations identical to direct assess_provenance
   and only PROVENANCE_SCHEMA_CONSISTENT_UNATTESTED for a fictional
-  positive, with no trust token or dispatch.
+  positive constructed from public router dataclasses (never
+  a private module object), with no trust token or dispatch.
 - [ ] Run focused pytest; confirm real RED due to missing interface, not PYTHONPATH environment error.
 - [ ] Implement exact frozen-record typing and every selector
   field's locked ASCII/byte/allowlist gate before comparison; import
   and cache exactly the trusted sibling Gate A module with the
   fixed spec_from_file_location identifier and sys.modules guard,
+  plus exact public aliases to all seven Gate A input classes;
   statically wired Darwin-only; no runtime host detection.
 - [ ] Run focused GREEN and Ruff; commit feat: introduce inert Darwin profile router; save command/results in ignored progress.md.
 
 ## Task 2 — Negative cross-profile and compatibility tests
 
-**Files:** same router and test module, optionally existing Gate A only if strictly necessary.
+**Files:** ONLY the NEW router and NEW router tests. Existing Gate A source and tests are frozen; no optional modification.
 
 - [ ] Add RED tests test_linux_profile_unavailable_refuses,
   test_profile_abi_mismatch_refuses,
   test_role_not_execution_authority,
   test_hostile_profile_type_refuses,
-  test_unknown_profile_no_fallback and
+  test_unknown_profile_no_fallback,
+  test_router_public_evidence_constructor_identity,
+  test_foreign_imported_record_refuses and
   test_darwin_router_exact_status_violations_parity.
   Parametrize exact field allowlists, ASCII/length boundary,
   wrong class/subclass, and paired selector/evidence contradictions.
@@ -167,11 +207,16 @@ This belongs solely to separately approved Gate B.
 
 ## Task 3 — Documentation and review-ready code PR
 
-**Files:** allowed router/test, optional proven-compatible source, roadmap and new evidence doc.
+**Files:** ONLY new router, new router tests, existing roadmap and NEW evidence note. NO existing Gate A source or test modifications.
 
 - [ ] RED-test that exports do not include dispatch, execute, approve, run, credential, stat or subprocess side effects; no imported OS/platform/network/process helpers.
 - [ ] Implement the minimal no-authority module API and update docs to separate product/CI/orchestrator/guest roles. State explicitly Linux synthetic provenance is NOT YET implemented.
-- [ ] Run host-independent test regression, Ruff/format, compileall, git diff --check, doc link and exact path allowlist; verify protected workflows, provider and staging remain unchanged.
+- [ ] Run host-independent regression, Ruff/format, compileall,
+  git diff --check, doc links, exact 4-path allowlist; explicitly
+  require zero Git diff against the baseline for BOTH frozen
+  ops/live-e2e/interpreter_provenance_contract.py and
+  tests/ops/test_interpreter_provenance_contract.py. Verify
+  protected workflows, provider and staging are unchanged.
 - [ ] Push a separate code PR, request independent full-project/security review immediately, require exact-final-head CI and clean independent review before any operator-authorized merge.
 - [ ] Retain evidence and local progress handoff in ignored worktree until safely archived.
 
