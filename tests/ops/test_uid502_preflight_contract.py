@@ -151,3 +151,121 @@ def test_numeric_admin_gid_refuses(contract, inputs, attr, invalid):
     run, checkout, job, runner = inputs
     changed = replace(runner, **{attr: invalid}, group_names=("staff",))
     assert "RUNNER_INVALID" in contract.validate_run(run, checkout, job, changed)
+
+
+# Task 2: positive example is fictional and never a real interpreter approval.
+def _safe_interpreter(contract):
+    from pathlib import PurePosixPath
+
+    path = "/test-only/uid502-pinned/python3.13"
+    names = PurePosixPath(path).parts
+    chain = tuple(
+        contract.PathWitness(
+            name, i + 10, i + 100, 0, 0,
+            0o100755 if i == len(names) - 1 else 0o40755,
+            "verified_safe",
+            "regular" if i == len(names) - 1 else "directory",
+            None, False,
+        )
+        for i, name in enumerate(names)
+    )
+    return (
+        contract.InterpreterInventory(path, path, (3, 13, 16), "x86_64", True, chain),
+        contract.InterpreterTrustPolicy(
+            "TEST_ONLY_NOT_AUTHORITY", path, (3, 13, 16), 0, 0, names
+        ),
+    )
+
+
+def test_interpreter_unapproved_by_default(contract):
+    inv, _ = _safe_interpreter(contract)
+    assert contract.validate_interpreter(inv, None) == ("INTERPRETER_TRUST_UNAPPROVED",)
+
+
+def test_interpreter_synthetic_safe_contract(contract):
+    inv, policy = _safe_interpreter(contract)
+    assert contract.validate_interpreter(inv, policy) == ()
+    assert "/test-only/" in inv.resolved_path
+    assert policy.policy_label == "TEST_ONLY_NOT_AUTHORITY"
+
+
+def test_interpreter_actual_observed_candidate_refused(contract):
+    from pathlib import PurePosixPath
+
+    # Actual observed ancestry includes UID501:GID80 0775 on Cellar.
+    path = ("/usr/local/Cellar/python@3.13/3.13.16/Frameworks/"
+            "Python.framework/Versions/3.13/bin/python3.13")
+    names = PurePosixPath(path).parts
+    chain = []
+    for i, name in enumerate(names):
+        operator_owned = i >= names.index("Cellar")
+        mode = 0o100755 if i == len(names) - 1 else 0o40755
+        if name == "Cellar":
+            mode = 0o40775
+        chain.append(contract.PathWitness(
+            name, i + 10, i + 100, 501 if operator_owned else 0,
+            80 if operator_owned else 0, mode, "verified_safe",
+            "regular" if i == len(names) - 1 else "directory", None, False,
+        ))
+    observed = contract.InterpreterInventory(
+        path, path, (3, 13, 16), "x86_64", True, tuple(chain)
+    )
+    optimistic = contract.InterpreterTrustPolicy(
+        "TEST_ONLY_NOT_AUTHORITY", path, (3, 13, 16), 501, 80, names
+    )
+    assert "INTERPRETER_INVALID" in contract.validate_interpreter(observed, optimistic)
+
+
+@pytest.mark.parametrize(
+    ("part", "attribute", "value"),
+    [
+        ("inv", "resolved_path", "/usr/local/bin/python3"),
+        ("inv", "sys_executable", "/bin/python3"),
+        ("inv", "version", (3, 12, 5)),
+        ("inv", "version", (3, True, 16)),
+        ("inv", "arch", "arm64"),
+        ("inv", "complete", False),
+        ("inv", "chain", ()),
+        ("policy", "policy_label", ""),
+        ("policy", "policy_label", "approved"),
+        ("policy", "allowed_owner_uid", 501),
+        ("policy", "allowed_owner_gid", 80),
+        ("policy", "expected_path", "/tmp/python3"),
+    ],
+)
+def test_interpreter_chain_tamper_refuses(contract, part, attribute, value):
+    inv, policy = _safe_interpreter(contract)
+    if part == "inv":
+        inv = replace(inv, **{attribute: value})
+    else:
+        policy = replace(policy, **{attribute: value})
+    assert "INTERPRETER_INVALID" in contract.validate_interpreter(inv, policy)
+
+
+@pytest.mark.parametrize(
+    ("attribute", "value"),
+    [
+        ("name", "renamed"),
+        ("dev", 0),
+        ("ino", 0),
+        ("uid", 502),
+        ("gid", 80),
+        ("mode", 0o40775),
+        ("mode", 0o120777),
+        ("acl_state", "unknown"),
+        ("kind", "symlink"),
+        ("target", "/foreign"),
+        ("writable_by_uid502", True),
+    ],
+)
+def test_interpreter_chain_witness_tamper_refuses(contract, attribute, value):
+    inv, policy = _safe_interpreter(contract)
+    bad = replace(inv.chain[1], **{attribute: value})
+    inv = replace(inv, chain=(*inv.chain[:1], bad, *inv.chain[2:]))
+    assert "INTERPRETER_INVALID" in contract.validate_interpreter(inv, policy)
+
+
+def test_interpreter_wrong_chain_order_refuses(contract):
+    inv, policy = _safe_interpreter(contract)
+    inv = replace(inv, chain=tuple(reversed(inv.chain)))
+    assert "INTERPRETER_INVALID" in contract.validate_interpreter(inv, policy)

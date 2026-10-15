@@ -142,3 +142,96 @@ def validate_run(
     ):
         failed.append("RUNNER_INVALID")
     return tuple(failed)
+
+
+@dataclass(frozen=True, slots=True)
+class PathWitness:
+    name: str
+    dev: int
+    ino: int
+    uid: int
+    gid: int
+    mode: int
+    acl_state: str
+    kind: str
+    target: str | None
+    writable_by_uid502: bool
+
+
+@dataclass(frozen=True, slots=True)
+class InterpreterInventory:
+    resolved_path: str
+    sys_executable: str
+    version: tuple[int, int, int]
+    arch: str
+    complete: bool
+    chain: tuple[PathWitness, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class InterpreterTrustPolicy:
+    policy_label: str
+    expected_path: str
+    version: tuple[int, int, int]
+    allowed_owner_uid: int
+    allowed_owner_gid: int
+    approved_chain: tuple[str, ...]
+
+
+def validate_interpreter(
+    inventory: InterpreterInventory, policy: InterpreterTrustPolicy | None
+) -> tuple[str, ...]:
+    """Validate a fictional schema fixture; current real Homebrew Python is BLOCKED."""
+    from pathlib import PurePosixPath
+
+    if policy is None:
+        return ("INTERPRETER_TRUST_UNAPPROVED",)
+    if not isinstance(inventory, InterpreterInventory) or not isinstance(
+        policy, InterpreterTrustPolicy
+    ):
+        return ("EVIDENCE_INVALID",)
+
+    # There is intentionally *no* policy path for running the real UID501/admin
+    # interpreter; a future trusted collector + immutable installation needs
+    # separate operator/security approval.
+    if (
+        policy.policy_label != "TEST_ONLY_NOT_AUTHORITY"
+        or policy.expected_path != "/test-only/uid502-pinned/python3.13"
+        or inventory.resolved_path != policy.expected_path
+        or inventory.sys_executable != policy.expected_path
+        or inventory.version != (3, 13, 16)
+        or any(type(i) is not int for i in inventory.version)
+        or policy.version != inventory.version
+        or inventory.arch != "x86_64"
+        or inventory.complete is not True
+        or policy.allowed_owner_uid != 0
+        or policy.allowed_owner_gid != 0
+        or type(inventory.chain) is not tuple
+        or type(policy.approved_chain) is not tuple
+        or policy.approved_chain != PurePosixPath(policy.expected_path).parts
+        or len(inventory.chain) != len(policy.approved_chain)
+    ):
+        return ("INTERPRETER_INVALID",)
+
+    for i, (witness, name) in enumerate(zip(inventory.chain, policy.approved_chain)):
+        if not isinstance(witness, PathWitness):
+            return ("INTERPRETER_INVALID",)
+        leaf = i == len(inventory.chain) - 1
+        expected_type = 0o100000 if leaf else 0o040000
+        if (
+            witness.name != name
+            or not all(_int_id(x) for x in (witness.dev, witness.ino, witness.uid, witness.gid))
+            or witness.dev == 0
+            or witness.ino == 0
+            or witness.uid != policy.allowed_owner_uid
+            or witness.gid != policy.allowed_owner_gid
+            or type(witness.mode) is not int
+            or witness.mode & 0o170000 != expected_type
+            or witness.mode & 0o022 != 0
+            or witness.acl_state != "verified_safe"
+            or witness.kind != ("regular" if leaf else "directory")
+            or witness.target is not None
+            or witness.writable_by_uid502 is not False
+        ):
+            return ("INTERPRETER_INVALID",)
+    return ()
