@@ -2110,8 +2110,19 @@ SOM-wide Darwin requirement or a real UID502/APFS acceptance proof.
 
 The current work is documentation-only:
 [design](superpowers/specs/2026-10-15-issue256-cross-platform-provenance-profiles-design.md)
-and [future Slice B TDD plan](superpowers/plans/2026-10-15-issue256-portable-provenance-profile-slice-b.md).
-Proposed Slice B retains existing Darwin behavior and refuses all Linux
-profiles until separately reviewed Slice C. Linux native E2E
-orchestration/Runner and Gate B actual interpreter trust are independent
-future operator/security approvals, not implied by green Ubuntu CI.
+and [future **Slice B1 (Darwin-only router)** TDD plan](superpowers/plans/2026-10-15-issue256-portable-provenance-profile-slice-b.md).
+[PR #257 independent review #6191154142](https://github.com/zhangyuz/ssh-over-mcp/pull/257#issuecomment-6191154142)
+clarified that **B1 is only explicit static Darwin routing**, not the
+promised portable shared invariant contract. **B2** is a separately reviewed
+and explicitly approved future extraction of the pure OS-neutral
+input/manifest/graph core, with direct-versus-routed Darwin status and
+violations parity tests. **Slice C Linux synthetic ELF profile is blocked
+on B2**; B1 must REFUSE all Linux selectors. Declared Linux/Darwin
+selector-to-evidence contradictions can refuse, but perfectly forged
+Darwin claims may remain **UNATTESTED**: no pure synthetic router
+can identify unobserved real ELF or Mach-O bytes.
+
+B1, B2, C and future Linux native E2E orchestration/Runner (Slice D)
+and Gate B actual interpreter trust all require separate operator and
+independent security approvals. Green Ubuntu CI, or a synthetic
+Darwin-positive, is never native host or source verification.
