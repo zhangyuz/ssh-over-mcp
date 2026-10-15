@@ -1,0 +1,42 @@
+# ADR 0019 B0a — Sigstore offline verifier compatibility and trusted-time research
+
+**Date:** 2026-10-15 (America/Toronto)
+**Status:** PUBLIC-DOCUMENTATION RESEARCH ONLY / UNAPPROVED. **No T1–T9 decisions are resolved by this document.**
+**Tracking:** [Issue #259](https://github.com/zhangyuz/ssh-over-mcp/issues/259).
+**Governing:** [B0a T1–T5 evidence checklist](2026-10-15-adr19-b0a-artifact-trust-approval-checklist.md), [B0 signer research](2026-10-15-adr19-b0-signer-trust-policy-research.md), [B0 implementation plan](../superpowers/plans/2026-10-15-adr19-gate-b0-offhost-package-verification.md), [digest interface design](../superpowers/specs/2026-10-15-adr19-b0a-digest-bound-offline-verifier-interface-design.md).
+
+> **Scope:** Read-only official published references; no actual CPython macOS package, `.sigstore` bundle, cert, trust root, verifier binary, dependency or local installation was downloaded, opened or run. Exact bundle version, signer/OIDC, log generation, trusted-time form, pinned verifier/runtime, trusted root and revocation policy remain **UNOBSERVED / UNAPPROVED**. This does not authorize even test-key verifier execution or a B0a code PR.
+
+## New interoperability findings worth resolving before tool selection
+
+| Public upstream claim (not measured on target bundle) | Source | Operator/security consequence |
+| --- | --- | --- |
+| Python.org permits `sha256:<digest>` as verification input with `sigstore-python` **at least v3.3.0** | https://www.python.org/downloads/metadata/sigstore/ | Minimum interface support is **not** sufficient to pin a trusted version; check signed bundle generation, log/time semantics, exact CLI and runtime closure separately |
+| Upstream `sigstore-python` README explicitly warns that **Rekor v2** transparency-log bundles need **sigstore-python 4 or above**; older versions may report incompatible log entry or insufficient verified-time sources | https://github.com/sigstore/sigstore-python | A v3.3+-only version rule can wrongly reject a legitimate v2 bundle or weaken verification if the error is bypassed. Determine actual *permitted* bundle/log type only after separately authorized isolated inspection; incompatible or unavailable verifier means **B0A_REFUSED**, not unsafe fallback |
+| `sigstore-python` changelog documents verifier API and bundle/inclusion-proof behavior changes across releases, including changes from detached material to bundle handling | https://github.com/sigstore/sigstore-python/blob/main/CHANGELOG.md | Pin an **exact reproducible verifier revision and API/CLI**; test actual offline behavior, signed-digest binding and defensive result handling. Current upstream main documentation is informational and does not pin a trustworthy binary |
+| For bundle verification, `--offline` stops TUF trust-root refresh but may use a cached or embedded **stale root**; `--trust-config` can avoid TUF but is not automatically independently trustworthy | https://sigstore.github.io/sigstore-python/advanced/offline/ | Require independently sourced, verified, expiry-checked and hash-pinned trust configuration, numeric offline age/skew cutoffs and reject unknown rotation/revocation. Offline execution is **not** an approval witness |
+| Sigstore relies on verified signing time for short-lived Fulcio certificates. Rekor v1 `integratedTime` is signed in its SET but the internal clock is not externally verifiable; Rekor v2 uses separate signed timestamp authority evidence | https://docs.sigstore.dev/cosign/verifying/timestamps/ | T4 must explicitly select acceptable **verifiable time evidence** and chain/policy per log generation. Do not silently treat raw `integratedTime` or an OS wall clock as an independently trusted timestamp |
+| Public `sigstore-python` CLI documents explicit `--bundle`, identity/OIDC and digest input; cosign is listed as a possible standalone alternative by Python.org | https://github.com/sigstore/sigstore-python and https://www.python.org/downloads/metadata/sigstore/ | Either tool option still needs independent exact binary/loader/dependency and trust-root provenance plus a passing synthetic positive/negative test; an untrusted Python interpreter cannot bootstrap its own integrity |
+
+**Critical distinction:** `v3.3.0+` is an upstream **feature floor**, `v4+` is an upstream **Rekor v2 compatibility statement**, and **neither** is an approved exact executable identity or compatible with a bundle not yet inspected. Do not infer that CPython's `python-3.13.16-macos11.pkg.sigstore` specifically uses Rekor v1, Rekor v2, DSSE, a particular timestamp authority or signer from index presence.
+
+## Proposed pre-implementation compatibility decision matrix (not executed)
+
+| Future separately authorized synthetic probe | Positive evidence required | Fail-closed refusal |
+| --- | --- | --- |
+| **Digest-only input** with exact pinned standalone verifier/known test key | Independent hash of a **verified writer-isolated sealed fixture**; explicit `sha256:<measured>` verified against a known signed bundle, exact test SAN+OIDC/root/log/time under offline policy; result strictly `SYNTHETIC_ONLY` | Pinned CLI lacks digest support; wrong digest; success from merely echoing input |
+| **Log generation / bundle version** | Selected exact binary handles an independently constructed **synthetic permitted** v1/v2 or other policy-defined fixture, and validates inclusion and required signed time | Error like incompatible log generation / insufficient verified time; do not retry with reduced evidence or hidden network |
+| **Offline root provenance and freshness** | Independently hash-pinned root/config with authenticated distribution, stated expiry/age/skew limits and explicit permitted signing-time and revocation rules | `--offline` silently uses unknown/default stale cache, root changed/expired, timestamp source absent |
+| **Loader and dependency closure** | Exact tool executable, interpreter if any, imported libraries, trust-config and argv/inherited FDs independently authenticated before first invocation | Runtime `pip install` / ambient PATH / unpinned shared library / self-attesting candidate Mac Python |
+| **Full-byte sealed snapshot and negative pair** | Hasher measures **all** original sealed bytes, exact length, approved expected SHA, and authenticated handoff; pinned verifier checks bundle signature over exactly that digest | Same-name/size but different sealed content, mutation/restore, swapped/mismatched digest or changed policy, even if synthetic fixture otherwise valid |
+
+No mock verifier or always-REFUSE adapter can satisfy the **synthetic positive** row. These are **future tests**, not tests run or authorized by this documentation. If production tool/roots cannot be pinned or verified in a network-denied isolated environment, keep T4/T5 **UNRESOLVED / B0A_REFUSED**.
+
+## Independent operator decisions still required
+
+1. **Which exact bundle/log generation is allowable?** This question cannot be answered from release-page metadata; any inspection of `.pkg.sigstore` requires **separate bounded artifact-material authorization**. Never download it just to satisfy this docs PR.
+2. **What signed-time evidence and root age are sufficient offline?** Approver must define explicit accepted witness hierarchy, trust roots, numeric validity/staleness/skew cutoffs, trusted clock source and revocation handling. Any unverifiable evidence **REFUSES**, not a source approval.
+3. **Which exact verifier runtime?** Approval must bind tool release/version, downloaded binary/digest and loader closure, supply-chain verification, CLI flags, trust-config/TUF revision, network-denied launch and the precise permitted digest/signature-log form. **Neither `sigstore-python >=3.3.0` nor `>=4` is a security pin.**
+4. **Who authorizes what, and when?** Written approval for T1–T5+handoff mode remains distinct from (a) this research/docs merge, (b) synthetic-only implementation, (c) actual package/bundle acquisition, (d) B0b independent Mac Apple Installer CMS/notarization/effects, and (e) B1–B4/UID502/staging/release.
+
+**Boundary preserved:** the B0a→B0b join still requires immutable copy custody, complete SHA-256 + exact length and approved policy digest/revision, and B0b's Apple Installer checks are separate from Sigstore. All T1–T9 and B0–B4 remain **UNRESOLVED / UNVERIFIED**, real UID502/APFS original nine-case E2E not run, Homebrew source BLOCKED, Linux Slice C DEFERRED.
