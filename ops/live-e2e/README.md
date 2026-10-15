@@ -256,3 +256,34 @@ Its historical roots/marker are expected absent and its journal remains
 protected. Do not dispatch that exhausted fixed disposer for normal healthy
 checks or a future incident; normal native E2E uses the existing live-local-e2e
 workflow and its cleanup postconditions.
+
+
+## ADR 0019 Gate B0a — synthetic-only offline source-evidence CLI (Draft PR #268)
+
+The Gate B0a feature is developed and reviewed in [PR #268](https://github.com/zhangyuz/ssh-over-mcp/pull/268). This command currently exposes only **refusal behavior**, **not real signed-source verification**. It does not access a Python.org package, install software, grant `SOURCE_VERIFIED` or permit UID502/APFS execution.
+
+From the repository root with an ordinary, non-privileged developer Python 3.13+ runtime:
+
+```sh
+python3 ops/live-e2e/gate_b0_source_verification.py \
+  verify-synthetic --fixture signed-test-key-1 --format json
+```
+
+Until the **separately reviewed and operator-approved T5 synthetic policy** is present, it MUST exit with status `2` and emit one bounded JSON record with these stable fields:
+
+```json
+{
+  "evidence_class": "NON_AUTHORIZING_SYNTHETIC",
+  "reason_code": "T5_POLICY_UNAPPROVED",
+  "schema": "som.b0a.synthetic.v1",
+  "status": "B0A_REFUSED"
+}
+```
+
+An unrecognized test fixture exits `2` with `FIXTURE_NOT_APPROVED`; disallowed options and arbitrary `--root`, `--approved`, `--online` or real-artifact flags exit `2` with `CLI_ARGS_REJECTED`. `--help` is informational only and returns `0`.
+
+The Linux-only `gate_b0_immutable_bytes.py` helper is **not a generic file validator**. It accepts only bounded built-in immutable `bytes` owned by a trusted *synthetic test fixture harness*, seals a fresh anonymous `memfd` with verified Linux kernel write/grow/shrink/seal flags, hashes **all sealed bytes**, records exact length and closes the descriptor on refusal. Its caller-created witness is **not independent cryptographic source provenance**; never use it as an approval root for real files, concurrent writable sources, Sigstore signer identity, B0b custody or a trusted Mac host.
+
+**Requirements before marking this Draft PR Ready:** a separately independently pinned/authenticated offline Sigstore tool/runtime and complete dependency closure, approved exact signed **test-key** fixture/bundle and expected signer SAN/OIDC, independently authenticated Fulcio/CT/Rekor roots/log inclusion/signed time, numeric clock/skew/staleness/revocation disposition and a single approved sealed-FD or digest-bound mode. In an isolated unprivileged **network-denied** verifier runtime, demonstrate actual pinned-tool test-key signature **GREEN** (`SYNTHETIC_ONLY`) and distinct changed-sealed-byte and valid-signature/bundle-declared-digest **RED** tests, and retain exact-head CI plus independent project-wide security review. A self-generated root, fake verifier output, always-refusing CLI or hosted CI PASS cannot replace those proofs.
+
+See the [B0a design](../../docs/superpowers/specs/2026-10-15-adr19-b0a-offline-source-evidence-cli-design.md), [TDD implementation plan](../../docs/superpowers/plans/2026-10-15-adr19-b0a-offline-source-evidence-cli.md) and [separately governed B0a/B0b trust boundary](../../docs/superpowers/plans/2026-10-15-adr19-gate-b0-offhost-package-verification.md). The operator must not access/execute real `.pkg` or `.sigstore` material, `installer`, protected macOS paths, UID502 or production trust roots under this synthetic feature scope.
