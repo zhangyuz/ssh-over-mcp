@@ -52,6 +52,23 @@ result is PROVENANCE_REFUSED. Neither is host admission or UID502 PASS_CLEAN.
   out-of-range integers are refused before bitwise graph validation.
   These are finite *claimed-evidence widths*, not actual Darwin
   provenance measurements.
+- The follow-up [independent review #6189539816](https://github.com/zhangyuz/ssh-over-mcp/pull/255#issuecomment-6189539816)
+  confirmed previous claimed object identity and POSIX numeric limits were
+  resolved, but identified two more fail-closed gaps in the synthetic schema:
+  NUL-containing filenames and special permission bits. The shared lexical
+  validator now refuses NUL in every absolute and relative path field
+  (including artifact root, manifest path, node, runtime executable, and
+  module search paths). A negative fixture **recomputes the fictional
+  manifest checksum** after inserting a NUL in a stdlib file name; this
+  independently tests canonical-path refusal rather than digest mismatch.
+- All claimed POSIX file/directory st_mode witnesses now require
+  **no setuid, setgid or sticky mode bits** (mode & 0o7000 == 0).
+  A hypothetical root-owned interpreter or dylib with setuid/setgid is
+  REFUSED; shared directories with special permissions are also
+  conservatively refused. Relaxing this policy for a real installation
+  would require a separately reviewed design; Gate B must independently
+  verify real host mode/privilege properties. This is still **untrusted
+  caller-supplied evidence**, never source or host authentication.
 - Negative cases cover hostile rich comparisons, wrong nested types,
   exceeded quotas, duplicate search paths, malformed manifest association,
   framework dylib outside its bundle, wrong architecture or Python ABI,

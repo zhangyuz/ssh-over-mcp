@@ -2086,6 +2086,14 @@ uses a unique positive fixture identity per declared node, and bounds full
 POSIX st_mode to 0..0o177777 plus 64-bit positive device/inode
 claims. Those checks do not authenticate actual host objects.
 
+The subsequent independent review also required canonical paths to reject
+embedded NUL bytes even if every synthetic digest is coherently recomputed,
+and all reported POSIX file/directory modes to reject setuid, setgid, and
+sticky privilege bits (mode & 0o7000), including root-owned interpreter
+claims. These checks are explicitly fail-closed *synthetic schema* policies;
+real host mode, package contents, signatures and loader behavior remain
+unattested and belong to separately approved Gate B.
+
 See [Gate A implementation evidence](evidence/2026-10-14-adr19-interpreter-provenance-contract.md)
 for review/CI gates. A green synthetic schema fixture or old-path
 trusted-main Level-3 run is NOT real UID502/APFS acceptance.

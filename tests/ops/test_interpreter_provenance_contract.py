@@ -534,3 +534,62 @@ def test_out_of_range_st_mode_refuses(c, node_id, invalid_mode):
 )
 def test_out_of_range_synthetic_device_inode_refuses(c, field, invalid_value):
     _refuses(c, _replace_node(fixture(c), "ext", **{field: invalid_value}))
+
+
+# Independent review #6189539816 — preserve the reviewed canonical path and
+# no-special-permissions trust policy even when every fake digest matches.
+def test_coherent_manifest_nul_filename_refuses(c):
+    e = fixture(c)
+    changed = ROOT + "/lib/os\x00.py"
+    e = _replace_node(e, "os", path=changed)
+    e = _rebind_fictional_claim(c, e)
+    assert next(n for n in e.nodes if n.node_id == "os").path.endswith("os\x00.py")
+    # This must not pass merely because all attacker-created hash fields agree.
+    _refuses(c, e)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/test-only/uid502-immutable\x00-python",
+        ROOT + "/lib/os\x00.py",
+        ROOT + "/lib/\x00",
+    ],
+)
+def test_nul_rejected_by_absolute_path_predicate(c, path):
+    assert c._absolute(path) is False
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "lib/os\x00.py",
+        "lib/\x00",
+        "\x00",
+    ],
+)
+def test_nul_rejected_by_manifest_relative_path_predicate(c, relative):
+    assert c._relative(relative, root=False) is False
+
+
+@pytest.mark.parametrize(
+    "node_id,mode",
+    [
+        ("exe", 0o104755),  # file / setuid
+        ("exe", 0o102755),  # file / setgid
+        ("dyld", 0o104755),
+        ("dyld", 0o102755),
+        ("ext", 0o104755),
+        ("ext", 0o102755),
+        ("root", 0o41755),  # directory / sticky
+        ("lib", 0o42755),  # directory / setgid
+    ],
+)
+def test_special_permission_bits_refuse_even_on_root_owned_claims(c, node_id, mode):
+    e = fixture(c)
+    _refuses(c, _replace_node(e, node_id, mode=mode))
+
+
+def test_framework_dylib_special_mode_refuses(c):
+    e = fixture(c, framework=True)
+    _refuses(c, _replace_node(e, "frameworklib", mode=0o104755))

@@ -120,14 +120,20 @@ def _sha(value: object) -> bool:
     return _ascii(value, 64) and _DIGEST.fullmatch(value) is not None
 
 
+def _path_text(value: object, *, empty: bool = False) -> bool:
+    # POSIX path bytes cannot contain NUL. ASCII alone permits NUL, so
+    # explicitly reject it for all claimed absolute and relative paths.
+    return _ascii(value, 1024, empty=empty) and "\x00" not in value
+
+
 def _absolute(value: object) -> bool:
-    if not _ascii(value, 1024) or not value.startswith("/") or value == "/":
+    if not _path_text(value) or not value.startswith("/") or value == "/":
         return False
     return all(part not in ("", ".", "..") for part in value.split("/")[1:])
 
 
 def _relative(value: object, *, root: bool) -> bool:
-    if not _ascii(value, 1024, empty=root):
+    if not _path_text(value, empty=root):
         return False
     if not value:
         return root
@@ -323,6 +329,10 @@ def _valid_graph(e: ProvenanceEvidence) -> bool:
             or n.uid != 0
             or n.gid != 0
             or n.mode & 0o022
+            # Reject every special mode bit (setuid, setgid, sticky) on
+            # all synthetic directory/file roles. No privilege semantics
+            # are admitted by this restrictive, non-authorizing schema.
+            or n.mode & 0o7000
             or n.writable_by_uid502
             or n.mode & 0o170000 != (0o040000 if n.kind in _DIRS else 0o100000)
             or (n.kind in _DIRS and n.digest_sha256 != _NA)
