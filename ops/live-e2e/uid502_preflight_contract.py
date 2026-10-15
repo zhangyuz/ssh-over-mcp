@@ -69,6 +69,29 @@ def _int_id(value: object) -> bool:
     return type(value) is int and value >= 0
 
 
+def _text_tuple(values: object) -> bool:
+    return type(values) is tuple and all(type(v) is str for v in values)
+
+
+def _string_pairs(values: object) -> bool:
+    return (
+        type(values) is tuple
+        and all(
+            type(pair) is tuple
+            and len(pair) == 2
+            and type(pair[0]) is str
+            and type(pair[1]) is str
+            for pair in values
+        )
+    )
+
+
+def _int_triple(values: object) -> bool:
+    return type(values) is tuple and len(values) == 3 and all(
+        type(v) is int for v in values
+    )
+
+
 def validate_run(
     run: RunIdentity,
     checkout: CheckoutEvidence,
@@ -78,13 +101,57 @@ def validate_run(
     """Evaluate untrusted field values, never prove real GitHub/host identity."""
     if not all(
         (
-            isinstance(run, RunIdentity),
-            isinstance(checkout, CheckoutEvidence),
-            isinstance(job, WorkflowJobEvidence),
-            isinstance(runner, RunnerIdentity),
+            type(run) is RunIdentity,
+            type(checkout) is CheckoutEvidence,
+            type(job) is WorkflowJobEvidence,
+            type(runner) is RunnerIdentity,
         )
     ):
         return ("EVIDENCE_INVALID",)
+
+    # Fail each typed domain BEFORE comparisons: dataclasses do not enforce
+    # constructor types, and arbitrary rich comparisons can be malicious.
+    if not (
+        all(type(v) is str for v in (
+            run.repository, run.event, run.ref, run.github_sha
+        ))
+        and _string_pairs(run.inputs)
+    ):
+        return ("RUN_CONTEXT_INVALID",)
+    if not (
+        all(type(v) is str for v in (
+            checkout.head_sha, checkout.checkout_uses, checkout.checkout_ref
+        ))
+        and all(type(v) is bool for v in (
+            checkout.clean, checkout.persist_credentials, checkout.checkout_clean,
+            checkout.credential_env_present, checkout.credential_helper_present,
+            checkout.complete,
+        ))
+        and type(checkout.fetch_depth) is int
+    ):
+        return ("CHECKOUT_INVALID",)
+    if not (
+        _string_pairs(job.permissions)
+        and _text_tuple(job.runs_on)
+        and type(job.concurrency_group) is str
+        and type(job.cancel_in_progress) is bool
+        and type(job.complete) is bool
+    ):
+        return ("JOB_INVALID",)
+    if not (
+        all(type(v) is str for v in (
+            runner.user, runner.home, runner.platform, runner.arch
+        ))
+        and all(_int_id(v) for v in (
+            runner.uid, runner.euid, runner.account_uid, runner.gid,
+            runner.egid, runner.account_primary_gid, runner.admin_gid,
+        ))
+        and type(runner.supplementary_gids) is tuple
+        and all(_int_id(v) for v in runner.supplementary_gids)
+        and _text_tuple(runner.group_names)
+        and type(runner.complete) is bool
+    ):
+        return ("RUNNER_INVALID",)
 
     failed: list[str] = []
     if (
@@ -186,10 +253,35 @@ def validate_interpreter(
 
     if policy is None:
         return ("INTERPRETER_TRUST_UNAPPROVED",)
-    if not isinstance(inventory, InterpreterInventory) or not isinstance(
-        policy, InterpreterTrustPolicy
-    ):
+    if type(inventory) is not InterpreterInventory or type(policy) is not InterpreterTrustPolicy:
         return ("EVIDENCE_INVALID",)
+    if not (
+        all(type(v) is str for v in (
+            inventory.resolved_path, inventory.sys_executable, inventory.arch
+        ))
+        and _int_triple(inventory.version)
+        and type(inventory.complete) is bool
+        and type(inventory.chain) is tuple
+        and all(type(v) is str for v in (policy.policy_label, policy.expected_path))
+        and _int_triple(policy.version)
+        and type(policy.allowed_owner_uid) is int
+        and type(policy.allowed_owner_gid) is int
+        and _text_tuple(policy.approved_chain)
+    ):
+        return ("INTERPRETER_INVALID",)
+    for witness in inventory.chain:
+        if type(witness) is not PathWitness or not (
+            all(type(v) is str for v in (
+                witness.name, witness.acl_state, witness.kind
+            ))
+            and (witness.target is None or type(witness.target) is str)
+            and all(_int_id(v) for v in (
+                witness.dev, witness.ino, witness.uid, witness.gid
+            ))
+            and type(witness.mode) is int
+            and type(witness.writable_by_uid502) is bool
+        ):
+            return ("INTERPRETER_INVALID",)
 
     # There is intentionally *no* policy path for running the real UID501/admin
     # interpreter; a future trusted collector + immutable installation needs
@@ -284,7 +376,13 @@ _NAMESPACE_CHAIN = (
 )
 
 
-def _namespace_identity(values: object) -> bool:
+_NATIVE_TEMP_CANONICAL = re.compile(
+    r"/private/var/folders/[a-z0-9]{2}/[a-z0-9_]{1,255}/T/"
+)
+
+
+def _namespace_identity(values: object, *, private: bool) -> bool:
+    # 0700/0755 are allowed on shared ancestors; private root remains 0700.
     return (
         type(values) is tuple
         and len(values) == 5
@@ -292,21 +390,30 @@ def _namespace_identity(values: object) -> bool:
         and values[0] > 0
         and values[1] > 0
         and values[2] == 502
-        and values[4] == 0o40700
+        and values[4] in ((0o40700,) if private else (0o40700, 0o40755))
     )
 
 
 def validate_namespace(namespace: NamespaceEvidence) -> tuple[str, ...]:
-    """Only compare synthetic pinned-edge claims; never inspect real APFS."""
-    if not isinstance(namespace, NamespaceEvidence):
+    """Only compare synthetic claims; lexical checks do not prove real APFS aliases."""
+    if type(namespace) is not NamespaceEvidence:
         return ("EVIDENCE_INVALID",)
+    if not (
+        all(type(v) is str for v in (
+            namespace.verification_root, namespace.protected_root,
+            namespace.native_temp_parent,
+        ))
+        and all(type(v) is bool for v in (
+            namespace.complete, namespace.foreign_entry,
+            namespace.quarantine_present, namespace.alias_disjoint,
+        ))
+        and type(namespace.edges) is tuple
+    ):
+        return ("NAMESPACE_INVALID",)
     if (
         namespace.verification_root != _VERIFICATION_ROOT
         or namespace.protected_root != _PROTECTED_ROOT
-        or not isinstance(namespace.native_temp_parent, str)
-        or not namespace.native_temp_parent.startswith("/private/var/folders/")
-        or namespace.native_temp_parent.startswith(_VERIFICATION_ROOT)
-        or namespace.native_temp_parent.startswith(_PROTECTED_ROOT)
+        or _NATIVE_TEMP_CANONICAL.fullmatch(namespace.native_temp_parent) is None
         or namespace.complete is not True
         or namespace.foreign_entry is not False
         or namespace.quarantine_present is not False
@@ -317,12 +424,17 @@ def validate_namespace(namespace: NamespaceEvidence) -> tuple[str, ...]:
         return ("NAMESPACE_INVALID",)
 
     witnessed = []
-    for edge, component in zip(namespace.edges, _NAMESPACE_CHAIN):
+    for index, (edge, component) in enumerate(zip(namespace.edges, _NAMESPACE_CHAIN)):
+        if type(edge) is not NamespaceEdge or not (
+            type(edge.name) is str
+            and type(edge.acl_state) is str
+            and type(edge.nofollow) is bool
+            and _namespace_identity(edge.original, private=index == len(_NAMESPACE_CHAIN) - 1)
+            and _namespace_identity(edge.current, private=index == len(_NAMESPACE_CHAIN) - 1)
+        ):
+            return ("NAMESPACE_INVALID",)
         if (
-            not isinstance(edge, NamespaceEdge)
-            or edge.name != component
-            or not _namespace_identity(edge.original)
-            or not _namespace_identity(edge.current)
+            edge.name != component
             or edge.original != edge.current
             or edge.acl_state != "verified_safe"
             or edge.nofollow is not True
@@ -336,8 +448,19 @@ def validate_namespace(namespace: NamespaceEvidence) -> tuple[str, ...]:
 
 def validate_provider(provider: ProviderInventory) -> tuple[str, ...]:
     """Synthetic complete-empty claims are not authenticated process evidence."""
-    if not isinstance(provider, ProviderInventory):
+    if type(provider) is not ProviderInventory:
         return ("EVIDENCE_INVALID",)
+    if not (
+        type(provider.marker_state) is str
+        and type(provider.qemu_state) is str
+        and (provider.qemu_count is None or type(provider.qemu_count) is int)
+        and all(type(v) is bool for v in (
+            provider.marker_chain_pinned, provider.protected_clean,
+            provider.legacy_private_clean, provider.legacy_native_clean,
+            provider.complete,
+        ))
+    ):
+        return ("PROVIDER_INVALID",)
     if (
         provider.marker_state != "absent_no_follow"
         or provider.marker_chain_pinned is not True
@@ -384,16 +507,16 @@ def assess(
 ) -> ContractResult:
     """Classify *synthetic* evidence only; never authorize native execution."""
     refuse = ContractResult("CONTRACT_REFUSED", ("EVIDENCE_INVALID",))
-    if not isinstance(evidence, ContractEvidence):
+    if type(evidence) is not ContractEvidence:
         return refuse
     if not all((
-        isinstance(evidence.run, RunIdentity),
-        isinstance(evidence.checkout, CheckoutEvidence),
-        isinstance(evidence.job, WorkflowJobEvidence),
-        isinstance(evidence.runner, RunnerIdentity),
-        isinstance(evidence.interpreter, InterpreterInventory),
-        isinstance(evidence.namespace, NamespaceEvidence),
-        isinstance(evidence.provider, ProviderInventory),
+        type(evidence.run) is RunIdentity,
+        type(evidence.checkout) is CheckoutEvidence,
+        type(evidence.job) is WorkflowJobEvidence,
+        type(evidence.runner) is RunnerIdentity,
+        type(evidence.interpreter) is InterpreterInventory,
+        type(evidence.namespace) is NamespaceEvidence,
+        type(evidence.provider) is ProviderInventory,
     )):
         return refuse
 

@@ -287,7 +287,7 @@ def _safe_namespace(contract):
         "ssh-over-mcp-uid502-verification-v1",
         "/Users/gha-e2e-orchestrator/Library/Application Support/"
         "ssh-over-mcp-e2e/staging-v1",
-        "/private/var/folders/test/T/",
+        "/private/var/folders/ab/abc_012345/T/",
         edges, True, False, False, True,
     )
 
@@ -492,3 +492,154 @@ def test_no_host_io_or_execution_surface(contract, inputs):
     assert contract.assess(evidence, interpreter_policy=policy).status == (
         "CONTRACT_ELIGIBLE_FOR_HOST_PROBE"
     )
+
+
+class _ComparisonTrap:
+    """Unknown evidence type: comparisons MUST NEVER invoke these callbacks."""
+
+    def __init__(self, calls, *, raises=False):
+        self.calls = calls
+        self.raises = raises
+
+    def __eq__(self, other):
+        self.calls.append("eq")
+        if self.raises:
+            raise AssertionError("untrusted __eq__ called")
+        return True
+
+    def __ne__(self, other):
+        self.calls.append("ne")
+        if self.raises:
+            raise AssertionError("untrusted __ne__ called")
+        return False
+
+
+@pytest.mark.parametrize(
+    ("part", "field", "nested"),
+    [
+        ("run", "repository", False),
+        ("run", "event", False),
+        ("run", "ref", False),
+        ("checkout", "head_sha", False),
+        ("checkout", "checkout_uses", False),
+        ("checkout", "checkout_ref", False),
+        ("job", "concurrency_group", False),
+        ("job", "permissions", True),
+        ("job", "runs_on", True),
+        ("runner", "user", False),
+        ("runner", "home", False),
+        ("runner", "platform", False),
+        ("runner", "group_names", True),
+        ("interpreter", "resolved_path", False),
+        ("interpreter", "sys_executable", False),
+        ("interpreter", "arch", False),
+        ("interpreter", "version", True),
+        ("namespace", "verification_root", False),
+        ("namespace", "protected_root", False),
+        ("namespace", "native_temp_parent", False),
+        ("provider", "marker_state", False),
+        ("provider", "qemu_state", False),
+    ],
+)
+@pytest.mark.parametrize("raises", [False, True])
+def test_untrusted_inner_comparison_never_invoked(
+    contract, inputs, part, field, nested, raises
+):
+    calls = []
+    trap = _ComparisonTrap(calls, raises=raises)
+    evidence, policy = _safe_evidence(contract, inputs)
+    value = trap
+    if nested:
+        original = getattr(getattr(evidence, part), field)
+        if field == "permissions":
+            value = ((trap, "read"),)
+        elif field == "runs_on":
+            value = (trap, *original[1:])
+        elif field == "group_names":
+            value = (trap,)
+        elif field == "version":
+            value = (trap, 13, 16)
+    evidence = replace(evidence, **{
+        part: replace(getattr(evidence, part), **{field: value})
+    })
+    result = contract.assess(evidence, interpreter_policy=policy)
+    assert result.status == "CONTRACT_REFUSED"
+    assert result.violations
+    assert all(code in contract._FIXED_CODES for code in result.violations)
+    assert calls == [], "comparison must not invoke untrusted rich comparison"
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_untrusted_witness_or_policy_chain_never_compared(contract, inputs, raises):
+    calls = []
+    trap = _ComparisonTrap(calls, raises=raises)
+    evidence, policy = _safe_evidence(contract, inputs)
+    bad_witness = replace(evidence.interpreter.chain[1], name=trap)
+    bad_interpreter = replace(evidence.interpreter, chain=(
+        evidence.interpreter.chain[0], bad_witness,
+        *evidence.interpreter.chain[2:],
+    ))
+    for altered_evidence, altered_policy in (
+        (replace(evidence, interpreter=bad_interpreter), policy),
+        (evidence, replace(policy, approved_chain=(trap, *policy.approved_chain[1:]))),
+        (replace(evidence, namespace=replace(
+            evidence.namespace, edges=(
+                replace(evidence.namespace.edges[0], name=trap),
+                *evidence.namespace.edges[1:],
+            ),
+        )), policy),
+    ):
+        result = contract.assess(altered_evidence, interpreter_policy=altered_policy)
+        assert result.status == "CONTRACT_REFUSED"
+        assert result.violations
+        assert all(code in contract._FIXED_CODES for code in result.violations)
+    assert calls == []
+
+
+@pytest.mark.parametrize("native", [
+    "/private/var/folders/../../tmp",
+    "/private/var/folders/ab/../../../../tmp",
+    "/private/var/folders/",
+    "/private/var/folders/ab/abc/T",
+    "/private/var/folders/ab/abc/T/extra/",
+    "/private/var/folders/ab/abc/../T/",
+    "/private/var/folders/ab/abc/./T/",
+    "/private/var/folders/ab/abc/U/",
+    "/private/var/folders/a/abc/T/",
+    "/private/var/folders/ab/abc/T//",
+    "/private/var/folders/AB/abc/T/",
+    "/var/folders/ab/abc/T/",
+])
+def test_native_temp_path_lexical_escape_refused(contract, native):
+    record = replace(_safe_namespace(contract), native_temp_parent=native)
+    assert "NAMESPACE_INVALID" in contract.validate_namespace(record)
+
+
+def test_native_temp_canonical_shape_synthetic_only(contract):
+    record = replace(
+        _safe_namespace(contract),
+        native_temp_parent="/private/var/folders/ab/abc_012345/T/",
+    )
+    assert contract.validate_namespace(record) == ()
+
+
+@pytest.mark.parametrize("shared_edge_index", [0, 1, 2])
+def test_permitted_shared_ancestor_mode_0755(contract, shared_edge_index):
+    record = _safe_namespace(contract)
+    edge = record.edges[shared_edge_index]
+    original = (*edge.original[:4], 0o40755)
+    changed_edge = replace(edge, original=original, current=original)
+    record = replace(record, edges=tuple(
+        changed_edge if i == shared_edge_index else e
+        for i, e in enumerate(record.edges)
+    ))
+    assert contract.validate_namespace(record) == ()
+
+
+def test_private_verification_root_mode_0755_refused(contract):
+    record = _safe_namespace(contract)
+    edge = record.edges[-1]
+    original = (*edge.original[:4], 0o40755)
+    record = replace(record, edges=(*record.edges[:-1],
+        replace(edge, original=original, current=original)))
+    assert "NAMESPACE_INVALID" in contract.validate_namespace(record)

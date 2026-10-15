@@ -34,6 +34,30 @@ acceptance **UNVERIFIED**. This is **not** an authorization record.
   Only a separately approved trusted-main host collector may eventually
   verify real UID502 identity, APFS ACL/FD ownership and trusted interpreter.
 
+## Independent implementation review and remediation
+
+[PR #253 review #6182297828](https://github.com/zhangyuz/ssh-over-mcp/pull/253#issuecomment-6182297828)
+examined original code HEAD `32d996836f9281bc9390c1bc69d9d1f195c7a30a`
+and reported **0 Critical / 2 Important / 1 Minor**. Before any merge,
+the implementation branch added RED→GREEN regressions and corrected:
+
+- **Important 1:** exact primitive and recursively typed nested tuple
+  evidence checks **before any equality or regular-expression comparison**;
+  no attacker-supplied equality callback may run. Malformed fields refuse
+  using bounded fixed diagnostic codes.
+- **Important 2:** anchored native-temp canonical format matching the existing
+  frozen Darwin selector: `/private/var/folders/<2-character>/<token>/T/`.
+  Lexical correctness **never authenticates** alias disjointness, FD
+  identities or a real `DARWIN_USER_TEMP_DIR`; only future operator-approved
+  host collection can.
+- **Minor:** shared account ancestor modes may be `0700` or `0755`
+  (consistent with merged `protected_staging._policy`), but the
+  verification-only **private root still requires `0700`**.
+
+The review findings are addressed on the implementation branch, **pending
+independent fresh exact-head review and CI**. Local synthetic tests do not
+constitute UID502/APFS physical acceptance.
+
 ## Implementation verification boundaries
 
 Host-independent focused RED→GREEN cases have been run incrementally
