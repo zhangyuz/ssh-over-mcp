@@ -2179,3 +2179,8 @@ separate operator go-ahead before a B0 verification implementation plan.
 ### ADR0019 Gate B0 plan proposed — 2026-10-15
 
 The [separate B0a/B0b plan](superpowers/plans/2026-10-15-adr19-gate-b0-offhost-package-verification.md) follows merged PR #258. It is documentation for independent operator/security review, not implementation authorization. B0a concerns independently verified offline digest and Sigstore evidence; B0b separately covers Apple Installer identity and package effects. The Python.org CPython 3.13.16 release remains a candidate only; B0 through B4 remain UNVERIFIED, with no download, installation, UID502 run or provider change. Linux Slice C remains deferred.
+
+
+### ADR0019 B0 trusted signer policy research — 2026-10-15
+
+A new [public-metadata-only B0 source trust dossier](evidence/2026-10-15-adr19-b0-signer-trust-policy-research.md) gathers independent primary-source signing and packaging references for **operator/security review**. The published CPython 3.13 Sigstore release-manager identity, the distinct Apple Installer Developer ID, and the offline trust-root freshness risk are **candidates and unresolved policy**, not measurements or granted authority. Exact signer/issuer, independent trust anchors, revocation/time rules, verifier provenance, byte-identity/custody join, installer effects and separate implementation/artifact/host approvals remain UNRESOLVED; **no source code, package download or Mac operation is authorized or changed**. B0–B4 and original UID502/APFS remain UNVERIFIED; Linux Slice C deferred.
