@@ -45,6 +45,46 @@ d30434bda6e079ab303fb30d1b3006d939a10ca34783b1573d61cd9b802fa45c  tuf-7.0.1-py3-
 0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3  urllib3-2.8.0-py3-none-any.whl
 ```
 
+### T5A per-wheel measured-size and PyPI release-metadata audit receipt
+
+The guest recorded each downloaded wheel's **actual on-disk byte length** and SHA-256 separately from each corresponding PyPI project/version JSON release record. Every listed exact filename was found once in that release's `urls[]`, with matching `digests.sha256` and `size`; `yanked=false` for all 31. Source metadata links are the exact project-version JSON endpoints used for comparison; they are **publisher-supplied metadata**, not independent proof of build provenance or trust authorization. This is a fixed **2026-10-15 observation**, not an assertion about current availability or any future resolution.
+
+| Exact candidate wheel filename | Measured SHA-256 | Measured length (bytes) | PyPI `urls[].size` (bytes) | Source metadata |
+| --- | --- | ---: | ---: | --- |
+| `annotated_types-0.8.0-py3-none-any.whl` | `f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0` | 13427 | 13427 | [PyPI annotated-types 0.8.0](https://pypi.org/pypi/annotated-types/0.8.0/json) |
+| `certifi-2026.7.22-py3-none-any.whl` | `62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775` | 136983 | 136983 | [PyPI certifi 2026.7.22](https://pypi.org/pypi/certifi/2026.7.22/json) |
+| `cffi-2.1.1-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl` | `b0431303acaea1089ad4b3e9ce4e6518193def1118d4073ca848635ee4ea2e96` | 221525 | 221525 | [PyPI cffi 2.1.1](https://pypi.org/pypi/cffi/2.1.1/json) |
+| `charset_normalizer-3.5.2-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl` | `34276fd796040bf0993ab33a369aa572e6979c7aab225a88893667ad8eac8f7a` | 255056 | 255056 | [PyPI charset-normalizer 3.5.2](https://pypi.org/pypi/charset-normalizer/3.5.2/json) |
+| `cryptography-48.0.1-cp311-abi3-manylinux_2_34_x86_64.whl` | `0ee6ea481db1ab889cba043ec1eda17bb9c1ea79db6722f779c3667f9f70322f` | 4745488 | 4745488 | [PyPI cryptography 48.0.1](https://pypi.org/pypi/cryptography/48.0.1/json) |
+| `dnspython-2.9.0-py3-none-any.whl` | `9a4aedb833c3c1b49214d04d44d3032ab7a9135f7c1d29a549b4ff78fd82fda9` | 354822 | 354822 | [PyPI dnspython 2.9.0](https://pypi.org/pypi/dnspython/2.9.0/json) |
+| `email_validator-2.3.0-py3-none-any.whl` | `80f13f623413e6b197ae73bb10bf4eb0908faf509ad8362c5edeb0be7fd450b4` | 35604 | 35604 | [PyPI email-validator 2.3.0](https://pypi.org/pypi/email-validator/2.3.0/json) |
+| `id-1.6.1-py3-none-any.whl` | `f5ec41ed2629a508f5d0988eda142e190c9c6da971100612c4de9ad9f9b237ca` | 14689 | 14689 | [PyPI id 1.6.1](https://pypi.org/pypi/id/1.6.1/json) |
+| `idna-3.20-py3-none-any.whl` | `ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c` | 69583 | 69583 | [PyPI idna 3.20](https://pypi.org/pypi/idna/3.20/json) |
+| `markdown_it_py-4.2.0-py3-none-any.whl` | `9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a` | 91687 | 91687 | [PyPI markdown-it-py 4.2.0](https://pypi.org/pypi/markdown-it-py/4.2.0/json) |
+| `mdurl-0.1.2-py3-none-any.whl` | `84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8` | 9979 | 9979 | [PyPI mdurl 0.1.2](https://pypi.org/pypi/mdurl/0.1.2/json) |
+| `platformdirs-4.13.0-py3-none-any.whl` | `3dbcf4cd708f21cf876c4eaa90e58412bc4f033d87143f41b1493ff77c25b7e1` | 32724 | 32724 | [PyPI platformdirs 4.13.0](https://pypi.org/pypi/platformdirs/4.13.0/json) |
+| `pyasn1-0.6.4-py3-none-any.whl` | `deda9277cfd454080ec40b207fb6df82206a3a2688735233cdcd8d3d565f088b` | 84410 | 84410 | [PyPI pyasn1 0.6.4](https://pypi.org/pypi/pyasn1/0.6.4/json) |
+| `pycparser-3.11-py3-none-any.whl` | `51d5a8ba2be0bbe440b99d2112604c95bbbc3c2748a64260186c541e1729cd80` | 51178 | 51178 | [PyPI pycparser 3.11](https://pypi.org/pypi/pycparser/3.11/json) |
+| `pydantic-2.14.1-py3-none-any.whl` | `9195d967ec791692a04438115466764fb8b9a27b31f14a760437694f40d6b454` | 488106 | 488106 | [PyPI pydantic 2.14.1](https://pypi.org/pypi/pydantic/2.14.1/json) |
+| `pydantic_core-2.50.1-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl` | `42b54c2c90ad348b5e3a85e03e715d572c1fde357ef104cdfe3b03b697a404ea` | 2159857 | 2159857 | [PyPI pydantic_core 2.50.1](https://pypi.org/pypi/pydantic_core/2.50.1/json) |
+| `pygments-2.21.0-py3-none-any.whl` | `2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9` | 1250147 | 1250147 | [PyPI Pygments 2.21.0](https://pypi.org/pypi/Pygments/2.21.0/json) |
+| `pyjwt-2.15.1-py3-none-any.whl` | `42d59d631f7768a1028a64c7ff581a9bf7519804daf91fc5b6c56e30eec5e193` | 33860 | 33860 | [PyPI PyJWT 2.15.1](https://pypi.org/pypi/PyJWT/2.15.1/json) |
+| `pyopenssl-26.2.0-py3-none-any.whl` | `4f9d971bc5298b8bc1fab282803da04bf000c755d4ad9d99b52de2569ca19a70` | 55823 | 55823 | [PyPI pyOpenSSL 26.2.0](https://pypi.org/pypi/pyOpenSSL/26.2.0/json) |
+| `requests-2.34.2-py3-none-any.whl` | `2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0` | 73075 | 73075 | [PyPI requests 2.34.2](https://pypi.org/pypi/requests/2.34.2/json) |
+| `rfc3161_client-1.0.9-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl` | `fac3f440a507555e684dc5daba75e33dc08f0f45fdefa48448f19001233a6b21` | 2415566 | 2415566 | [PyPI rfc3161-client 1.0.9](https://pypi.org/pypi/rfc3161-client/1.0.9/json) |
+| `rfc8785-0.1.4-py3-none-any.whl` | `520d690b448ecf0703691c76e1a34a24ddcd4fc5bc41d589cb7c58ec651bcd48` | 9240 | 9240 | [PyPI rfc8785 0.1.4](https://pypi.org/pypi/rfc8785/0.1.4/json) |
+| `rich-15.0.0-py3-none-any.whl` | `33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb` | 310654 | 310654 | [PyPI rich 15.0.0](https://pypi.org/pypi/rich/15.0.0/json) |
+| `securesystemslib-1.5.1-py3-none-any.whl` | `ada8bdf817da29ece4ba91654f6a162ce7cfbadbc3ae3f840f7313f9d22675de` | 876390 | 876390 | [PyPI securesystemslib 1.5.1](https://pypi.org/pypi/securesystemslib/1.5.1/json) |
+| `sigstore-4.3.0-py3-none-any.whl` | `0f60c46c92fd4e871fbec979c9ae2aa381d7a93fbb774e49c9964550e5e16856` | 111351 | 111351 | [PyPI sigstore 4.3.0](https://pypi.org/pypi/sigstore/4.3.0/json) |
+| `sigstore_models-0.0.6-py3-none-any.whl` | `5201a68f4d7d0f8bec1e2f4378eb646b084c52609a4e31db8c385095fff68b2e` | 13213 | 13213 | [PyPI sigstore-models 0.0.6](https://pypi.org/pypi/sigstore-models/0.0.6/json) |
+| `sigstore_rekor_types-0.0.18-py3-none-any.whl` | `b62bf38c5b1a62bc0d7fe0ee51a0709e49311d137c7880c329882a8f4b2d1d78` | 20610 | 20610 | [PyPI sigstore-rekor-types 0.0.18](https://pypi.org/pypi/sigstore-rekor-types/0.0.18/json) |
+| `tuf-7.0.1-py3-none-any.whl` | `d30434bda6e079ab303fb30d1b3006d939a10ca34783b1573d61cd9b802fa45c` | 56253 | 56253 | [PyPI tuf 7.0.1](https://pypi.org/pypi/tuf/7.0.1/json) |
+| `typing_extensions-4.16.0-py3-none-any.whl` | `481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8` | 45571 | 45571 | [PyPI typing_extensions 4.16.0](https://pypi.org/pypi/typing_extensions/4.16.0/json) |
+| `typing_inspection-0.4.4-py3-none-any.whl` | `65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147` | 14750 | 14750 | [PyPI typing-inspection 0.4.4](https://pypi.org/pypi/typing-inspection/0.4.4/json) |
+| `urllib3-2.8.0-py3-none-any.whl` | `0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3` | 135717 | 135717 | [PyPI urllib3 2.8.0](https://pypi.org/pypi/urllib3/2.8.0/json) |
+
+Audit predicates (31/31 PASS as measured in the **T5A inspection guest**): matching exact wheel filename, matching downloaded SHA-256 vs `urls[].digests.sha256`, measured length vs `urls[].size`, `yanked=false`; wheel archive path traversal and decompressed-size bounds also had no flagged results. Method: `pip download --only-binary=:all: sigstore==4.3.0`, `hashlib.sha256`/filesystem byte counts, read-only `zipfile` metadata inspection, and HTTP GET of the matching `https://pypi.org/pypi/<package>/<version>/json` release metadata. The original uncommitted machine-readable audit is retained in guest-local `pypi-crosscheck.json` under the T5A path above; **this table persists the exact name/hash/size and source-reference values for independent cross-check**. Do not infer independently authenticated provenance, signed timestamp validation, an approved loader/interpreter/root, or T5B execution permission.
+
 ## Independently identifiable signed-test candidate (NOT VERIFIED)
 
 Official [Sigstore conformance repository snapshot](https://github.com/sigstore/sigstore-conformance/tree/e241c4ea6c83b4d8f03461e825f056b2c5eba3ed/test/assets/bundle-verify/rekor2-happy-path) at commit `e241c4ea6c83b4d8f03461e825f056b2c5eba3ed`:
