@@ -2051,3 +2051,49 @@ nine-case matrix. Real UID502 acceptance, expected-forensic-quarantine
 disposition, protected placement Slice 2B/3, any new persistent-Mac
 workflow, and ADR 0020 automatic PR-native dispatch remain unapproved
 or UNVERIFIED. See [contract evidence](evidence/2026-10-14-adr19-uid502-preflight-contract.md).
+
+### Phase 7 — ADR0019 Gate A interpreter provenance consistency (2026-10-15)
+
+The independently reviewed [design + plan PR #254](https://github.com/zhangyuz/ssh-over-mcp/pull/254)
+was merged into main as ade5b33a7397c1f23844c29a2f61c88e5e6533f7.
+This permits a separately reviewed implementation of **Gate A only**.
+
+The standalone pure Python module ops/live-e2e/interpreter_provenance_contract.py
+and adversarial tests tests/ops/test_interpreter_provenance_contract.py
+implement bounded **synthetic, untrusted data consistency** checks for
+declared package and canonical manifest SHA, manifest/node membership,
+limited self-owned dependency graph/roles/ABI, Darwin x86_64 and
+CPython 3.13.16 claims. The maximum 64 nodes/entries, 128 edges and
+64 unique bounded module search paths are **schema budgets**, not proof
+of macOS compatibility. The only states are PROVENANCE_REFUSED and
+PROVENANCE_SCHEMA_CONSISTENT_UNATTESTED.
+
+**Even self-consistent caller-supplied manifests/digests are not
+authenticated.** Gate A performs no filesystem reads, package attestation,
+code signing, runtime install, runner invocation, privilege use or physical
+UID502/APFS fixture execution. It does not change the merged UID502
+preflight interpreter default refusal, or authorize host execution.
+The observed UID501/GID80 group-writable Homebrew Python remains **BLOCKED**.
+Trusted Gate B interpreter selection/provisioning, original FD/APFS/ACL
+and dyld/import resolution, operator approval, nine-case original UID502
+fixture and protected placement remain **UNVERIFIED and OUT OF SCOPE**.
+
+An independent source review identified two missing checks in the synthetic
+witness schema: distinct nodes could share a claimed (dev, ino), and
+unbounded st_mode/device/inode integers could pass permissive masks.
+The Gate A validator now **refuses duplicated synthetic object identities**,
+uses a unique positive fixture identity per declared node, and bounds full
+POSIX st_mode to 0..0o177777 plus 64-bit positive device/inode
+claims. Those checks do not authenticate actual host objects.
+
+The subsequent independent review also required canonical paths to reject
+embedded NUL bytes even if every synthetic digest is coherently recomputed,
+and all reported POSIX file/directory modes to reject setuid, setgid, and
+sticky privilege bits (mode & 0o7000), including root-owned interpreter
+claims. These checks are explicitly fail-closed *synthetic schema* policies;
+real host mode, package contents, signatures and loader behavior remain
+unattested and belong to separately approved Gate B.
+
+See [Gate A implementation evidence](evidence/2026-10-14-adr19-interpreter-provenance-contract.md)
+for review/CI gates. A green synthetic schema fixture or old-path
+trusted-main Level-3 run is NOT real UID502/APFS acceptance.
