@@ -52,7 +52,7 @@ class SealedMeasurement:
 # Retain the exact issued object until authenticated one-time close.
 # Matching public fields do not prove possession of this descriptor.
 _LIVE_LOCK = threading.Lock()
-_LIVE_MEASUREMENTS: dict[int, tuple[SealedMeasurement, int, int, int, int]] = {}
+_LIVE_MEASUREMENTS: dict[int, tuple[SealedMeasurement, int, int, int, int, str, int, str]] = {}
 
 
 def fixture_from_trusted_bytes(
@@ -142,7 +142,8 @@ def ingest_fixed_fixture(
         )
         with _LIVE_LOCK:
             _LIVE_MEASUREMENTS[id(result)] = (
-                result, fd, final.st_dev, final.st_ino, final.st_size
+                result, fd, final.st_dev, final.st_ino, final.st_size,
+                result.sha256, result.length, result.witness_ref
             )
         transferred = True
         return result
@@ -154,6 +155,45 @@ def ingest_fixed_fixture(
         if fd >= 0 and not transferred:
             os.close(fd)
 
+
+
+def authenticated_measurement_for_handoff(
+    measurement: SealedMeasurement,
+) -> tuple[int, str, int]:
+    """Return only registered and kernel-checked sealed bytes identity.
+
+    Intended for the future approved T5 adapter; this is not trust-policy
+    approval or a proof against hostile concurrent same-process FD changes.
+    Never use public measurement.sha256 as an independently trusted hash.
+    """
+    if type(measurement) is not SealedMeasurement:
+        raise B0aInputRefused("SEALED_MEASUREMENT_INVALID")
+    with _LIVE_LOCK:
+        owned = _LIVE_MEASUREMENTS.get(id(measurement))
+        if owned is None or owned[0] is not measurement:
+            raise B0aInputRefused("SEALED_MEASUREMENT_NOT_OWNED")
+        _, fd, dev, ino, size, digest, length, witness = owned
+        if (
+            measurement.fd != fd
+            or measurement.sha256 != digest
+            or measurement.length != length
+            or measurement.witness_ref != witness
+        ):
+            raise B0aInputRefused("SEALED_MEASUREMENT_SUBSTITUTED")
+        try:
+            actual = os.fstat(fd)
+            seals = fcntl.fcntl(fd, fcntl.F_GET_SEALS)
+        except OSError:
+            raise B0aInputRefused("SEALED_MEASUREMENT_STALE") from None
+        if (
+            actual.st_dev != dev
+            or actual.st_ino != ino
+            or actual.st_size != size
+            or size != length
+            or (seals & _REQUIRED_SEALS) != _REQUIRED_SEALS
+        ):
+            raise B0aInputRefused("SEALED_MEASUREMENT_SUBSTITUTED")
+        return fd, digest, size
 
 def close_measurement(measurement: SealedMeasurement) -> None:
     """Close one still-owned sealed FD, never an arbitrary reused integer.
@@ -167,7 +207,7 @@ def close_measurement(measurement: SealedMeasurement) -> None:
         owned = _LIVE_MEASUREMENTS.get(id(measurement))
         if owned is None or owned[0] is not measurement or measurement.fd != owned[1]:
             raise B0aInputRefused("SEALED_MEASUREMENT_NOT_OWNED")
-        _, fd, original_dev, original_ino, original_size = owned
+        _, fd, original_dev, original_ino, original_size, _, _, _ = owned
         try:
             current = os.fstat(fd)
             seals = fcntl.fcntl(fd, fcntl.F_GET_SEALS)

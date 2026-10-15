@@ -256,3 +256,46 @@ def test_mutated_live_measurement_fd_refuses_and_preserves_borrower():
         finally:
             object.__setattr__(owned, "fd", original)
     api.close_measurement(owned)
+
+
+def test_handoff_rejects_mutated_public_digest_length_or_witness():
+    api = load_module()
+    payload = b"synthetic signed-boundary bytes"
+    fixture, authority = api.fixture_from_trusted_bytes(payload, fixture_id="handoff-fields")
+    measured = api.ingest_fixed_fixture(fixture, authority)
+    try:
+        for field, malicious in (
+            ("sha256", "0" * 64),
+            ("length", measured.length + 1),
+            ("witness_ref", "synthetic-memfd:forged"),
+        ):
+            original = getattr(measured, field)
+            object.__setattr__(measured, field, malicious)
+            try:
+                with pytest.raises(api.B0aInputRefused):
+                    api.authenticated_measurement_for_handoff(measured)
+            finally:
+                object.__setattr__(measured, field, original)
+        fd, digest, size = api.authenticated_measurement_for_handoff(measured)
+        assert fd == measured.fd
+        assert digest == hashlib.sha256(payload).hexdigest()
+        assert size == len(payload)
+    finally:
+        api.close_measurement(measured)
+
+
+def test_handoff_rejects_forged_or_closed_issued_descriptor():
+    api = load_module()
+    fixture, authority = api.fixture_from_trusted_bytes(b"fixture", fixture_id="handoff-stale")
+    issued = api.ingest_fixed_fixture(fixture, authority)
+    copied = api.SealedMeasurement(
+        fd=issued.fd, sha256=issued.sha256,
+        length=issued.length, witness_ref=issued.witness_ref,
+    )
+    try:
+        with pytest.raises(api.B0aInputRefused):
+            api.authenticated_measurement_for_handoff(copied)
+    finally:
+        api.close_measurement(issued)
+    with pytest.raises(api.B0aInputRefused):
+        api.authenticated_measurement_for_handoff(issued)
