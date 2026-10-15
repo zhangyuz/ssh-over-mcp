@@ -132,7 +132,7 @@
 
 **Files:**
 - Modify: `ops/live-e2e/README.md`
-- Create: `docs/evidence/2026-10-15-adr19-gate-b0-source-verification.md` (only factual genuine synthetic verification receipts)
+- Update: `docs/evidence/2026-10-15-adr19-gate-b0-source-verification.md` (**T5A inspection-only provenance/hash/size/metadata receipts may be recorded before T5B, explicitly `NON_AUTHORIZING_SYNTHETIC`; append separately labeled genuine synthetic Sigstore GREEN/RED receipts only after exact T5B approval and actual pinned-verifier execution**; never promote T5A evidence to source trust or signed GREEN)
 - Modify: `docs/development-methodology.md`
 - Modify: `docs/development-plan.md`
 - Review: `docs/superpowers/plans/2026-10-15-adr19-gate-b0-offhost-package-verification.md` (proposed allowlist change; requires independent approval before implementation)
