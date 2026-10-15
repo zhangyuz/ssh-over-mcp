@@ -2097,3 +2097,21 @@ unattested and belong to separately approved Gate B.
 See [Gate A implementation evidence](evidence/2026-10-14-adr19-interpreter-provenance-contract.md)
 for review/CI gates. A green synthetic schema fixture or old-path
 trusted-main Level-3 run is NOT real UID502/APFS acceptance.
+
+### Issue #256 — Proposed cross-platform provenance profile architecture (2026-10-15)
+
+[Issue #256](https://github.com/zhangyuz/ssh-over-mcp/issues/256)
+calls for portable **synthetic** evidence invariants and separate Darwin
+and Linux ABI/loader profiles. Product/managed target, Ubuntu CI host,
+macOS native E2E orchestrator and Ubuntu QEMU guest are distinct roles.
+The merged [Gate A PR #255](https://github.com/zhangyuz/ssh-over-mcp/pull/255)
+remains Darwin-specific and explicitly UNATTESTED; it is not a
+SOM-wide Darwin requirement or a real UID502/APFS acceptance proof.
+
+The current work is documentation-only:
+[design](superpowers/specs/2026-10-15-issue256-cross-platform-provenance-profiles-design.md)
+and [future Slice B TDD plan](superpowers/plans/2026-10-15-issue256-portable-provenance-profile-slice-b.md).
+Proposed Slice B retains existing Darwin behavior and refuses all Linux
+profiles until separately reviewed Slice C. Linux native E2E
+orchestration/Runner and Gate B actual interpreter trust are independent
+future operator/security approvals, not implied by green Ubuntu CI.
