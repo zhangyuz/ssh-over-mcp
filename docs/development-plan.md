@@ -2147,3 +2147,30 @@ B1, B2, C and future Linux native E2E orchestration/Runner (Slice D)
 and Gate B actual interpreter trust all require separate operator and
 independent security approvals. Green Ubuntu CI, or a synthetic
 Darwin-positive, is never native host or source verification.
+
+### ADR0019 macOS real-acceptance critical path — Gate B source selection (2026-10-15, proposal only)
+
+Following merged [PR #257](https://github.com/zhangyuz/ssh-over-mcp/pull/257),
+the next macOS-first blocker is not another synthetic profile router.
+The existing Homebrew interpreter lives below a historically observed
+UID501/GID80 **group-writable** /usr/local/Cellar ancestor and remains
+**BLOCKED**. Merged Gate A only checks fabricated evidence.
+
+The new [Gate B signed interpreter source design](superpowers/specs/2026-10-15-adr19-gate-b-macos-interpreter-source-decision-design.md)
+evaluates Python.org CPython 3.13.16 macOS signed installer as a
+**candidate only** and defines separate B0 source/signature verification,
+B1 independently approved installation, B2 real at-use native FD/APFS/
+Mach-O/dyld dependency attestation, and B3 original-code UID502 nine-row
+physical acceptance. The [macOS blocker and release readiness matrix]
+(evidence/2026-10-15-macos-native-release-blocker-inventory.md)
+distinguishes already-merged inert contracts, old-path native Level-3
+and still-UNVERIFIED physical gates. Gate B terminology here is
+separate from Issue #256's portable-profile B1/B2 router/core slices.
+Linux C remains deferred until operator-confirmed macOS full-feature
+launch and separate portable B2 acceptance.
+
+**This is a documentation-only design proposal**: no installer download,
+package trust proof, root-owned path, permission change, host collector,
+new workflow, persistent Mac run or UID502/APFS test has been performed
+or authorized. The next step is joint design/security review and a
+separate operator go-ahead before a B0 verification implementation plan.
