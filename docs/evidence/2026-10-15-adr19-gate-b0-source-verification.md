@@ -122,3 +122,25 @@ The [offline CLI guidance](https://sigstore.github.io/sigstore-python/advanced/o
 | B0b / macOS physical UID502/APFS acceptance | **UNVERIFIED**, separately gated |
 
 **No READY or MERGE** until the exact T5B independent security and operator decision is recorded; actual execution is separately authorized; real cryptographic positive and adversarial negatives plus final independent review and exact-head CI are available. Never use this T5A manifest, same-repo staging root, CLI `B0A_REFUSED`, or CI green as a real `SOURCE_VERIFIED` result.
+
+
+## T5B trust-config design candidate — static T5A inspection, NOT TRUST-APPROVED
+
+For T5B review, inspected a **separately published, test-only staging TUF repository** at immutable [`sigstore/root-signing-staging` commit `e6a4dcecdbc2c15e2c05caac5b0f0202008ef023`](https://github.com/sigstore/root-signing-staging/tree/e6a4dcecdbc2c15e2c05caac5b0f0202008ef023). This is a *candidate source distinct from the conformance bundle's repository*; it has **not** been accepted as an independent cryptographic trust anchor. Upstream explicitly says staging is for development/testing and **not suitable for production source trust**.
+
+| Immutable candidate source file | Measured length | Measured SHA-256 |
+| --- | ---: | --- |
+| `metadata/root.json` | 4,221 | `3cfd686011642e1fe151d5e413524bc1fe47ac69e87d44a33a811d04fe1795b9` |
+| `metadata/timestamp.json` | 450 | `a399663b1f923b15dc0b31ddc4efeece640b43c22cacf3e9f6bf3293de97b22a` |
+| `metadata/snapshot.json` | 498 | `bedd2a80db1f2e0d417d98f4ce17f130290d438926aed4ce757aaca5fb4b5328` |
+| `metadata/targets.json` | 4,465 | `f7b603d51b3aef6f33d515a3ce1e1c05b3fb696e1aac3eb9978751af9ed1513f` |
+| `targets/trusted_root.json` | 12,722 | `44deb991d4bbf2150751ccee235d9810bce4434383c26d8898c1bcadbace6ed8` |
+| `targets/signing_config.v0.2.json` | 1,215 | `7cd0090164c5c85e46d78ac44a28cca2e423967aa184c4d43c2108683ca26f62` |
+
+**Read-only consistency result:** Both `targets/` byte counts and SHA-256s equal the respective entries in the same commit's `metadata/targets.json`. `metadata/root.json` announces root version 15, expiration `2027-03-13T01:31:42Z`; `timestamp.json` announces version 750, expiration `2026-10-22T13:26:57Z`; snapshot version 25 expires `2036-07-03T07:17:24Z`, targets version 28 expires `2036-06-29T08:21:59Z`. The presence of signed metadata and unexpired self-declared times **does not prove any TUF signatures, role threshold, rollback protection, or externally trusted clock**.
+
+The pinned candidate `trusted_root.json` declares 5 transparency log keys, 2 CA entries, 5 CT logs and 2 TSAs. Its declared tlog IDs include the historical conformance Rekor v2 bundle's ID `8w1amZ2S5mJIQkQmPxdMuOrL/oJkvFg9MnQXmeOCXck=`, providing **static key-ID compatibility only**; Rekor inclusion, checkpoint authenticity, signature time and validity under that key **remain unverified**.
+
+**Correct v4.3.0 config shape candidate:** `ClientTrustConfig` requires `mediaType=application/vnd.dev.sigstore.clienttrustconfig.v0.1+json`, a `trustedRoot` object and a `signingConfig` object of **media type v0.2**, not a bare `trusted_root.json`. A deterministic `json.dumps(..., sort_keys=True, separators=(",", ":")) + "\\n"` static wrapper over these two published targets was written to the **guest's candidate-only staging area**, not installed or executed: 11,700 bytes; SHA-256 `592ab025f274ce7b43376a2cd0c1085d9620c37c21c74bb84960deded8ef5390`. This is a **locally assembled, unauthenticated candidate configuration**, and is **not included as a trusted executable policy**. Do not pass it to `sigstore verify` until all T5B checks and exact material execution consent are complete.
+
+**Still missing T5B:** independently authenticated TUF root bootstrap and signature thresholds/metadata chain; externally trusted offline wall clock/skew and numerical freshness/rollback limits (including older 2025 signed test fixture); correct TSA/certificate SCT/CT/log inclusion cryptography and revocation policy; complete 31-wheel interpreter/native-loader/environment provenance, version-compatible parser behavior, precisely specified network-denied sandbox and one approved sealed-digest/FD handoff. Self-consistent staging metadata cannot approve itself. No genuine Sigstore verification was run; `SYNTHETIC_ONLY` GREEN/hostile RED remain **NOT EXECUTED**. Real macOS `.pkg`, B0b, UID502/APFS and production source acceptance remain out of scope.
