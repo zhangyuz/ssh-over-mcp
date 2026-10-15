@@ -123,7 +123,7 @@ def test_cli_unknown_fixture_refuses():
     proc = subprocess.run(
         [sys.executable, str(cli), "verify-synthetic", "--fixture", "unknown",
          "--format", "json"],
-        text=True, capture_output=True, timeout=5,
+        text=True, capture_output=True, check=False, timeout=5,
     )
     assert proc.returncode != 0
     result = json.loads(proc.stdout)
@@ -141,7 +141,7 @@ def test_cli_known_fixture_never_self_approves_without_t5():
     proc = subprocess.run(
         [sys.executable, str(cli), "verify-synthetic", "--fixture", "signed-test-key-1",
          "--format", "json"],
-        text=True, capture_output=True, timeout=5,
+        text=True, capture_output=True, check=False, timeout=5,
     )
     assert proc.returncode != 0
     result = json.loads(proc.stdout)
@@ -163,7 +163,7 @@ def test_cli_refuses_unsafe_flags_and_unknown_modes():
             sys.executable, str(cli), "verify-synthetic", "--fixture",
             "signed-test-key-1", "--format", "json", *extra,
         ]
-        proc = subprocess.run(command, text=True, capture_output=True, timeout=5)
+        proc = subprocess.run(command, text=True, capture_output=True, check=False, timeout=5)
         assert proc.returncode != 0
         assert json.loads(proc.stdout)["status"] == "B0A_REFUSED"
 
@@ -172,7 +172,7 @@ def test_cli_help_is_non_authorizing():
     import subprocess
     cli = MODULE.with_name("gate_b0_source_verification.py")
     proc = subprocess.run(
-        [sys.executable, str(cli), "--help"], text=True, capture_output=True, timeout=5,
+        [sys.executable, str(cli), "--help"], text=True, capture_output=True, check=False, timeout=5,
     )
     assert proc.returncode == 0
     assert "verify-synthetic" in proc.stdout
