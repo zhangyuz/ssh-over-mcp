@@ -2122,6 +2122,18 @@ selector-to-evidence contradictions can refuse, but perfectly forged
 Darwin claims may remain **UNATTESTED**: no pure synthetic router
 can identify unobserved real ELF or Mach-O bytes.
 
+**Mac-first release sequence (operator decision, 2026-10-15):**
+Prioritize completing and launching the approved macOS functionality.
+**Do not begin Linux Slice C implementation until macOS full-feature
+release/launch has been completed and confirmed by the operator AND
+the B2 shared-core parity/refactor has separately passed review.**
+Actual macOS release/UID502 physical acceptance and Gate B trust
+evidence remain unverified here and require their own authorization;
+CI or synthetic Gate A success is not macOS launch proof. B1/B2 may
+remain future planning work, but should not displace the Mac release
+critical path. Linux native E2E orchestration (D) stays separately
+deferred.
+
 B1, B2, C and future Linux native E2E orchestration/Runner (Slice D)
 and Gate B actual interpreter trust all require separate operator and
 independent security approvals. Green Ubuntu CI, or a synthetic

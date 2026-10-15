@@ -44,6 +44,25 @@ verify parity of the Darwin behavior against existing and router-mediated
 fixtures. B2 is a mandatory dependency of independently reviewed Slice C
 (Linux synthetic ELF profile); if no safe extraction is feasible,
 revisit architecture before C rather than duplicating unnoticed logic.
+**Operator sequencing decision (2026-10-15): macOS-first release.**
+Linux **Slice C must NOT start development before the macOS full-feature
+implementation has passed its approved release gates and has actually
+launched**. The milestone is **not yet achieved**; do not infer it from
+a green hosted Ubuntu CI, legacy Level-3, Gate A synthetic evidence or
+a merged design PR. Release evidence and operator acknowledgement
+must establish the approved macOS feature/release scope, applicable
+trusted-host/security review, operational/deployment readiness, and
+the real UID502/APFS nine-case acceptance **where required by the
+approved macOS scope**. Gate B source/install attestation and native
+host testing each retain their own operator approval; this paragraph
+does not authorize running them or presume they are already passed.
+Starting C requires **both** (1) completed and reviewed B2 parity/
+shared-core delivery and (2) documented macOS full-feature launch
+confirmed by the operator, plus a **new explicit Slice C approval**.
+B1/B2 planning may be retained but must not divert the macOS release
+critical path; code work needs separate authorization. Linux native
+orchestrator Slice D also remains deferred to a later distinct approval.
+
 Slice D (Linux native orchestrator) and real Gate B are separate,
 independently gated projects. No B1/B2/C/D implementation is authorized
 by the current docs-only PR.
@@ -54,7 +73,7 @@ Shared pure checks only: frozen exact record/primitive type validation before co
 
 **Darwin profile:** Existing assess_provenance(evidence) API, all observed statuses and all current negative tests must retain their old behavior, including Mach-O binary/framework/dylib relationships, cpython-313-darwin extension tags, UID0/GID0 policy, claimed no-writability, special-bit refusals, NUL refusals, DAG, and finite budgets. Do not change the UID502 inert preflight, protected staging or native E2E workflow.
 
-**Linux profile (not in B1 or B2):** A later independently reviewed Slice C must specify ELF e_machine, ELF ABI, dynamic interpreter, DT_NEEDED / SONAME and loader search/rpath/runpath, explicit glibc-versus-musl policy, extension SOABI, permission/ACL/mount/namespace semantics and dependency completeness. A Linux-looking record, wrong ELF machine, cross-profile substitution, unknown libc or incomplete dynamic graph must refuse. No real Linux provenance acceptance is claimed here.
+**Linux profile (not in B1 or B2; C deferred until macOS full-feature launch):** After BOTH approved B2 and an operator-confirmed full-feature macOS release, a separately reviewed and approved Slice C may specify ELF e_machine, ELF ABI, dynamic interpreter, DT_NEEDED / SONAME and loader search/rpath/runpath, explicit glibc-versus-musl policy, extension SOABI, permission/ACL/mount/namespace semantics and dependency completeness. A Linux-looking record, wrong ELF machine, cross-profile substitution, unknown libc or incomplete dynamic graph must refuse. No real Linux provenance acceptance is claimed here.
 
 **B1-only routing interface:** frozen
 ProfileSelector(os_family, machine_arch, python_abi, role, profile_id);
@@ -124,7 +143,9 @@ synthetic router can detect an undisclosed real format.
 - Documentation-only PR; no behavior, CI workflow, operator privilege, cleanup or runner change.
 - B1 only provides an explicit Darwin selector; B2 is the required
   OS-neutral shared core extraction, not delivered/approved by B1.
-  Slice C depends on independent B2 parity/review and separate approval.
+  Slice C is **deferred until macOS full-feature release and launch**
+  confirmed by the operator, AND independent B2 parity/review and
+  separate explicit Slice C approval. No pre-launch Linux C work.
 - A future B1 router must preserve every Darwin Gate A direct status
   AND violations through the new router, reject declared inconsistencies,
   unregistered Linux and role authority claims, and preserve coherent

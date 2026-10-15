@@ -25,7 +25,8 @@ never silently skip B2 or describe router-only as portable.
 - No .github/workflows, UID502 preflight, QEMU provider, protected staging, incident recovery, CI runner or physical fixture modifications.
 - No OS/network/process/file I/O; no platform detection or user-chosen dynamic imports.
 - Keep 64 nodes/entries, 128 edges, 64 paths, 1024 ASCII-byte paths, 64-byte approval labels, no NUL, no special mode bits and duplicate claimed identity refusal.
-- Existing full-profile result PROVENANCE_SCHEMA_CONSISTENT_UNATTESTED remains unauthenticated. Linux deliberately refuses until separately reviewed Slice C, which **depends on B2**.
+- Existing full-profile result PROVENANCE_SCHEMA_CONSISTENT_UNATTESTED remains unauthenticated. Linux deliberately refuses until separately reviewed Slice C. **C requires B2 complete AND the operator-confirmed macOS full-feature release/launch milestone**; neither is yet established.
+- macOS full-feature development, actual verified acceptance and launch are the delivery priority. Neither a green Ubuntu CI nor the existing legacy native Level-3 test is sufficient launch evidence. Future Gate B and real UID502/APFS acceptance must be separately authorized before being used to support a release claim; none is authorized by this plan.
 - B1 never implements a portable core; B2 needs independent spec, plan,
   implementation approval and fresh security review. Do not change the
   existing Gate A implementation in B1, and no Linux profile may be
@@ -181,9 +182,14 @@ typed reusable OS-neutral invariant module and refactor Darwin to
 consume it without changing any existing direct or router
 (status, violations). B2 needs its own design/plan/PR,
 adversarial TDD, exact-head hosted CI and independent review.
-**Slice C (blocked until B2 accepted):** independently design
-a Linux synthetic ELF/glibc-or-musl/ld.so/SOABI/dependency
-profile and hostile-path tests. **Slice D:** distinct Linux
+**Slice C (BLOCKED until BOTH B2 acceptance and macOS full-feature
+launch):** only after the macOS release is actually live and the
+operator confirms its completed release gates, and B2 is independently
+reviewed/accepted, may a separately approved iteration design and
+implement the Linux synthetic ELF/glibc-or-musl/ld.so/SOABI/dependency
+profile and hostile-path tests. Linux Slice C must not consume delivery
+capacity before that milestone. This is an explicit sequencing rule,
+not a prediction or a claim that the Mac has already shipped. **Slice D:** distinct Linux
 native E2E host/QEMU/identity/provider/isolation feasibility.
 Neither B2, C nor D is authorized by this B1 proposal.
 Gate B actual package bytes/host attestation, UID502 staging
