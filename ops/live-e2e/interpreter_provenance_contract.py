@@ -100,6 +100,9 @@ _DIGEST = re.compile(r"[0-9a-f]{64}")
 _ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _APPROVAL = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
 _REFUSAL = ProvenanceResult("PROVENANCE_REFUSED", ("EVIDENCE_INVALID",))
+# Finite synthetic witness widths, not an attestation of Darwin stat results.
+_MAX_WITNESS_OBJECT_ID = (1 << 64) - 1
+_MAX_POSIX_MODE = 0o177777
 
 
 def _ascii(value: object, size: int, *, empty: bool = False) -> bool:
@@ -227,16 +230,10 @@ def _typed(e: ProvenanceEvidence) -> bool:
             and _absolute(n.path)
             and type(n.kind) is str
             and n.kind in _KINDS
-            and all(
-                type(x) is int and x >= 0
-                for x in (
-                    n.dev,
-                    n.ino,
-                    n.uid,
-                    n.gid,
-                    n.mode,
-                )
-            )
+            and all(type(x) is int and 0 < x <= _MAX_WITNESS_OBJECT_ID for x in (n.dev, n.ino))
+            and all(type(x) is int and x >= 0 for x in (n.uid, n.gid))
+            and type(n.mode) is int
+            and 0 <= n.mode <= _MAX_POSIX_MODE
             and type(n.acl_state) is str
             and n.acl_state == "verified_safe"
             and (
@@ -297,7 +294,11 @@ def _valid_graph(e: ProvenanceEvidence) -> bool:
     if len(members) != len(entries) or len(nodes) != len(e.nodes) or members.keys() != nodes.keys():
         return False
     paths = {n.path for n in e.nodes}
-    if len(paths) != len(e.nodes):
+    # Different declared file/dir paths must not alias the same
+    # caller-supplied filesystem object, even under distinct roles/digests.
+    # This is in-memory claim consistency, NOT a live stat/FD identity proof.
+    identities = {(n.dev, n.ino) for n in e.nodes}
+    if len(paths) != len(e.nodes) or len(identities) != len(e.nodes):
         return False
 
     root = None

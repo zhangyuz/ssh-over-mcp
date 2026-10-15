@@ -30,6 +30,20 @@ def c():
         sys.modules.pop(spec.name, None)
 
 
+# Stable, pairwise unique fictional inode values; never derived from path length.
+_FIXTURE_INODES = {
+    "root": 101,
+    "exe": 102,
+    "lib": 103,
+    "os": 104,
+    "dyld": 105,
+    "ext": 106,
+    "frameparent": 107,
+    "bundle": 108,
+    "frameworklib": 109,
+}
+
+
 def _node(c, node_id, rel, kind, *, mode=None, arch=None, abi=DIR, py=None):
     directory = kind in ("directory", "framework_bundle", "stdlib_dir")
     return c.ProvenanceNode(
@@ -37,7 +51,7 @@ def _node(c, node_id, rel, kind, *, mode=None, arch=None, abi=DIR, py=None):
         ROOT + ("/" + rel if rel else ""),
         kind,
         1,
-        100 + len(rel),
+        _FIXTURE_INODES[node_id],
         0,
         0,
         (0o40755 if directory else 0o100755) if mode is None else mode,
@@ -477,3 +491,46 @@ def test_over_budget_manifest_tuple_and_nodes_refuse_early(c):
         replace(e, nodes=e.nodes * 12),
     ):
         _refuses(c, invalid)
+
+
+def test_positive_fixtures_claim_unique_device_inode_identities(c):
+    # Synthetic aliases of one object cannot represent separate nodes.
+    for framework in (False, True):
+        e = fixture(c, framework=framework)
+        identities = [(n.dev, n.ino) for n in e.nodes]
+        assert len(identities) == len(set(identities))
+
+
+def test_distinct_paths_same_device_inode_refuse_with_coherent_manifest(c):
+    e = fixture(c)
+    original = next(n for n in e.nodes if n.node_id == "root")
+    e = _replace_node(e, "ext", dev=original.dev, ino=original.ino)
+    # Node names, paths, package manifest, digest, role and topology are
+    # intentionally unchanged and coherent; only alleged inode identity aliases.
+    _refuses(c, e)
+
+
+@pytest.mark.parametrize(
+    ("node_id", "invalid_mode"),
+    [
+        ("exe", 0o100755 | (1 << 64)),
+        ("lib", 0o40755 | (1 << 64)),
+        ("exe", 0o100755 | (1 << 128)),
+        ("exe", 0o100755 | (1 << 1000)),
+    ],
+)
+def test_out_of_range_st_mode_refuses(c, node_id, invalid_mode):
+    _refuses(c, _replace_node(fixture(c), node_id, mode=invalid_mode))
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    [
+        ("dev", 1 << 64),
+        ("ino", 1 << 64),
+        ("dev", 1 << 1000),
+        ("ino", 1 << 1000),
+    ],
+)
+def test_out_of_range_synthetic_device_inode_refuses(c, field, invalid_value):
+    _refuses(c, _replace_node(fixture(c), "ext", **{field: invalid_value}))

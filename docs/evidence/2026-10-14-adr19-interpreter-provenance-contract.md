@@ -34,6 +34,24 @@ result is PROVENANCE_REFUSED. Neither is host admission or UID502 PASS_CLEAN.
   search, Python imports, original FD/APFS/ACL, immutable install or
   operator trust is verified. The existing Homebrew interpreter remains
   BLOCKED by earlier UID502 preflight policy.
+- The original [PR #255 security review #6186387240](https://github.com/zhangyuz/ssh-over-mcp/pull/255#issuecomment-6186387240)
+  found **0 Critical / 1 Important / 1 Minor** on head 2a9320b.
+  Remediation of Important: all *distinct synthetic nodes* must have unique
+  (dev, ino) pairs, not just unique IDs and canonical paths. The old
+  positive fixture used path-length-derived inode values and accidentally
+  aliased its binary and extension. The fixed fictional fixture assigns
+  pairwise-unique stable inode numbers. An otherwise fully coherent
+  package/manifest with a duplicated claimed object identity REFUSES.
+  Intentional hardlinks are not represented by this version; a future
+  reviewed schema would be required. **No real stat, APFS or FD identity
+  was obtained.**
+- The same review's Minor: synthetic device and inode numbers must be
+  positive exact Python ints at most 2^64-1, and a synthetic full POSIX
+  st_mode must be an exact int in 0..0o177777 with the expected
+  regular-file/directory type bits and non-writable policy. Malformed
+  out-of-range integers are refused before bitwise graph validation.
+  These are finite *claimed-evidence widths*, not actual Darwin
+  provenance measurements.
 - Negative cases cover hostile rich comparisons, wrong nested types,
   exceeded quotas, duplicate search paths, malformed manifest association,
   framework dylib outside its bundle, wrong architecture or Python ABI,
