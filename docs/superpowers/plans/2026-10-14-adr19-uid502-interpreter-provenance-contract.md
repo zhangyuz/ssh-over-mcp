@@ -56,6 +56,12 @@ main `4d8449a8eec95eb37f33bd8c193cdaf7cf19be61`.
 
 The [independent review #6185298182](https://github.com/zhangyuz/ssh-over-mcp/pull/254#issuecomment-6185298182)
 found 0 Critical, 2 Important, 1 Minor at old head 2ac9658.
+Its fixes were re-reviewed at exact 04f64f4 in
+[review #6185643321](https://github.com/zhangyuz/ssh-over-mcp/pull/254#issuecomment-6185643321):
+all prior findings resolved, but one new Important (unbounded module path
+count/approval labels) and one Minor (framework dylib role not bound
+to framework bundle) require this revised bound and association contract.
+No implementation approval or persistent-host authority follows.
 
 1. **Important 1, option A chosen:** tie the package SHA to the
    manifest claim and a canonical manifest SHA-256, then map every
@@ -119,8 +125,14 @@ No caller-supplied field, even when labelled signed, carries authority.
   stdlib_dir descendants (no zip-stdlib format in this version).
   Exactly one binary, >=1 stdlib_dir, >=1 stdlib_file. For
   layout=framework, exactly one framework_bundle and >=1
-  framework_dylib are required. For standalone, both are
-  forbidden. A Python distribution needing other roles must
+  framework_dylib are required; every framework_dylib must be a
+  strict canonical-path descendant of that same framework_bundle,
+  connected by an unbroken chain of direct-parent contains
+  edges entirely within the bundle subtree. Reaching an unrelated
+  sibling framework_dylib from installation root by contains, or
+  from binary by macho_load, DOES NOT satisfy this requirement;
+  refuse even when all role counts are present. For standalone,
+  both framework roles are forbidden. A Python distribution needing other roles must
   REFUSE as unrepresentable, not be automatically generalized.
 - Mach-O/ABI claims: binary, dylib, framework_dylib, extension
   require macho_arch exactly x86_64. All directory/stdlib_file
@@ -173,12 +185,48 @@ manifest entry path/kind/digest alone, or associated node alone
 must REFUSE. Changing all fields coherently **cannot** establish
 real package identity, actual source authenticity or signature.
 
+**Complete input budgets — mandatory before traversing any untrusted
+collection or computing a hash (review #6185643321 Important):**
+Validate exact top-level/frozen dataclass types and exact built-in
+tuple types; reject wrong types without invoking comparison methods.
+Run constant-time len checks BEFORE iterating, sorting, set construction
+or json.dumps:
+- nodes <=64, PackageManifest.entries <=64, DependencyEdge tuple <=128,
+  and RuntimeClaim.module_search_paths <=64. Require at least one unique
+  canonical search path; reject repeated paths EVEN if count <=64.
+  Every search path must belong to a distinct declared stdlib_dir node,
+  and count <= number of unique stdlib_dir nodes. An oversized
+  search-path tuple must refuse BEFORE iterating its members.
+- ArtifactClaim.approval_ref: exactly built-in str, 1..64 ASCII bytes,
+  fullmatch [A-Za-z0-9_.:-]{1,64}. It is NEVER authorization.
+  All node_id, parent_id, child_id: built-in str,
+  1..64 ASCII bytes, fullmatch [A-Za-z0-9_-]{1,64}.
+- ArtifactClaim.install_root, RuntimeClaim.sys_executable,
+  ProvenanceNode.path, ManifestEntry.relative_path and every
+  module_search_paths entry: ASCII <=1024 bytes before lexical parsing
+  or equality, no NUL, dot/dot-dot or ambiguous slash; root manifest
+  relative path alone is permitted to be an empty string.
+- Digests are exactly 64 lowercase ASCII hex bytes; every other
+  text field (platform, arch, layout, kind, loader_kind, acl_state,
+  python_abi and macho_arch) is a strictly finite allowlist token
+  with exact built-in str type. Fixed version tuple arities are 3
+  for ArtifactClaim.python_version and 2 for extension
+  python_major_minor, with exact ints, not bools; other fields have
+  no variable-length text/sequence allowance.
+- Check all string lengths and element types before regex, comparison,
+  hashing, set/sorted, repr, log or canonical JSON; do not
+  stringify caller-supplied objects or echo any offending text.
+  Reject unknown/malformed/oversized early with one finite fixed
+  refusal code. An input that exceeds a limit may NEVER be skipped
+  or truncated into eligibility.
+
 **Refusal and bounds:** Maximum 64 nodes/manifest entries,
-128 dependency edges, 1024 characters per path, 32 fixed
-distinct codes. Only PROVENANCE_REFUSED and
-PROVENANCE_SCHEMA_CONSISTENT_UNATTESTED are outputs.
-Do not log user paths/tokens or expose execution/approval APIs;
-never permit exception messages or attacker-object repr in output.
+128 dependency edges, 64 module search paths, <=64 ASCII bytes
+per approval reference and node ID, <=1024 ASCII bytes per path,
+and 32 fixed distinct reason codes. The only status values are
+PROVENANCE_REFUSED and PROVENANCE_SCHEMA_CONSISTENT_UNATTESTED.
+No execution, API dispatch, operator approval or source attestation
+is conferred by the latter state.
 
 **Explicit representation limit:** Claimed loader edges may omit
 real dyld, @rpath, OS platform libraries, import paths and
@@ -203,6 +251,14 @@ An actual runtime exceeding the graph limits is UNVERIFIED.
   relative path, ABI, package claim and nested tuple. Assert
   refusal with fixed code and ZERO trap-method invocations.
   Invalid outer records/None/wrong types refuse.
+- [ ] **RED untrusted input budgets:** supply 65 module search paths
+  repeating one otherwise valid stdlib_dir, then two repeated valid
+  paths below quota; a 65-byte approval_ref and a multimegabyte
+  string label; 65-byte node IDs; oversized relative and absolute
+  paths and an over-budget edge tuple. Every case must refuse
+  before any expensive traversal, sort, set, JSON serialization
+  or trap comparator/formatter invocation. Assert bounded
+  fixed codes without leaked caller data.
 - [ ] Verify genuine RED against missing new production module,
   not an unrelated missing Python dependency; note exact output.
 - [ ] **GREEN:** frozen-slot types and recursive exact primitive
@@ -226,6 +282,13 @@ An actual runtime exceeding the graph limits is UNVERIFIED.
   zip/unrepresentable stdlib, arm64 Mach-O dependency,
   extension ABI cpython-312-darwin and major/minor=(3,12),
   wrong binary path or missing claimed dependency.
+  Additionally construct a framework layout with valid
+  framework_bundle and framework_dylib roles but place the dylib
+  outside the bundle as a sibling, while still reachable
+  from installation root or a macho_load edge; require refusal.
+  A positive framework fixture nests every framework_dylib
+  under the single bundle with full direct-parent contains
+  chain, proving association rather than mere role count.
 - [ ] **RED graph trust:** absent target/duplicate/cycle/wrong
   loader_kind or illegal role direction, non-direct contains,
   path traversal or alias, missing owned ancestor, detached

@@ -107,7 +107,12 @@ real macOS executable compatibility.
 - Artifact layout is exactly framework or standalone. Require exactly
   one executable binary, at least one stdlib_dir and one stdlib_file.
   Framework layout requires one framework_bundle and at least one
-  framework_dylib; standalone layout prohibits both. This first
+  framework_dylib; every framework_dylib MUST be a strict descendant
+  of that unique framework_bundle by canonical path components,
+  with a complete chain of direct-parent contains edges from bundle
+  to dylib. Root reachability via unrelated macho_load edges does
+  NOT suffice. A sibling/free-floating framework dylib must REFUSE.
+  Standalone layout prohibits both framework roles. This first
   contract covers only filesystem stdlib sources and a fully self-owned
   graph. Zipped stdlib, external system dylibs and more complex real
   packaging remain UNREPRESENTABLE and REFUSED until a separately
@@ -130,6 +135,31 @@ real macOS executable compatibility.
   or quota are UNVERIFIED rather than allowed through or labelled PASS.
   These assumptions must be revisited based on real candidate evidence
   before Gate B, with a separate security review.
+
+**Whole-record untrusted-input budget (new review #6185643321 Important):**
+Before any nested traversal, rich comparison, hashing, regex, sorting,
+or canonical JSON serialization, check exact built-in dataclass, tuple,
+string and numeric types and constant-time collection lengths. Limits:
+nodes <=64, manifest entries <=64, dependency edges <=128 and
+runtime.module_search_paths <=64; version tuples must be arity 3 or 2.
+Module search paths must be nonempty, all distinct, and count no greater
+than the number of unique declared stdlib_dir nodes. Every member must
+be a canonical absolute ASCII path <=1024 bytes and match exactly one
+such node path. Even within quota, duplicate module paths REFUSE.
+
+ArtifactClaim.approval_ref is 1..64 ASCII bytes from the safe alphabet
+[A-Za-z0-9_.:-] (still no actual approval authority); node_id and edge
+IDs are 1..64 ASCII bytes from [A-Za-z0-9_-]. All absolute and
+manifest-relative path strings (root entry alone may be empty) must
+fit <=1024 ASCII bytes. Digest fields are exactly 64 lowercase hex
+bytes; finite-token fields (kinds, loader kinds, layout, platform,
+architecture, ACL state, ABI and NOT_APPLICABLE) must match explicit
+allowlists. Other unbounded strings or sequences are not admitted.
+Check individual strings and nested tuple item types and lengths
+before any expensive evaluation, set, sort, serialization, logging
+or attacker-controlled repr. Oversized/invalid input returns fixed
+bounded refusal codes without copying caller content. This is
+synthetic-only input budgeting, not package attestation.
 
 Require exact primitive/nested dataclass type validation before rich
 comparison, sorting and serialization: never call arbitrary supplied
@@ -192,10 +222,13 @@ separately gated.
   digests, one-to-one relative paths, node hashes and roles bind
   coherently. Mutating package SHA without matching manifest claim,
   manifest entry/path/digest without matching node, adding a foreign
-  entry, an arm64 dylib, or a Python 3.12 extension REFUSES. Tests
-  reject the observed Homebrew group-writable ancestor and custom
-  equality callbacks without executing them; no host I/O or
-  cryptographic source attestation is claimed.
+  entry, an arm64 dylib, or a Python 3.12 extension REFUSES.
+  A framework dylib outside its bundle, 65 search-path entries,
+  duplicate stdlib search paths even under quota, or an
+  approval_ref longer than 64 ASCII bytes must also REFUSE before
+  unbounded operations. Tests reject the observed Homebrew group-
+  writable ancestor and custom equality callbacks without executing
+  them; no host I/O or source authentication is claimed.
 - Documentation shall keep **GATE A IMPLEMENTED / REAL PROVENANCE UNVERIFIED**
   distinct. No release test, workflow dispatch or real trust approval is
   claimed by a green hosted CI.
