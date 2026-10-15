@@ -382,3 +382,113 @@ def test_provider_complete_absence_synthetic_schema(contract):
 def test_provider_incomplete_refuses(contract, attribute, value):
     p = replace(_safe_provider(contract), **{attribute: value})
     assert "PROVIDER_INVALID" in contract.validate_provider(p)
+
+
+# Task 4: aggregate status is never authority to execute, dispatch or release.
+def _safe_evidence(contract, inputs):
+    run, checkout, job, runner = inputs
+    inv, policy = _safe_interpreter(contract)
+    return (
+        contract.ContractEvidence(
+            run, checkout, job, runner, inv, _safe_namespace(contract), _safe_provider(contract)
+        ),
+        policy,
+    )
+
+
+def test_synthetic_eligible_result_never_authorizes_host(contract, inputs):
+    evidence, policy = _safe_evidence(contract, inputs)
+    result = contract.assess(evidence, interpreter_policy=policy)
+    assert result.status == "CONTRACT_ELIGIBLE_FOR_HOST_PROBE"
+    assert result.violations == ()
+    assert result.__dataclass_params__.frozen
+    for name in ("dispatch", "run", "token", "pass_clean", "ready_to_dispatch"):
+        assert not hasattr(result, name)
+    rejected = contract.assess(evidence)
+    assert rejected.status == "CONTRACT_REFUSED"
+    assert "INTERPRETER_TRUST_UNAPPROVED" in rejected.violations
+
+
+@pytest.mark.parametrize(
+    ("part", "attribute", "invalid"),
+    [
+        ("run", "event", "pull_request_target"),
+        ("run", "github_sha", "b"*40),
+        ("checkout", "credential_env_present", True),
+        ("checkout", "persist_credentials", True),
+        ("job", "permissions", (("contents", "write"),)),
+        ("job", "concurrency_group", "other"),
+        ("runner", "gid", 80),
+        ("runner", "egid", 80),
+        ("runner", "account_primary_gid", 80),
+        ("runner", "supplementary_gids", (20,80)),
+        ("interpreter", "resolved_path", "/tmp/python3"),
+        ("namespace", "alias_disjoint", False),
+        ("namespace", "quarantine_present", True),
+        ("provider", "marker_state", "dangling_symlink"),
+        ("provider", "qemu_state", "enumeration_failed"),
+        ("provider", "legacy_native_clean", False),
+    ],
+)
+def test_single_field_mutation_refuses(contract, inputs, part, attribute, invalid):
+    evidence, policy = _safe_evidence(contract, inputs)
+    evidence = replace(
+        evidence,
+        **{part: replace(getattr(evidence, part), **{attribute: invalid})},
+    )
+    result = contract.assess(evidence, interpreter_policy=policy)
+    assert result.status == "CONTRACT_REFUSED"
+    assert result.violations
+
+
+@pytest.mark.parametrize(
+    ("part", "payload"),
+    [
+        ("run", {"fake": "SECRET_SENTINEL"}),
+        ("checkout", None),
+        ("job", "SECRET_SENTINEL"),
+        ("runner", 0),
+        ("interpreter", {"path": "/sensitive/SECRET_SENTINEL"}),
+        ("namespace", ()),
+        ("provider", object()),
+    ],
+)
+def test_malformed_and_secrets_do_not_leak(contract, inputs, part, payload):
+    evidence, policy = _safe_evidence(contract, inputs)
+    evidence = replace(evidence, **{part: payload})
+    result = contract.assess(evidence, interpreter_policy=policy)
+    assert result.status == "CONTRACT_REFUSED"
+    assert "EVIDENCE_INVALID" in result.violations
+    assert "SECRET_SENTINEL" not in repr(result)
+    assert "/sensitive" not in repr(result)
+    assert len(result.violations) <= 32
+
+
+def test_malformed_evidence_outer_shape_refuses(contract):
+    result = contract.assess({"token": "SECRET_SENTINEL"})
+    assert result.status == "CONTRACT_REFUSED"
+    assert result.violations == ("EVIDENCE_INVALID",)
+    assert "SECRET_SENTINEL" not in repr(result)
+
+
+def test_no_host_io_or_execution_surface(contract, inputs):
+    import ast
+    source = MODULE.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    forbidden_modules = {"os", "subprocess", "socket", "urllib", "requests", "httpx"}
+    forbidden_names = {"main", "dispatch", "ready_to_dispatch", "pass_clean"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            assert not any(n.name.split(".")[0] in forbidden_modules for n in node.names)
+        if isinstance(node, ast.ImportFrom):
+            assert node.module and node.module.split(".")[0] not in forbidden_modules
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            assert node.name not in forbidden_names
+        if isinstance(node, ast.Compare):
+            assert "__main__" not in ast.unparse(node)
+    for name in forbidden_names:
+        assert not hasattr(contract, name)
+    evidence, policy = _safe_evidence(contract, inputs)
+    assert contract.assess(evidence, interpreter_policy=policy).status == (
+        "CONTRACT_ELIGIBLE_FOR_HOST_PROBE"
+    )

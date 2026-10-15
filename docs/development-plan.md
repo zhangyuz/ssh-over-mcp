@@ -2023,3 +2023,31 @@ Existing runner labels, checkout, trigger, no-network guest and
 marker wire format remain unchanged.
 This is not evidence of a passed protected UID502 staging fixture;
 final exact-HEAD CI and independent review are required before merge.
+
+### Phase 7 — ADR 0019 UID502 inert preflight contract (implementation iteration, 2026-10-14)
+
+The jointly reviewed [design](superpowers/specs/2026-10-14-adr19-uid502-trusted-preflight-design.md)
+and [TDD plan](superpowers/plans/2026-10-14-adr19-uid502-inert-preflight-contract.md)
+were approved as **documentation only** and merged via
+[PR #252](https://github.com/zhangyuz/ssh-over-mcp/pull/252), after independent
+re-review cleared all previous findings. The exact merged documentation
+baseline is `1c29ae8e8f8dfdb699d64e5f82285d46160473a6`.
+
+A separate feature implementation now introduces an **inert, host-independent,
+synthetic-only contract** in `ops/live-e2e/uid502_preflight_contract.py`.
+Its two outputs, `CONTRACT_REFUSED` and
+`CONTRACT_ELIGIBLE_FOR_HOST_PROBE`, are **not host admission,
+authentication, fixture acceptance, workflow dispatch, CI status, or
+production activation**. The accepted positive interpreter witness is a
+**fictional test-only path**, not a real trusted Python installation.
+The observed UID501/GID80 group-writable Homebrew ancestry remains
+**refused pending a separately reviewed immutable interpreter and
+operator/security trust decision**.
+
+The trusted-main legacy no-network Level-3 and provider-marker postrun
+verification succeeded in [main CI #38648215422](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/38648215422),
+but do **not** prove the ADR 0019 UID502/APFS original Slice 2A physical
+nine-case matrix. Real UID502 acceptance, expected-forensic-quarantine
+disposition, protected placement Slice 2B/3, any new persistent-Mac
+workflow, and ADR 0020 automatic PR-native dispatch remain unapproved
+or UNVERIFIED. See [contract evidence](evidence/2026-10-14-adr19-uid502-preflight-contract.md).

@@ -351,3 +351,68 @@ def validate_provider(provider: ProviderInventory) -> tuple[str, ...]:
     ):
         return ("PROVIDER_INVALID",)
     return ()
+
+
+@dataclass(frozen=True, slots=True)
+class ContractEvidence:
+    run: RunIdentity
+    checkout: CheckoutEvidence
+    job: WorkflowJobEvidence
+    runner: RunnerIdentity
+    interpreter: InterpreterInventory
+    namespace: NamespaceEvidence
+    provider: ProviderInventory
+
+
+@dataclass(frozen=True, slots=True)
+class ContractResult:
+    status: str
+    violations: tuple[str, ...]
+
+
+_FIXED_CODES = frozenset({
+    "RUN_CONTEXT_INVALID", "CHECKOUT_INVALID", "JOB_INVALID",
+    "RUNNER_INVALID", "INTERPRETER_INVALID", "INTERPRETER_TRUST_UNAPPROVED",
+    "NAMESPACE_INVALID", "PROVIDER_INVALID", "EVIDENCE_INVALID",
+})
+
+
+def assess(
+    evidence: ContractEvidence,
+    *,
+    interpreter_policy: InterpreterTrustPolicy | None = None,
+) -> ContractResult:
+    """Classify *synthetic* evidence only; never authorize native execution."""
+    refuse = ContractResult("CONTRACT_REFUSED", ("EVIDENCE_INVALID",))
+    if not isinstance(evidence, ContractEvidence):
+        return refuse
+    if not all((
+        isinstance(evidence.run, RunIdentity),
+        isinstance(evidence.checkout, CheckoutEvidence),
+        isinstance(evidence.job, WorkflowJobEvidence),
+        isinstance(evidence.runner, RunnerIdentity),
+        isinstance(evidence.interpreter, InterpreterInventory),
+        isinstance(evidence.namespace, NamespaceEvidence),
+        isinstance(evidence.provider, ProviderInventory),
+    )):
+        return refuse
+
+    try:
+        codes = (
+            *validate_run(evidence.run, evidence.checkout, evidence.job, evidence.runner),
+            *validate_interpreter(evidence.interpreter, interpreter_policy),
+            *validate_namespace(evidence.namespace),
+            *validate_provider(evidence.provider),
+        )
+        if (
+            len(codes) > 32
+            or not all(type(code) is str and code in _FIXED_CODES for code in codes)
+        ):
+            return refuse
+        violations = tuple(sorted(set(codes)))
+    except (AttributeError, IndexError, KeyError, OverflowError, TypeError, ValueError):
+        return refuse
+    return ContractResult(
+        "CONTRACT_REFUSED" if violations else "CONTRACT_ELIGIBLE_FOR_HOST_PROBE",
+        violations,
+    )
