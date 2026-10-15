@@ -114,3 +114,66 @@ def test_fd_closed_after_late_digest_failure(monkeypatch):
     assert len(opened) == 1
     with pytest.raises(OSError):
         os.fstat(opened[0])
+
+
+def test_cli_unknown_fixture_refuses():
+    import json
+    import subprocess
+    cli = MODULE.with_name("gate_b0_source_verification.py")
+    proc = subprocess.run(
+        [sys.executable, str(cli), "verify-synthetic", "--fixture", "unknown",
+         "--format", "json"],
+        text=True, capture_output=True, timeout=5,
+    )
+    assert proc.returncode != 0
+    result = json.loads(proc.stdout)
+    assert result["status"] == "B0A_REFUSED"
+    assert result["schema"] == "som.b0a.synthetic.v1"
+    assert result["evidence_class"] == "NON_AUTHORIZING_SYNTHETIC"
+    assert result["reason_code"] == "FIXTURE_NOT_APPROVED"
+    assert not any(x in result for x in ("approved", "source_verified", "measured_sha256"))
+
+
+def test_cli_known_fixture_never_self_approves_without_t5():
+    import json
+    import subprocess
+    cli = MODULE.with_name("gate_b0_source_verification.py")
+    proc = subprocess.run(
+        [sys.executable, str(cli), "verify-synthetic", "--fixture", "signed-test-key-1",
+         "--format", "json"],
+        text=True, capture_output=True, timeout=5,
+    )
+    assert proc.returncode != 0
+    result = json.loads(proc.stdout)
+    assert result["status"] == "B0A_REFUSED"
+    assert result["reason_code"] == "T5_POLICY_UNAPPROVED"
+    assert len(proc.stdout.encode()) < 16 * 1024
+    assert not any(x in result for x in ("approved", "source_verified", "measured_sha256"))
+
+
+def test_cli_refuses_unsafe_flags_and_unknown_modes():
+    import json
+    import subprocess
+    cli = MODULE.with_name("gate_b0_source_verification.py")
+    for extra in [
+        ("--root", "/tmp/test-root"), ("--approved", "true"),
+        ("--online",), ("verify-approved",),
+    ]:
+        command = [
+            sys.executable, str(cli), "verify-synthetic", "--fixture",
+            "signed-test-key-1", "--format", "json", *extra,
+        ]
+        proc = subprocess.run(command, text=True, capture_output=True, timeout=5)
+        assert proc.returncode != 0
+        assert json.loads(proc.stdout)["status"] == "B0A_REFUSED"
+
+
+def test_cli_help_is_non_authorizing():
+    import subprocess
+    cli = MODULE.with_name("gate_b0_source_verification.py")
+    proc = subprocess.run(
+        [sys.executable, str(cli), "--help"], text=True, capture_output=True, timeout=5,
+    )
+    assert proc.returncode == 0
+    assert "verify-synthetic" in proc.stdout
+    assert "verify-approved" not in proc.stdout
