@@ -62,13 +62,19 @@ Transfer between isolated verification environments must use an independently co
 
 ## Proposed execution slices (each separately authorized)
 
-### Slice B0a — bounded offline source proof, **future code PR only**
+### Slice B0a — bounded offline source proof, **future approved feature implementation only**
 
-**Allowed paths in a later approved implementation PR (proposal, not permission):**
-- `ops/live-e2e/gate_b0_source_verification.py` — one narrow offline artifact verification entrypoint using an **independently approved** verifier, not candidate Python; no download/install, no Mac runner integration.
-- `tests/ops/test_gate_b0_source_verification.py` — hostile synthetic tiny package/signature fixtures and controlled verifier results.
-- `docs/evidence/2026-10-15-adr19-gate-b0-source-verification.md` and `docs/development-plan.md` — measured results and precise UNVERIFIED states.
-- No `.github/workflows/**`, native guest/provider paths, `src/**`, installed interpreter paths, GitHub secrets/permissions, Gate A or UID502 preflight changes.
+**Proposed path allowlist amendment inside Draft PR #268 — PENDING INDEPENDENT SECURITY REVIEW AND EXPLICIT OPERATOR D2 APPROVAL; NOT IMPLEMENTATION AUTHORITY.** The original short list predates the proposed synthetic-only operator CLI. Separating three private helpers avoids a monolithic verifier, but does not add another public tool or widen trust/host authority. Review and approve these exact paths **before writing source code**, independently of the exact synthetic T5 trust policy decision:
+- `ops/live-e2e/gate_b0_source_verification.py` — **only operator-facing** fixed `verify-synthetic` CLI entrypoint; no real artifact, download, installer or Mac runner.
+- `ops/live-e2e/gate_b0_immutable_bytes.py` — private bounded exclusive-writer witness, sealed `memfd` original-byte hashing/length and FD cleanup.
+- `ops/live-e2e/gate_b0_sigstore_adapter.py` — private strictly pinned offline external Sigstore verifier handoff and refusal handling only.
+- `ops/live-e2e/gate_b0_evidence.py` — private bounded canonical JSON and **non-authorizing** evidence/refusal statuses only.
+- `tests/ops/test_gate_b0_source_verification.py` — genuine synthetic test-key signature GREEN and hostile RED tests; never a mock-positive substitute.
+- `tests/ops/fixtures/b0a_synthetic/**` — tiny independently authenticated *test-key-only* fixture/bundle/policy records after separate T5 authorization; no real Python.org artifact, secret or unapproved root.
+- `ops/live-e2e/README.md` — operator example and offline limitations; documentation only.
+- `docs/evidence/2026-10-15-adr19-gate-b0-source-verification.md`, `docs/development-plan.md`, `docs/development-methodology.md` — independently measured **synthetic-only** evidence, accurate UNVERIFIED state and PR workflow.
+- `docs/superpowers/specs/2026-10-15-adr19-b0a-offline-source-evidence-cli-design.md` and `docs/superpowers/plans/2026-10-15-adr19-b0a-offline-source-evidence-cli.md` — exact feature spec/plan reviewed in this same Draft PR; this governing plan's changes are limited to the explicit allowlist amendment.
+- **Still prohibited:** `.github/workflows/**`, any other native guest/provider/privileged host files, `src/**`, installed interpreter paths, GitHub secrets/permissions, Gate A or UID502 preflight, real package/bundle/verifier/root retrieval, production source authority, host mutation, external networking or Linux Slice C. Allowlist approval does not approve external execution or source trust.
 
 **Task 1 — input/type/budget boundary (RED→GREEN):** define exact immutable release policy, bounded artifact input and **verified exclusive-writer-control at ingestion**; neither read-only open nor a file descriptor alone excludes concurrent writers. Refuse any writer-access ambiguity, oversized or altered source, forged/duplicate fields, symlinks and mismatched identity labels **before any evidence promotion**. Test missing bytes, malicious objects and concurrent writes against the same source inode followed by restoration of bytes/size/mtime: the race case MUST REFUSE even if metadata appears unchanged. A test-only writer-exclusion witness is not a production trust root. RED on missing module, GREEN on minimal refusal path. No signed output yet.
 

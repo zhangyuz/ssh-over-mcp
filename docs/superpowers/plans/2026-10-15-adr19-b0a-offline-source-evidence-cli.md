@@ -13,17 +13,18 @@
 ## Global Constraints
 
 - Source of truth: [ADR0019 Gate B design](../specs/2026-10-15-adr19-gate-b-macos-interpreter-source-decision-design.md), [B0a/B0b governing plan](2026-10-15-adr19-gate-b0-offhost-package-verification.md), [T1–T5 approval checklist](../../evidence/2026-10-15-adr19-b0a-artifact-trust-approval-checklist.md), `docs/development-methodology.md`.
-- **Stop before any implementation until this plan and execution approach have operator approval.** A written spec or general request to continue does not approve an unwritten plan.
+- **Stop before any implementation until this plan, execution approach, and the proposed B0a path allowlist amendment to `docs/superpowers/plans/2026-10-15-adr19-gate-b0-offhost-package-verification.md` have independent security review and explicit operator D2 approval inside Draft PR #268.** No new module, fixture, README or methodology change is preauthorized under the original path list. Written spec approval alone does not authorize code.
 - **T5 synthetic gate:** before any verifier invocation, independent operator/security review must record the exact executable/runtime/dependency closure digests, test signer SAN/OIDC and key material source, test Fulcio/Rekor/TSA/log roots and signature-time evidence, offline clock/freshness/skew/revocation numeric bounds, actual accepted bundle format, and explicit supported `digest-from-sealed-bytes` or `direct-sealed-FD` mode. If any is unavailable, STOP; no fake GREEN, autodownload, ambient cache/root, self-declared `approved=true` or always-REFUSE feature claim.
 - No real macOS `.pkg`/`.sigstore` acquisition/use, no trust-root/verifier install or download, no privileged persistent Mac operation, no candidate-Python execution, no `installer`/B0b, no UID502/APFS, no Linux C. Later real `B0A_EVIDENCE_COLLECTED_UNAPPROVED` is **not** part of this PR.
 - Runner must be independently trusted disposable unprivileged Linux x86_64, with credentials and networking absent and executable/runtime closure approved. Linux here is verification environment, not postponed Linux product Slice C.
 - All emitted success is **`SYNTHETIC_ONLY`**; all uncertain evidence **`B0A_REFUSED`**. JSON is non-authorizing and max 16 KiB. No caller-selected path, root, verifier binary, trust policy or privilege.
-- One feature PR after code/test/demo/docs are complete; request independent project-wide/security review and full exact-head hosted CI concurrently. Unmodified native Level-3 gate authority; **the unmerged branch, its fixture generator and its own tests cannot attest their own verifier/root authenticity**. Merge only on explicit operator approval.
+- Work **inside existing Draft PR #268**, adding code/tests/demo/docs to the same branch; mark **that PR Ready for Review** only after genuine pinned-verifier GREEN and RED acceptance. Request independent project-wide/security review and exact-head hosted CI concurrently. Unmodified native Level-3 gate authority; **the unmerged branch, its fixture generator and its own tests cannot attest their own verifier/root authenticity**. Merge only on explicit operator approval.
 
 ## File map and responsibilities
 
 | Path | Responsibility |
 | --- | --- |
+| `docs/superpowers/plans/2026-10-15-adr19-gate-b0-offhost-package-verification.md` | Proposed exact B0a path allowlist amendment; **independent security review and operator D2 approval required before coding** |
 | `ops/live-e2e/gate_b0_immutable_bytes.py` | Fixed trusted synthetic fixture ingestion, writer-exclusion witness, private sealed `memfd`, full measured bytes/SHA-256/size and close-on-failure |
 | `ops/live-e2e/gate_b0_sigstore_adapter.py` | Immutable synthetic policy loader/verification, pinned real Sigstore CLI, fixed args/FD or digest handoff, bounded subprocess and offline/result authentication |
 | `ops/live-e2e/gate_b0_evidence.py` | Stable bounded non-authorizing JSON schema and refusal error mapping |
@@ -31,6 +32,7 @@
 | `tests/ops/test_gate_b0_source_verification.py` | Unit/schema/refusal plus real pinned Sigstore test-key positive/negative integration (tests requiring T5 gated runtime explicitly marked, not silently counted as GREEN when unavailable) |
 | `tests/ops/fixtures/b0a_synthetic/` | Reviewed fixed tiny test fixture, bundle, immutable signed test policy or separately authenticated fixture generator inputs; **no ambient generated trust** |
 | `ops/live-e2e/README.md` | Operator example, constraints, expected status/exit and independent T5 setup prerequisites |
+| `docs/evidence/2026-10-15-adr19-gate-b0-source-verification.md` | Actual reproducible synthetic GREEN/RED evidence and explicit UNVERIFIED provenance boundaries (only after genuine execution) |
 | `docs/development-methodology.md`, `docs/development-plan.md` | Vertical-slice Definition of Done and accurate unverified Mac release status |
 
 ## Review Focus
@@ -130,8 +132,10 @@
 
 **Files:**
 - Modify: `ops/live-e2e/README.md`
+- Create: `docs/evidence/2026-10-15-adr19-gate-b0-source-verification.md` (only factual genuine synthetic verification receipts)
 - Modify: `docs/development-methodology.md`
 - Modify: `docs/development-plan.md`
+- Review: `docs/superpowers/plans/2026-10-15-adr19-gate-b0-offhost-package-verification.md` (proposed allowlist change; requires independent approval before implementation)
 - Review: `docs/superpowers/specs/2026-10-15-adr19-b0a-offline-source-evidence-cli-design.md`
 - Review: this implementation plan and all Tasks 1–4 code/tests/fixtures
 
@@ -143,7 +147,7 @@
 - [ ] **Step 2:** Change `docs/development-methodology.md` to require one operator/user-verifiable **vertical feature** per PR (code + positive/negative tests + usage + matching security docs), while preserving independent T1–T9/real-material/UID502 and exact-head approval gates. Update roadmap only with **actually evidenced** results.
 - [ ] **Step 3:** Run `python -m ruff check src tests ops/systemd ops/live-e2e`, `python -m compileall -q src tests ops/systemd ops/live-e2e`, focused `python -m pytest tests/ops/test_gate_b0_source_verification.py -q`, all relevant provenance/UID502 regression and approved isolated-offline real-verifier demo. Mandatory genuine GREEN must be unskipped and attested. Do not describe hosted Ubuntu CI as B0a/macOS source approval.
 - [ ] **Step 4:** Review whole branch for writer controls, pinned tool and root/freshness, disclosure, symlink TOCTOU, subprocess/network, signed digest and B0b separation, check `git diff --check`, then commit documentation and self-review evidence.
-- [ ] **Step 5:** Push branch and open **one non-draft functional PR** only when genuine test-key GREEN/paired RED and operator invocation are reproducible. Immediately request independent whole-project/security review and allow GitHub exact-head full CI to run concurrently. On SHA changes, repeat exact-head gates. Merge requires separate operator approval. Verify merge-main CI/native evidence as separate closure and preserve `progress.md`.
+- [ ] **Step 5:** Push completion commits to **existing Draft PR #268** and **mark the same PR Ready for Review** only when genuine test-key GREEN/paired RED and operator invocation are reproducible. Request independent whole-project/security final review and allow GitHub exact-head full CI to run concurrently. On SHA changes, repeat exact-head gates. Merge requires separate operator approval. Verify merge-main CI/native evidence as separate closure and preserve `progress.md`.
 
 ## Plan acceptance check
 
