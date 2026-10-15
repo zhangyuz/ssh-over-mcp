@@ -46,7 +46,7 @@ def test_sealed_fixture_measures_exact_all_bytes():
         os.fstat(result.fd)
 
 
-def test_uncontrolled_writer_and_restore_refuses_before_verifier():
+def test_untrusted_synthetic_writer_witness_refuses_before_verifier():
     api = load_module()
     fixture, witness = api.fixture_from_trusted_bytes(b"aaa", fixture_id="unit-2")
     forged = api.VerifiedFixtureAuthority(witness._source_identity, witness._proof, False)
@@ -55,7 +55,7 @@ def test_uncontrolled_writer_and_restore_refuses_before_verifier():
     assert fixture.payload == b"aaa"
 
 
-def test_unsealed_or_substituted_fd_refuses():
+def test_synthetic_fixture_identity_mismatch_refuses():
     api = load_module()
     fixture, witness = api.fixture_from_trusted_bytes(b"aaa", fixture_id="unit-3")
     another, _ = api.fixture_from_trusted_bytes(b"aaa", fixture_id="unit-4")
@@ -177,3 +177,82 @@ def test_cli_help_is_non_authorizing():
     assert proc.returncode == 0
     assert "verify-synthetic" in proc.stdout
     assert "verify-approved" not in proc.stdout
+
+
+def test_forged_measurement_cannot_close_unrelated_fd():
+    api = load_module()
+    with open(__file__, "rb") as unrelated:
+        original_fd = unrelated.fileno()
+        fabricated = api.SealedMeasurement(
+            fd=original_fd, sha256="0" * 64, length=1, witness_ref="untrusted"
+        )
+        with pytest.raises(api.B0aInputRefused):
+            api.close_measurement(fabricated)
+        assert os.fstat(original_fd).st_size > 0
+
+
+def test_copied_measurement_cannot_close_live_owner():
+    api = load_module()
+    fixture, witness = api.fixture_from_trusted_bytes(b"live fixture", fixture_id="owned")
+    live = api.ingest_fixed_fixture(fixture, witness)
+    try:
+        clone = api.SealedMeasurement(
+            fd=live.fd, sha256=live.sha256, length=live.length, witness_ref=live.witness_ref
+        )
+        with pytest.raises(api.B0aInputRefused):
+            api.close_measurement(clone)
+        assert os.fstat(live.fd).st_size == live.length
+    finally:
+        api.close_measurement(live)
+
+
+def test_double_close_after_fd_reuse_refuses_and_preserves_replacement():
+    api = load_module()
+    fixture, witness = api.fixture_from_trusted_bytes(b"closed fixture", fixture_id="reused")
+    owned = api.ingest_fixed_fixture(fixture, witness)
+    stale_number = owned.fd
+    api.close_measurement(owned)
+    with open(__file__, "rb") as unrelated:
+        os.dup2(unrelated.fileno(), stale_number)
+        try:
+            with pytest.raises(api.B0aInputRefused):
+                api.close_measurement(owned)
+            assert os.fstat(stale_number).st_ino == os.fstat(unrelated.fileno()).st_ino
+        finally:
+            if stale_number != unrelated.fileno():
+                os.close(stale_number)
+
+
+def test_externally_closed_and_reused_owned_fd_refuses_without_closing_replacement():
+    api = load_module()
+    fixture, witness = api.fixture_from_trusted_bytes(
+        b"closed fixture", fixture_id="externally-reused"
+    )
+    owned = api.ingest_fixed_fixture(fixture, witness)
+    fd = owned.fd
+    os.close(fd)
+    with open(__file__, "rb") as unrelated:
+        os.dup2(unrelated.fileno(), fd)
+        try:
+            with pytest.raises(api.B0aInputRefused):
+                api.close_measurement(owned)
+            assert os.fstat(fd).st_ino == os.fstat(unrelated.fileno()).st_ino
+        finally:
+            if fd != unrelated.fileno():
+                os.close(fd)
+
+
+def test_mutated_live_measurement_fd_refuses_and_preserves_borrower():
+    api = load_module()
+    fixture, witness = api.fixture_from_trusted_bytes(b"owned", fixture_id="mutated-fd")
+    owned = api.ingest_fixed_fixture(fixture, witness)
+    original = owned.fd
+    with open(__file__, "rb") as unrelated:
+        object.__setattr__(owned, "fd", unrelated.fileno())
+        try:
+            with pytest.raises(api.B0aInputRefused):
+                api.close_measurement(owned)
+            assert os.fstat(unrelated.fileno()).st_size > 0
+        finally:
+            object.__setattr__(owned, "fd", original)
+    api.close_measurement(owned)
