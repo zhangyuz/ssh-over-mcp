@@ -39,7 +39,7 @@ main `4d8449a8eec95eb37f33bd8c193cdaf7cf19be61`.
   tuples before equality/regex/sort/set. Never invoke custom comparisons or
   stringify attacker objects. Require absolute canonical lexical POSIX
   paths (reject `.`, `..`, duplicate `/`, NUL, relative/alias claims).
-- Refusal is the default for missing trust policy, digest evidence,
+- Refusal is the default for missing manifest linkage, digest evidence,
   out-of-policy owner/mode/ACL/loader path, wrong runtime/version/arch,
   UID502-effective write, unexpected/DYLD/PYTHONPATH modifiers, incomplete
   transitive dependency graph or unbounded/unknown evidence.
@@ -52,83 +52,193 @@ main `4d8449a8eec95eb37f33bd8c193cdaf7cf19be61`.
   fictional fixture does not change real UID502 contract's
   `INTERPRETER_TRUST_UNAPPROVED` outcome. Actual homebrew remains blocked.
 
-## Locked proof inputs for code implementation (subject to review)
+## Independent PR #254 review disposition: API choices before implementation
 
-Define frozen-slot dataclasses, tuple-only immutable collections:
+The [independent review #6185298182](https://github.com/zhangyuz/ssh-over-mcp/pull/254#issuecomment-6185298182)
+found 0 Critical, 2 Important, 1 Minor at old head 2ac9658.
 
-- `ArtifactClaim(package_sha256: str, python_version: tuple[int,int,int],
-  platform: str, arch: str, approval_ref: str, complete: bool)`.
-- `ProvenanceNode(node_id: str, path: str, kind: str, dev: int, ino: int,
+1. **Important 1, option A chosen:** tie the package SHA to the
+   manifest claim and a canonical manifest SHA-256, then map every
+   relative-path+role+digest manifest member one-to-one onto a node.
+   All inputs are synthetic and self-reported; Gate A can check
+   contradictory claims, NOT identify or authenticate real package
+   bytes. For the required negative example, changing only the
+   package digest must cause a manifest-binding refusal.
+2. **Important 2, option A chosen:** declare each node's POSIX type,
+   Mach-O architecture and Python extension ABI/major-minor where
+   applicable. Explicitly represent framework bundle directories
+   versus framework dylib files, optional framework packaging,
+   filesystem stdlib files, exact loader edge labels and finite
+   role-compatible graph closure. Arm64 dylibs and cpython-312
+   extensions refuse under x86_64/3.13.16 artifact claims.
+3. **Minor:** directly replace the stale interpreter-source sentence
+   in the older UID502 physical fixture plan; keep a single
+   conspicuous BLOCKED rule and no chmod/adoption fallback.
+4. **Quota limitation:** 64 node/128 edge limits are provisional and
+   may reject the actual macOS dependency closure. A too-large real
+   candidate remains UNVERIFIED; modifying quotas/role rules needs
+   another review, not a silent workaround.
+
+## Locked proof inputs for code implementation (subject to operator review)
+
+Define frozen-slot dataclasses with only tuple-based immutable collections.
+No caller-supplied field, even when labelled signed, carries authority.
+
+- ArtifactClaim(package_sha256: str, manifest_sha256: str,
+  install_root: str, layout: str, python_version: tuple[int,int,int],
+  platform: str, arch: str, approval_ref: str, complete: bool).
+  Exactly CPython (3,13,16), Darwin, x86_64. Layout is framework or
+  standalone. Install root is absolute canonical lexical POSIX and
+  fictional test fixture lives under /test-only; no real location is
+  implicitly selected or approved.
+- ManifestEntry(node_id: str, relative_path: str, kind: str,
+  digest_sha256: str). For the one installation-root directory
+  entry ONLY, relative_path is the empty string. Other relative
+  paths are slash-separated canonical components, with neither
+  dot nor dot-dot nor empty components or NUL; no leading slash.
+  File digests are exact lowercase SHA256 strings; directory
+  digest MUST be NOT_APPLICABLE.
+- PackageManifest(package_sha256: str, entries: tuple[ManifestEntry,...]).
+  The artifact and manifest package digests must equal. Entries
+  ordered strictly by relative_path (unique paths/IDs); maximum
+  64 entries and every graph node must have exactly one member.
+- ProvenanceNode(node_id: str, path: str, kind: str, dev: int, ino: int,
   uid: int, gid: int, mode: int, acl_state: str, digest_sha256: str,
-  writable_by_uid502: bool)`. Kinds exactly `directory`, `binary`,
-  `framework`, `dylib`, `stdlib`, `extension`; directory digest
-  may be a literal documented `NOT_APPLICABLE` only with complete identity
-  evidence, file digests must be 64 lowercase hex. UID0:GID0 and no
-  group/world write on all candidate and dependency nodes (not merely
-  executable). Full POSIX type bits/kind must agree.
-- `DependencyEdge(parent_id: str, child_id: str, loader_kind: str)`,
-  where loader kind is one of a fixed allowlist, and every edge resolves to
-  a unique present node; no unknown dynamic/injected paths.
-- `RuntimeClaim(binary_node_id: str, sys_executable: str,
+  writable_by_uid502: bool, macho_arch: str, python_abi: str,
+  python_major_minor: tuple[int,int] | None). A node's path
+  must equal install_root for its root member, otherwise
+  install_root + "/" + entry.relative_path. All fields are exact
+  primitive types before comparison. All nodes claim UID0:GID0,
+  full POSIX type/mode, no group/world or UID502 write, verified
+  safe ACL, positive dev/inode and no symlink role. Each digest
+  and kind equals the corresponding manifest entry.
+- Kinds / full-mode mapping: directory, framework_bundle and
+  stdlib_dir => POSIX directory (0o040000); binary, dylib,
+  framework_dylib, extension and stdlib_file => POSIX regular
+  (0o100000). Require stdlib_file names ending .py and
+  stdlib_dir descendants (no zip-stdlib format in this version).
+  Exactly one binary, >=1 stdlib_dir, >=1 stdlib_file. For
+  layout=framework, exactly one framework_bundle and >=1
+  framework_dylib are required. For standalone, both are
+  forbidden. A Python distribution needing other roles must
+  REFUSE as unrepresentable, not be automatically generalized.
+- Mach-O/ABI claims: binary, dylib, framework_dylib, extension
+  require macho_arch exactly x86_64. All directory/stdlib_file
+  roles use NOT_APPLICABLE. Extension alone requires python_abi
+  exactly cpython-313-darwin and python_major_minor=(3,13);
+  every non-extension requires python_abi=NOT_APPLICABLE and
+  python_major_minor=None. A claimed 3.12 extension or arm64-only
+  dependency refuses even if global fields claim 3.13/x86_64.
+  These are *synthetic* slice/ABI claims, NOT Mach-O inspection.
+- DependencyEdge(parent_id: str, child_id: str, loader_kind: str).
+  Exactly contains (directory/framework_bundle/stdlib_dir parent
+  to **direct lexical child**), macho_load (binary/dylib/
+  framework_dylib/extension parent to dylib/framework_dylib),
+  python_import (binary/stdlib_file parent to stdlib_file/
+  extension). Forbid duplicates, self edges, unknown IDs,
+  invalid type combinations and cycles; require reachability of
+  every node from installation root via valid edges. A valid
+  graph must include parent/child contains edges matching each
+  nested filesystem entry; this is claimed structure, not proof
+  of real dyld/@rpath resolution or actual imported modules.
+- RuntimeClaim(binary_node_id: str, sys_executable: str,
   module_search_paths: tuple[str,...], dyld_environment_clean: bool,
-  python_environment_clean: bool, graph_complete: bool)`.
-- `ProvenanceEvidence(artifact: ArtifactClaim, runtime: RuntimeClaim,
-  nodes: tuple[ProvenanceNode,...], edges: tuple[DependencyEdge,...])`.
-- `ProvenanceResult(status: str, violations: tuple[str,...])`.
-- `assess_provenance(evidence: ProvenanceEvidence) -> ProvenanceResult`.
+  python_environment_clean: bool, graph_complete: bool).
+  The exact binary's claimed path must equal sys_executable;
+  search paths must be canonical literal paths present in
+  stdlib_dir nodes. All completeness/clean flags must be the
+  literal bool True (never bool-int aliases).
+- ProvenanceEvidence(artifact: ArtifactClaim,
+  manifest: PackageManifest, runtime: RuntimeClaim,
+  nodes: tuple[ProvenanceNode,...], edges: tuple[DependencyEdge,...]).
+- ProvenanceResult(status: str, violations: tuple[str,...]).
+- assess_provenance(evidence: ProvenanceEvidence) -> ProvenanceResult.
 
-**Evidence limitations:** These do not confer independently verified
-signature, source trust, installed dependency loader trace, graph
-completeness or operator approval. A separately reviewed Gate B must
-actually authenticate them. The fictional package digest is a
-well-typed SHA string, not a measured actual artifact.
+**Canonical manifest SHA (exact v1 algorithm):** sort entries by
+relative_path strictly (the input tuple itself must already be in
+that order). Encode canonical JSON using Python stdlib json.dumps
+with ensure_ascii=True, sort_keys=True, separators=(",", ":"),
+on the object with exactly these keys:
+  schema_version: 1
+  package_sha256: Manifest.package_sha256
+  entries: array of maps of node_id, relative_path, kind,
+           digest_sha256 in manifest tuple order
+Serialize as UTF-8 bytes and compute hashlib.sha256(bytes).hexdigest().
+Require equality to ArtifactClaim.manifest_sha256. No optional
+fields or ambiguous encodings; reject overlong/non-ASCII paths
+and IDs, duplicate/ambiguous entries before serialization.
+This computes **only the self-reported manifest's** digest; changing
+artifact.package_sha256 alone, manifest.package_sha256 alone,
+manifest entry path/kind/digest alone, or associated node alone
+must REFUSE. Changing all fields coherently **cannot** establish
+real package identity, actual source authenticity or signature.
 
-**Bounding:** Maximum 64 nodes, 128 edges, 1024 chars/path, 32 distinct
-fixed refusal codes. Deny duplicates, disconnected/unreachable vertices,
-cycles that thwart a finite closure, missing binary/framework/stdlib
-required roles or ambiguous resolution; no `repr`/exception content from
-caller. Any incompatible exact-version/arch combination or missing
-positive completeness fields refuses.
+**Refusal and bounds:** Maximum 64 nodes/manifest entries,
+128 dependency edges, 1024 characters per path, 32 fixed
+distinct codes. Only PROVENANCE_REFUSED and
+PROVENANCE_SCHEMA_CONSISTENT_UNATTESTED are outputs.
+Do not log user paths/tokens or expose execution/approval APIs;
+never permit exception messages or attacker-object repr in output.
 
-## Task 1 — Evidence types and hostile-field rejection
+**Explicit representation limit:** Claimed loader edges may omit
+real dyld, @rpath, OS platform libraries, import paths and
+cyclic dependency behavior, which this contract cannot discover.
+Real platform dependencies outside the self-owned root, zip
+stdlib, code signing and actual file digest verification remain
+**Gate B / further reviewed model extension**, never quietly PASS.
+An actual runtime exceeding the graph limits is UNVERIFIED.
 
-**Files:** new module and tests only.
+## Task 1 — Exact evidence types and hostile-value resistance
 
-- [ ] **RED**: test a fictional, root-owned, all-immutable graph with
-  exact pinned Python 3.13.16 / Darwin x86_64, positive complete module
-  paths and finite closure; expected schema-consistent-unattested only.
-  Define `test_unknown_type_refuses_without_rich_comparison` for hostile
-  objects with observable/raising `__eq__`, across every string field,
-  nested node/edge tuple, module paths and `approval_ref`. Assert zero
-  callback invocations and fixed refusal. A missing/unknown record refuses.
-- [ ] Verify genuine RED against missing module/types, not a Python
-  environment failure. Use `PYTHONPATH=$PWD/src <repo-venv-python> -m
-  pytest -q tests/ops/test_interpreter_provenance_contract.py`.
-- [ ] **GREEN:** smallest typed immutable data structures, finite explicit
-  type validation before comparisons. Favor pure explicit checks; no host
-  imports. Run focused GREEN and Ruff, commit
-  `feat: add inert interpreter provenance evidence records`.
-- [ ] Update ignored worktree `progress.md` after RED/GREEN with commands
-  and exact result; keep Task 1 commit recoverable.
+**Files:** new Gate A module and test only.
 
-## Task 2 — Fail-closed origin / dependency closure
+- [ ] **RED:** valid fully fictional root-owned standalone layout
+  with install-root directory, binary, stdlib directory/stdlib_file,
+  compatible dylib and cpython-313 extension, an ordered manifest,
+  canonical manifest hash and complete claimed edges returns only
+  PROVENANCE_SCHEMA_CONSISTENT_UNATTESTED. Under Gate A, no
+  assertion refers to actual source bytes or host execution.
+- [ ] **RED hostile inner fields:** insert false-equality / raising
+  __eq__/__ne__ trap objects into every node/manifest/edge/digest,
+  relative path, ABI, package claim and nested tuple. Assert
+  refusal with fixed code and ZERO trap-method invocations.
+  Invalid outer records/None/wrong types refuse.
+- [ ] Verify genuine RED against missing new production module,
+  not an unrelated missing Python dependency; note exact output.
+- [ ] **GREEN:** frozen-slot types and recursive exact primitive
+  type checks before comparisons, set or sorting. Run focused
+  pytest and Ruff; commit typed evidence records with progress.md.
 
-**Files:** same module and test.
+## Task 2 — Synthetic manifest association and ABI-aware graph
 
-- [ ] **RED:** missing package digest, wrong version/arch, mutable UID501
-  Homebrew `/usr/local/Cellar` group-write, UID502 ownership/writeable
-  witness, uncertain ACL, mode/kind mismatch, bad/no absolute path,
-  duplicate/path alias, unexpected DYLD/Python runtime environment,
-  absent stdlib/framework/loader dependency, disconnected node, duplicate
-  ID, cycle/unknown target, false `graph_complete`, excessive vertices/
-  edges/path length all refuse. Ensure no dynamic caller comparators.
-- [ ] **GREEN:** deterministic finite graph-shape checks and positive
-  closure; fixed sorted reason-code results with maximum 32 codes;
-  `PROVENANCE_SCHEMA_CONSISTENT_UNATTESTED` only for fictional valid
-  static evidence. **Never** accept real observed Homebrew, authorize an
-  executable or infer signatures from caller assertions.
-- [ ] Rerun Tasks 1–2, Ruff, commit
-  `feat: fail closed on mutable interpreter dependency provenance`.
+**Files:** same new module and test.
+
+- [ ] **RED package binding:** keep valid graph fixed, mutate just
+  ArtifactClaim.package_sha256 to a different syntactically valid
+  digest, then separately change just manifest.package_sha256,
+  manifest entry/node ID, relative path, node digest, entry kind,
+  declared manifest SHA, reorder/duplicate manifest membership.
+  Each must REFUSE; no proof of real package bytes is claimed.
+- [ ] **RED role and compatibility:** require valid standalone
+  WITHOUT framework nodes; valid framework WITH bundle-directory
+  plus framework_dylib regular-file node. Reject framework absent,
+  bundle mislabelled regular, stdlib dir/file mode mismatch,
+  zip/unrepresentable stdlib, arm64 Mach-O dependency,
+  extension ABI cpython-312-darwin and major/minor=(3,12),
+  wrong binary path or missing claimed dependency.
+- [ ] **RED graph trust:** absent target/duplicate/cycle/wrong
+  loader_kind or illegal role direction, non-direct contains,
+  path traversal or alias, missing owned ancestor, detached
+  node, group-writable UID501 Homebrew ancestor, unknown ACL,
+  uid502 writable, DYLD/Python search injection, false
+  completeness, too many nodes/edges/path chars refuse.
+- [ ] **GREEN:** canonical JSON manifest digest binding per
+  approved specification; finite graph validation with
+  role-specific file/mode/ABI checks and hard quotas;
+  deterministic bounded fixed errors; no filesystem reading,
+  digesting actual package bytes, symbol resolution or host
+  environment access. Test and commit separately with
+  RED-to-GREEN results in ignored progress.md.
 
 ## Task 3 — Non-authority regression, evidence and PR
 
@@ -139,10 +249,12 @@ positive completeness fields refuses.
   `run`/`dispatch`/approval/host-token exports. Negative checks
   reject forged `approval_ref` and “signature valid” claims as an
   authorization path. Positive state stays explicitly **unattested**.
-- [ ] **GREEN:** close non-authority API, add evidence/roadmap distinction:
-  Gate A synthetic schema only; Gate B not implemented; *real* trusted
-  interpreter source **UNVERIFIED/UNAPPROVED**; nine-row UID502 matrix
-  unexecuted; no protected placement and no manual evidence deletion.
+- [ ] **GREEN:** close non-authority API and add roadmap/evidence:
+  Gate A synthetic *claimed manifest + ABI + topology consistency
+  only*; no checked bytes, signer, dyld/@rpath/import trace,
+  actual package or immutable interpreter. Gate B remains
+  UNVERIFIED / UNAPPROVED; nine-row physical UID502 matrix not
+  run, no protected placement and no forensic deletion.
 - [ ] Verify entire applicable pytest suite on hosted-safe runner (do not
   count Darwin-host-only Linux `prctl` tests as macOS-green), Ruff,
   compileall, `git diff --check`, relative links and exact changed-path
