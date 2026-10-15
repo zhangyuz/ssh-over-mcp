@@ -269,3 +269,116 @@ def test_interpreter_wrong_chain_order_refuses(contract):
     inv, policy = _safe_interpreter(contract)
     inv = replace(inv, chain=tuple(reversed(inv.chain)))
     assert "INTERPRETER_INVALID" in contract.validate_interpreter(inv, policy)
+
+
+# Task 3: all "FD witnesses" below are untrusted SYNTHETIC records.
+def _safe_namespace(contract):
+    names = ("gha-e2e-orchestrator", "Library", "Application Support",
+             "ssh-over-mcp-uid502-verification-v1")
+    edges = tuple(
+        contract.NamespaceEdge(
+            name, (1, i + 50, 502, 20, 0o40700),
+            (1, i + 50, 502, 20, 0o40700), "verified_safe", True
+        )
+        for i, name in enumerate(names)
+    )
+    return contract.NamespaceEvidence(
+        "/Users/gha-e2e-orchestrator/Library/Application Support/"
+        "ssh-over-mcp-uid502-verification-v1",
+        "/Users/gha-e2e-orchestrator/Library/Application Support/"
+        "ssh-over-mcp-e2e/staging-v1",
+        "/private/var/folders/test/T/",
+        edges, True, False, False, True,
+    )
+
+
+def _safe_provider(contract):
+    return contract.ProviderInventory(
+        "absent_no_follow", True, "complete_empty", 0, True, True, True, True
+    )
+
+
+def test_namespace_synthetic_fixed_edges_are_consistent(contract):
+    assert contract.validate_namespace(_safe_namespace(contract)) == ()
+
+
+@pytest.mark.parametrize(
+    ("attribute", "value"),
+    [
+        ("verification_root", "/private/tmp/ssh-over-mcp-e2e-unsafe"),
+        ("verification_root", (
+            "/Users/gha-e2e-orchestrator/Library/Application Support/"
+            "ssh-over-mcp-e2e/staging-v1"
+        )),
+        ("protected_root", "/private/tmp/protected"),
+        ("native_temp_parent", "/private/tmp"),
+        ("native_temp_parent", "relative/path"),
+        ("complete", False),
+        ("foreign_entry", True),
+        ("quarantine_present", True),
+        ("alias_disjoint", False),
+    ],
+)
+def test_namespace_identity_and_quarantine_refuse(contract, attribute, value):
+    n = replace(_safe_namespace(contract), **{attribute: value})
+    assert "NAMESPACE_INVALID" in contract.validate_namespace(n)
+
+
+@pytest.mark.parametrize(
+    ("attribute", "value"),
+    [
+        ("name", "renamed"),
+        ("original", (1, 2, 502, 20, 0o40700)),
+        ("current", (2, 52, 502, 20, 0o40700)),
+        ("current", (1, 52, 0, 20, 0o40700)),
+        ("current", (1, 52, 502, 20, 0o40775)),
+        ("acl_state", "unknown"),
+        ("nofollow", False),
+    ],
+)
+def test_namespace_edge_tamper_refuses(contract, attribute, value):
+    n = _safe_namespace(contract)
+    changed = replace(n.edges[2], **{attribute: value})
+    n = replace(n, edges=(*n.edges[:2], changed, *n.edges[3:]))
+    assert "NAMESPACE_INVALID" in contract.validate_namespace(n)
+
+
+@pytest.mark.parametrize("replacement", [(), ("duplicate",), "reverse"])
+def test_namespace_missing_duplicate_or_out_of_order_edges_refuse(contract, replacement):
+    n = _safe_namespace(contract)
+    if replacement == "reverse":
+        bad = tuple(reversed(n.edges))
+    elif replacement == ():
+        bad = n.edges[:-1]
+    else:
+        bad = (*n.edges, n.edges[-1])
+    assert "NAMESPACE_INVALID" in contract.validate_namespace(replace(n, edges=bad))
+
+
+def test_provider_complete_absence_synthetic_schema(contract):
+    assert contract.validate_provider(_safe_provider(contract)) == ()
+
+
+@pytest.mark.parametrize(
+    ("attribute", "value"),
+    [
+        ("marker_state", "present_file"),
+        ("marker_state", "dangling_symlink"),
+        ("marker_state", "dangling_parent_symlink"),
+        ("marker_state", "unknown"),
+        ("marker_chain_pinned", False),
+        ("qemu_state", "enumeration_failed"),
+        ("qemu_state", "truncated"),
+        ("qemu_state", "unknown"),
+        ("qemu_count", 1),
+        ("qemu_count", None),
+        ("qemu_count", True),
+        ("protected_clean", False),
+        ("legacy_private_clean", False),
+        ("legacy_native_clean", False),
+        ("complete", False),
+    ],
+)
+def test_provider_incomplete_refuses(contract, attribute, value):
+    p = replace(_safe_provider(contract), **{attribute: value})
+    assert "PROVIDER_INVALID" in contract.validate_provider(p)

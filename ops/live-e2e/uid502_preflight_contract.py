@@ -235,3 +235,119 @@ def validate_interpreter(
         ):
             return ("INTERPRETER_INVALID",)
     return ()
+
+
+@dataclass(frozen=True, slots=True)
+class NamespaceEdge:
+    name: str
+    original: tuple[int, int, int, int, int]
+    current: tuple[int, int, int, int, int]
+    acl_state: str
+    nofollow: bool
+
+
+@dataclass(frozen=True, slots=True)
+class NamespaceEvidence:
+    verification_root: str
+    protected_root: str
+    native_temp_parent: str
+    edges: tuple[NamespaceEdge, ...]
+    complete: bool
+    foreign_entry: bool
+    quarantine_present: bool
+    alias_disjoint: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderInventory:
+    marker_state: str
+    marker_chain_pinned: bool
+    qemu_state: str
+    qemu_count: int | None
+    protected_clean: bool
+    legacy_private_clean: bool
+    legacy_native_clean: bool
+    complete: bool
+
+
+_VERIFICATION_ROOT = (
+    "/Users/gha-e2e-orchestrator/Library/Application Support/"
+    "ssh-over-mcp-uid502-verification-v1"
+)
+_PROTECTED_ROOT = (
+    "/Users/gha-e2e-orchestrator/Library/Application Support/"
+    "ssh-over-mcp-e2e/staging-v1"
+)
+_NAMESPACE_CHAIN = (
+    "gha-e2e-orchestrator", "Library", "Application Support",
+    "ssh-over-mcp-uid502-verification-v1",
+)
+
+
+def _namespace_identity(values: object) -> bool:
+    return (
+        type(values) is tuple
+        and len(values) == 5
+        and all(_int_id(v) for v in values)
+        and values[0] > 0
+        and values[1] > 0
+        and values[2] == 502
+        and values[4] == 0o40700
+    )
+
+
+def validate_namespace(namespace: NamespaceEvidence) -> tuple[str, ...]:
+    """Only compare synthetic pinned-edge claims; never inspect real APFS."""
+    if not isinstance(namespace, NamespaceEvidence):
+        return ("EVIDENCE_INVALID",)
+    if (
+        namespace.verification_root != _VERIFICATION_ROOT
+        or namespace.protected_root != _PROTECTED_ROOT
+        or not isinstance(namespace.native_temp_parent, str)
+        or not namespace.native_temp_parent.startswith("/private/var/folders/")
+        or namespace.native_temp_parent.startswith(_VERIFICATION_ROOT)
+        or namespace.native_temp_parent.startswith(_PROTECTED_ROOT)
+        or namespace.complete is not True
+        or namespace.foreign_entry is not False
+        or namespace.quarantine_present is not False
+        or namespace.alias_disjoint is not True
+        or type(namespace.edges) is not tuple
+        or len(namespace.edges) != len(_NAMESPACE_CHAIN)
+    ):
+        return ("NAMESPACE_INVALID",)
+
+    witnessed = []
+    for edge, component in zip(namespace.edges, _NAMESPACE_CHAIN):
+        if (
+            not isinstance(edge, NamespaceEdge)
+            or edge.name != component
+            or not _namespace_identity(edge.original)
+            or not _namespace_identity(edge.current)
+            or edge.original != edge.current
+            or edge.acl_state != "verified_safe"
+            or edge.nofollow is not True
+        ):
+            return ("NAMESPACE_INVALID",)
+        witnessed.append((edge.original[0], edge.original[1]))
+    if len(set(witnessed)) != len(witnessed):
+        return ("NAMESPACE_INVALID",)
+    return ()
+
+
+def validate_provider(provider: ProviderInventory) -> tuple[str, ...]:
+    """Synthetic complete-empty claims are not authenticated process evidence."""
+    if not isinstance(provider, ProviderInventory):
+        return ("EVIDENCE_INVALID",)
+    if (
+        provider.marker_state != "absent_no_follow"
+        or provider.marker_chain_pinned is not True
+        or provider.qemu_state != "complete_empty"
+        or type(provider.qemu_count) is not int
+        or provider.qemu_count != 0
+        or provider.protected_clean is not True
+        or provider.legacy_private_clean is not True
+        or provider.legacy_native_clean is not True
+        or provider.complete is not True
+    ):
+        return ("PROVIDER_INVALID",)
+    return ()
