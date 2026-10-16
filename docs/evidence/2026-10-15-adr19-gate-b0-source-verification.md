@@ -252,3 +252,86 @@ Read-only Python `zipfile` inspection of the **31 still-uninstalled wheel archiv
 **Separate decisions still required even with trusted v15:** accept one exact `ClientTrustConfig` (candidate 11,700 bytes / SHA-256 `592ab025f274ce7b43376a2cd0c1085d9620c37c21c74bb84960deded8ef5390`; currently **locally assembled UNAPPROVED**), complete Sigstore 4.3.0 interpreter/loader/31-wheel closure and independently authenticated source/build provenance, approved signed test signer SAN/OIDC and Fulcio/CT/Rekor/TSA/revocation historical policy, measured sealed-digest vs sealed-FD mode (proposal: **digest-from-registered-sealed-bytes**), and exact independent unprivileged network-denied execution authorization. Test-only staging must never become real Python.org artifact source acceptance.
 
 **Stop rule:** no trusted root is adopted, no Sigstore candidate wheel imported/installed/invoked, no `SYNTHETIC_ONLY` GREEN, no PR Ready/review request/merge from this proposal. Have the separate operator/security decision enumerate **the actual exact approved bytes, independent authority source, valid numeric policies and execution boundaries**, or explicitly refuse.
+
+## 2026-10-16 static candidate CPython extension/ELF closure ledger (T5A, NOT TRUSTED)
+
+**Method and scope:** Read-only hashing on the existing persistent Ubuntu 26.04 x86_64 Linux guest. Python 3.14.4 stdlib and existing readelf inspected installed files; no candidate Sigstore wheel or verifier imported, installed or executed. All 49 Python lib-dynload ELF modules and 23 system SONAME objects below have successful readelf -d results, no declared RPATH/RUNPATH, and all DT_NEEDED names in the enumerated 23-object set. These are **guest-measured, unauthenticated bytes**, not a complete runtime trust chain or an independently approved verification environment.
+
+Sorted stdlib SHA-256 manifest format is SHA256 + two ASCII spaces + basename + newline per module. Manifest SHA-256: `a6c6711f23a05807453f72959273ca85decec06392d5aed84cdb7f789566864a`. Prior T5A evidence records the SHA-256/length of all 31 candidate wheels and separately the six inert wheel-native extension members. No wheel software was executed.
+
+| Classification | Module basename / SONAME | SHA-256 of guest bytes |
+| --- | --- | --- |
+| STDLIB | `_asyncio.cpython-314-x86_64-linux-gnu.so` | `4496ed30fd0b3357181e650f966378c4222875c01c5e4ebc21be0b38c0066ed0` |
+| STDLIB | `_bz2.cpython-314-x86_64-linux-gnu.so` | `61ce64aaf008333efb4254ddb389d482254ec79b62cdd7d22ca0f7fb5430f1a3` |
+| STDLIB | `_codecs_cn.cpython-314-x86_64-linux-gnu.so` | `b7bb36aa937c9e5f7d8d05c77cc840bbdca906de791be49349f3ec7f4671d9ca` |
+| STDLIB | `_codecs_hk.cpython-314-x86_64-linux-gnu.so` | `a4ec7fe518ccb8521d065b48fe2cbc6a557c5802ddea0ac7fd63db8ad7d17a91` |
+| STDLIB | `_codecs_iso2022.cpython-314-x86_64-linux-gnu.so` | `3cd79b3a690040f7cca6b0764b5e4b4df08d7e1c9db0c10f0c8305ef94732a57` |
+| STDLIB | `_codecs_jp.cpython-314-x86_64-linux-gnu.so` | `e2322168cf620760af4232896a7e1d17d3f9fcd97a77477604ddd3223a4562eb` |
+| STDLIB | `_codecs_kr.cpython-314-x86_64-linux-gnu.so` | `c64ad9113cc2ba4cbf0607d225953e66dc868f2d42f292d6229a2ac589177cf3` |
+| STDLIB | `_codecs_tw.cpython-314-x86_64-linux-gnu.so` | `5a21824e9ffbd02abe1ac9b62225f9a2c52263451c99c9f7826ffc9ad2219294` |
+| STDLIB | `_ctypes.cpython-314-x86_64-linux-gnu.so` | `140e837f2bc9344f3a98dea90e8bdf6f208370e45f3eccbac759c59e59d4d045` |
+| STDLIB | `_ctypes_test.cpython-314-x86_64-linux-gnu.so` | `2bd8a371b9c9dfbaca9d3d5ec7f0c37a4563bd9cd3fcf08e55ecb736ed98b902` |
+| STDLIB | `_curses.cpython-314-x86_64-linux-gnu.so` | `e808a0b78be9acb637d83e53d495594efd7d0a52810aeaa7acda4d7ec987c4ba` |
+| STDLIB | `_curses_panel.cpython-314-x86_64-linux-gnu.so` | `a766fe589aa87dade78dc2822893658ea3ae0358d9c3aefdc11ebc9986585f99` |
+| STDLIB | `_dbm.cpython-314-x86_64-linux-gnu.so` | `df1190fe52e4eb922c67ce10990aa552f2de6c80be9f1090dfdc4e4e65aee0a5` |
+| STDLIB | `_decimal.cpython-314-x86_64-linux-gnu.so` | `2d471da94b807de52049da8314f31ec061cc2510cd3bbdb9a496dcb733f91871` |
+| STDLIB | `_gdbm.cpython-314-x86_64-linux-gnu.so` | `e26eaaf954350eafc79e6adaa0122a435a99b8a6a70f4defb02533c2c74d63d3` |
+| STDLIB | `_hashlib.cpython-314-x86_64-linux-gnu.so` | `f57bc22cc1b6f3b48c43778634af1a7e79c5ae0632350fa5144d050c7848112c` |
+| STDLIB | `_hmac.cpython-314-x86_64-linux-gnu.so` | `fcbf64f591f96b8e2a2abf86ae56efc7ed08bb3ee64201ff368767d9bd12d4c6` |
+| STDLIB | `_interpchannels.cpython-314-x86_64-linux-gnu.so` | `a706f2dd9e6c5ed83c982824a0b54eb5f699ca7b676450cf407cd7fae8a9065b` |
+| STDLIB | `_interpqueues.cpython-314-x86_64-linux-gnu.so` | `6a7bdd40cb080c9352e756738a663258cb13a38bdd6cc7347a39c382de685fd9` |
+| STDLIB | `_interpreters.cpython-314-x86_64-linux-gnu.so` | `fc578dc57d59b31b891176076da52f441cd763c45ed1da39121c59625774dbb5` |
+| STDLIB | `_lsprof.cpython-314-x86_64-linux-gnu.so` | `bf6fef048e68abdba0cf9f6ce55b0242cf5ed1025bed7aaddef816b8a6cf9a0d` |
+| STDLIB | `_lzma.cpython-314-x86_64-linux-gnu.so` | `fd83f9d0efaa0897e8c50812f59a509cb0c72ed5b2afce9b935e0f36314c2d03` |
+| STDLIB | `_multibytecodec.cpython-314-x86_64-linux-gnu.so` | `289fa01f6fb447017b5020ac2b48596794ab61ad5fc9a56ba2704eba35576f57` |
+| STDLIB | `_multiprocessing.cpython-314-x86_64-linux-gnu.so` | `b690ca4d1d6811aa03f821a3a0761375ace39ace1e23c584f88fc08baf2cdafb` |
+| STDLIB | `_posixshmem.cpython-314-x86_64-linux-gnu.so` | `24bb62a697bea71781037a29455a428b18af647672802cf94ef9c54cc424460a` |
+| STDLIB | `_queue.cpython-314-x86_64-linux-gnu.so` | `473d24ecbca58e9ba835a9b0fc0a5eb6215f5f510ad49822cffca3903b4ac40a` |
+| STDLIB | `_remote_debugging.cpython-314-x86_64-linux-gnu.so` | `2c6ea3ef65d7585a4fdb2eb30776e3c1b214f3e778a4e1c78b5faaad0304648e` |
+| STDLIB | `_sqlite3.cpython-314-x86_64-linux-gnu.so` | `d1cfe7116cd7683b0ec01eb6de449f6d4fe1bee45046ae4c289599d2e4ee69f6` |
+| STDLIB | `_ssl.cpython-314-x86_64-linux-gnu.so` | `53789b72a5011867c45036d115ef10f452282751b8735691d1eaf22bf8fe5587` |
+| STDLIB | `_testbuffer.cpython-314-x86_64-linux-gnu.so` | `d0f05b76ecc2db20f79ed4590238a0369d2a367f09d8916b775c2b02289e11bd` |
+| STDLIB | `_testcapi.cpython-314-x86_64-linux-gnu.so` | `9e762cfad89fc0eef3a77cb0d4c5811a1dccdcc47e2fc7f67698e2df8eafe41a` |
+| STDLIB | `_testclinic.cpython-314-x86_64-linux-gnu.so` | `493498b086c80d366783d58734847876c196908542c4020ea58d28a406ac00b6` |
+| STDLIB | `_testclinic_limited.cpython-314-x86_64-linux-gnu.so` | `8275cfe228f9b02e70f5dc6bca6d687d7fefed452124f6ffe938024478437e8b` |
+| STDLIB | `_testimportmultiple.cpython-314-x86_64-linux-gnu.so` | `fc5ad9d3e1a19fb105fd5a55c2433463ed28215e2a0ae358ef39db36dd1d1471` |
+| STDLIB | `_testinternalcapi.cpython-314-x86_64-linux-gnu.so` | `cdefe52b425cbbc010f1fddc544f0b8cd9f0b4bd55f75c11be228439e265f0ce` |
+| STDLIB | `_testlimitedcapi.cpython-314-x86_64-linux-gnu.so` | `7a62e07453c3701810d2d01d6815f0416eefa6fbc6c9ac615f2bc73d7588b4a8` |
+| STDLIB | `_testmultiphase.cpython-314-x86_64-linux-gnu.so` | `651d2380a88acc9529c1c3a8bbc941769fccf336512835997370efbe12279212` |
+| STDLIB | `_testsinglephase.cpython-314-x86_64-linux-gnu.so` | `6b482c49fbb0ca3183a737a4a297849a8cfaeb79d692e38e9de780b2e590ef38` |
+| STDLIB | `_uuid.cpython-314-x86_64-linux-gnu.so` | `0b49faf028ed0aa0a29a50b8b32086e54bbafde1703f2c81413eef41ad79721d` |
+| STDLIB | `_xxtestfuzz.cpython-314-x86_64-linux-gnu.so` | `2f69a3b38b8e95bb613aebb88df8b105ff5ab844854360d99083f22fcc4424b0` |
+| STDLIB | `_zoneinfo.cpython-314-x86_64-linux-gnu.so` | `6b786110b21aa071e8097a744f01bc96c8b80ace35a0c057730eebbfb2cbfd00` |
+| STDLIB | `_zstd.cpython-314-x86_64-linux-gnu.so` | `f7869f631b6435fbd1c62ee3e57a6aab766b4b5b75a065637b4d355bb2aa1147` |
+| STDLIB | `mmap.cpython-314-x86_64-linux-gnu.so` | `6cb6efcd6eebb10132b3cd17d1a8283ed11ee01702d4bebc4305b05b3756939d` |
+| STDLIB | `readline.cpython-314-x86_64-linux-gnu.so` | `4dd74b80e2452b965688d759c2e9c4eee9289cada1d8a7caf38ea84d2f71ed6b` |
+| STDLIB | `resource.cpython-314-x86_64-linux-gnu.so` | `56bc220a6a1b5fdd4bf652a47f6f137e36746b6eac65233a8d8cc1bd3538b9e4` |
+| STDLIB | `termios.cpython-314-x86_64-linux-gnu.so` | `2c998343bc8f45837b44abf702290e0d7629dacb7d41d80d4aaa9fc0b30232d6` |
+| STDLIB | `xxlimited.cpython-314-x86_64-linux-gnu.so` | `db1293e831573211dca28165ac71c1b31d34b75aac348fca7ec5fd5e849a11e5` |
+| STDLIB | `xxlimited_35.cpython-314-x86_64-linux-gnu.so` | `a8843f4772a7543c0b9a579c116f911d59770b5fd7c81fb25a82c871091e370f` |
+| STDLIB | `xxsubtype.cpython-314-x86_64-linux-gnu.so` | `65745d26b1846964e09086d0792957a683872b8f52cb5a71d8f1283d3b65051a` |
+| LIB | `ld-linux-x86-64.so.2` | `bda779ea9e9ad234f60315477d7cfd0bdde861cd8ddd9df8cdaf62f18c4cec14` |
+| LIB | `libbz2.so.1.0` | `7138aeb748f73c150b1d34d67de69139a441910cd7b269076ba3c8b986dea9a7` |
+| LIB | `libc.so.6` | `85e64f97e348786a8fb4d9f3d52fec289e2fb86bba20f0731dfe61990525e0f7` |
+| LIB | `libcrypto.so.3` | `5385f0436ac2e284ba8c5fb1488874057c29c04be72dea32add832694f381e28` |
+| LIB | `libdb-5.3.so` | `66319e2bbca33c46b6bfb6b1315c49ce90ee19e2e8d2d3f9c5dc30f8ebbd9e29` |
+| LIB | `libdl.so.2` | `59d725ca30596a9863f4fa2552a7125f834842abc86b40890231c129358965d2` |
+| LIB | `libexpat.so.1` | `2e5f66e2784c2746775567ff9916f6e7503182a8f1f2deb8ca729dfc1463849f` |
+| LIB | `libffi.so.8` | `1a0dc86f787f73e025a6e521056360afcbe70f2a82cd808132fefc2b4ee95daa` |
+| LIB | `libgcc_s.so.1` | `9d339ecb409578d6a5d587e6c537a8f9589b8a13fefba30d167433a4b5758bee` |
+| LIB | `libgdbm.so.6` | `f761c391c1c84e3d9e534533cbf8a78d315613e614c349043a3b40b1c8f9bf7e` |
+| LIB | `liblzma.so.5` | `64550dc7a4dc9159d32c00d9e78ce86e0951d02b7b24827df97f090dae101a19` |
+| LIB | `libm.so.6` | `1c488db6f4fe8cecb72456bc018de000b7a9b539c2994864b0416b5e8371b3d8` |
+| LIB | `libncursesw.so.6` | `d392aa39297399808eccfeee96303b83c802c94379e24c8f98841fba11ff9758` |
+| LIB | `libpanelw.so.6` | `9c25289b7d62e43d2e38bff4ac2bc2ffd99e118326fca5e8b8e75ebb49041236` |
+| LIB | `libpthread.so.0` | `1327fc40710691dbd94e88b6cf4efce27fefe8fbb93f7d1164a75b4dccaea696` |
+| LIB | `libreadline.so.8` | `d2e865b97bc4631f9eec46a202d69f5407695734a3bbaeb8c838a93d1bfe5902` |
+| LIB | `librt.so.1` | `9f3cc59207bcaaac74aaf7aca961f4816f0f4d945e4bd1c3cb98ec516becf161` |
+| LIB | `libsqlite3.so.0` | `4633a4be13fdf05cb0f859e04fb06077a1fe30a90e405721a23873bd1f3d88a8` |
+| LIB | `libssl.so.3` | `63b47f444efa588e291e9b650a5ba2ab02f856356f2d50f13a2e477db9119e09` |
+| LIB | `libtinfo.so.6` | `085dbbe5dc38619276bdd0af37ae588969b1308baded09a2990ce8824a602912` |
+| LIB | `libuuid.so.1` | `aef01d22b409ace7db97357b8b47332cd3e10c262ffa3c4014f3eeb44b968620` |
+| LIB | `libz.so.1` | `47b61967895b30e8c0c6818dd633ffeb87711cf637c688f981896f0dd84ce23b` |
+| LIB | `libzstd.so.1` | `060eeb79531d435306665fd78329d8a9dd579f95876c5960bb67937825362a80` |
+
+**Hard limits:** This is NOT independent Ubuntu/CPython build or source provenance, does not hash all Python stdlib .py or resource files, does not guarantee path-level dynamic-loader resolution at use, prevent library injection, attest the OS image or provide a secure clock, and cannot select Sigstore/TUF/Fulcio/Rekor/TSA keys. No complete T5B executable+dependency approval, actual pinned Sigstore GREEN/RED, or source authority. This research does not permit PR Ready or a real Mac installer.
