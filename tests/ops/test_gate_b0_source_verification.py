@@ -629,3 +629,95 @@ def test_upstream_candidate_rekor_inclusion_tampering_changes_computed_root():
         body, log_index=735, tree_size=736, hashes=modified_hashes
     ) != expected
     # Both are mathematical negatives, not authentication of the log/root.
+
+
+def _candidate_leaf_ecdsa_verification(
+    *, payload: bytes, signature: bytes, certificate_der: bytes
+) -> bool:
+    """Conditional arithmetic with an UNTRUSTED bundled leaf; never authorizes."""
+    import subprocess
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="som-b0a-untrusted-ecdsa-") as directory:
+        root = Path(directory)
+        certificate_path = root / "leaf.der"
+        signature_path = root / "signature.der"
+        payload_path = root / "payload.bin"
+        public_key_path = root / "leaf-public.pem"
+        certificate_path.write_bytes(certificate_der)
+        signature_path.write_bytes(signature)
+        payload_path.write_bytes(payload)
+        # Fixed local OS utility: no shell, Sigstore tool, remote roots or network.
+        env = {"PATH": "/usr/bin:/bin", "LC_ALL": "C", "OPENSSL_CONF": "/dev/null"}
+        key = subprocess.run(
+            [
+                "/usr/bin/openssl", "x509", "-inform", "DER",
+                "-in", str(certificate_path), "-pubkey", "-noout",
+            ],
+            capture_output=True, check=False, timeout=5, env=env,
+        )
+        if key.returncode != 0:
+            return False
+        public_key_path.write_bytes(key.stdout)
+        verified = subprocess.run(
+            [
+                "/usr/bin/openssl", "dgst", "-sha256",
+                "-verify", str(public_key_path),
+                "-signature", str(signature_path), str(payload_path),
+            ],
+            capture_output=True, check=False, timeout=5, env=env,
+        )
+        return verified.returncode == 0 and verified.stdout.strip() == b"Verified OK"
+
+
+def test_upstream_candidate_ecdsa_leaf_signature_math_only():
+    """Genuine archived ECDSA verifies only under self-supplied UNTRUSTED key."""
+    import base64
+    import json
+
+    base = Path(__file__).resolve().parent / "fixtures" / "b0a_synthetic"
+    payload = (base / "sigstore-conformance-a.txt").read_bytes()
+    archive = (base / "sigstore-conformance-rekor2-bundle.sigstore.json").read_bytes()
+    assert len(payload) == 109
+    assert hashlib.sha256(payload).hexdigest() == (
+        "a0cfc71271d6e278e57cd332ff957c3f7043fdda354c4cbb190a30d56efa01bf"
+    )
+    assert hashlib.sha256(archive).hexdigest() == (
+        "3a5ce62cee2653969be846a41e8332eae82c633cdfafe6db48b10e60939518dd"
+    )
+    bundle = json.loads(archive)
+    signature = base64.b64decode(bundle["messageSignature"]["signature"], validate=True)
+    certificate = base64.b64decode(
+        bundle["verificationMaterial"]["certificate"]["rawBytes"], validate=True
+    )
+    assert _candidate_leaf_ecdsa_verification(
+        payload=payload, signature=signature, certificate_der=certificate
+    )
+    # This proves signature arithmetic, NOT Fulcio, OIDC, TSA, Rekor or TUF.
+
+
+def test_upstream_candidate_ecdsa_artifact_and_signature_tamper_fail():
+    """Same-length changes must fail under the unchanged untrusted leaf key."""
+    import base64
+    import json
+
+    base = Path(__file__).resolve().parent / "fixtures" / "b0a_synthetic"
+    payload = (base / "sigstore-conformance-a.txt").read_bytes()
+    bundle = json.loads(
+        (base / "sigstore-conformance-rekor2-bundle.sigstore.json").read_bytes()
+    )
+    signature = base64.b64decode(bundle["messageSignature"]["signature"], validate=True)
+    certificate = base64.b64decode(
+        bundle["verificationMaterial"]["certificate"]["rawBytes"], validate=True
+    )
+    altered_payload = bytes([payload[0] ^ 1]) + payload[1:]
+    assert len(altered_payload) == len(payload)
+    assert not _candidate_leaf_ecdsa_verification(
+        payload=altered_payload, signature=signature, certificate_der=certificate
+    )
+    altered_signature = bytes([signature[0] ^ 1]) + signature[1:]
+    assert len(altered_signature) == len(signature)
+    assert not _candidate_leaf_ecdsa_verification(
+        payload=payload, signature=altered_signature, certificate_der=certificate
+    )
+    # These negatives are not T5B or an approved full offline Sigstore verifier.
