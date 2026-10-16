@@ -459,3 +459,75 @@ def test_bundle_invalid_signature_or_empty_material_refuses():
                 )
     finally:
         api.close_measurement(measured)
+
+
+def test_upstream_real_signed_candidate_fixture_static_digest_matches_without_authority():
+    """Archived upstream test signature is data, NOT an approved verifier GREEN."""
+    api = load_module()
+    adapter = _load_unapproved_digest_preflight()
+    base = Path(__file__).resolve().parent / "fixtures" / "b0a_synthetic"
+    payload = (base / "sigstore-conformance-a.txt").read_bytes()
+    bundle = (base / "sigstore-conformance-rekor2-bundle.sigstore.json").read_bytes()
+    assert len(payload) == 109
+    assert hashlib.sha256(payload).hexdigest() == (
+        "a0cfc71271d6e278e57cd332ff957c3f7043fdda354c4cbb190a30d56efa01bf"
+    )
+    assert len(bundle) == 10123
+    assert hashlib.sha256(bundle).hexdigest() == (
+        "3a5ce62cee2653969be846a41e8332eae82c633cdfafe6db48b10e60939518dd"
+    )
+    fixture, witness = api.fixture_from_trusted_bytes(payload, fixture_id="archived-candidate")
+    measurement = api.ingest_fixed_fixture(fixture, witness)
+    try:
+        assert adapter.check_bundle_digest_consistency(measurement, bundle) is None
+    finally:
+        api.close_measurement(measurement)
+
+
+def test_upstream_real_signed_candidate_same_length_modified_bytes_refuse():
+    """Real archived bundle is unchanged: only sealed artifact differs by one byte."""
+    api = load_module()
+    adapter = _load_unapproved_digest_preflight()
+    base = Path(__file__).resolve().parent / "fixtures" / "b0a_synthetic"
+    payload = (base / "sigstore-conformance-a.txt").read_bytes()
+    bundle = (base / "sigstore-conformance-rekor2-bundle.sigstore.json").read_bytes()
+    modified = bytes([payload[0] ^ 1]) + payload[1:]
+    assert len(modified) == len(payload)
+    fixture, witness = api.fixture_from_trusted_bytes(modified, fixture_id="modified-candidate")
+    measurement = api.ingest_fixed_fixture(fixture, witness)
+    try:
+        with pytest.raises(api.B0aInputRefused, match="BUNDLE_DIGEST_MISMATCH"):
+            adapter.check_bundle_digest_consistency(measurement, bundle)
+    finally:
+        api.close_measurement(measurement)
+
+
+def test_upstream_candidate_bundle_digest_field_tamper_refuses_without_rewriting_signature():
+    """Change *only* declared digest; original upstream signature/proofs unchanged."""
+    import base64
+    import json
+
+    api = load_module()
+    adapter = _load_unapproved_digest_preflight()
+    base = Path(__file__).resolve().parent / "fixtures" / "b0a_synthetic"
+    payload = (base / "sigstore-conformance-a.txt").read_bytes()
+    untouched = (base / "sigstore-conformance-rekor2-bundle.sigstore.json").read_bytes()
+    assert hashlib.sha256(untouched).hexdigest() == (
+        "3a5ce62cee2653969be846a41e8332eae82c633cdfafe6db48b10e60939518dd"
+    )
+    bundle = json.loads(untouched)
+    original_signature = bundle["messageSignature"]["signature"]
+    original_material = bundle["verificationMaterial"]
+    bundle["messageSignature"]["messageDigest"]["digest"] = base64.b64encode(
+        b"\x00" * 32
+    ).decode("ascii")
+    assert bundle["messageSignature"]["signature"] == original_signature
+    assert bundle["verificationMaterial"] == original_material
+    tampered = json.dumps(bundle).encode("utf-8")
+    fixture, witness = api.fixture_from_trusted_bytes(payload, fixture_id="tampered-candidate")
+    measurement = api.ingest_fixed_fixture(fixture, witness)
+    try:
+        with pytest.raises(api.B0aInputRefused, match="BUNDLE_DIGEST_MISMATCH"):
+            adapter.check_bundle_digest_consistency(measurement, tampered)
+    finally:
+        api.close_measurement(measurement)
