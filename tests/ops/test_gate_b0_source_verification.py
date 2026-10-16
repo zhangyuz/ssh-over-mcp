@@ -299,3 +299,94 @@ def test_handoff_rejects_forged_or_closed_issued_descriptor():
         api.close_measurement(issued)
     with pytest.raises(api.B0aInputRefused):
         api.authenticated_measurement_for_handoff(issued)
+
+
+def _load_unapproved_digest_preflight():
+    import importlib.util
+    p = MODULE.with_name("gate_b0_sigstore_adapter.py")
+    spec = importlib.util.spec_from_file_location("gate_b0_sigstore_adapter", p)
+    assert spec is not None and spec.loader is not None
+    adapter = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = adapter
+    spec.loader.exec_module(adapter)
+    return adapter
+
+
+def _syntactic_message_signature_bundle(digest_hex: str) -> bytes:
+    import base64
+    import json
+    return json.dumps(
+        {
+            "mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json",
+            "messageSignature": {
+                "messageDigest": {
+                    "algorithm": "SHA2_256",
+                    "digest": base64.b64encode(bytes.fromhex(digest_hex)).decode("ascii"),
+                },
+            },
+        },
+        sort_keys=True,
+    ).encode("ascii")
+
+
+def test_bundle_digest_preflight_matches_registered_sealed_bytes_without_certifying_signature():
+    api = load_module()
+    adapter = _load_unapproved_digest_preflight()
+    payload = b"test-only synthetic sealed bytes"
+    fixture, witness = api.fixture_from_trusted_bytes(payload, fixture_id="digest-check")
+    measurement = api.ingest_fixed_fixture(fixture, witness)
+    try:
+        bundle = _syntactic_message_signature_bundle(hashlib.sha256(payload).hexdigest())
+        # None explicitly denotes a consistency check, NOT a verified signer/root.
+        assert adapter.check_bundle_digest_consistency(measurement, bundle) is None
+    finally:
+        api.close_measurement(measurement)
+
+
+def test_bundle_declared_digest_differs_from_same_length_payload_refuses_preflight():
+    api = load_module()
+    adapter = _load_unapproved_digest_preflight()
+    payload = b"same length bytes one"
+    wrong = b"same length bytes two"
+    assert len(payload) == len(wrong)
+    fixture, witness = api.fixture_from_trusted_bytes(payload, fixture_id="digest-mismatch")
+    measurement = api.ingest_fixed_fixture(fixture, witness)
+    try:
+        bundle = _syntactic_message_signature_bundle(hashlib.sha256(wrong).hexdigest())
+        with pytest.raises(api.B0aInputRefused):
+            adapter.check_bundle_digest_consistency(measurement, bundle)
+    finally:
+        api.close_measurement(measurement)
+
+
+def test_bundle_duplicate_digest_or_incompatible_shape_refuses_preflight():
+    api = load_module()
+    adapter = _load_unapproved_digest_preflight()
+    fixture, witness = api.fixture_from_trusted_bytes(b"fixed", fixture_id="bundle-shape")
+    measurement = api.ingest_fixed_fixture(fixture, witness)
+    valid = _syntactic_message_signature_bundle(measurement.sha256)
+    try:
+        duplicate = valid.replace(b'"digest":', b'"digest":"AAAA","digest":', 1)
+        for bad in (duplicate, b"{", b"[]", b"{}", b"null", b"x" * (1024 * 1024 + 1)):
+            with pytest.raises(api.B0aInputRefused):
+                adapter.check_bundle_digest_consistency(measurement, bad)
+    finally:
+        api.close_measurement(measurement)
+
+
+def test_bundle_preflight_rejects_forged_or_closed_measurement():
+    api = load_module()
+    adapter = _load_unapproved_digest_preflight()
+    fixture, witness = api.fixture_from_trusted_bytes(b"sealed", fixture_id="bundle-owner")
+    measurement = api.ingest_fixed_fixture(fixture, witness)
+    clone = api.SealedMeasurement(
+        measurement.fd, measurement.sha256, measurement.length, measurement.witness_ref
+    )
+    bundle = _syntactic_message_signature_bundle(measurement.sha256)
+    try:
+        with pytest.raises(api.B0aInputRefused):
+            adapter.check_bundle_digest_consistency(clone, bundle)
+    finally:
+        api.close_measurement(measurement)
+    with pytest.raises(api.B0aInputRefused):
+        adapter.check_bundle_digest_consistency(measurement, bundle)
