@@ -774,16 +774,11 @@ def _archived_candidate_leaf_identity_fields() -> tuple[str, str, str]:
     assert hashlib.sha256(cert_der).hexdigest() == (
         "bb2b81c4f07d282f71e99007e78584dbf7b086793fabfdde7c45244a946ac639"
     )
-    openssl = (
-        "/usr/local/bin/openssl"
-        if sys.platform == "darwin" and Path("/usr/local/bin/openssl").is_file()
-        else "/usr/bin/openssl"
-    )
     with tempfile.TemporaryDirectory(prefix="som-b0a-archived-leaf-") as name:
         path = Path(name) / "leaf.der"
         path.write_bytes(cert_der)
         result = subprocess.run(
-            [openssl, "x509", "-inform", "DER", "-in", str(path),
+            ["/usr/bin/openssl", "x509", "-inform", "DER", "-in", str(path),
              "-text", "-noout"],
             capture_output=True, check=False, text=True, timeout=5,
             env={"PATH": "/usr/bin:/bin", "LC_ALL": "C", "OPENSSL_CONF": "/dev/null"},
@@ -795,15 +790,37 @@ def _archived_candidate_leaf_identity_fields() -> tuple[str, str, str]:
         r"^\s+1\.3\.6\.1\.4\.1\.57264\.1\.1:\s*\n\s+(\S+)\s*$",
         text, flags=re.MULTILINE,
     )
-    sct = re.search(
-        r"Log ID\s+:\s+((?:[0-9A-F]{2}:){15}[0-9A-F]{2}):\s*"
-        r"((?:[0-9A-F]{2}:){15}[0-9A-F]{2})",
-        text,
-    )
-    assert len(san) == len(oidc) == 1 and sct is not None
-    return san[0], oidc[0], base64.b64encode(
-        bytes.fromhex((sct.group(1) + sct.group(2)).replace(":", ""))
-    ).decode("ascii")
+    assert len(san) == len(oidc) == 1
+
+    # RFC6962 certificate SCT extension: OID -> X.509 extnValue OCTET,
+    # inner DER OCTET, TLS list length, one length-prefixed SCT v1 entry.
+    # Exact leaf DER digest above is pinned, but its SCT is NOT authenticated.
+    def read_der_octet(source: bytes, offset: int) -> tuple[bytes, int]:
+        assert source[offset] == 0x04
+        head = source[offset + 1]
+        if head < 128:
+            length, start = head, offset + 2
+        else:
+            count = head & 0x7F
+            assert 1 <= count <= 2
+            length = int.from_bytes(source[offset + 2: offset + 2 + count], "big")
+            assert length >= 128
+            start = offset + 2 + count
+        stop = start + length
+        assert stop <= len(source)
+        return source[start:stop], stop
+
+    oid = bytes.fromhex("060a2b06010401d679020402")
+    assert cert_der.count(oid) == 1
+    outer, _ = read_der_octet(cert_der, cert_der.index(oid) + len(oid))
+    sct_list, inner_end = read_der_octet(outer, 0)
+    assert inner_end == len(outer)
+    assert len(sct_list) >= 5
+    assert int.from_bytes(sct_list[:2], "big") == len(sct_list) - 2
+    assert int.from_bytes(sct_list[2:4], "big") == len(sct_list) - 4
+    sct_entry = sct_list[4:]
+    assert sct_entry[0] == 0 and len(sct_entry) >= 43  # SCT v1
+    return san[0], oidc[0], base64.b64encode(sct_entry[1:33]).decode("ascii")
 
 
 def test_archived_candidate_identity_matches_untrusted_conformance_claims_only():
