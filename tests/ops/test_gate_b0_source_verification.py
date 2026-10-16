@@ -756,3 +756,74 @@ def test_cli_ambient_sigstore_variables_cannot_grant_t5_authority():
     }
     assert len(proc.stdout.encode("ascii")) < 16 * 1024
     # This covers only the current refusal-only CLI, not a future verifier sandbox.
+
+
+def _archived_candidate_leaf_identity_fields() -> tuple[str, str, str]:
+    """Read-only candidate X.509 extension parsing; NOT certificate-chain trust."""
+    import base64
+    import json
+    import re
+    import subprocess
+    import tempfile
+
+    root = Path(__file__).resolve().parent / "fixtures" / "b0a_synthetic"
+    bundle = json.loads((root / "sigstore-conformance-rekor2-bundle.sigstore.json").read_bytes())
+    cert_der = base64.b64decode(
+        bundle["verificationMaterial"]["certificate"]["rawBytes"], validate=True
+    )
+    assert hashlib.sha256(cert_der).hexdigest() == (
+        "bb2b81c4f07d282f71e99007e78584dbf7b086793fabfdde7c45244a946ac639"
+    )
+    openssl = (
+        "/usr/local/bin/openssl"
+        if sys.platform == "darwin" and Path("/usr/local/bin/openssl").is_file()
+        else "/usr/bin/openssl"
+    )
+    with tempfile.TemporaryDirectory(prefix="som-b0a-archived-leaf-") as name:
+        path = Path(name) / "leaf.der"
+        path.write_bytes(cert_der)
+        result = subprocess.run(
+            [openssl, "x509", "-inform", "DER", "-in", str(path),
+             "-text", "-noout"],
+            capture_output=True, check=False, text=True, timeout=5,
+            env={"PATH": "/usr/bin:/bin", "LC_ALL": "C", "OPENSSL_CONF": "/dev/null"},
+        )
+    assert result.returncode == 0 and len(result.stdout) < 16384
+    text = result.stdout
+    san = re.findall(r"^\s+URI:(\S+)\s*$", text, flags=re.MULTILINE)
+    oidc = re.findall(
+        r"^\s+1\.3\.6\.1\.4\.1\.57264\.1\.1:\s*\n\s+(\S+)\s*$",
+        text, flags=re.MULTILINE,
+    )
+    sct = re.search(
+        r"Log ID\s+:\s+((?:[0-9A-F]{2}:){15}[0-9A-F]{2}):\s*"
+        r"((?:[0-9A-F]{2}:){15}[0-9A-F]{2})",
+        text,
+    )
+    assert len(san) == len(oidc) == 1 and sct is not None
+    return san[0], oidc[0], base64.b64encode(
+        bytes.fromhex((sct.group(1) + sct.group(2)).replace(":", ""))
+    ).decode("ascii")
+
+
+def test_archived_candidate_identity_matches_untrusted_conformance_claims_only():
+    """Record real leaf SAN/OIDC/SCT key ID without authenticating their issuer."""
+    identity, oidc, sct_log_id = _archived_candidate_leaf_identity_fields()
+    assert identity == (
+        "https://github.com/sigstore-conformance/"
+        "extremely-dangerous-public-oidc-beacon/.github/workflows/"
+        "extremely-dangerous-oidc-beacon.yml@refs/heads/main"
+    )
+    assert oidc == "https://token.actions.githubusercontent.com"
+    assert sct_log_id == "KzC83GiIyeLh2CYpXnQfSDkxlgLynDPLXkNA/rKshno="
+    # This SCT log key ID is a self-reported value, not an SCT signature proof.
+
+
+def test_archived_candidate_wrong_signer_identity_not_equal_expected_test_identity():
+    """A wrong identity/issuer must never accidentally equal the candidate leaf."""
+    identity, oidc, _ = _archived_candidate_leaf_identity_fields()
+    assert identity != identity + "/attacker"
+    assert identity != identity.replace("@refs/heads/main", "@refs/heads/other")
+    assert oidc != "https://attacker.example"
+    assert oidc != "https://token.actions.githubusercontent.com.attacker.example"
+    # A real pinned Sigstore policy rejection is a DIFFERENT unexecuted T5B test.
