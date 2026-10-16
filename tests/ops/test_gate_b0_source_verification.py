@@ -312,6 +312,7 @@ def _load_unapproved_digest_preflight():
     return adapter
 
 
+# Syntactic fake fields are intentionally NOT a signed/verified Sigstore bundle.
 def _syntactic_message_signature_bundle(digest_hex: str) -> bytes:
     import base64
     import json
@@ -322,6 +323,16 @@ def _syntactic_message_signature_bundle(digest_hex: str) -> bytes:
                 "messageDigest": {
                     "algorithm": "SHA2_256",
                     "digest": base64.b64encode(bytes.fromhex(digest_hex)).decode("ascii"),
+                },
+                "signature": base64.b64encode(b"FAKE_UNVERIFIED_SIGNATURE").decode("ascii"),
+            },
+            "verificationMaterial": {
+                "certificate": {
+                    "rawBytes": base64.b64encode(b"FAKE_UNVERIFIED_CERT").decode("ascii")
+                },
+                "tlogEntries": [{"logId": {"keyId": "UNVERIFIED_TEST_LOG"}}],
+                "timestampVerificationData": {
+                    "rfc3161Timestamps": [{"signedTimestamp": "RkFLRQ=="}]
                 },
             },
         },
@@ -390,3 +401,61 @@ def test_bundle_preflight_rejects_forged_or_closed_measurement():
         api.close_measurement(measurement)
     with pytest.raises(api.B0aInputRefused):
         adapter.check_bundle_digest_consistency(measurement, bundle)
+
+
+def test_bundle_unsigned_or_missing_material_refuses():
+    import json
+
+    api = load_module()
+    adapter = _load_unapproved_digest_preflight()
+    fixture, witness = api.fixture_from_trusted_bytes(b"sealed", fixture_id="bundle-unsigned")
+    measured = api.ingest_fixed_fixture(fixture, witness)
+    try:
+        valid = json.loads(_syntactic_message_signature_bundle(measured.sha256))
+        variants = []
+        unsigned = json.loads(json.dumps(valid))
+        del unsigned["messageSignature"]["signature"]
+        variants.append(unsigned)
+        for missing in ("verificationMaterial",):
+            no_material = json.loads(json.dumps(valid))
+            del no_material[missing]
+            variants.append(no_material)
+        for key in ("certificate", "tlogEntries", "timestampVerificationData"):
+            absent = json.loads(json.dumps(valid))
+            del absent["verificationMaterial"][key]
+            variants.append(absent)
+        for bad in variants:
+            with pytest.raises(api.B0aInputRefused):
+                adapter.check_bundle_digest_consistency(
+                    measured, json.dumps(bad).encode("utf-8")
+                )
+    finally:
+        api.close_measurement(measured)
+
+
+def test_bundle_invalid_signature_or_empty_material_refuses():
+    import json
+
+    api = load_module()
+    adapter = _load_unapproved_digest_preflight()
+    fixture, witness = api.fixture_from_trusted_bytes(b"sealed", fixture_id="bundle-incomplete")
+    measured = api.ingest_fixed_fixture(fixture, witness)
+    try:
+        valid = json.loads(_syntactic_message_signature_bundle(measured.sha256))
+        variants = []
+        for signature in ("", "***", 1):
+            bad = json.loads(json.dumps(valid))
+            bad["messageSignature"]["signature"] = signature
+            variants.append(bad)
+        for field, value in (("certificate", {}), ("tlogEntries", []),
+                             ("timestampVerificationData", {"rfc3161Timestamps": []})):
+            bad = json.loads(json.dumps(valid))
+            bad["verificationMaterial"][field] = value
+            variants.append(bad)
+        for bad in variants:
+            with pytest.raises(api.B0aInputRefused):
+                adapter.check_bundle_digest_consistency(
+                    measured, json.dumps(bad).encode("utf-8")
+                )
+    finally:
+        api.close_measurement(measured)

@@ -36,10 +36,10 @@ def _reject_constant(_: str) -> None:
 def check_bundle_digest_consistency(
     measurement: SealedMeasurement, bundle_bytes: bytes
 ) -> None:
-    """Reject any bundle-declared digest different from live sealed bytes.
+    """Check a minimum test-bundle envelope and sealed-byte digest equality.
 
-    A matching field is NOT a signature, certificate, Rekor, TSA or trust
-    verification result and MUST NOT generate SYNTHETIC_ONLY or exit success.
+    Matching fields are NOT validated signatures, certificates, Rekor logs,
+    timestamps, or trust and MUST NOT generate SYNTHETIC_ONLY or exit success.
     """
     if type(bundle_bytes) is not bytes or not 0 < len(bundle_bytes) <= _MAX_BUNDLE_BYTES:
         raise B0aInputRefused("BUNDLE_BYTES_INVALID")
@@ -58,6 +58,41 @@ def check_bundle_digest_consistency(
         signed = bundle.get("messageSignature")
         if type(signed) is not dict:
             raise B0aInputRefused("BUNDLE_FORMAT_REFUSED")
+        # This is only an envelope shape guard for the fixed test-only
+        # conformance bundle, not cryptographic validation of these fields.
+        material = bundle.get("verificationMaterial")
+        if type(material) is not dict:
+            raise B0aInputRefused("BUNDLE_FORMAT_REFUSED")
+        cert = material.get("certificate")
+        log_entries = material.get("tlogEntries")
+        timestamp = material.get("timestampVerificationData")
+        if (
+            type(cert) is not dict
+            or type(log_entries) is not list
+            or not log_entries
+            or any(type(entry) is not dict for entry in log_entries)
+            or type(timestamp) is not dict
+            or type(timestamp.get("rfc3161Timestamps")) is not list
+            or not timestamp["rfc3161Timestamps"]
+        ):
+            raise B0aInputRefused("BUNDLE_FORMAT_REFUSED")
+
+        def present_b64(value: object) -> bool:
+            if type(value) is not str or not 0 < len(value) <= 16384:
+                return False
+            try:
+                return bool(base64.b64decode(value, validate=True))
+            except (ValueError, binascii.Error):
+                return False
+
+        if not present_b64(signed.get("signature")) or not present_b64(cert.get("rawBytes")):
+            raise B0aInputRefused("BUNDLE_FORMAT_REFUSED")
+        if any(
+            type(entry) is not dict or not present_b64(entry.get("signedTimestamp"))
+            for entry in timestamp["rfc3161Timestamps"]
+        ):
+            raise B0aInputRefused("BUNDLE_FORMAT_REFUSED")
+
         declared = signed.get("messageDigest")
         if (
             type(declared) is not dict
