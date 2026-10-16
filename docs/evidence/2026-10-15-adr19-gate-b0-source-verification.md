@@ -211,3 +211,32 @@ A separate `openssl ts -reply -in response.der -text` parsed `Hash Algorithm: sh
 - This adds conditional chain/TSA crypto checks to the earlier untrusted-leaf ECDSA, RFC6962 Rekor inclusion, and Ed25519 checkpoint math. It does **not** authenticate upstream TUF bootstrap, trusted historical clock, SCT/CT, approved SAN/OIDC identity/role, Rekor log key custody, anti-rollback, historical revocation, or numeric freshness/skew. Passing a chain rooted in the same source's own candidate root is **not** an independent trust decision.
 
 **Final gate:** **T5B stays UNRESOLVED**. No fully independently attested Sigstore 4.3.0 toolchain/31-wheel/loader or end-to-end pinned-verifier signed GREEN+paired hostile RED. No `SYNTHETIC_ONLY`, PR Ready/formal review/merge, real installer/B0b/UID502.
+
+## 2026-10-16 candidate verifier loader/native-extension static closure (T5A, NOT APPROVED)
+
+**Read-only research on the existing Lima Ubuntu 26.04 Linux x86_64 guest** (`ssh-over-mcp-cgroup-live-x86`); no candidate Sigstore wheel imported/installed/executed, no runtime, root or library installed, and no disposable T5B execution sandbox prepared. Existing guest state is *not* a reviewed fresh disposable verification runtime. Hashes below bind inspected bytes **only on that guest at this instant**; package-manager metadata, Python runtime and loader remain **UNAUTHENTICATED**.
+
+The previously T5A-downloaded **31/31** wheel files passed another fresh `sha256sum -c /tmp/som-pr268-t5a-candidates-20261015/manifest.sha256` check. The exact wheel hash/lengths are preserved in the earlier 31-row evidence table above. The raw manifest file SHA-256 is `299d5a999dc0cc65f3372f811463bf56e88e5a7d85ac8467bf0697d1e2e1fe59`.
+
+The candidate guest system interpreter is `/usr/bin/python3` → `/usr/bin/python3.14`; both resolve to byte-identical SHA-256 `52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41`, reported version Python 3.14.4. `readelf -l /usr/bin/python3.14` reports ELF interpreter `/lib64/ld-linux-x86-64.so.2`. Read-only `ldd` reports these *direct interpreter* dynamic libraries, each independently hashed from installed disk bytes:
+
+| ELF candidate object | SHA-256 (guest-only, NOT authenticated) |
+| --- | --- |
+| `/lib64/ld-linux-x86-64.so.2` | `bda779ea9e9ad234f60315477d7cfd0bdde861cd8ddd9df8cdaf62f18c4cec14` |
+| `/usr/lib/x86_64-linux-gnu/libm.so.6` | `1c488db6f4fe8cecb72456bc018de000b7a9b539c2994864b0416b5e8371b3d8` |
+| `/usr/lib/x86_64-linux-gnu/libz.so.1` | `47b61967895b30e8c0c6818dd633ffeb87711cf637c688f981896f0dd84ce23b` |
+| `/usr/lib/x86_64-linux-gnu/libexpat.so.1` | `2e5f66e2784c2746775567ff9916f6e7503182a8f1f2deb8ca729dfc1463849f` |
+| `/usr/lib/x86_64-linux-gnu/libc.so.6` | `85e64f97e348786a8fb4d9f3d52fec289e2fb86bba20f0731dfe61990525e0f7` |
+
+Read-only Python `zipfile` inspection of the **31 still-uninstalled wheel archives** enumerated **6** native ELF extension entries (SHA-256 of the decompressed archive member bytes):
+
+| Wheel member (candidate-only) | SHA-256 |
+| --- | --- |
+| `_cffi_backend.cpython-314-x86_64-linux-gnu.so` (in `cffi-2.1.1` wheel) | `7d1eff7fbb874ee72228fd426103da2b9eef528979156077bdec736d5b4f61a2` |
+| `charset_normalizer/cd.cpython-314-x86_64-linux-gnu.so` | `4ca0b03cc9e0d6a206c33433c2d62fbd43dc0eca43015c8532635ee66ea60818` |
+| `charset_normalizer/md.cpython-314-x86_64-linux-gnu.so` | `a92bc8c547c9fdc8b6f1d4d20a6500bdaf3622893202b206ce7b6c516a5f8be9` |
+| `cryptography/hazmat/bindings/_rust.abi3.so` | `0629ac2efafdf1eecd9f14fdbf5efb205b0431af08964ba78484a972396ce859` |
+| `pydantic_core/_pydantic_core.cpython-314-x86_64-linux-gnu.so` | `f1c6034d9d708521893241e1f597532aab8c334fddc10b8773f6a73e0503577b` |
+| `rfc3161_client/_rust.abi3.so` | `cec5ada79a8754fbbf000fec318f8d54bc902029ea65cc31e720840a01930cf3` |
+
+**Do not treat this as a complete trusted loader/OS closure.** There are at least **49** installed CPython stdlib `lib-dynload/*.so` candidate files on that guest not individually admitted, and no dynamic dependency inventory for the six uninstalled wheel ELF members, no interpreter build/Ubuntu image/signed apt provenance, no verified `DT_NEEDED` transitive graph, no closure after environment isolation or root/TUF authenticity. A fresh, controlled, independently attested immutable verifier runtime is **still required** for Task 0/T5B; no candidate was made executable or installed from this inspection. No operator/security approval of these digests is inferred. Do not mark PR Ready or report actual Sigstore signature GREEN/RED from this evidence.
