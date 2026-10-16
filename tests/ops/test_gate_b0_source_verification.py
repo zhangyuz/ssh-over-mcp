@@ -531,3 +531,101 @@ def test_upstream_candidate_bundle_digest_field_tamper_refuses_without_rewriting
             adapter.check_bundle_digest_consistency(measurement, tampered)
     finally:
         api.close_measurement(measurement)
+
+
+def _candidate_rekor_merkle_root(
+    canonical_body: bytes, *, log_index: int, tree_size: int, hashes: list[str]
+) -> bytes:
+    """Test-only RFC6962 inclusion math; does NOT authenticate a Rekor key."""
+    import base64
+
+    assert 0 <= log_index < tree_size
+    node = hashlib.sha256(b"\x00" + canonical_body).digest()
+    fn, sn = log_index, tree_size - 1
+    for entry in hashes:
+        sibling = base64.b64decode(entry, validate=True)
+        assert len(sibling) == 32
+        if fn & 1 or fn == sn:
+            node = hashlib.sha256(b"\x01" + sibling + node).digest()
+            while fn % 2 == 0 and fn:
+                fn //= 2
+                sn //= 2
+        else:
+            node = hashlib.sha256(b"\x01" + node + sibling).digest()
+        fn //= 2
+        sn //= 2
+    assert fn == sn == 0
+    return node
+
+
+def test_upstream_candidate_rekor_inclusion_consistent_without_trusting_log():
+    """Archival data links exact artifact, signature, cert and Merkle root ONLY."""
+    import base64
+    import json
+
+    base = Path(__file__).resolve().parent / "fixtures" / "b0a_synthetic"
+    payload = (base / "sigstore-conformance-a.txt").read_bytes()
+    encoded = (base / "sigstore-conformance-rekor2-bundle.sigstore.json").read_bytes()
+    assert hashlib.sha256(payload).hexdigest() == (
+        "a0cfc71271d6e278e57cd332ff957c3f7043fdda354c4cbb190a30d56efa01bf"
+    )
+    assert hashlib.sha256(encoded).hexdigest() == (
+        "3a5ce62cee2653969be846a41e8332eae82c633cdfafe6db48b10e60939518dd"
+    )
+    bundle = json.loads(encoded)
+    entries = bundle["verificationMaterial"]["tlogEntries"]
+    assert len(entries) == 1
+    entry = entries[0]
+    canonical_body = base64.b64decode(entry["canonicalizedBody"], validate=True)
+    record = json.loads(canonical_body)["spec"]["hashedRekordV002"]
+    assert record["data"]["algorithm"] == "SHA2_256"
+    assert base64.b64decode(record["data"]["digest"]) == hashlib.sha256(payload).digest()
+    assert record["signature"]["content"] == bundle["messageSignature"]["signature"]
+    assert (
+        record["signature"]["verifier"]["x509Certificate"]["rawBytes"]
+        == bundle["verificationMaterial"]["certificate"]["rawBytes"]
+    )
+    proof = entry["inclusionProof"]
+    assert int(proof["logIndex"]) == int(entry["logIndex"]) == 735
+    assert int(proof["treeSize"]) == 736
+    assert len(proof["hashes"]) == 8
+    expected = base64.b64decode(proof["rootHash"], validate=True)
+    assert expected.hex() == "aecd583d8d3274057497181faeae69138a11a54270a37b327a9b39f9e1944c32"
+    assert _candidate_rekor_merkle_root(
+        canonical_body, log_index=735, tree_size=736, hashes=proof["hashes"]
+    ) == expected
+    note = proof["checkpoint"]["envelope"].split("\n\n— ", 1)[0]
+    assert note.splitlines() == [
+        "log2025-alpha1.rekor.sigstage.dev", "736", proof["rootHash"]
+    ]
+    # This verifies neither the signed checkpoint nor its issuer identity.
+
+
+def test_upstream_candidate_rekor_inclusion_tampering_changes_computed_root():
+    """Tampering with archived log bytes/proof must not reproduce the pinned root."""
+    import base64
+    import json
+
+    base = Path(__file__).resolve().parent / "fixtures" / "b0a_synthetic"
+    bundle = json.loads(
+        (base / "sigstore-conformance-rekor2-bundle.sigstore.json").read_bytes()
+    )
+    proof = bundle["verificationMaterial"]["tlogEntries"][0]["inclusionProof"]
+    body = base64.b64decode(
+        bundle["verificationMaterial"]["tlogEntries"][0]["canonicalizedBody"],
+        validate=True,
+    )
+    expected = base64.b64decode(proof["rootHash"], validate=True)
+    modified_body = bytes([body[0] ^ 1]) + body[1:]
+    assert len(modified_body) == len(body)
+    assert _candidate_rekor_merkle_root(
+        modified_body, log_index=735, tree_size=736, hashes=proof["hashes"]
+    ) != expected
+    modified_hashes = list(proof["hashes"])
+    first_hash = bytearray(base64.b64decode(modified_hashes[0], validate=True))
+    first_hash[0] ^= 1
+    modified_hashes[0] = base64.b64encode(first_hash).decode("ascii")
+    assert _candidate_rekor_merkle_root(
+        body, log_index=735, tree_size=736, hashes=modified_hashes
+    ) != expected
+    # Both are mathematical negatives, not authentication of the log/root.
