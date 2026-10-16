@@ -721,3 +721,38 @@ def test_upstream_candidate_ecdsa_artifact_and_signature_tamper_fail():
         payload=payload, signature=altered_signature, certificate_der=certificate
     )
     # These negatives are not T5B or an approved full offline Sigstore verifier.
+
+
+def test_cli_ambient_sigstore_variables_cannot_grant_t5_authority():
+    """Untrusted environment hints must not bypass absent signed T5 policy."""
+    import json
+    import subprocess
+
+    cli = MODULE.with_name("gate_b0_source_verification.py")
+    env = os.environ.copy()
+    env.update({
+        "SIGSTORE_OFFLINE": "0",
+        "SIGSTORE_BUNDLE": "/tmp/attacker-bundle",
+        "SIGSTORE_TRUST_CONFIG": "/tmp/attacker-root",
+        "SIGSTORE_CERT_IDENTITY": "https://invalid.example/attacker",
+        "SIGSTORE_CERT_OIDC_ISSUER": "https://invalid.example",
+        "B0A_T5_APPROVED": "true",
+    })
+    proc = subprocess.run(
+        [
+            sys.executable, str(cli), "verify-synthetic", "--fixture",
+            "signed-test-key-1", "--format", "json",
+        ],
+        text=True, capture_output=True, check=False, timeout=5, env=env,
+    )
+    assert proc.returncode == 2
+    assert not proc.stderr
+    record = json.loads(proc.stdout)
+    assert record == {
+        "schema": "som.b0a.synthetic.v1",
+        "status": "B0A_REFUSED",
+        "reason_code": "T5_POLICY_UNAPPROVED",
+        "evidence_class": "NON_AUTHORIZING_SYNTHETIC",
+    }
+    assert len(proc.stdout.encode("ascii")) < 16 * 1024
+    # This covers only the current refusal-only CLI, not a future verifier sandbox.
