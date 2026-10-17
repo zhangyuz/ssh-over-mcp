@@ -16,3 +16,6 @@ secrets/
 *.crt
 known_hosts.local
 .DS_Store
+
+# Per-worktree agent handoff; never commit transient state or secrets.
+/progress.md
