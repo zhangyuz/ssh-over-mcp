@@ -5,7 +5,7 @@ import os
 import re
 import stat
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 IDS = frozenset({'C0-W1', 'C0-P1', 'C0-R1', 'C0-T1'})
 HEX = re.compile(r'^[0-9a-f]{64}$')
@@ -39,8 +39,20 @@ def validate(doc):
         if not isinstance(url, str) or len(url) > 2048 or any(c.isspace() for c in url):
             errors.append(prefix + ': invalid URL')
         else:
-            p = urlsplit(url)
-            if p.scheme != 'https' or not p.hostname or p.username or p.password or p.port or p.fragment or p.query or not p.path.startswith('/') or p.path == '/' or p.netloc != p.hostname or '..' in p.path.split('/'):
+            try:
+                p = urlsplit(url)
+                port = p.port
+            except ValueError:
+                errors.append(prefix + ': malformed URL authority')
+                continue
+            # Reject encoded path separators/dot segments and noncanonical spellings.
+            # No URL here is a download authorization or an endpoint allowlist.
+            canonical_path = unquote(p.path)
+            if (p.scheme != 'https' or not p.hostname or p.username or p.password
+                    or port is not None or p.fragment or p.query or not p.path.startswith('/')
+                    or p.path == '/' or p.netloc != p.hostname
+                    or canonical_path != p.path or any(segment in ('.', '..', '') for segment in p.path.split('/')[1:])
+                    or '\\' in p.path or any(ord(c) < 33 or ord(c) > 126 for c in url)):
                 errors.append(prefix + ': URL not pinned to a single HTTPS object path')
         if not isinstance(obj['sha256'], str) or not HEX.fullmatch(obj['sha256']):
             errors.append(prefix + ': missing SHA256')

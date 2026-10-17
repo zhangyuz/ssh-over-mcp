@@ -52,7 +52,13 @@ class C0PreflightTests(unittest.TestCase):
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),
-                           ('url', 'https://host/'), ('sha256', 'invalid'), ('bytes', True),
+                           ('url', 'https://host/'), ('url', 'https://host/%2e%2e/secret'),
+                           ('url', 'https://host/a%2fb'), ('url', 'https://host/a//b'),
+                           ('url', 'https://host/a/./b'), ('url', 'https://host/a\\b'),
+                           ('url', 'https://host/%252e%252e/b'),
+                           ('url', 'https://host:443/path'),
+                           ('url', 'https://host:invalid/path'),
+                           ('url', 'https://host/%E2%80%AE/path'), ('sha256', 'invalid'), ('bytes', True),
                            ('max_bytes', 0), ('id', 'C0-OTHER')]:
             with self.subTest(key=key, value=value):
                 case = copy.deepcopy(BASE)
