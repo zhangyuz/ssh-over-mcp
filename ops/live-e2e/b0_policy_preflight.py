@@ -2,6 +2,7 @@
 """Offline, non-authorizing B0 policy completeness preflight."""
 import argparse
 import json
+import re
 from pathlib import Path
 
 FIELDS = ('artifact_name', 'artifact_sha256', 'artifact_size', 'signer_identity',
@@ -13,7 +14,34 @@ FIELDS = ('artifact_name', 'artifact_sha256', 'artifact_size', 'signer_identity'
 def preflight(data):
     if not isinstance(data, dict):
         return ('B0_POLICY_INCOMPLETE', ['policy_object'])
-    missing = [k for k in FIELDS if k not in data or data[k] in (None, '', [], {})]
+    placeholders = {'UNVERIFIED', 'PENDING', 'TODO', 'TBD', 'UNKNOWN', 'PLACEHOLDER'}
+    digest_fields = {'artifact_sha256', 'trust_config_sha256', 'verifier_sha256'}
+    positive_fields = {'artifact_size', 'max_root_age_seconds'}
+    nonnegative_fields = {'max_clock_skew_seconds'}
+
+    def valid(key, value):
+        if value is None or value == '' or value == [] or value == {}:
+            return False
+        if isinstance(value, str) and value.strip().upper() in placeholders:
+            return False
+        if key in digest_fields:
+            return isinstance(value, str) and re.fullmatch(r'[0-9a-fA-F]{64}', value) is not None
+        if key == 'fulcio_roots_sha256':
+            return isinstance(value, list) and bool(value) and all(
+                isinstance(v, str) and re.fullmatch(r'[0-9a-fA-F]{64}', v) for v in value
+            )
+        if key == 'rekor_log_ids':
+            return isinstance(value, list) and bool(value) and all(
+                isinstance(v, str) and v.strip() and v.strip().upper() not in placeholders
+                for v in value
+            )
+        if key in positive_fields | nonnegative_fields:
+            return type(value) is int and value >= (0 if key in nonnegative_fields else 1)
+        if key == 'handoff_mode':
+            return value in ('direct-sealed-FD', 'digest-from-sealed-bytes')
+        return isinstance(value, str) and bool(value.strip())
+
+    missing = [k for k in FIELDS if k not in data or not valid(k, data[k])]
     # Never turn a document completeness check into source authorization.
     return ('B0_POLICY_INCOMPLETE' if missing else 'B0_POLICY_CANDIDATE_ONLY', missing)
 
