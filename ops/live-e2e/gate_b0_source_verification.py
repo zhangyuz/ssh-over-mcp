@@ -43,7 +43,9 @@ def _read_fixed_candidate(name: str, size: int, expected_sha256: str) -> bytes:
         Path(__file__).resolve().parents[2]
         / "tests" / "ops" / "fixtures" / "b0a_synthetic" / name
     )
-    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+    # O_NONBLOCK prevents a substituted FIFO from waiting forever for a writer.
+    # fstat rejects non-regular descriptors before any read (including devices).
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
     try:
         fd = os.open(path, flags)
     except OSError:

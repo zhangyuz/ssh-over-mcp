@@ -426,3 +426,16 @@ material/root/runtime/time policy admission remain under Issue #259 as
 a later independent approval. Reduced feature acceptance requires its
 own exact-head CI and independent review of the newly delivered CLI
 and tests, not retroactive reuse of prior T5A interim reviews.
+
+### 2026-10-16 independent review #6228028151 FIFO and normative-doc resolution
+
+Review of the reduced inspection feature at `ae52804` identified one Important
+risk: `O_RDONLY|O_NOFOLLOW` could wait indefinitely when an attacker replaces
+a fixed test fixture with a FIFO. The fix uses `O_NONBLOCK` on the exact
+file-descriptor open and rejects non-regular `fstat` results before any
+`read`, while preserving `O_NOFOLLOW`, fixed SHA-256, length and sealed
+memory checks. Disposable-copy tests cover **both** artifact and bundle FIFO
+replacements with child subprocess timeout, in addition to byte and symlink
+tampering. A separate plan/runbook correction labels `SYNTHETIC_ONLY` as
+*deferred full-T5B success*, not the present `B0A_INSPECTED_UNTRUSTED`
+result. This is code hardening, not Sigstore execution or source admission.

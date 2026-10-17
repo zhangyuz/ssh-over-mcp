@@ -911,7 +911,14 @@ def test_inspect_candidate_rejects_changed_bytes_bundle_and_digest_envelope():
         cli._inspect_candidate(payload, json.dumps(tampered).encode("ascii"))
 
 
-@pytest.mark.parametrize("modified", ("artifact-byte", "bundle-byte", "artifact-symlink", "bundle-symlink"))
+@pytest.mark.parametrize(
+    "modified",
+    (
+        "artifact-byte", "bundle-byte",
+        "artifact-symlink", "bundle-symlink",
+        "artifact-fifo", "bundle-fifo",
+    ),
+)
 def test_inspect_cli_rejects_modified_or_symlinked_archived_fixtures(tmp_path, modified):
     """Change only a disposable copied checkout; never mutate the real archive."""
     import json
@@ -936,11 +943,16 @@ def test_inspect_cli_rejects_modified_or_symlinked_archived_fixtures(tmp_path, m
     if modified.endswith("-byte"):
         old = target.read_bytes()
         target.write_bytes(bytes([old[0] ^ 1]) + old[1:])
-    else:
+    elif modified.endswith("-symlink"):
         replacement = archive / "not-authorized-copy.bin"
         replacement.write_bytes(target.read_bytes())
         target.unlink()
         target.symlink_to(replacement)
+    else:
+        # Regression: opening a FIFO with O_RDONLY alone would hang here.
+        # The child must fail cleanly without a writer and before fstat/read.
+        target.unlink()
+        os.mkfifo(target)
 
     proc = subprocess.run(
         [sys.executable, str(scripts / "gate_b0_source_verification.py"),

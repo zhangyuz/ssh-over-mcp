@@ -279,7 +279,7 @@ Successful **inspection only** exits `0` and reports
 `status=B0A_INSPECTED_UNTRUSTED` (schema `som.b0a.inspect.v1`), exact 109-byte
 sealed SHA-256 and archived bundle SHA-256, `signature_verified=false`,
 `source_approved=false`, and `evidence_class=NON_AUTHORIZING_SYNTHETIC`.
-It checks fixed fixture byte-length and SHA-256, refuses symlinked/changed
+It checks fixed fixture byte-length and SHA-256, opens in nonblocking mode to refuse FIFO and other non-regular replacements without hanging, and refuses symlinked/changed
 files, seals anonymous Linux memory before all-byte hashing and checks the
 untrusted bundle-declared digest. The fixture's recorded hashes are **not
 independent publisher authentication**. Exit `0` means the inspection
@@ -297,9 +297,9 @@ Original full pinned-offline-verifier design remains below as a future
 T5B milestone, not a completion requirement for this reduced-scope PR.
 Issue #259 keeps all production-trust, Mac B0b and B1–B4 HOLDs.
 
-## ADR 0019 Gate B0a — synthetic-only offline source-evidence CLI (Draft PR #268)
+## ADR 0019 Gate B0a — deferred signed-source verification command (PR #268 is Ready for Review)
 
-The Gate B0a feature is developed and reviewed in [PR #268](https://github.com/zhangyuz/ssh-over-mcp/pull/268). This command currently exposes only **refusal behavior**, **not real signed-source verification**. It does not access a Python.org package, install software, grant `SOURCE_VERIFIED` or permit UID502/APFS execution.
+The Gate B0a feature is developed and reviewed in [PR #268](https://github.com/zhangyuz/ssh-over-mcp/pull/268). The **`verify-synthetic` command** currently exposes only **refusal behavior**, **not real signed-source verification**; the separate `inspect-synthetic` command above can succeed only with an explicitly untrusted developer-only inspection record. It does not access a Python.org package, install software, grant `SOURCE_VERIFIED` or permit UID502/APFS execution.
 
 From the repository root with an ordinary, non-privileged developer Python 3.13+ runtime:
 
