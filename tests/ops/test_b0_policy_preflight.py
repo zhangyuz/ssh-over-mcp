@@ -45,3 +45,29 @@ def test_valid_shaped_candidate_remains_non_authorizing():
     candidate['max_clock_skew_seconds'] = 60
     candidate['handoff_mode'] = 'digest-from-sealed-bytes'
     assert mod.preflight(candidate) == ('B0_POLICY_CANDIDATE_ONLY', [])
+
+def test_fifo_refused_without_blocking(tmp_path):
+    import os
+    import subprocess
+    import sys
+    fifo = tmp_path / 'policy.fifo'
+    os.mkfifo(fifo)
+    result = subprocess.run([sys.executable, str(P), str(fifo)], capture_output=True, timeout=3, check=False)
+    assert result.returncode == 2
+    assert b'B0_POLICY_REFUSED' in result.stdout
+
+def test_oversize_refused(tmp_path):
+    import subprocess
+    import sys
+    path = tmp_path / 'huge.json'
+    path.write_bytes(b' ' * (65537))
+    result = subprocess.run([sys.executable, str(P), str(path)], capture_output=True, timeout=3, check=False)
+    assert result.returncode == 2
+
+def test_deep_json_refused(tmp_path):
+    import subprocess
+    import sys
+    path = tmp_path / 'deep.json'
+    path.write_text('[' * 1000 + '0' + ']' * 1000)
+    result = subprocess.run([sys.executable, str(P), str(path)], capture_output=True, timeout=3, check=False)
+    assert result.returncode == 2

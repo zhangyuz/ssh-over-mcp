@@ -2,7 +2,9 @@
 """Offline, non-authorizing B0 policy completeness preflight."""
 import argparse
 import json
+import os
 import re
+import stat
 from pathlib import Path
 
 FIELDS = ('artifact_name', 'artifact_sha256', 'artifact_size', 'signer_identity',
@@ -45,12 +47,45 @@ def preflight(data):
     # Never turn a document completeness check into source authorization.
     return ('B0_POLICY_INCOMPLETE' if missing else 'B0_POLICY_CANDIDATE_ONLY', missing)
 
+MAX_POLICY_BYTES = 65536
+MAX_JSON_DEPTH = 32
+
+
+def read_policy(path):
+    flags = os.O_RDONLY | os.O_NONBLOCK
+    if hasattr(os, 'O_NOFOLLOW'):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(path, flags)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_POLICY_BYTES:
+            raise ValueError('not a bounded regular file')
+        with os.fdopen(os.dup(fd), 'rb') as stream:
+            raw = stream.read(MAX_POLICY_BYTES + 1)
+        if len(raw) > MAX_POLICY_BYTES:
+            raise ValueError('oversized input')
+        obj = json.loads(raw)
+        def check_depth(node, depth=0):
+            if depth > MAX_JSON_DEPTH:
+                raise ValueError('JSON nesting exceeds bound')
+            if isinstance(node, dict):
+                for value in node.values():
+                    check_depth(value, depth + 1)
+            elif isinstance(node, list):
+                for value in node:
+                    check_depth(value, depth + 1)
+        check_depth(obj)
+        return obj
+    finally:
+        os.close(fd)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('policy', type=Path)
     args = p.parse_args()
     try:
-        data = json.loads(args.policy.read_text(encoding='utf-8'))
+        data = read_policy(args.policy)
     except (OSError, ValueError) as exc:
         print(f'B0_POLICY_REFUSED: {type(exc).__name__}')
         return 2
