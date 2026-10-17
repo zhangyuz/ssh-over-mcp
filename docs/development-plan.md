@@ -2229,4 +2229,4 @@ A [strictly offline structural preflight](evidence/2026-10-17-adr19-t5b0-c0-offl
 
 ### 2026-10-17 C0 offline preflight hosted coverage
 
-The existing CI matrix now lints/compiles `ops/t5b0` and runs its offline adversarial fixtures on Python 3.13 and 3.14 in `rest` shards, preserving the same non-root/no-supplementary-groups boundary. This is verification coverage only; `C0_COLLECT_HOLD_INCOMPLETE` and T5B-0/T5B-1 remain HOLD.
+An existing `tests/ops` pytest bridge runs `ops/t5b0` offline adversarial fixtures on Python 3.13 and 3.14 in `rest` shards, preserving the same non-root/no-supplementary-groups boundary and frozen CI workflow bytes. This is verification coverage only; `C0_COLLECT_HOLD_INCOMPLETE` and T5B-0/T5B-1 remain HOLD.

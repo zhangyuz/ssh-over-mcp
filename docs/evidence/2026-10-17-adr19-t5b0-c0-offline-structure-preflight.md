@@ -8,4 +8,4 @@ Run offline tests: `python3 -m unittest discover -s ops/t5b0 -p 'test_*.py' -v`.
 
 ## Hosted regression coverage
 
-CI runs the offline C0 fixtures on both Python 3.13 and 3.14 in the `rest` shard, under the same non-root, cleared-supplementary-groups Linux execution policy as other tests. Ruff and compileall include `ops/t5b0`. Failures therefore block the existing required aggregate contexts; no new privileged runner, external endpoint or additional network access is introduced by the fixture command.
+A `tests/ops` pytest bridge runs all offline C0 fixtures on both Python 3.13 and 3.14 in the existing `rest` shard, under the existing non-root, cleared-supplementary-groups Linux execution policy. Failures block the existing required aggregate contexts. Crucially, the frozen-authority `.github/workflows/ci.yml` remains byte-identical; no CI privilege, runner, external endpoint or network allowance changes.
