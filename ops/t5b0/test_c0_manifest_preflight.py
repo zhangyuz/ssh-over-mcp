@@ -5,9 +5,10 @@ import os
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
 import unittest
-from c0_manifest_preflight import validate, parse_manifest
+from pathlib import Path
+
+from c0_manifest_preflight import parse_manifest, validate
 
 BASE = {'schema': 'som-t5b0-c0-preflight-v1', 'approval': None,
         'objects': [{'id': 'C0-W1', 'url': 'https://files.pythonhosted.org/packages/sha256/immutable.whl',
@@ -39,12 +40,12 @@ class C0PreflightTests(unittest.TestCase):
             for path in (oversized, fifo, symlink, deep, root):
                 with self.subTest(path=path):
                     result = subprocess.run([sys.executable, str(script), str(path)],
-                                            capture_output=True, text=True, timeout=3)
+                                            capture_output=True, text=True, timeout=3, check=False)
                     self.assertEqual(result.returncode, 2, result.stderr)
                     self.assertIn('REFUSED:', result.stdout)
                     self.assertNotIn('Traceback', result.stderr)
             result = subprocess.run([sys.executable, str(script), str(valid)],
-                                    capture_output=True, text=True, timeout=3)
+                                    capture_output=True, text=True, timeout=3, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn('NO_AUTHORIZATION', result.stdout)
 

@@ -51,10 +51,19 @@ jobs:
         run: python -m pip install -e '.[dev]'
 
       - name: Lint source, tests, and operator tools
-        run: python -m ruff check src tests ops/systemd ops/live-e2e
+        run: python -m ruff check src tests ops/systemd ops/live-e2e ops/t5b0
 
       - name: Compile all source and operator tools
-        run: python -m compileall -q src tests ops/systemd ops/live-e2e
+        run: python -m compileall -q src tests ops/systemd ops/live-e2e ops/t5b0
+
+      - name: Verify T5B-0 C0 offline fail-closed fixtures (rest shards only)
+        if: matrix.partition == 'rest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo /usr/bin/setpriv --reuid "$(id -u)" --regid "$(id -g)" \
+            --clear-groups "$(command -v python)" -m unittest discover \
+            -s ops/t5b0 -p 'test_*.py' -v
 
       - name: Verify hosted-only minimal non-root Linux groups
         shell: bash
