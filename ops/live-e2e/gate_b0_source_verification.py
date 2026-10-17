@@ -78,6 +78,15 @@ def _inspect_candidate(payload: bytes, bundle: bytes) -> bytes:
     ):
         raise CandidateInspectionRefused("CANDIDATE_BYTES_CHANGED")
 
+    # Refuse cleanly on macOS and platforms lacking Linux anonymous sealing.
+    # Do not import Linux-only fcntl seal constants before this guard.
+    if (
+        sys.platform != "linux"
+        or not hasattr(os, "memfd_create")
+        or not hasattr(os, "MFD_ALLOW_SEALING")
+    ):
+        raise CandidateInspectionRefused("SEALED_SNAPSHOT_REFUSED")
+
     # Lazy Linux-only imports keep the original refusal command portable.
     from gate_b0_immutable_bytes import (
         B0aInputRefused,
@@ -154,7 +163,10 @@ def main(argv: list[str] | None = None) -> int:
     except CandidateInspectionRefused as exc:
         # No untrusted detail, path, signer or root enters the bounded response.
         reason = str(exc)
-        if reason not in ("CANDIDATE_BYTES_CHANGED", "CANDIDATE_STRUCTURE_REFUSED"):
+        if reason not in (
+            "CANDIDATE_BYTES_CHANGED", "CANDIDATE_STRUCTURE_REFUSED",
+            "SEALED_SNAPSHOT_REFUSED",
+        ):
             reason = "CANDIDATE_STRUCTURE_REFUSED"
         sys.stdout.buffer.write(format_refusal(reason))
         return 2

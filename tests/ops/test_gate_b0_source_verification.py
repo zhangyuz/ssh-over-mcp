@@ -953,3 +953,21 @@ def test_inspect_cli_rejects_modified_or_symlinked_archived_fixtures(tmp_path, m
     assert result["reason_code"] == "CANDIDATE_BYTES_CHANGED"
     assert "measured_sha256" not in result
     assert "signature_verified" not in result
+
+
+def test_inspect_synthetic_refuses_unsupported_platform_without_traceback(monkeypatch):
+    """macOS must receive bounded JSON refusal, not a Linux fcntl import traceback."""
+    import importlib.util
+
+    cli_path = MODULE.with_name("gate_b0_source_verification.py")
+    spec = importlib.util.spec_from_file_location("gate_b0_source_verification", cli_path)
+    assert spec is not None and spec.loader is not None
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    base = Path(__file__).resolve().parent / "fixtures" / "b0a_synthetic"
+    payload = (base / "sigstore-conformance-a.txt").read_bytes()
+    bundle = (base / "sigstore-conformance-rekor2-bundle.sigstore.json").read_bytes()
+    with monkeypatch.context() as mp:
+        mp.setattr(cli.sys, "platform", "darwin")
+        with pytest.raises(cli.CandidateInspectionRefused, match="SEALED_SNAPSHOT_REFUSED"):
+            cli._inspect_candidate(payload, bundle)
