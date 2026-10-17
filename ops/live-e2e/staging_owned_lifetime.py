@@ -223,7 +223,10 @@ class _FixtureOwnedWorkspace:
             raise NamespaceError("drift")
         if _stable_id(_identity(self._root_fd)) != _stable_id(self.root_identity):
             raise NamespaceError("drift")
-        actual = os.stat(self.name, dir_fd=self._staging_fd, follow_symlinks=False)
+        try:
+            actual = os.stat(self.name, dir_fd=self._staging_fd, follow_symlinks=False)
+        except OSError as exc:
+            raise NamespaceError("drift") from exc
         if (
             (actual.st_dev, actual.st_ino, actual.st_uid, actual.st_gid, actual.st_mode)
             != _stable_id(self.root_identity)
