@@ -21,3 +21,7 @@ A distinct test-only `b0a_synthetic_signature_proof.py` CLI verifies an **Ed2551
 ## Approval boundary / decision required
 
 The project T5B gate requires a separately approved **exact Sigstore-compatible verifier executable/version/hash**, signer/OIDC issuer, trust roots/log IDs, time/revocation/offline freshness policy and approved digest-vs-sealed-FD handoff. A local OpenSSL test-key proof cannot satisfy those requirements. **Before selecting a test-only crypto implementation or introducing dependencies, obtain explicit review/approval of the synthetic verifier approach; before actual B0a source verification, obtain separate T1–T5 approvals.** Real package/bundle downloads, installation, UID502/APFS and Linux Slice C are excluded.
+
+## Approved implementation decision (2026-10-17)
+
+Operator approved **OpenSSL CLI for synthetic Ed25519 proof only**. Do not treat the ambient Homebrew OpenSSL at `/usr/local/bin/openssl` as a trusted Mac executable: it is a symlink in a historically group-writable Homebrew tree. For this feature, prefer **CI-hosted Ubuntu `/usr/bin/openssl`** with exact executable provenance recorded as test evidence, and refuse if a verified fixed executable is unavailable. A test harness may generate a disposable private key and sign a deterministic domain-separated message; the verification CLI must receive only a fixed test public key (not caller-chosen) and the signature/payload. No test private key is committed. The hosted verifier remains a *test tool*, not an independently approved production T5B verifier.
