@@ -282,3 +282,30 @@ A feature PR is Ready for Review only after its **one complete user/operator fun
 - material rulings are preserved.
 
 Then begin the next small slice.
+
+### Exact-main CI event and merge-token provenance (2026-10-17)
+
+A merge API success and exact-PR-head green CI do **not** prove the merge-main
+push workflow ran. PR #268 was squash-merged at
+`a184f33644b3d54465c8bc8435e8b110342b907b` on 2026-10-17, but GitHub
+Actions API returned **zero** runs for that SHA. The precise event-suppression
+mechanism is **not yet established**; do not attribute it to a particular
+connector credential without independent evidence. GitHub documents that
+events caused by the repository's `GITHUB_TOKEN` do not start most workflows;
+do not assume other tokens have the same semantics.
+
+Before declaring a merge closed, use the read-only checker:
+
+```sh
+python3 ops/live-e2e/merge_main_evidence.py --sha <exact-40-hex-main-merge-sha>
+```
+
+The checker refuses absent/ambiguous push-on-main CI, wrong workflow or SHA,
+incomplete pagination, non-successful runs, and missing/skipped/failed/duplicate
+jobs (all 8 Python shards, 2 Ubuntu gates, 1 real native Level-3). It **never**
+dispatches CI, executes Mac code, changes host state or substitutes PR checks
+for merge-main acceptance. A refusal is a **missing gate**, not a CI failure.
+For future merges, prefer an operator-approved GitHub CLI merge with an
+appropriately authorized non-`GITHUB_TOKEN` credential and observe the
+actual exact-SHA main-push event; never auto-retry a possibly committed merge.
+Any rerun/dispatch or native Mac operation requires its own applicable approval.
