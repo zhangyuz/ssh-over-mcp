@@ -19,37 +19,33 @@ All automated coding agents MUST read and follow [`docs/development-methodology.
 
 When code and docs differ, stop and resolve the discrepancy rather than silently choosing one.
 
+## Three-layer agent operating model
+
+The three layers have different responsibilities and MUST NOT substitute for one another:
+
+1. **`AGENTS.md` — operational contract:** what agents must do, must not do, and when they must request approval.
+2. **[`docs/development-methodology.md`](docs/development-methodology.md) — normative method:** TDD, security and CI gates, review, exact-SHA evidence, and Definition of Done.
+3. **Worktree-local `progress.md` — current handoff:** live facts, approved scope, outstanding gates, evidence, and next action. Initialize from [`docs/templates/progress.md`](docs/templates/progress.md). This file is Git-ignored; it is neither an authority source nor a substitute for PR/issue comments.
+
+## Agent execution and handoff
+
+- **Resume before changing anything.** Inspect actual HEAD, `git status`, branch/worktree ownership, active PRs, review comments, and existing `progress.md`. Prior conversations or agent summaries are leads, not proof of current state. Do not reset or clean someone else's worktree.
+- **Record durable checkpoints.** Keep worktree-local `progress.md` current after meaningful changes and before handoff: exact SHA, scope, completed work, verification, blockers, granted/denied approvals, shared-host activity, and the next executable action. Never record secrets. Preserve authoritative decisions and durable evidence in the appropriate tracked documents or PR/issue comments.
+- **Keep moving within consent.** Complete normal investigation, isolated implementation, focused testing, remediation, documentation, and PR preparation within the approved scope. Do not request redundant confirmation. Never extrapolate approval to privileged host operations, unapproved executables/trust roots, destructive cleanup, release, or merge.
+- **Make blockers explicit.** If external trust evidence or approval blocks a feature, seek a smaller independently useful, non-authorizing slice with explicit success/refusal semantics. Keep the original security gate open. A synthetic or shape-only PASS is never production authorization.
+- **Separate author and reviewer.** Independent reviews assess exact-head code, security, documentation and evidence. On shared hosts, avoid redundant expensive test runs and coordinate stateful native/privileged fixtures. Do not claim an author self-review was independent.
+- **Report verifiable states.** Distinguish implementation, local verification, exact-HEAD CI, independent review, operator authorization, and exact-main acceptance. No skipped or absent check is a PASS. Never claim unscheduled background work.
+- **Prevent repeat defect classes.** Treat findings on untrusted input bounds, FIFOs/special files, symlinks, parser recursion, ambient CLI configuration, and evidence provenance as reusable security review cases. Detailed requirements belong to the development methodology.
+
 ## Merge-main CI event provenance (incident PR #268, 2026-10-17)
 
-**Verified facts:** PR #268 was merged using the ChatGPT GitHub connector REST
-merge action to main SHA `a184f33644b3d54465c8bc8435e8b110342b907b`.
-The active `.github/workflows/ci.yml` has `push: main`, but GitHub Actions
-recorded **no `CI` push run for that SHA**. Previous main merge
-`c7c2ad627e4572b804d585780469416ab9d93040` had a real push CI run
-`38780209959` with 11/11 required jobs successful. The PR #268 merge API's
-**credential type is not exposed** in available evidence; do not claim the
-specific token or a definitive suppression root cause was proven.
+A merged PR with green PR checks is **not** proof of `push:main` CI.
+PR #268's exact merge SHA lacked an observed main-push CI run; the connector's
+merge credential and precise suppression cause remain **unproven**. GitHub's
+documented `GITHUB_TOKEN` event-suppression rule is a possible explanation,
+not confirmed incident attribution.
 
-**Verified GitHub platform rule:** repository Actions `GITHUB_TOKEN`-generated
-`push` events do not trigger new workflow runs. GitHub App installation tokens
-and personal access tokens can trigger workflows. See
-https://docs.github.com/en/actions/concepts/security/github_token .
-This rule makes merge-token/event suppression a plausible explanation for
-PR #268, **not proof of which credential the connector used**.
-
-**Mandatory agent behavior:**
-
-- For operator-approved merges, prefer the authenticated local `gh pr merge`
-  with a normal user credential rather than an opaque connector merge token.
-  Never silently retry a merge after an uncertain API result; first query
-  authoritative PR and main SHA state.
-- After merge, inspect the actual exact-merge-SHA `push`/`main` `CI` run and
-  all 11 required jobs. Run the read-only verifier
-  `python3 ops/live-e2e/merge_main_evidence.py --sha <40-hex-main-sha>`.
-  No run, a different SHA, incomplete/skipped jobs or a PR-only run means
-  **MERGE_MAIN_UNVERIFIED**; never claim post-merge acceptance or gate closure.
-- Never fabricate a push event or use a PR run as a substitute. Do not weaken
-  event provenance with `pull_request_target`, automatic privileged dispatch,
-  or native Mac reruns. Such changes require separate explicit approval.
-- Preserve exact evidence and incident uncertainty in `progress.md` and PR
-  comments; see `docs/development-methodology.md` for the full gate.
+- Prefer operator-approved local `gh pr merge` with an appropriate user credential. Do not retry an ambiguous merge without checking authoritative PR/main state.
+- Verify exact-merge-SHA `push/main` CI and every required job with `python3 ops/live-e2e/merge_main_evidence.py --sha <40-hex-main-sha>`. Missing, skipped, failed, wrong-SHA, or PR-only evidence means **MERGE_MAIN_UNVERIFIED**.
+- No synthetic push, privileged dispatch, `pull_request_target`, or native Mac rerun to bypass provenance without separate approval. Record uncertainty in `progress.md` and PR comments.
+- Follow the canonical incident account and gates in [`docs/development-methodology.md`](docs/development-methodology.md).

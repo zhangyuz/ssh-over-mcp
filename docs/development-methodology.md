@@ -133,7 +133,7 @@ GitHub-hosted Ubuntu 26.04 x86 runners, as defined by
 - complete pytest collection, distributed across disjoint exhaustive partitions;
 - Python 3.13 and 3.14, each covering the entire collection;
 - full source, tests and operator-tool lint/compile checks;
-- both historical Python required contexts, failing unless all six shards succeed.
+- both historical Python required contexts, failing unless all eight shards succeed.
 
 Hosted CI PASS is not hardened-container or native Level-3 acceptance.
 
@@ -309,3 +309,91 @@ For future merges, prefer an operator-approved GitHub CLI merge with an
 appropriately authorized non-`GITHUB_TOKEN` credential and observe the
 actual exact-SHA main-push event; never auto-retry a possibly committed merge.
 Any rerun/dispatch or native Mac operation requires its own applicable approval.
+
+
+## 14. Agent handoff and shared-worktree discipline
+
+The project uses a three-layer collaboration model:
+
+- `../AGENTS.md`: short operational rules and approval boundaries.
+- This document: normative development, verification, security, and review method.
+- Each active worktree's root `progress.md`: **local, Git-ignored** operational handoff, initialized from [`templates/progress.md`](templates/progress.md).
+
+On session resume, an agent MUST reconcile the live branch, HEAD SHA,
+working tree, other active worktrees, relevant PR/issue decisions, and the
+existing handoff before making changes. A conversation or previous handoff
+claim alone does not establish a current repository fact. Agents MUST NOT
+reset, overwrite, clean, or adopt another agent's worktree or shared state
+without an ownership check and appropriate authorization.
+
+Every active development worktree MUST create `progress.md` from the
+template. Agents MUST update an existing handoff after material changes,
+tests, decisions, review remediation, approval changes, or interruption.
+At minimum it MUST distinguish:
+
+- objective, bounded scope, owner/role, worktree, branch, exact SHA and PR;
+- verified checkpoints versus assertions or pending jobs;
+- concrete test commands/results and links to evidence;
+- review findings, outstanding dependencies and deferred gates;
+- exact approvals, denials, and actions still needing consent;
+- concurrent/shared-host resources and the next executable step.
+
+The handoff MUST NOT contain secrets. Keep durable decisions, material
+rulings, and acceptance evidence in version-controlled documents, ADRs,
+or PR/issue comments. A Git-ignored handoff does not travel with a PR and
+is not a source of security authority.
+
+Agents SHOULD continue independently through ordinary tasks inside
+previously authorized scope. Approval to design, inspect, or test
+synthetic data MUST NOT authorize execution of candidate artifacts,
+privileged host mutation, root/trust admission, protected staging,
+release, or merge. When an action may already have committed, inspect
+authoritative state before retrying.
+
+On a shared Mac or CI host, author and reviewer MUST avoid competing
+native/provider work and must not mutate each other's worktrees.
+Reviewers SHOULD independently inspect code, evidence, and targeted
+adversarial cases rather than rerunning costly author tests without
+cause. Report independent review and author self-review separately.
+
+Progress updates SHOULD report **Completed / Blocked / Next / Approval
+required**, with exact evidence where relevant. Agents MUST NOT imply
+work is running in the background unless a real task or process exists.
+
+## 15. Reusable adversarial and external-evidence checks
+
+The review cycle for PRs #268–270 exposed repeated input-handling and
+evidence-provenance failure classes. Apply these checks across comparable
+entrypoints, not only to the file named in the review.
+
+**Untrusted files and structured input:**
+
+- Bound byte count, execution time, memory/CPU exposure and parser nesting;
+  a post-parse depth check alone does not protect the parser itself.
+- Consider FIFO/special-file substitution and blocking `open()`, symlink
+  traversal, race/TOCTOU, file identity changes, and oversized reads.
+- Where applicable, use no-follow and nonblocking open, verify the opened
+  object is a regular file before reading, and enforce explicit read caps.
+- Catch documented parser/resource exceptions (including recursion
+  failures) before they become raw tracebacks or inconsistent exit codes.
+- Add negative subprocess tests with timeouts for FIFO, oversized/deep
+  input, malformed encodings, symlink/special-file substitutions, and
+  refusal behavior relevant to the tool.
+
+**External evidence and source authority:**
+
+- Pin and verify the authoritative API/service endpoint rather than
+  accepting ambient configuration such as a hostile `GH_HOST`.
+- Match evidence to exact SHA, actual run/event, workflow, platform,
+  signer, and policy scope as applicable.
+- Treat a structurally valid response, hash match, public attestation
+  claim, synthetic preflight, or exit 0 as **non-authorizing** unless the
+  required independent trust evidence and approval are established.
+- Distinguish a verification failure from missing evidence or an
+  unsupported platform. Unverified MUST NOT silently become PASS.
+
+For CI efficiency, reproduce the smallest failing case first, move to
+focused GREEN, then run the full applicable regression and exact-SHA
+acceptance gates. A slow optional investigation MAY be deferred with an
+explicit owner and tracked follow-up; mandatory security and completion
+gates MUST NOT be replaced with placeholders.
