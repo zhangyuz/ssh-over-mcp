@@ -258,6 +258,45 @@ checks or a future incident; normal native E2E uses the existing live-local-e2e
 workflow and its cleanup postconditions.
 
 
+## 2026-10-16 reduced-scope developer-only B0a inspection (PR #268)
+
+**Delivery-scope amendment, not a relaxation of production-source trust.** The operator
+prioritized shipping a useful bounded inspection function while independent T5B
+material authentication remains on HOLD. Only the **developer-only, offline,
+non-authorizing** inspection is in scope for this iteration. Genuine offline
+Sigstore signed GREEN/RED and the real T5B source admission chain are deferred
+to a separately gated follow-up; they are NOT considered satisfied by this PR.
+
+From a non-privileged **Linux** development/test environment with Python 3.13+
+and the two exact archived fixture files in this repository:
+
+```sh
+python3 ops/live-e2e/gate_b0_source_verification.py \
+  inspect-synthetic --fixture signed-test-key-1 --format json
+```
+
+Successful **inspection only** exits `0` and reports
+`status=B0A_INSPECTED_UNTRUSTED` (schema `som.b0a.inspect.v1`), exact 109-byte
+sealed SHA-256 and archived bundle SHA-256, `signature_verified=false`,
+`source_approved=false`, and `evidence_class=NON_AUTHORIZING_SYNTHETIC`.
+It checks fixed fixture byte-length and SHA-256, refuses symlinked/changed
+files, seals anonymous Linux memory before all-byte hashing and checks the
+untrusted bundle-declared digest. The fixture's recorded hashes are **not
+independent publisher authentication**. Exit `0` means the inspection
+completed, **never that a signature or source passed trust verification**.
+
+Changed candidate bytes, symlinked files, invalid envelope, inaccessible
+Linux seals or unsafe CLI arguments fail closed as bounded `B0A_REFUSED`
+JSON with exit `2`. No package paths, caller-supplied roots, tool flags,
+network access, dynamic Sigstore execution or generic OS-source admission.
+The preexisting `verify-synthetic` still exits `2` with
+`T5_POLICY_UNAPPROVED`. **Never let a deployment, B0 source admission,
+UID502/APFS or release gate consume `B0A_INSPECTED_UNTRUSTED` as approval.**
+
+Original full pinned-offline-verifier design remains below as a future
+T5B milestone, not a completion requirement for this reduced-scope PR.
+Issue #259 keeps all production-trust, Mac B0b and B1–B4 HOLDs.
+
 ## ADR 0019 Gate B0a — synthetic-only offline source-evidence CLI (Draft PR #268)
 
 The Gate B0a feature is developed and reviewed in [PR #268](https://github.com/zhangyuz/ssh-over-mcp/pull/268). This command currently exposes only **refusal behavior**, **not real signed-source verification**. It does not access a Python.org package, install software, grant `SOURCE_VERIFIED` or permit UID502/APFS execution.
@@ -294,6 +333,6 @@ The fixed archived fixture also has **local system-OpenSSL ECDSA mathematical-po
 
 Two additional **archival candidate-only certificate identity checks** extract the pinned DER leaf SAN/OIDC issuer and the SCT **log ID** from system OpenSSL text, then show an incorrect SAN or OIDC issuer does not equal those fields. The SCT log ID matches one staging CT candidate key ID but no SCT signature, trusted log membership, Fulcio issuance, or original signer identity was cryptographically authenticated by those tests. The archive-only tests use fixed system `/usr/bin/openssl` for SAN/OIDC and strict standard-library parsing of pinned DER bytes for the SCT; they do not invoke an optional Homebrew `/usr/local/bin/openssl` executable. Future exact-policy **real Sigstore GREEN and wrong-identity RED** are still mandatory; these local parsing assertions are not that test.
 
-**Requirements before marking this Draft PR Ready:** a separately independently pinned/authenticated offline Sigstore tool/runtime and complete dependency closure, approved exact signed **test-key** fixture/bundle and expected signer SAN/OIDC, independently authenticated Fulcio/CT/Rekor roots/log inclusion/signed time, numeric clock/skew/staleness/revocation disposition and a single approved sealed-FD or digest-bound mode. In an isolated unprivileged **network-denied** verifier runtime, demonstrate actual pinned-tool test-key signature **GREEN** (`SYNTHETIC_ONLY`) and distinct changed-sealed-byte and valid-signature/bundle-declared-digest **RED** tests, and retain exact-head CI plus independent project-wide security review. A self-generated root, fake verifier output, always-refusing CLI or hosted CI PASS cannot replace those proofs.
+**Deferred full signed-verifier T5B acceptance (NOT the reduced-scope inspection PR):** a separately independently pinned/authenticated offline Sigstore tool/runtime and complete dependency closure, approved exact signed **test-key** fixture/bundle and expected signer SAN/OIDC, independently authenticated Fulcio/CT/Rekor roots/log inclusion/signed time, numeric clock/skew/staleness/revocation disposition and a single approved sealed-FD or digest-bound mode. In an isolated unprivileged **network-denied** verifier runtime, demonstrate actual pinned-tool test-key signature **GREEN** (`SYNTHETIC_ONLY`) and distinct changed-sealed-byte and valid-signature/bundle-declared-digest **RED** tests, and retain exact-head CI plus independent project-wide security review. A self-generated root, fake verifier output, always-refusing CLI or hosted CI PASS cannot replace those proofs.
 
 See the [B0a design](../../docs/superpowers/specs/2026-10-15-adr19-b0a-offline-source-evidence-cli-design.md), [TDD implementation plan](../../docs/superpowers/plans/2026-10-15-adr19-b0a-offline-source-evidence-cli.md) and [separately governed B0a/B0b trust boundary](../../docs/superpowers/plans/2026-10-15-adr19-gate-b0-offhost-package-verification.md). The operator must not access/execute real `.pkg` or `.sigstore` material, `installer`, protected macOS paths, UID502 or production trust roots under this synthetic feature scope.

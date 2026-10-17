@@ -844,3 +844,112 @@ def test_archived_candidate_wrong_signer_identity_not_equal_expected_test_identi
     assert oidc != "https://attacker.example"
     assert oidc != "https://token.actions.githubusercontent.com.attacker.example"
     # A real pinned Sigstore policy rejection is a DIFFERENT unexecuted T5B test.
+
+
+def test_inspect_cli_exact_archived_candidate_is_untrusted_only():
+    """A successful developer inspection must never certify a signature or source."""
+    import json
+    import subprocess
+    cli = MODULE.with_name("gate_b0_source_verification.py")
+    proc = subprocess.run(
+        [sys.executable, str(cli), "inspect-synthetic", "--fixture", "signed-test-key-1",
+         "--format", "json"],
+        text=True, capture_output=True, check=False, timeout=8,
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    result = json.loads(proc.stdout)
+    assert result == {
+        "schema": "som.b0a.inspect.v1",
+        "status": "B0A_INSPECTED_UNTRUSTED",
+        "evidence_class": "NON_AUTHORIZING_SYNTHETIC",
+        "fixture": "signed-test-key-1",
+        "measured_sha256": "a0cfc71271d6e278e57cd332ff957c3f7043fdda354c4cbb190a30d56efa01bf",
+        "measured_length": 109,
+        "bundle_sha256": "3a5ce62cee2653969be846a41e8332eae82c633cdfafe6db48b10e60939518dd",
+        "signature_verified": False,
+        "source_approved": False,
+    }
+    assert len(proc.stdout.encode("ascii")) < 16384
+
+
+def test_inspect_cli_still_refuses_arbitrary_policy_and_unsafe_flags():
+    import json
+    import subprocess
+    cli = MODULE.with_name("gate_b0_source_verification.py")
+    for extra in [("--approved", "true"), ("--root", "/tmp/key"), ("--online",)]:
+        proc = subprocess.run(
+            [sys.executable, str(cli), "inspect-synthetic", "--fixture", "signed-test-key-1",
+             "--format", "json", *extra],
+            text=True, capture_output=True, check=False, timeout=8,
+        )
+        assert proc.returncode == 2
+        assert json.loads(proc.stdout)["status"] == "B0A_REFUSED"
+
+
+def test_inspect_candidate_rejects_changed_bytes_bundle_and_digest_envelope():
+    import importlib.util
+    cli_path = MODULE.with_name("gate_b0_source_verification.py")
+    spec = importlib.util.spec_from_file_location("gate_b0_source_verification", cli_path)
+    assert spec is not None and spec.loader is not None
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    base = Path(__file__).resolve().parent / "fixtures" / "b0a_synthetic"
+    payload = (base / "sigstore-conformance-a.txt").read_bytes()
+    bundle = (base / "sigstore-conformance-rekor2-bundle.sigstore.json").read_bytes()
+    with pytest.raises(cli.CandidateInspectionRefused):
+        cli._inspect_candidate(payload[:-1] + bytes([payload[-1] ^ 1]), bundle)
+    with pytest.raises(cli.CandidateInspectionRefused):
+        cli._inspect_candidate(payload, bundle[:-1] + bytes([bundle[-1] ^ 1]))
+    # Even structurally valid altered-digest bundles cannot be counted as inspected.
+    import base64
+    import json
+    tampered = json.loads(bundle)
+    tampered["messageSignature"]["messageDigest"]["digest"] = base64.b64encode(
+        b"\x00" * 32
+    ).decode("ascii")
+    with pytest.raises(cli.CandidateInspectionRefused):
+        cli._inspect_candidate(payload, json.dumps(tampered).encode("ascii"))
+
+
+@pytest.mark.parametrize("modified", ("artifact-byte", "bundle-byte", "artifact-symlink", "bundle-symlink"))
+def test_inspect_cli_rejects_modified_or_symlinked_archived_fixtures(tmp_path, modified):
+    """Change only a disposable copied checkout; never mutate the real archive."""
+    import json
+    import shutil
+    import subprocess
+
+    root = tmp_path / "project"
+    scripts = root / "ops" / "live-e2e"
+    archive = root / "tests" / "ops" / "fixtures" / "b0a_synthetic"
+    scripts.mkdir(parents=True)
+    archive.mkdir(parents=True)
+    for source in MODULE.parent.glob("gate_b0_*.py"):
+        shutil.copy2(source, scripts / source.name)
+    original_archive = Path(__file__).resolve().parent / "fixtures" / "b0a_synthetic"
+    for source in original_archive.iterdir():
+        if source.is_file():
+            shutil.copy2(source, archive / source.name)
+
+    artifact = archive / "sigstore-conformance-a.txt"
+    bundle = archive / "sigstore-conformance-rekor2-bundle.sigstore.json"
+    target = artifact if modified.startswith("artifact") else bundle
+    if modified.endswith("-byte"):
+        old = target.read_bytes()
+        target.write_bytes(bytes([old[0] ^ 1]) + old[1:])
+    else:
+        replacement = archive / "not-authorized-copy.bin"
+        replacement.write_bytes(target.read_bytes())
+        target.unlink()
+        target.symlink_to(replacement)
+
+    proc = subprocess.run(
+        [sys.executable, str(scripts / "gate_b0_source_verification.py"),
+         "inspect-synthetic", "--fixture", "signed-test-key-1", "--format", "json"],
+        text=True, capture_output=True, check=False, timeout=8,
+    )
+    assert proc.returncode == 2
+    result = json.loads(proc.stdout)
+    assert result["status"] == "B0A_REFUSED"
+    assert result["reason_code"] == "CANDIDATE_BYTES_CHANGED"
+    assert "measured_sha256" not in result
+    assert "signature_verified" not in result

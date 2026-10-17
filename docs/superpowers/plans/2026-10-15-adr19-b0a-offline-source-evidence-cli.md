@@ -1,5 +1,19 @@
 # B0a Offline Source-Evidence CLI Implementation Plan
 
+> **2026-10-16 staged feature amendment:** This six-task full T5B plan
+> is retained as a later protected milestone. PR #268's revised completion
+> gate delivers the bounded Linux-only `inspect-synthetic` (hard-coded
+> archived candidate, bounded safe read, kernel-sealed digest and
+> bundle-declared digest preflight), explicit `B0A_INSPECTED_UNTRUSTED`
+> reporting without any signature/source authorization, adverse
+> changed/symlink/invalid inputs, docs, exact-head CI and author self-review before Ready; independent
+> security review *of the reduced feature* after Ready, before merge. Existing
+> `verify-synthetic` must keep refusing absent the original exact-material
+> T5B-0 approval. Tasks requiring full authenticated executable/roots/TSA
+> and actual signed-green plus hostile red are deferred and NOT marked done.
+> Nothing changes real macOS B0b/B1–B4 permissions.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deliver one reproducible operator command that cryptographically verifies an independently approved signed synthetic B0a fixture against a fully measured immutable byte snapshot, emitting `SYNTHETIC_ONLY` or `B0A_REFUSED` without granting real-artifact source trust.
@@ -18,7 +32,7 @@
 - No real macOS `.pkg`/`.sigstore` acquisition/use, no **unapproved** verifier/trust-root install or execution, no privileged persistent Mac operation, no candidate-Python execution, no `installer`/B0b, no UID502/APFS, no Linux C. **Separate operator T5A approval granted inspection-only retrieval** of public synthetic research candidates (with exact hashes/provenance recorded); it is **not** T5B execution or test-root approval. Later real `B0A_EVIDENCE_COLLECTED_UNAPPROVED` is **not** part of this PR.
 - Runner must be independently trusted disposable unprivileged Linux x86_64, with credentials and networking absent and executable/runtime closure approved. Linux here is verification environment, not postponed Linux product Slice C.
 - All emitted success is **`SYNTHETIC_ONLY`**; all uncertain evidence **`B0A_REFUSED`**. JSON is non-authorizing and max 16 KiB. No caller-selected path, root, verifier binary, trust policy or privilege.
-- Work **inside existing Draft PR #268**, adding code/tests/demo/docs to the same branch; mark **that PR Ready for Review** only after genuine pinned-verifier GREEN and RED acceptance. Request independent project-wide/security review and exact-head hosted CI concurrently. Unmodified native Level-3 gate authority; **the unmerged branch, its fixture generator and its own tests cannot attest their own verifier/root authenticity**. Merge only on explicit operator approval.
+- **Original full-T5B work plan, now deferred:** its pinned-verifier GREEN/RED completion gate is **not** a PR #268 narrowed-inspection Ready criterion. This same PR may become Ready only after the amended inspection-only positive/adverse tests, docs, exact-head hosted CI and independent review pass. The genuine tool/root/TSA GREEN/RED plan will require its own separately authorized follow-up. Native Level-3 is unchanged. Merge still needs explicit operator approval.
 
 ## File map and responsibilities
 
@@ -149,7 +163,7 @@
 - [ ] **Step 2:** Change `docs/development-methodology.md` to require one operator/user-verifiable **vertical feature** per PR (code + positive/negative tests + usage + matching security docs), while preserving independent T1–T9/real-material/UID502 and exact-head approval gates. Update roadmap only with **actually evidenced** results.
 - [ ] **Step 3:** Run `python -m ruff check src tests ops/systemd ops/live-e2e`, `python -m compileall -q src tests ops/systemd ops/live-e2e`, focused `python -m pytest tests/ops/test_gate_b0_source_verification.py -q`, all relevant provenance/UID502 regression and approved isolated-offline real-verifier demo. Mandatory genuine GREEN must be unskipped and attested. Do not describe hosted Ubuntu CI as B0a/macOS source approval.
 - [ ] **Step 4:** Review whole branch for writer controls, pinned tool and root/freshness, disclosure, symlink TOCTOU, subprocess/network, signed digest and B0b separation, check `git diff --check`, then commit documentation and self-review evidence.
-- [ ] **Step 5:** Push completion commits to **existing Draft PR #268** and **mark the same PR Ready for Review** only when genuine test-key GREEN/paired RED and operator invocation are reproducible. Request independent whole-project/security final review and allow GitHub exact-head full CI to run concurrently. On SHA changes, repeat exact-head gates. Merge requires separate operator approval. Verify merge-main CI/native evidence as separate closure and preserve `progress.md`.
+- [ ] **Step 5 (DEFERRED full verifier, not PR #268 readiness):** In a separate future authorized iteration, reproduce genuine test-key GREEN/paired RED, exact-head CI and independent whole-project/security review. PR #268 itself is limited to offline untrusted inspection with separately reviewed scope and exact-head CI. Real tool/roots/UID502 acceptance remain gated; no merge without operator approval. Preserve `progress.md`.
 
 ## Plan acceptance check
 

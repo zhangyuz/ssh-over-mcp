@@ -402,3 +402,27 @@ A second read-only pass checked the **other 20** wheel digests with the same Git
 **Unverified statement-exact SHA-256 fingerprints** (SHA-256 of base64-decoded DSSE `payload` bytes, not a cryptographic signature validation): `pydantic-core` `4b7e97e0ee80e603a8b093e105bddc8ea6021432dcefc33407ea396a7c1b4c54`, `pydantic` `bf3320bb1b1794bf90ae1e21dc4c7b54dbb94a3b5c2cdcbab8920e5eb215dba7`, `sigstore` `fe4f933e1c8ea4aeb047dd4cd7c423009fcb420b43ce2bba5742f047795ba764`, `securesystemslib` `4f0dcb4c36574101ffe3f052da08299ce94474c257e445ccd8e3f61e69d3e2f0`, `urllib3` `35025372e541a0ea824a02701c34a8a6951292037791b7db6d3f1c37561397c8`. The three claimed SLSA v1 records each declare an exact GitHub Actions workflow path/tag and resolved source commit: `pydantic` and `pydantic-core` both declare `pydantic/pydantic` `.github/workflows/ci.yml` at `refs/tags/v2.14.1`, commit `b2212c787fb5c73386dc770681ec49cd09da8e73`; `sigstore` declares `sigstore/sigstore-python` `.github/workflows/release.yml` at `refs/tags/v4.3.0`, commit `4baa76f7b30ec416d4bba66defc325d5c36dfb20`. Release v0.2 does **not** itself provide equivalent SLSA build provenance.
 
 **Evidence boundary:** **3/31** wheels have raw *claimed* SLSA v1 build statements from the checked GitHub API; **2/31** have *claimed* release v0.2 statements; **26/31** lack an exact-repo result at the selected API endpoint. **0/31 have been independently cryptographically verified or admitted**. Neither the GitHub API's claimed publisher identity nor the PyPI metadata determines acceptable verifier trust, immutable runtime/complete dependency closure, original TUF bootstrap, rollback/time/revocation, or isolated execution authority. The signed fixtures have not been authenticated; no candidate verifier was installed/imported/executed and no T5B-0 permission exists. **PR must remain Draft.**
+
+## 2026-10-16 reduced-scope delivery decision: inspected is NOT authenticated
+
+The operator directed the development loop to stop blocking a useful CLI
+on the unavailable independently authenticated T5B full supply-chain root.
+For the **current PR #268 only**, the exit-0 result from
+`inspect-synthetic` means *fixed, untrusted sample bytes were inspected*.
+It records `B0A_INSPECTED_UNTRUSTED`, NOT `SYNTHETIC_ONLY` and NOT
+`SOURCE_VERIFIED`; its report explicitly sets
+`signature_verified=false` and `source_approved=false`.
+Archived SHA-256s embedded in source are reproducibility pins against local
+file replacement, not independent trust anchors. All same-source,
+non-executing T5A claims above remain just candidate observations.
+
+`verify-synthetic` deliberately keeps returning
+`B0A_REFUSED/T5_POLICY_UNAPPROVED`. This staged developer inspection
+does not authorize candidate Sigstore wheel/tool import, installation or
+execution, any accepted staging TUF root, 2025 signed-time/revocation,
+a real Python.org .pkg/bundle, Mac privileges, UID502/APFS, staging or
+release. Full signed fixture cryptographic GREEN/hostile RED and T5B-0
+material/root/runtime/time policy admission remain under Issue #259 as
+a later independent approval. Reduced feature acceptance requires its
+own exact-head CI and independent review of the newly delivered CLI
+and tests, not retroactive reuse of prior T5A interim reviews.

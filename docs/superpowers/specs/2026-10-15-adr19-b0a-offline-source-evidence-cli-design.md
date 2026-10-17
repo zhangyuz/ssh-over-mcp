@@ -1,5 +1,23 @@
 # ADR 0019 — B0a offline source-evidence operator CLI (feature design)
 
+> **2026-10-16 operator-directed staged-delivery amendment (PR #268):**
+> The full authenticated Sigstore verification design below remains the
+> later T5B objective, **not** the release claim for the current PR.
+> Current acceptance is a usable Linux-only `inspect-synthetic` CLI over
+> repository-pinned conformance test data: bounded candidate-hash+size and
+> no-follow checks, sealed in-memory complete-byte digest, untrusted bundle
+> structural/digest preflight, deterministic JSON
+> `B0A_INSPECTED_UNTRUSTED` with explicit
+> `signature_verified=false`, `source_approved=false`, hostile changed
+> bytes/symlink/bundle/refusal tests, usage docs, exact-head CI and author self-review before Ready;
+> request independent formal review after Ready, before any merge. The original
+> `verify-synthetic` remains always refusing until separately approved
+> T5B material+execution and genuine cryptographic GREEN/RED.
+> This is a *scope reduction in development evidence*, not a production
+> trust waiver. Issue #259 B0b/B1–B4 and real installer/UID502/APFS
+> remain separately gated.
+
+
 **Date:** 2026-10-15 (America/Toronto)
 **State:** DESIGN FOR OPERATOR REVIEW, **not** an approved trust-policy, implementation plan, binary pin or execution permit.
 **Tracks:** [Issue #259](https://github.com/zhangyuz/ssh-over-mcp/issues/259).
@@ -13,7 +31,7 @@
 
 ### Explicit scope and non-goals
 
-- **Deliver now, after separate written spec/plan/implementation approval and reviewed exact synthetic T5 pins:** a **synthetic-only executable acceptance flow** with status `SYNTHETIC_ONLY` or `B0A_REFUSED`. It must have a **real** pinned verifier GREEN and adversarial REDs. This is not a fake/mock signature adapter.
+- **Deferred complete T5B target (NOT current reduced PR #268 acceptance):** a **synthetic-only executable acceptance flow** with status `SYNTHETIC_ONLY` or `B0A_REFUSED`. It must have a **real** pinned verifier GREEN and adversarial REDs. This is not a fake/mock signature adapter.
 - **Governing path-scope gate:** the original B0a plan allowed only one entrypoint, tests and evidence/roadmap. This design's three **private** modules, inert fixtures, operator README and methodology update are part of a **proposed narrow allowlist amendment in this same Draft PR #268**; they require independent security review and explicit operator D2 approval **before code work**, and do not widen any runtime authority.
 - **Do not deliver now:** trust policy for CPython `python-3.13.16-macos11.pkg`, any real package/bundle/root/verifier download, production `verify-approved` command, source approval, Apple CMS or notarization inspection, package extraction, `installer`, Python provisioning, host ACL mutation, UID502/APFS, native provider changes, deployment/staging or Linux C.
 - **Future separately approved extension only:** `B0A_EVIDENCE_COLLECTED_UNAPPROVED` on the exact real artifact, after **all** T1–T5 signer/artifact/tool/root/time/mode approvals plus separately authorized artifact-use; it is **not** implemented or emitted in this feature. No caller flag can turn a test-only run into it. B0b/T6–T9 and operator source-decision join are independent.
