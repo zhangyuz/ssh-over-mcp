@@ -2226,3 +2226,7 @@ The [finite C0 object allowlist and custody proposal](evidence/2026-10-17-adr19-
 ### 2026-10-17 C0 offline manifest structural preflight (non-authorizing)
 
 A [strictly offline structural preflight](evidence/2026-10-17-adr19-t5b0-c0-offline-structure-preflight.md) with fail-closed negative fixtures rejects malformed C0 proposal objects, but explicitly does not validate authenticity or approve downloads. It does not replace independent exact URL/byte evidence, trusted source/time, isolated host/downloader admission, or separate operator consent. `C0_COLLECT_HOLD_INCOMPLETE` and T5B-0/T5B-1 HOLD persist.
+
+### 2026-10-17 C0 offline preflight hosted coverage
+
+An existing `tests/ops` pytest bridge runs `ops/t5b0` offline adversarial fixtures on Python 3.13 and 3.14 in `rest` shards, preserving the same non-root/no-supplementary-groups boundary and frozen CI workflow bytes. This is verification coverage only; `C0_COLLECT_HOLD_INCOMPLETE` and T5B-0/T5B-1 remain HOLD.

@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
 """Offline, fail-closed structural preflight; NEVER downloads or approves collection."""
 import argparse
 import json
 import os
-import stat
 import re
+import stat
 from pathlib import Path
 from urllib.parse import urlsplit
 
