@@ -1,5 +1,11 @@
 """Purely offline negative/positive structural fixtures; no network."""
 import copy
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 import unittest
 from c0_manifest_preflight import validate, parse_manifest
 
@@ -15,6 +21,32 @@ class C0PreflightTests(unittest.TestCase):
     def test_reject_duplicate_json_keys(self):
         with self.assertRaises(ValueError):
             parse_manifest('{"schema":"x","schema":"y","objects":[],"approval":null}')
+
+    def test_untrusted_file_types_and_limits(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            valid = root / 'valid.json'
+            valid.write_text(json.dumps(BASE))
+            oversized = root / 'oversized.json'
+            oversized.write_bytes(b'x' * (16385 + 1024 * 1024))
+            fifo = root / 'fifo.json'
+            os.mkfifo(fifo)
+            symlink = root / 'symlink.json'
+            symlink.symlink_to(valid)
+            deep = root / 'deep.json'
+            deep.write_text('[' * 3000 + '0' + ']' * 3000)
+            for path in (oversized, fifo, symlink, deep, root):
+                with self.subTest(path=path):
+                    result = subprocess.run([sys.executable, str(script), str(path)],
+                                            capture_output=True, text=True, timeout=3)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn('REFUSED:', result.stdout)
+                    self.assertNotIn('Traceback', result.stderr)
+            result = subprocess.run([sys.executable, str(script), str(valid)],
+                                    capture_output=True, text=True, timeout=3)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('NO_AUTHORIZATION', result.stdout)
 
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),

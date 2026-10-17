@@ -2,6 +2,8 @@
 """Offline, fail-closed structural preflight; NEVER downloads or approves collection."""
 import argparse
 import json
+import os
+import stat
 import re
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -63,17 +65,36 @@ def parse_manifest(data):
                       parse_constant=lambda _: (_ for _ in ()).throw(ValueError('nonfinite number')))
 
 
+def read_regular_manifest(path):
+    flags = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW
+    if hasattr(os, 'O_CLOEXEC'):
+        flags |= os.O_CLOEXEC
+    fd = os.open(path, flags)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError('manifest is not a regular file')
+        if info.st_size > 16384:
+            raise ValueError('manifest too large')
+        data = os.read(fd, 16385)
+        if len(data) > 16384:
+            raise ValueError('manifest too large')
+        if len(data) != info.st_size:
+            raise ValueError('manifest size changed during read')
+        return data
+    finally:
+        os.close(fd)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('manifest', type=Path)
     args = p.parse_args()
     try:
-        data = args.manifest.read_bytes()
-        if len(data) > 16384:
-            raise ValueError('manifest too large')
+        data = read_regular_manifest(args.manifest)
         doc = parse_manifest(data)
         errors = validate(doc)
-    except (OSError, UnicodeError, ValueError, TypeError) as exc:
+    except (OSError, UnicodeError, ValueError, TypeError, RecursionError) as exc:
         errors = [f'unreadable/invalid manifest: {type(exc).__name__}']
     for err in errors:
         print('REFUSED:', err)
