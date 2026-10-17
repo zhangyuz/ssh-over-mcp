@@ -2222,3 +2222,7 @@ The [exact-material admission dossier](evidence/2026-10-17-adr19-t5b0-exact-mate
 ### 2026-10-17 C0 inert-candidate collection preauthorization manifest (still HOLD)
 
 The [finite C0 object allowlist and custody proposal](evidence/2026-10-17-adr19-t5b0-c0-inert-candidate-object-allowlist.md) restricts research candidates to a single `sigstore-python==4.3.0` wheel, its exact PyPI provenance metadata, and separately pinned Sigstore root-signing/TUF history metadata. **No URL wildcard, implicit dependency, actual CPython installer/bundle, downloader execution or candidate bytes acquisition is permitted.** Immutable per-object URLs/length caps, off-host image/downloader identity, independent OOB root/clock and explicit collection consent are still missing. `C0_COLLECT_HOLD_INCOMPLETE`; T5B-0 material admission and T5B-1 remain HOLD.
+
+### 2026-10-17 C0 offline manifest structural preflight (non-authorizing)
+
+A [strictly offline structural preflight](evidence/2026-10-17-adr19-t5b0-c0-offline-structure-preflight.md) with fail-closed negative fixtures rejects malformed C0 proposal objects, but explicitly does not validate authenticity or approve downloads. It does not replace independent exact URL/byte evidence, trusted source/time, isolated host/downloader admission, or separate operator consent. `C0_COLLECT_HOLD_INCOMPLETE` and T5B-0/T5B-1 HOLD persist.
