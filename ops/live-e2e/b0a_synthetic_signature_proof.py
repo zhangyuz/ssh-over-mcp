@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Synthetic-only Ed25519 proof, never B0 source approval."""
 import argparse
+import hashlib
+import hmac
 import json
 import os
 import stat
@@ -11,6 +13,8 @@ from pathlib import Path
 
 PREFIX = b'SOM-B0A-SYNTHETIC-V1\x00'
 OPENSSL = '/usr/bin/openssl'
+FIXED_TEST_KEY_SHA256 = '16a48dce89fc0b5ce10153371ba3de55d605d0bb85bf0deb4df126ed71066c66'
+HEADER_BYTES = len(PREFIX) + 4
 
 
 def read_bounded(path, limit):
@@ -40,9 +44,15 @@ def main():
         payload = read_bounded(args.payload, 4096)
         signature = read_bounded(args.signature, 64)
         public_key = read_bounded(args.public_key, 512)
-        if not payload.startswith(PREFIX) or len(signature) != 64:
-            raise ValueError('synthetic format invalid')
-        # The public key is supplied by the test: mathematical proof ONLY.
+        if (
+            not payload.startswith(PREFIX)
+            or len(payload) < HEADER_BYTES
+            or int.from_bytes(payload[len(PREFIX):HEADER_BYTES], 'big') != len(payload) - HEADER_BYTES
+            or len(signature) != 64
+            or not hmac.compare_digest(hashlib.sha256(public_key).hexdigest(), FIXED_TEST_KEY_SHA256)
+        ):
+            raise ValueError('synthetic framing or fixed test key invalid')
+        # Only the fixed synthetic test key is accepted; never production authority.
         # Private temporary copies prevent reopening the caller's mutable files.
         with tempfile.TemporaryDirectory(prefix='som-b0a-synthetic-') as directory:
             paths = [Path(directory) / name for name in ('payload', 'signature', 'public.pem')]
