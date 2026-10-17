@@ -16,6 +16,13 @@ This directory is the canonical behavioral and security specification for `ssh-o
 10. **Implementation sequencing** — [`development-plan.md`](development-plan.md)
 11. **CI execution topology** — [`ci-hosted-primary.md`](ci-hosted-primary.md); manual hardened Docker validation — [`self-hosted-runner.md`](self-hosted-runner.md)
 12. **Normative design changes** — [`decisions/`](decisions/README.md)
+13. **Worktree-local agent handoff template** — [`templates/progress.md`](templates/progress.md)
+
+## Three-layer agent collaboration
+
+- [`../AGENTS.md`](../AGENTS.md) is the concise operational contract for agents and approval boundaries.
+- [`development-methodology.md`](development-methodology.md) is the normative development and acceptance method.
+- Root `progress.md` in **each active worktree** is a local, Git-ignored handoff. Copy the [template](templates/progress.md); it records current facts, evidence, unresolved approvals, and the next action. It is not a security specification or PR artifact.
 
 ## Normative language
 
