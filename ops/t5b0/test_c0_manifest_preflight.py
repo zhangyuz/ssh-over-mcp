@@ -1,7 +1,7 @@
 """Purely offline negative/positive structural fixtures; no network."""
 import copy
 import unittest
-from c0_manifest_preflight import validate
+from c0_manifest_preflight import validate, parse_manifest
 
 BASE = {'schema': 'som-t5b0-c0-preflight-v1', 'approval': None,
         'objects': [{'id': 'C0-W1', 'url': 'https://files.pythonhosted.org/packages/sha256/immutable.whl',
@@ -11,6 +11,10 @@ BASE = {'schema': 'som-t5b0-c0-preflight-v1', 'approval': None,
 class C0PreflightTests(unittest.TestCase):
     def test_structure_only_pass_not_approval(self):
         self.assertEqual(validate(BASE), [])
+
+    def test_reject_duplicate_json_keys(self):
+        with self.assertRaises(ValueError):
+            parse_manifest('{"schema":"x","schema":"y","objects":[],"approval":null}')
 
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Offline, fail-closed structural preflight; NEVER downloads or approves collection."""
 import argparse
-import hashlib
 import json
 import re
 from pathlib import Path
@@ -50,6 +49,20 @@ def validate(doc):
     return errors
 
 
+def reject_duplicate_keys(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('duplicate JSON key')
+        result[key] = value
+    return result
+
+
+def parse_manifest(data):
+    return json.loads(data, object_pairs_hook=reject_duplicate_keys,
+                      parse_constant=lambda _: (_ for _ in ()).throw(ValueError('nonfinite number')))
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('manifest', type=Path)
@@ -58,7 +71,7 @@ def main():
         data = args.manifest.read_bytes()
         if len(data) > 16384:
             raise ValueError('manifest too large')
-        doc = json.loads(data)
+        doc = parse_manifest(data)
         errors = validate(doc)
     except (OSError, UnicodeError, ValueError, TypeError) as exc:
         errors = [f'unreadable/invalid manifest: {type(exc).__name__}']
