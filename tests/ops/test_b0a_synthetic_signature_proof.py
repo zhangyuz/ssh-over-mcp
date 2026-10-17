@@ -31,17 +31,17 @@ def test_real_ed25519_green_and_hostile_red(tmp_path):
     signature = tmp_path / 'payload.sig'
     shutil.copyfile(fixture / 'payload.bin', payload)
     shutil.copyfile(fixture / 'signature.bin', signature)
-    good = run_cli(payload, signature, fixture / 'fixed-test-public.pem')
+    good = run_cli(payload, signature, fixture / 'fixed-test-public.txt')
     assert good.returncode == 0, good.stderr
     assert json.loads(good.stdout)['status'] == 'SYNTHETIC_ONLY'
     assert json.loads(good.stdout)['source_approved'] is False
     original = payload.read_bytes()
     payload.write_bytes(original[:-1] + bytes([original[-1] ^ 1]))
-    assert run_cli(payload, signature, fixture / 'fixed-test-public.pem').returncode == 2
+    assert run_cli(payload, signature, fixture / 'fixed-test-public.txt').returncode == 2
     payload.write_bytes(original)
     original_signature = signature.read_bytes()
     signature.write_bytes(bytes([original_signature[0] ^ 1]) + original_signature[1:])
-    assert run_cli(payload, signature, fixture / 'fixed-test-public.pem').returncode == 2
+    assert run_cli(payload, signature, fixture / 'fixed-test-public.txt').returncode == 2
     signature.write_bytes(original_signature)
     other_private = tmp_path / 'other.key'
     other_public = tmp_path / 'other.pub'
@@ -49,7 +49,7 @@ def test_real_ed25519_green_and_hostile_red(tmp_path):
     subprocess.run([OPENSSL, 'pkey', '-in', str(other_private), '-pubout', '-out', str(other_public)], check=True, capture_output=True, timeout=5)
     subprocess.run([OPENSSL, 'pkeyutl', '-sign', '-rawin', '-inkey', str(other_private), '-in', str(payload), '-out', str(signature)], check=True, capture_output=True, timeout=5)
     assert run_cli(payload, signature, other_public).returncode == 2
-    assert run_cli(payload, signature, fixture / 'fixed-test-public.pem').returncode == 2
+    assert run_cli(payload, signature, fixture / 'fixed-test-public.txt').returncode == 2
 
 
 def test_length_prefix_refuses_malformed_framing(tmp_path):
@@ -57,7 +57,7 @@ def test_length_prefix_refuses_malformed_framing(tmp_path):
     payload = tmp_path / 'payload.bin'
     original = (fixture / 'payload.bin').read_bytes()
     payload.write_bytes(original[:21] + (999).to_bytes(4, 'big') + original[25:])
-    assert run_cli(payload, fixture / 'signature.bin', fixture / 'fixed-test-public.pem').returncode == 2
+    assert run_cli(payload, fixture / 'signature.bin', fixture / 'fixed-test-public.txt').returncode == 2
 
 
 def test_fifo_refused_without_waiting(tmp_path):
