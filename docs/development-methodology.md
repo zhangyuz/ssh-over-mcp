@@ -10,18 +10,19 @@ In English: **ship small, iterate continuously, and keep quality, security, and 
 
 These are operating rules, not slogans. A change is not complete merely because code exists or a happy-path test passes.
 
-## 1. Small, independently reviewable slices
+## 1. One independently verifiable user/operator function per feature PR
 
-Changes MUST be split into the smallest slices that can be independently reviewed, tested, reverted, and understood.
+Each **feature PR MUST deliver one bounded, independently usable and reproducibly verifiable user/operator capability**. Split by meaningful feature and trust/authority boundary, **not** by a single document, helper, checklist item, test assertion, or mechanical micro-commit. Keep RED → GREEN commits and narrowly scoped modules inside **the same feature PR**.
 
-A slice SHOULD:
-- add or change one bounded capability;
-- have explicit security invariants;
-- have a focused RED → GREEN proof;
-- produce its own review and verification evidence;
-- avoid unrelated cleanup or opportunistic refactors.
+The feature PR MUST contain, when applicable:
+- a real user/operator entrypoint or observable workflow with explicit success **and refusal/error semantics**;
+- actual product/operation code, test-first GREEN, adversarial/negative security tests and independent runnable acceptance evidence;
+- a usage/runbook example and code/test/roadmap/security documentation consistent with what was actually demonstrated;
+- a coherent security boundary, without unrelated refactors, invented approvals or out-of-scope host actions.
 
-Large architectural work MUST be decomposed into design-approved slices before implementation.
+**Open a Draft feature PR early** for architecture/design, written plan and governing path-scope review gates **inside that same PR**. Record reviewer findings, corrections and explicit operator approvals as PR comments. The plan/spec alone, or a refusal-only mock where a real positive proof is required, does not qualify the PR as Ready for Review. Mark the **same** PR Ready only after the complete executable feature and required acceptance evidence exist.
+
+Architectural work retains its independent written-spec and implementation-plan approvals; cross-boundary security decisions (trusted signer/root/verifier, real package/host/privilege use, UID502, and releases) remain separate operator gates. Approval of a PR design or a local unit test cannot grant an unrelated runtime authority.
 
 ## 2. Continuous iteration
 
@@ -41,8 +42,11 @@ understand current invariants
 → full regression
 → live/E2E when the touched boundary requires it
 → commit
-→ request independent review immediately when coding/self-review finish
-→ exact-head PR CI (may run concurrently with review)
+→ open one Draft feature PR with in-PR design/plan/security gates
+→ implement code+tests+runbook inside the same PR after required approvals
+→ independently demonstrate the actual user/operator positive and refusal paths
+→ request independent full-feature review (may run concurrently with exact-head CI)
+→ mark that PR Ready only after feature/evidence/review requirements are met
 → fresh final review
 → merge
 → exact merge-main CI
@@ -261,7 +265,7 @@ repeated fast samples do not authorize closing a failed security or cleanup gate
 
 ## 13. Definition of Done checklist
 
-A slice is done only when all applicable items are true:
+A feature PR is Ready for Review only after its **one complete user/operator function** is runnable with a real required positive proof, negative/refusal proof, correct docs and reviewable acceptance evidence. A Draft PR may host design/plan approval gates and incremental TDD commits without representing acceptance. A slice is done only when all applicable items are true:
 - intended behavior is defined;
 - baseline was clean;
 - RED failed for the intended reason;

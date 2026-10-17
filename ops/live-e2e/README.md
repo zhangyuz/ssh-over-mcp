@@ -256,3 +256,83 @@ Its historical roots/marker are expected absent and its journal remains
 protected. Do not dispatch that exhausted fixed disposer for normal healthy
 checks or a future incident; normal native E2E uses the existing live-local-e2e
 workflow and its cleanup postconditions.
+
+
+## 2026-10-16 reduced-scope developer-only B0a inspection (PR #268)
+
+**Delivery-scope amendment, not a relaxation of production-source trust.** The operator
+prioritized shipping a useful bounded inspection function while independent T5B
+material authentication remains on HOLD. Only the **developer-only, offline,
+non-authorizing** inspection is in scope for this iteration. Genuine offline
+Sigstore signed GREEN/RED and the real T5B source admission chain are deferred
+to a separately gated follow-up; they are NOT considered satisfied by this PR.
+
+From a non-privileged **Linux** development/test environment with Python 3.13+
+and the two exact archived fixture files in this repository:
+
+```sh
+python3 ops/live-e2e/gate_b0_source_verification.py \
+  inspect-synthetic --fixture signed-test-key-1 --format json
+```
+
+Successful **inspection only** exits `0` and reports
+`status=B0A_INSPECTED_UNTRUSTED` (schema `som.b0a.inspect.v1`), exact 109-byte
+sealed SHA-256 and archived bundle SHA-256, `signature_verified=false`,
+`source_approved=false`, and `evidence_class=NON_AUTHORIZING_SYNTHETIC`.
+It checks fixed fixture byte-length and SHA-256, opens in nonblocking mode to refuse FIFO and other non-regular replacements without hanging, and refuses symlinked/changed
+files, seals anonymous Linux memory before all-byte hashing and checks the
+untrusted bundle-declared digest. The fixture's recorded hashes are **not
+independent publisher authentication**. Exit `0` means the inspection
+completed, **never that a signature or source passed trust verification**.
+
+Changed candidate bytes, symlinked files, invalid envelope, inaccessible
+Linux seals or unsafe CLI arguments fail closed as bounded `B0A_REFUSED`
+JSON with exit `2`. No package paths, caller-supplied roots, tool flags,
+network access, dynamic Sigstore execution or generic OS-source admission.
+The preexisting `verify-synthetic` still exits `2` with
+`T5_POLICY_UNAPPROVED`. **Never let a deployment, B0 source admission,
+UID502/APFS or release gate consume `B0A_INSPECTED_UNTRUSTED` as approval.**
+
+Original full pinned-offline-verifier design remains below as a future
+T5B milestone, not a completion requirement for this reduced-scope PR.
+Issue #259 keeps all production-trust, Mac B0b and B1–B4 HOLDs.
+
+## ADR 0019 Gate B0a — deferred signed-source verification command (PR #268 is Ready for Review)
+
+The Gate B0a feature is developed and reviewed in [PR #268](https://github.com/zhangyuz/ssh-over-mcp/pull/268). The **`verify-synthetic` command** currently exposes only **refusal behavior**, **not real signed-source verification**; the separate `inspect-synthetic` command above can succeed only with an explicitly untrusted developer-only inspection record. It does not access a Python.org package, install software, grant `SOURCE_VERIFIED` or permit UID502/APFS execution.
+
+From the repository root with an ordinary, non-privileged developer Python 3.13+ runtime:
+
+```sh
+python3 ops/live-e2e/gate_b0_source_verification.py \
+  verify-synthetic --fixture signed-test-key-1 --format json
+```
+
+Until the **separately reviewed and operator-approved T5 synthetic policy** is present, it MUST exit with status `2` and emit one bounded JSON record with these stable fields:
+
+```json
+{
+  "evidence_class": "NON_AUTHORIZING_SYNTHETIC",
+  "reason_code": "T5_POLICY_UNAPPROVED",
+  "schema": "som.b0a.synthetic.v1",
+  "status": "B0A_REFUSED"
+}
+```
+
+An unrecognized test fixture exits `2` with `FIXTURE_NOT_APPROVED`; disallowed options and arbitrary `--root`, `--approved`, `--online` or real-artifact flags exit `2` with `CLI_ARGS_REJECTED`. `--help` is informational only and returns `0`.
+
+The Linux-only `gate_b0_immutable_bytes.py` helper is **not a generic file validator**. It accepts only bounded built-in immutable `bytes` owned by a trusted *synthetic test fixture harness*, seals a fresh anonymous `memfd` with verified Linux kernel write/grow/shrink/seal flags, hashes **all sealed bytes**, records exact length and closes the descriptor on refusal. Its caller-created witness is **not independent cryptographic source provenance**; never use it as an approval root for real files, concurrent writable sources, Sigstore signer identity, B0b custody or a trusted Mac host.
+
+The focused tests prove **synthetic witness refusal and fixed-fixture identity rejection only**. They do **not** claim genuine same-inode concurrent write/restore attacks, an externally supplied unsealed-FD attack, or verified writer exclusion for arbitrary OS source files. All those physical/source-ingestion adversarial cases remain **UNVERIFIED** until a separately approved ingestion interface and threat model exist. The one-time owned-FD registry prevents forged/stale/recycled-number closes through this helper but does **not** establish safety against a hostile same-process thread that closes or replaces a borrowed raw FD concurrently. The future T5 verifier adapter must use `authenticated_measurement_for_handoff()` and accept only the registry-backed digest/size returned **after** object identity, all public measurement fields, kernel inode/size and seals have been rechecked. Direct use of the public `SealedMeasurement.sha256` field is **not** authenticated evidence; an externally mutable dataclass property must never drive verification. These are explicit limitations, not approved exceptions to final B0a acceptance.
+
+The prospective Sigstore adapter currently contains only a **non-authorizing, read-only bundle digest consistency preflight** in `gate_b0_sigstore_adapter.py`. It rejects incompatible/malformed/duplicate-key JSON, including an absent or empty **signature, certificate, transparency-log entries or RFC3161 timestamp envelope**, a bundle-declared SHA-256 differing from registered sealed bytes, and forged/stale measurements **before** any future cryptographic verification. These are only syntactic envelope checks; test fixtures intentionally contain non-cryptographic placeholder signature and proof fields and cannot attest bundle validity. A matching digest is only syntactic byte consistency; it does **not** authenticate a certificate, signature, OIDC identity, Rekor inclusion, TSA time, TUF trust root or runtime. The preflight has **no executable Sigstore subprocess and no SYNTHETIC_ONLY success path**, and cannot replace genuine pinned-verifier acceptance.
+
+The [archived conformance candidate fixture](../../tests/ops/fixtures/b0a_synthetic/README.md) is stored with exact SHA-256 and byte length for reproducible **offline static** tests: registered sealed bytes match an unchanged upstream bundle, same-length modified bytes refuse, and an altered bundle-declared digest refuses with original signature/proof fields left unchanged. These are **T5A candidate-only preflight tests**, not cryptographic signature GREEN or verified signer trust.
+
+The fixed archived fixture also has **local system-OpenSSL ECDSA mathematical-positive and same-length artifact/signature-tamper negative regressions**. Tests use only the bundle-provided **untrusted** leaf public key, never acquire a root or call a Sigstore verifier, and cannot emit `SYNTHETIC_ONLY`. Do not mistake these targeted test-key signature arithmetic checks or hosted CI green for Fulcio/OIDC/CT/Rekor/TSA/TUF authentication or Gate T5B approval.
+
+Two additional **archival candidate-only certificate identity checks** extract the pinned DER leaf SAN/OIDC issuer and the SCT **log ID** from system OpenSSL text, then show an incorrect SAN or OIDC issuer does not equal those fields. The SCT log ID matches one staging CT candidate key ID but no SCT signature, trusted log membership, Fulcio issuance, or original signer identity was cryptographically authenticated by those tests. The archive-only tests use fixed system `/usr/bin/openssl` for SAN/OIDC and strict standard-library parsing of pinned DER bytes for the SCT; they do not invoke an optional Homebrew `/usr/local/bin/openssl` executable. Future exact-policy **real Sigstore GREEN and wrong-identity RED** are still mandatory; these local parsing assertions are not that test.
+
+**Deferred full signed-verifier T5B acceptance (NOT the reduced-scope inspection PR):** a separately independently pinned/authenticated offline Sigstore tool/runtime and complete dependency closure, approved exact signed **test-key** fixture/bundle and expected signer SAN/OIDC, independently authenticated Fulcio/CT/Rekor roots/log inclusion/signed time, numeric clock/skew/staleness/revocation disposition and a single approved sealed-FD or digest-bound mode. In an isolated unprivileged **network-denied** verifier runtime, demonstrate actual pinned-tool test-key signature **GREEN** (`SYNTHETIC_ONLY`) and distinct changed-sealed-byte and valid-signature/bundle-declared-digest **RED** tests, and retain exact-head CI plus independent project-wide security review. A self-generated root, fake verifier output, always-refusing CLI or hosted CI PASS cannot replace those proofs.
+
+See the [B0a design](../../docs/superpowers/specs/2026-10-15-adr19-b0a-offline-source-evidence-cli-design.md), [TDD implementation plan](../../docs/superpowers/plans/2026-10-15-adr19-b0a-offline-source-evidence-cli.md) and [separately governed B0a/B0b trust boundary](../../docs/superpowers/plans/2026-10-15-adr19-gate-b0-offhost-package-verification.md). The operator must not access/execute real `.pkg` or `.sigstore` material, `installer`, protected macOS paths, UID502 or production trust roots under this synthetic feature scope.
