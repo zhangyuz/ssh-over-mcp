@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -89,7 +90,9 @@ def verify_snapshot(sha: str, runs: object, get_jobs: Callable[[int], object]) -
 def _gh_api(path: str) -> object:
     try:
         process = subprocess.run(
-            ["gh", "api", path], capture_output=True, timeout=15, check=False
+            ["gh", "api", "--hostname", "github.com", path],
+            capture_output=True, timeout=15, check=False,
+            env={**os.environ, "GH_HOST": "github.com"}
         )
     except (OSError, subprocess.TimeoutExpired):
         raise Refused("GITHUB_API_UNAVAILABLE") from None

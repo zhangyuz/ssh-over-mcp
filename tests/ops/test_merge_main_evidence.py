@@ -109,3 +109,37 @@ def test_no_live_dispatch_and_fail_closed_on_missing_real_merge(monkeypatch, cap
     assert mod.main(["--sha", SHA]) == 2
     assert len(calls) == 1 and "head_sha=" + SHA in calls[0]
     assert "MERGE_MAIN_UNVERIFIED" in capsys.readouterr().err
+
+
+def test_api_pins_canonical_github_host_despite_hostile_ambient_host(monkeypatch):
+    """Hostile GH_HOST must never redirect acceptance to a different server."""
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("GH_HOST", "evil.enterprise.invalid")
+    observed = []
+
+    def fake_run(argv, **kwargs):
+        observed.append((argv, kwargs))
+        return SimpleNamespace(returncode=0, stdout=b'{"total_count":0,"workflow_runs":[]}')
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    assert mod._gh_api("repos/zhangyuz/ssh-over-mcp/actions/runs") == {
+        "total_count": 0, "workflow_runs": []
+    }
+    assert len(observed) == 1
+    argv, kwargs = observed[0]
+    assert argv[:4] == ["gh", "api", "--hostname", "github.com"]
+    assert kwargs["env"]["GH_HOST"] == "github.com"
+    assert argv[4] == "repos/zhangyuz/ssh-over-mcp/actions/runs"
+
+
+def test_api_host_unavailable_refuses(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("GH_HOST", "evil.enterprise.invalid")
+    monkeypatch.setattr(
+        mod.subprocess, "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout=b""),
+    )
+    with pytest.raises(mod.Refused, match="GITHUB_API_UNAVAILABLE"):
+        mod._gh_api("repos/zhangyuz/ssh-over-mcp/actions/runs")
