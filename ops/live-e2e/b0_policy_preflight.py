@@ -86,7 +86,7 @@ def main():
     args = p.parse_args()
     try:
         data = read_policy(args.policy)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         print(f'B0_POLICY_REFUSED: {type(exc).__name__}')
         return 2
     status, missing = preflight(data)

@@ -71,3 +71,13 @@ def test_deep_json_refused(tmp_path):
     path.write_text('[' * 1000 + '0' + ']' * 1000)
     result = subprocess.run([sys.executable, str(P), str(path)], capture_output=True, timeout=3, check=False)
     assert result.returncode == 2
+
+def test_ultra_deep_json_refuses_without_traceback(tmp_path):
+    import subprocess
+    import sys
+    path = tmp_path / 'ultradeep.json'
+    path.write_text('[' * 10000 + '0' + ']' * 10000)
+    result = subprocess.run([sys.executable, str(P), str(path)], capture_output=True, timeout=3, check=False)
+    assert result.returncode == 2
+    assert b'B0_POLICY_REFUSED' in result.stdout
+    assert b'Traceback' not in result.stderr
