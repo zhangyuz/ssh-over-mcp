@@ -326,7 +326,7 @@ claim alone does not establish a current repository fact. Agents MUST NOT
 reset, overwrite, clean, or adopt another agent's worktree or shared state
 without an ownership check and appropriate authorization.
 
-Every active development worktree SHOULD create `progress.md` from the
+Every active development worktree MUST create `progress.md` from the
 template. Agents MUST update an existing handoff after material changes,
 tests, decisions, review remediation, approval changes, or interruption.
 At minimum it MUST distinguish:
