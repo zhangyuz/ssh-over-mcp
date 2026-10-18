@@ -2242,3 +2242,7 @@ The bounded C0 preflight adds opt-in `--json` with a stable offline status/error
 ### 2026-10-17 C0 stable offline JSON error codes
 
 The opt-in `--json` report now exposes `error_codes` (`INVALID_MANIFEST` for read/parse failures, `INVALID_STRUCTURE` for parsed invalid proposals, empty on structure-only pass). Existing text/JSON fields, exit codes and no-authorization safety markers remain unchanged. This does not approve C0 collection or T5B admission.
+
+### 2026-10-17 C0 bounded offline batch preflight
+
+Added `--batch` for 1–16 independent local manifest inspections with a single machine-readable aggregate status and per-file reports, fail-closed exit 2 on any refusal or count overflow. Single-file CLI output/exit behavior and all C0 authorization/collection/network HOLD markers remain unchanged; this is not permission for C0 collection or T5B admission.
