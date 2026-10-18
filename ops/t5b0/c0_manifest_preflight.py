@@ -159,6 +159,72 @@ def inspect_stdin():
         'network': 'NO_NETWORK',
     }
 
+def inspect_stdin_batch():
+    """Audit bounded NDJSON proposals from stdin; never interpret them as consent."""
+    results = []
+    errors = []
+    try:
+        data = sys.stdin.buffer.read(16 * 16385 + 1)
+        if len(data) > 16 * 16385:
+            errors = ['stdin batch exceeds total byte budget']
+        else:
+            lines = data.split(b'\n')
+            if lines and lines[-1] == b'':
+                lines.pop()
+            if not 1 <= len(lines) <= 16:
+                errors = ['stdin batch must contain 1 to 16 manifests']
+            elif any(len(line) > 16384 for line in lines):
+                errors = ['stdin batch line too large']
+            else:
+                objects_by_line = []
+                for index, line in enumerate(lines, start=1):
+                    objects = None
+                    try:
+                        doc = parse_manifest(line)
+                        item_errors = validate(doc)
+                        codes = ['INVALID_STRUCTURE'] if item_errors else []
+                        if not item_errors:
+                            objects = doc['objects']
+                    except (OSError, UnicodeError, ValueError, TypeError, RecursionError) as exc:
+                        item_errors = [f'unreadable/invalid manifest: {type(exc).__name__}']
+                        codes = ['INVALID_MANIFEST']
+                    results.append({
+                        'path': f'stdin:{index}',
+                        'status': 'REFUSED' if item_errors else 'STRUCTURE_ONLY_PASS',
+                        'errors': item_errors,
+                        'error_codes': codes,
+                        'authorization': 'NO_AUTHORIZATION',
+                        'collection': 'C0_COLLECT_HOLD',
+                        'network': 'NO_NETWORK',
+                    })
+                    objects_by_line.append(objects)
+                cross_file_consistency(results, objects_by_line)
+                # Only fixed diagnostics cross the stream boundary: do not echo
+                # untrusted URLs, digests or input bytes in conflict reasons.
+                for item in results:
+                    if 'DUPLICATE_OBJECT_ID' in item['error_codes'] or (
+                        'CROSS_FILE_CONFLICT' in item['error_codes']
+                    ):
+                        item['errors'] = [
+                            'duplicate cross-manifest object id' if code == 'DUPLICATE_OBJECT_ID'
+                            else 'conflicting cross-manifest object metadata'
+                            for code in item['error_codes']
+                            if code in ('DUPLICATE_OBJECT_ID', 'CROSS_FILE_CONFLICT')
+                        ]
+    except (OSError, ValueError, TypeError) as exc:
+        errors = [f'unreadable/invalid stdin batch: {type(exc).__name__}']
+        results = []
+    refused = bool(errors) or any(item['status'] == 'REFUSED' for item in results)
+    return {
+        'status': 'REFUSED' if refused else 'STRUCTURE_ONLY_PASS',
+        'errors': errors,
+        'results': results,
+        'authorization': 'NO_AUTHORIZATION',
+        'collection': 'C0_COLLECT_HOLD',
+        'network': 'NO_NETWORK',
+    }
+
+
 def cross_file_consistency(results, objects_by_file):
     """Compare only structurally valid objects, without reopening input paths."""
     by_id, by_url, by_digest = {}, {}, {}
@@ -344,6 +410,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('manifest', type=Path, nargs='?')
     p.add_argument('--stdin', action='store_true', help='validate <=16 KiB piped manifest offline')
+    p.add_argument('--stdin-batch', action='store_true',
+                   help='audit 1–16 newline-delimited <=16 KiB C0 proposals offline')
     p.add_argument('--json', action='store_true', help='emit a machine-readable offline report')
     p.add_argument('--directory', type=Path, help='audit 1–16 .json entries in a directory, offline')
     p.add_argument('--compare-directories', type=Path, nargs=2, metavar=('BEFORE', 'AFTER'),
@@ -355,6 +423,10 @@ def main():
     p.add_argument('--batch', type=Path, nargs='+', metavar='MANIFEST',
                    help='inspect up to 16 manifests and emit one aggregate JSON report')
     args = p.parse_args()
+    if args.stdin_batch and (args.stdin or args.manifest is not None or args.batch is not None
+                             or args.directory is not None or args.compare_directories is not None
+                             or args.require_json_only or args.fail_on_change):
+        p.error('--stdin-batch cannot be combined with other input modes')
     if args.stdin and (args.manifest is not None or args.batch is not None
                        or args.directory is not None or args.compare_directories is not None):
         p.error('--stdin cannot be combined with other input modes')
@@ -362,6 +434,10 @@ def main():
         p.error('--fail-on-change requires --compare-directories')
     if args.require_json_only and args.compare_directories is None and args.directory is None:
         p.error('--require-json-only requires --directory or --compare-directories')
+    if args.stdin_batch:
+        report = inspect_stdin_batch()
+        print(json.dumps(report, sort_keys=True))
+        return 2 if report['status'] == 'REFUSED' else 0
     if args.compare_directories is not None:
         if args.manifest is not None or args.batch is not None or args.directory is not None:
             p.error('--compare-directories cannot be combined with other input modes')
