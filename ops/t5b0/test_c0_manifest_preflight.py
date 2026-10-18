@@ -155,6 +155,81 @@ class C0PreflightTests(unittest.TestCase):
             self.assertEqual(json.loads(oversized.stdout)['status'], 'REFUSED')
             self.assertEqual(json.loads(oversized.stdout)['results'], [])
 
+    def test_directory_audit_deterministic_counts_and_digests(self):
+        import hashlib
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'b.json').write_text(json.dumps({**BASE, 'approval': 'yes'}))
+            (root / 'a.json').write_text(json.dumps(BASE))
+            (root / 'ignored.txt').write_text('not a manifest')
+            (root / 'nested').mkdir()
+            (root / 'nested' / 'nested.json').write_text('not inspected')
+            result = subprocess.run([sys.executable, str(script), '--directory', str(root)],
+                                    capture_output=True, text=True, timeout=3, check=False)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual((report['passed'], report['refused']), (1, 1))
+            self.assertEqual(report['status'], 'REFUSED')
+            self.assertEqual([Path(x['path']).name for x in report['results']], ['a.json', 'b.json'])
+            for item in report['results']:
+                self.assertEqual(item['sha256'], hashlib.sha256(Path(item['path']).read_bytes()).hexdigest())
+                self.assertEqual((item['authorization'], item['collection'], item['network']),
+                                 ('NO_AUTHORIZATION', 'C0_COLLECT_HOLD', 'NO_NETWORK'))
+            self.assertEqual(result.stderr, '')
+
+    def test_directory_empty_overflow_and_symlink_fail_closed(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            def run():
+                result = subprocess.run([sys.executable, str(script), '--directory', str(root)],
+                                        capture_output=True, text=True, timeout=3, check=False)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(json.loads(result.stdout)['status'], 'REFUSED')
+                return json.loads(result.stdout)
+            self.assertEqual(run()['results'], [])
+            target = root / 'target.txt'
+            target.write_text('outside manifest')
+            (root / 'alias.json').symlink_to(target)
+            report = run()
+            self.assertEqual(report['refused'], 1)
+            self.assertEqual(report['results'][0]['error_codes'], ['INVALID_MANIFEST'])
+            self.assertIsNone(report['results'][0]['sha256'])
+            (root / 'alias.json').unlink()
+            for i in range(17):
+                (root / f'{i:02d}.json').write_text(json.dumps(BASE))
+            self.assertEqual(run()['results'], [])
+
+    def test_directory_success_special_file_and_directory_symlink(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder) / 'manifests'
+            root.mkdir()
+            valid = root / 'valid.json'
+            valid.write_text(json.dumps(BASE))
+            def run(directory):
+                result = subprocess.run([sys.executable, str(script), '--directory', str(directory)],
+                                        capture_output=True, text=True, timeout=3, check=False)
+                return result, json.loads(result.stdout)
+            result, report = run(root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((report['passed'], report['refused']), (1, 0))
+            self.assertEqual(report['status'], 'STRUCTURE_ONLY_PASS')
+            self.assertEqual(report['network'], 'NO_NETWORK')
+            fifo = root / 'fifo.json'
+            os.mkfifo(fifo)
+            result, report = run(root)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertEqual((report['passed'], report['refused']), (1, 1))
+            self.assertEqual(report['results'][0]['sha256'], None)
+            self.assertEqual(report['results'][0]['error_codes'], ['INVALID_MANIFEST'])
+            alias = Path(folder) / 'alias'
+            alias.symlink_to(root, target_is_directory=True)
+            result, report = run(alias)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertEqual(report['results'], [])
+
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),

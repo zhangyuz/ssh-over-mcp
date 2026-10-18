@@ -1,5 +1,6 @@
 """Offline, fail-closed structural preflight; NEVER downloads or approves collection."""
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -76,11 +77,11 @@ def parse_manifest(data):
                       parse_constant=lambda _: (_ for _ in ()).throw(ValueError('nonfinite number')))
 
 
-def read_regular_manifest(path):
+def read_regular_manifest(path, *, dir_fd=None):
     flags = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW
     if hasattr(os, 'O_CLOEXEC'):
         flags |= os.O_CLOEXEC
-    fd = os.open(path, flags)
+    fd = os.open(path, flags, dir_fd=dir_fd)
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
@@ -97,10 +98,13 @@ def read_regular_manifest(path):
         os.close(fd)
 
 
-def inspect_manifest(path):
+def inspect_manifest(path, *, dir_fd=None, include_digest=False):
     error_codes = []
+    digest = None
     try:
-        data = read_regular_manifest(path)
+        data = read_regular_manifest(path, dir_fd=dir_fd)
+        if include_digest:
+            digest = hashlib.sha256(data).hexdigest()
         doc = parse_manifest(data)
         errors = validate(doc)
         if errors:
@@ -108,7 +112,7 @@ def inspect_manifest(path):
     except (OSError, UnicodeError, ValueError, TypeError, RecursionError) as exc:
         errors = [f'unreadable/invalid manifest: {type(exc).__name__}']
         error_codes.append('INVALID_MANIFEST')
-    return {
+    report = {
         'status': 'REFUSED' if errors else 'STRUCTURE_ONLY_PASS',
         'errors': errors,
         'error_codes': error_codes,
@@ -116,15 +120,60 @@ def inspect_manifest(path):
         'collection': 'C0_COLLECT_HOLD',
         'network': 'NO_NETWORK',
     }
+    if include_digest:
+        report['sha256'] = digest
+    return report
+
+
+def inspect_directory(directory):
+    results = []
+    errors = []
+    try:
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        if hasattr(os, 'O_CLOEXEC'):
+            flags |= os.O_CLOEXEC
+        fd = os.open(directory, flags)
+        try:
+            with os.scandir(fd) as entries:
+                names = sorted(entry.name for entry in entries if entry.name.endswith('.json'))
+            if not 1 <= len(names) <= 16:
+                errors = ['directory must contain 1 to 16 .json entries']
+            else:
+                for name in names:
+                    report = inspect_manifest(name, dir_fd=fd, include_digest=True)
+                    results.append({'path': str(directory / name), **report})
+        finally:
+            os.close(fd)
+    except (OSError, ValueError) as exc:
+        errors = [f'unreadable/invalid directory: {type(exc).__name__}']
+        results = []
+    return results, errors
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('manifest', type=Path, nargs='?')
     p.add_argument('--json', action='store_true', help='emit a machine-readable offline report')
+    p.add_argument('--directory', type=Path, help='audit 1–16 .json entries in a directory, offline')
     p.add_argument('--batch', type=Path, nargs='+', metavar='MANIFEST',
                    help='inspect up to 16 manifests and emit one aggregate JSON report')
     args = p.parse_args()
+    if args.directory is not None:
+        if args.manifest is not None or args.batch is not None:
+            p.error('--directory cannot be combined with positional manifest or --batch')
+        results, errors = inspect_directory(args.directory)
+        refused = bool(errors) or any(item['status'] == 'REFUSED' for item in results)
+        print(json.dumps({
+            'status': 'REFUSED' if refused else 'STRUCTURE_ONLY_PASS',
+            'errors': errors,
+            'passed': sum(item['status'] == 'STRUCTURE_ONLY_PASS' for item in results),
+            'refused': sum(item['status'] == 'REFUSED' for item in results),
+            'results': results,
+            'authorization': 'NO_AUTHORIZATION',
+            'collection': 'C0_COLLECT_HOLD',
+            'network': 'NO_NETWORK',
+        }, sort_keys=True))
+        return 2 if refused else 0
     if args.batch is not None:
         if args.manifest is not None:
             p.error('positional manifest cannot be combined with --batch')

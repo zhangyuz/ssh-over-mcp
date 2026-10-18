@@ -2246,3 +2246,7 @@ The opt-in `--json` report now exposes `error_codes` (`INVALID_MANIFEST` for rea
 ### 2026-10-17 C0 bounded offline batch preflight
 
 Added `--batch` for 1–16 independent local manifest inspections with a single machine-readable aggregate status and per-file reports, fail-closed exit 2 on any refusal or count overflow. Single-file CLI output/exit behavior and all C0 authorization/collection/network HOLD markers remain unchanged; this is not permission for C0 collection or T5B admission.
+
+### 2026-10-18 C0 offline directory audit (non-authorizing)
+
+The bounded `--directory` workflow performs deterministic, nonrecursive 1–16 `.json` entry structural audits with per-file exact-read SHA256, pass/refusal counts and fail-closed handling of empty, overflow, symlink and special-file inputs. Existing single-file and batch behavior remains unchanged. Digest is only a reproducibility aid, not proof of authenticity or collection permission. C0_COLLECT_HOLD_INCOMPLETE, T5B-0/T5B-1, Mac/UID502/APFS and Linux Slice C remain HOLD.
