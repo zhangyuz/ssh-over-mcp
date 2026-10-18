@@ -935,6 +935,216 @@ class C0PreflightTests(unittest.TestCase):
                               result.stderr)
                 self.assertEqual(result.stdout, b'')
 
+    def test_stdin_directory_compare_unchanged_and_semantic_delta(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            before = Path(folder) / 'before'
+            before.mkdir()
+            (before / 'original.json').write_text(json.dumps(BASE))
+            same_payload = (json.dumps(BASE, separators=(',', ':')) + '\n').encode()
+            same = subprocess.run(
+                [sys.executable, str(script), '--compare-stdin-to-directory', str(before)],
+                input=same_payload, capture_output=True, timeout=5, check=False)
+            self.assertEqual(same.returncode, 0, same.stderr)
+            report = json.loads(same.stdout)
+            self.assertEqual(report['status'], 'UNCHANGED')
+            self.assertEqual(report['object_diff'],
+                             {'status': 'AVAILABLE', 'added': [], 'removed': [], 'changed': []})
+            self.assertEqual(report['before']['status'], 'STRUCTURE_ONLY_PASS')
+            self.assertEqual(report['after']['results'][0]['path'], 'stdin:1')
+            self.assertEqual((report['authorization'], report['collection'], report['network']),
+                             ('NO_AUTHORIZATION', 'C0_COLLECT_HOLD', 'NO_NETWORK'))
+            self.assertEqual(report['evidence']['status'], 'UNVERIFIED')
+
+            changed = copy.deepcopy(BASE)
+            changed['objects'][0].update(url='https://host/SECRET',
+                                         sha256='b' * 64)
+            delta = subprocess.run(
+                [sys.executable, str(script), '--compare-stdin-to-directory',
+                 str(before), '--fail-on-change'],
+                input=json.dumps(changed).encode(), capture_output=True, timeout=5, check=False)
+            self.assertEqual(delta.returncode, 3, delta.stderr)
+            result = json.loads(delta.stdout)
+            self.assertEqual(result['status'], 'CHANGED')
+            self.assertEqual(result['object_diff'],
+                             {'status': 'AVAILABLE', 'added': [], 'removed': [],
+                              'changed': [{'id': 'C0-W1', 'fields': ['sha256', 'url']}]})
+            self.assertNotIn(b'SECRET', delta.stdout)
+            self.assertNotIn(b'bbbbbbbb', delta.stdout)
+
+            alternate = copy.deepcopy(BASE)
+            alternate['objects'][0].update(id='C0-P1', url='https://host/second',
+                                           sha256='c' * 64)
+            replaced = subprocess.run(
+                [sys.executable, str(script), '--compare-stdin-to-directory', str(before)],
+                input=json.dumps(alternate).encode(), capture_output=True, timeout=5, check=False)
+            self.assertEqual(replaced.returncode, 0, replaced.stderr)
+            self.assertEqual(json.loads(replaced.stdout)['object_diff'],
+                             {'status': 'AVAILABLE', 'added': ['C0-P1'],
+                              'removed': ['C0-W1'], 'changed': []})
+
+    def test_stdin_directory_compare_fails_closed_without_partial_semantic_inventory(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            before = Path(folder) / 'before'
+            before.mkdir()
+            (before / 'original.json').write_text(json.dumps(BASE))
+            for label, payload in (
+                ('bad_utf8', b'\xff\n'),
+                ('bad_json', b'{\n'),
+                ('duplicate', (json.dumps(BASE) + '\n' + json.dumps(BASE)).encode()),
+                ('overflow', b'X' * (16 * 16385 + 1)),
+            ):
+                with self.subTest(label=label):
+                    result = subprocess.run(
+                        [sys.executable, str(script), '--compare-stdin-to-directory',
+                         str(before), '--fail-on-change'],
+                        input=payload, capture_output=True, timeout=5, check=False)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    report = json.loads(result.stdout)
+                    self.assertEqual(report['status'], 'REFUSED')
+                    self.assertEqual(report['object_diff']['status'], 'UNAVAILABLE')
+                    self.assertEqual(report['after']['status'], 'REFUSED')
+                    if label == 'overflow':
+                        self.assertEqual(report['after']['results'], [])
+                    self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+
+    def test_stdin_directory_compare_baseline_resource_and_strict_mode(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            before = Path(folder) / 'before'
+            before.mkdir()
+            (before / 'a.json').write_text(json.dumps(BASE))
+            payload = json.dumps(BASE).encode()
+            stray = before / 'notes.txt'
+            stray.write_text('ignored unless strict')
+            base_cmd = [sys.executable, str(script), '--compare-stdin-to-directory', str(before)]
+            allowed = subprocess.run(base_cmd, input=payload, capture_output=True,
+                                     timeout=5, check=False)
+            self.assertEqual(allowed.returncode, 0, allowed.stderr)
+            strict = subprocess.run(base_cmd + ['--require-json-only'], input=payload,
+                                    capture_output=True, timeout=5, check=False)
+            self.assertEqual(strict.returncode, 2, strict.stderr)
+            self.assertEqual(json.loads(strict.stdout)['object_diff']['status'], 'UNAVAILABLE')
+            for i in range(63):
+                (before / f'extra-{i}.txt').write_text('x')
+            # 1 JSON plus 64 non-JSON = 65 immediate entries.
+            overflow = subprocess.run(base_cmd, input=payload, capture_output=True,
+                                      timeout=5, check=False)
+            self.assertEqual(overflow.returncode, 2, overflow.stderr)
+            self.assertEqual(json.loads(overflow.stdout)['before']['errors'],
+                             ['directory must contain at most 64 total entries'])
+
+    def test_stdin_directory_compare_rejects_conflicting_modes_before_stdin(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            before = Path(folder)
+            for arguments in (
+                ['--stdin'], ['--stdin-batch'], ['--batch', 'anything.json'],
+                ['--directory', str(before)], ['--compare-directories', 'a', 'b'],
+                ['anything.json'],
+            ):
+                with self.subTest(arguments=arguments):
+                    result = subprocess.run(
+                        [sys.executable, str(script), '--compare-stdin-to-directory',
+                         str(before), *arguments],
+                        input=b'SECRET', capture_output=True, timeout=5, check=False)
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn(b'--compare-stdin-to-directory cannot be combined',
+                                  result.stderr)
+                    self.assertEqual(result.stdout, b'')
+
+    def test_stdin_directory_compare_symlink_and_conflict_are_refused(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            before = root / 'before'
+            before.mkdir()
+            (before / 'original.json').write_text(json.dumps(BASE))
+            link = root / 'untrusted_link'
+            link.symlink_to(before, target_is_directory=True)
+            invalid = subprocess.run(
+                [sys.executable, str(script), '--compare-stdin-to-directory', str(link)],
+                input=json.dumps(BASE).encode(), capture_output=True, timeout=5, check=False)
+            self.assertEqual(invalid.returncode, 2, invalid.stderr)
+            self.assertEqual(json.loads(invalid.stdout)['object_diff']['status'], 'UNAVAILABLE')
+
+            one = copy.deepcopy(BASE)
+            two = copy.deepcopy(BASE)
+            one['objects'][0]['url'] = 'https://host/SECRET'
+            two['objects'][0].update(id='C0-P1', url='https://host/SECRET',
+                                     sha256='b' * 64)
+            payload = (json.dumps(one) + '\n' + json.dumps(two)).encode()
+            conflict = subprocess.run(
+                [sys.executable, str(script), '--compare-stdin-to-directory', str(before)],
+                input=payload, capture_output=True, timeout=5, check=False)
+            self.assertEqual(conflict.returncode, 2, conflict.stderr)
+            report = json.loads(conflict.stdout)
+            self.assertEqual(report['object_diff']['status'], 'UNAVAILABLE')
+            self.assertTrue(any('CROSS_FILE_CONFLICT' in row['error_codes']
+                                for row in report['after']['results']))
+            self.assertNotIn(b'SECRET', conflict.stdout)
+            self.assertNotIn(b'bbbbbbbb', conflict.stdout)
+
+    def test_stdin_directory_compare_redacts_baseline_conflict_values(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            before = root / 'before'
+            before.mkdir()
+            first = copy.deepcopy(BASE)
+            second = copy.deepcopy(BASE)
+            second['objects'][0]['id'] = 'C0-P1'
+            for name, url, digest, first_size, second_size in (
+                ('url', 'https://host/SENTINEL_BASELINE_URL', 'b' * 64, 100, 100),
+                ('sha', 'https://host/distinct', 'f' * 64, 100, 101),
+            ):
+                with self.subTest(conflict=name):
+                    first['objects'][0].update(
+                        url=url if name == 'url' else 'https://host/first',
+                        sha256=digest,
+                        bytes=first_size, max_bytes=1000)
+                    second['objects'][0].update(
+                        url=url, sha256=digest,
+                        bytes=second_size, max_bytes=1000)
+                    (before / 'one.json').write_text(json.dumps(first))
+                    (before / 'two.json').write_text(json.dumps(second))
+                    cmd = [sys.executable, str(script), '--compare-stdin-to-directory',
+                           str(before)]
+                    result = subprocess.run(cmd, input=json.dumps(BASE).encode(),
+                                            capture_output=True, timeout=5, check=False)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    report = json.loads(result.stdout)
+                    self.assertEqual(report['status'], 'REFUSED')
+                    self.assertEqual(report['object_diff']['status'], 'UNAVAILABLE')
+                    self.assertEqual(report['before']['status'], 'REFUSED')
+                    self.assertEqual(report['after']['status'], 'STRUCTURE_ONLY_PASS')
+                    self.assertTrue(all('CROSS_FILE_CONFLICT' in item['error_codes']
+                                        for item in report['before']['results']))
+                    self.assertNotIn(url.encode(), result.stdout)
+                    self.assertNotIn(digest.encode(), result.stdout)
+                    self.assertNotIn(b'SENTINEL_BASELINE_URL', result.stdout)
+                    self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+                    self.assertEqual(report['network'], 'NO_NETWORK')
+                    # Existing standalone directory report retains its prior error contract.
+                    legacy = subprocess.run([sys.executable, str(script), '--directory',
+                                             str(before)], capture_output=True,
+                                            timeout=5, check=False)
+                    self.assertEqual(legacy.returncode, 2, legacy.stderr)
+                    self.assertIn(
+                        b'conflicting cross-file URL:' if name == 'url' else
+                        b'conflicting cross-file SHA256 size:', legacy.stdout)
+
+    def test_stdin_directory_compare_help_mentions_both_change_modes(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        result = subprocess.run([sys.executable, str(script), '--help'],
+                                capture_output=True, timeout=5, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(b'--compare-directories', result.stdout)
+        self.assertIn(b'--compare-stdin-to-directory', result.stdout)
+        change_help = result.stdout.split(b'--fail-on-change', 2)[-1]
+        self.assertIn(b'--compare-stdin-to-directory', change_help.replace(b'\n                        ', b''))
+
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),
