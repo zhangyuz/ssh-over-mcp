@@ -2230,3 +2230,7 @@ A [strictly offline structural preflight](evidence/2026-10-17-adr19-t5b0-c0-offl
 ### 2026-10-17 C0 offline preflight hosted coverage
 
 An existing `tests/ops` pytest bridge runs `ops/t5b0` offline adversarial fixtures on Python 3.13 and 3.14 in `rest` shards, preserving the same non-root/no-supplementary-groups boundary and frozen CI workflow bytes. This is verification coverage only; `C0_COLLECT_HOLD_INCOMPLETE` and T5B-0/T5B-1 remain HOLD.
+
+### 2026-10-17 C0 canonical URL syntax hardening
+
+The offline C0 manifest structural checker refuses ambiguous URL spellings (percent-encoded components, dot/empty segments, backslashes, non-ASCII, malformed ports) with negative fixtures, without changing any trust or collection authority. `C0_COLLECT_HOLD_INCOMPLETE` remains in force.
