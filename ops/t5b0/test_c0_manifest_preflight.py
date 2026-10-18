@@ -1086,6 +1086,65 @@ class C0PreflightTests(unittest.TestCase):
             self.assertNotIn(b'SECRET', conflict.stdout)
             self.assertNotIn(b'bbbbbbbb', conflict.stdout)
 
+    def test_stdin_directory_compare_redacts_baseline_conflict_values(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            before = root / 'before'
+            before.mkdir()
+            first = copy.deepcopy(BASE)
+            second = copy.deepcopy(BASE)
+            second['objects'][0]['id'] = 'C0-P1'
+            for name, url, digest, first_size, second_size in (
+                ('url', 'https://host/SENTINEL_BASELINE_URL', 'b' * 64, 100, 100),
+                ('sha', 'https://host/distinct', 'f' * 64, 100, 101),
+            ):
+                with self.subTest(conflict=name):
+                    first['objects'][0].update(
+                        url=url if name == 'url' else 'https://host/first',
+                        sha256=digest,
+                        bytes=first_size, max_bytes=1000)
+                    second['objects'][0].update(
+                        url=url, sha256=digest,
+                        bytes=second_size, max_bytes=1000)
+                    (before / 'one.json').write_text(json.dumps(first))
+                    (before / 'two.json').write_text(json.dumps(second))
+                    cmd = [sys.executable, str(script), '--compare-stdin-to-directory',
+                           str(before)]
+                    result = subprocess.run(cmd, input=json.dumps(BASE).encode(),
+                                            capture_output=True, timeout=5, check=False)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    report = json.loads(result.stdout)
+                    self.assertEqual(report['status'], 'REFUSED')
+                    self.assertEqual(report['object_diff']['status'], 'UNAVAILABLE')
+                    self.assertEqual(report['before']['status'], 'REFUSED')
+                    self.assertEqual(report['after']['status'], 'STRUCTURE_ONLY_PASS')
+                    self.assertTrue(all('CROSS_FILE_CONFLICT' in item['error_codes']
+                                        for item in report['before']['results']))
+                    self.assertNotIn(url.encode(), result.stdout)
+                    self.assertNotIn(digest.encode(), result.stdout)
+                    self.assertNotIn(b'SENTINEL_BASELINE_URL', result.stdout)
+                    self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+                    self.assertEqual(report['network'], 'NO_NETWORK')
+                    # Existing standalone directory report retains its prior error contract.
+                    legacy = subprocess.run([sys.executable, str(script), '--directory',
+                                             str(before)], capture_output=True,
+                                            timeout=5, check=False)
+                    self.assertEqual(legacy.returncode, 2, legacy.stderr)
+                    self.assertIn(
+                        b'conflicting cross-file URL:' if name == 'url' else
+                        b'conflicting cross-file SHA256 size:', legacy.stdout)
+
+    def test_stdin_directory_compare_help_mentions_both_change_modes(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        result = subprocess.run([sys.executable, str(script), '--help'],
+                                capture_output=True, timeout=5, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(b'--compare-directories', result.stdout)
+        self.assertIn(b'--compare-stdin-to-directory', result.stdout)
+        change_help = result.stdout.split(b'--fail-on-change', 2)[-1]
+        self.assertIn(b'--compare-stdin-to-directory', change_help)
+
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),
