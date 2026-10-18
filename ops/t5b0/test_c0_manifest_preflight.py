@@ -330,6 +330,101 @@ class C0PreflightTests(unittest.TestCase):
             self.assertEqual((report['passed'], report['refused']), (1, 1))
             self.assertEqual(report['results'][1]['error_codes'], ['INVALID_MANIFEST'])
 
+    def test_review_diff_unchanged_and_changed(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            before, after = (Path(folder) / name for name in ('before', 'after'))
+            before.mkdir()
+            after.mkdir()
+            (before / 'same.json').write_text(json.dumps(BASE))
+            (after / 'same.json').write_text(json.dumps(BASE))
+            def run():
+                result = subprocess.run([sys.executable, str(script), '--compare-directories',
+                                         str(before), str(after)], capture_output=True, text=True,
+                                        timeout=4, check=False)
+                return result, json.loads(result.stdout)
+            result, report = run()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(report['status'], 'UNCHANGED')
+            self.assertEqual(report['added'], [])
+            self.assertEqual(report['removed'], [])
+            self.assertEqual(report['changed'], [])
+            self.assertEqual(report['regressions'], [])
+            self.assertEqual(report['before']['audit_sha256'], report['after']['audit_sha256'])
+            self.assertEqual(report['evidence']['status'], 'UNVERIFIED')
+            self.assertEqual((report['authorization'], report['collection'], report['network']),
+                             ('NO_AUTHORIZATION', 'C0_COLLECT_HOLD', 'NO_NETWORK'))
+            (after / 'same.json').write_text(json.dumps({**BASE, 'approval': 'yes'}))
+            (after / 'new.json').write_text(json.dumps(BASE))
+            result, report = run()
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertEqual(report['status'], 'REFUSED')
+            self.assertEqual(report['changed'], ['same.json'])
+            self.assertEqual(report['added'], ['new.json'])
+            self.assertEqual(report['removed'], [])
+            self.assertEqual(report['regressions'], ['same.json'])
+            self.assertEqual(report['before']['status'], 'STRUCTURE_ONLY_PASS')
+            self.assertEqual(report['after']['status'], 'REFUSED')
+            self.assertNotEqual(report['before']['audit_sha256'], report['after']['audit_sha256'])
+
+    def test_review_diff_added_removed_and_structurally_valid_change(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            before, after = (Path(folder) / name for name in ('before', 'after'))
+            before.mkdir()
+            after.mkdir()
+            other = copy.deepcopy(BASE)
+            other['objects'][0]['id'] = 'C0-P1'
+            other['objects'][0]['url'] = 'https://host/other'
+            (before / 'old.json').write_text(json.dumps(other))
+            (before / 'common.json').write_text(json.dumps(BASE))
+            changed = copy.deepcopy(BASE)
+            changed['objects'][0]['sha256'] = 'b' * 64
+            (after / 'common.json').write_text(json.dumps(changed))
+            (after / 'new.json').write_text(json.dumps(other))
+            result = subprocess.run([sys.executable, str(script), '--compare-directories',
+                                     str(before), str(after)], capture_output=True, text=True,
+                                    timeout=4, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report['status'], 'CHANGED')
+            self.assertEqual(report['added'], ['new.json'])
+            self.assertEqual(report['removed'], ['old.json'])
+            self.assertEqual(report['changed'], ['common.json'])
+            self.assertEqual(report['regressions'], [])
+            self.assertEqual(report['before']['status'], 'STRUCTURE_ONLY_PASS')
+            self.assertEqual(report['after']['status'], 'STRUCTURE_ONLY_PASS')
+
+    def test_review_diff_fail_closed_unreadable_or_symlink(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            before, after = (Path(folder) / name for name in ('before', 'after'))
+            before.mkdir()
+            after.mkdir()
+            (before / 'a.json').write_text(json.dumps(BASE))
+            (after / 'a.json').symlink_to(before / 'a.json')
+            result = subprocess.run([sys.executable, str(script), '--compare-directories',
+                                     str(before), str(after)], capture_output=True, text=True,
+                                    timeout=4, check=False)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report['status'], 'REFUSED')
+            self.assertIsNone(report['after']['audit_sha256'])
+            self.assertEqual(report['regressions'], ['a.json'])
+            self.assertEqual(report['evidence']['status'], 'UNVERIFIED')
+            self.assertEqual(result.stderr, '')
+            (after / 'a.json').unlink()
+            for i in range(17):
+                (after / f'{i:02d}.json').write_text(json.dumps(BASE))
+            result = subprocess.run([sys.executable, str(script), '--compare-directories',
+                                     str(before), str(after)], capture_output=True, text=True,
+                                    timeout=4, check=False)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report['status'], 'REFUSED')
+            self.assertEqual(report['after']['results'], [])
+            self.assertIsNone(report['after']['audit_sha256'])
+
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),

@@ -220,32 +220,77 @@ def inspect_directory(directory):
     return results, errors
 
 
+def directory_report(directory):
+    """Return the exact legacy directory report shape for reuse by comparison."""
+    results, errors = inspect_directory(directory)
+    refused = bool(errors) or any(item['status'] == 'REFUSED' for item in results)
+    return {
+        'status': 'REFUSED' if refused else 'STRUCTURE_ONLY_PASS',
+        'errors': errors,
+        'passed': sum(item['status'] == 'STRUCTURE_ONLY_PASS' for item in results),
+        'refused': sum(item['status'] == 'REFUSED' for item in results),
+        'audit_sha256': audit_fingerprint(results),
+        'evidence': evidence_handoff(),
+        'results': results,
+        'authorization': 'NO_AUTHORIZATION',
+        'collection': 'C0_COLLECT_HOLD',
+        'network': 'NO_NETWORK',
+    }
+
+
+def compare_directories(before_path, after_path):
+    """Observe two independent offline snapshots; neither is a trusted baseline."""
+    before = directory_report(before_path)
+    after = directory_report(after_path)
+    old = {Path(item['path']).name: item for item in before['results']}
+    new = {Path(item['path']).name: item for item in after['results']}
+    added = sorted(new.keys() - old.keys())
+    removed = sorted(old.keys() - new.keys())
+    changed = sorted(name for name in old.keys() & new.keys()
+                     if old[name]['sha256'] != new[name]['sha256'])
+    regressions = sorted(name for name in old.keys() & new.keys()
+                         if old[name]['status'] == 'STRUCTURE_ONLY_PASS'
+                         and new[name]['status'] == 'REFUSED')
+    refused = before['status'] == 'REFUSED' or after['status'] == 'REFUSED'
+    status = ('REFUSED' if refused else
+              'CHANGED' if added or removed or changed else 'UNCHANGED')
+    return {
+        'status': status,
+        'before': before,
+        'after': after,
+        'added': added,
+        'removed': removed,
+        'changed': changed,
+        'regressions': regressions,
+        'evidence': evidence_handoff(),
+        'authorization': 'NO_AUTHORIZATION',
+        'collection': 'C0_COLLECT_HOLD',
+        'network': 'NO_NETWORK',
+    }
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('manifest', type=Path, nargs='?')
     p.add_argument('--json', action='store_true', help='emit a machine-readable offline report')
     p.add_argument('--directory', type=Path, help='audit 1–16 .json entries in a directory, offline')
+    p.add_argument('--compare-directories', type=Path, nargs=2, metavar=('BEFORE', 'AFTER'),
+                   help='offline review diff of two bounded directories')
     p.add_argument('--batch', type=Path, nargs='+', metavar='MANIFEST',
                    help='inspect up to 16 manifests and emit one aggregate JSON report')
     args = p.parse_args()
+    if args.compare_directories is not None:
+        if args.manifest is not None or args.batch is not None or args.directory is not None:
+            p.error('--compare-directories cannot be combined with other input modes')
+        report = compare_directories(*args.compare_directories)
+        print(json.dumps(report, sort_keys=True))
+        return 2 if report['status'] == 'REFUSED' else 0
     if args.directory is not None:
         if args.manifest is not None or args.batch is not None:
             p.error('--directory cannot be combined with positional manifest or --batch')
-        results, errors = inspect_directory(args.directory)
-        refused = bool(errors) or any(item['status'] == 'REFUSED' for item in results)
-        print(json.dumps({
-            'status': 'REFUSED' if refused else 'STRUCTURE_ONLY_PASS',
-            'errors': errors,
-            'passed': sum(item['status'] == 'STRUCTURE_ONLY_PASS' for item in results),
-            'refused': sum(item['status'] == 'REFUSED' for item in results),
-            'audit_sha256': audit_fingerprint(results),
-            'evidence': evidence_handoff(),
-            'results': results,
-            'authorization': 'NO_AUTHORIZATION',
-            'collection': 'C0_COLLECT_HOLD',
-            'network': 'NO_NETWORK',
-        }, sort_keys=True))
-        return 2 if refused else 0
+        report = directory_report(args.directory)
+        print(json.dumps(report, sort_keys=True))
+        return 2 if report['status'] == 'REFUSED' else 0
     if args.batch is not None:
         if args.manifest is not None:
             p.error('positional manifest cannot be combined with --batch')
