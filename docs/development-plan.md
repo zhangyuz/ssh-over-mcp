@@ -2254,3 +2254,7 @@ The bounded `--directory` workflow performs deterministic, nonrecursive 1–16 `
 ### 2026-10-18 C0 cross-file audit and evidence handoff
 
 The existing offline directory auditor now provides a complete non-authorizing handoff: cross-file duplicate object ID and contradictory URL/digest/declared-size checks, deterministic exact-read input fingerprint, final per-file refusal codes and aggregate counts, and explicit five-category external-evidence gap checklist. Legacy single/`--batch` contracts unchanged; no network or collection. The digest is not an authenticated seal. `C0_COLLECT_HOLD_INCOMPLETE`, T5B-0/T5B-1, real Mac/UID502/APFS remain HOLD and Linux Slice C deferred.
+
+### 2026-10-18 C0 two-directory offline review diff
+
+The non-authorizing `--compare-directories BEFORE AFTER` reviewer workflow reuses bounded directory audits to compare sorted filenames, exact-read digests and per-file pass-to-refusal regressions, with complete before/after reports and deterministic `UNCHANGED`/`CHANGED`/`REFUSED` status. Any refused side fails closed (exit 2) and partial delta is diagnostic only. Existing single-file, batch and directory output contracts unchanged; no network, collection, authorization, privileged host, CI workflow or Linux C change. `C0_COLLECT_HOLD_INCOMPLETE` and T5B-0/T5B-1 remain HOLD.
