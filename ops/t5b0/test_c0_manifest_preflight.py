@@ -230,6 +230,106 @@ class C0PreflightTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertEqual(report['results'], [])
 
+    def test_directory_audit_cross_file_conflicts_and_evidence_handoff(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            def manifest(ident, url, digest='a' * 64, size=100):
+                doc = copy.deepcopy(BASE)
+                doc['objects'] = [{**BASE['objects'][0], 'id': ident, 'url': url,
+                                   'sha256': digest, 'bytes': size, 'max_bytes': size}]
+                return doc
+            (root / 'a.json').write_text(json.dumps(manifest('C0-W1', 'https://host/x')))
+            (root / 'b.json').write_text(json.dumps(manifest('C0-W1', 'https://host/y')))
+            (root / 'c.json').write_text(json.dumps(manifest('C0-P1', 'https://host/x', 'b' * 64, 99)))
+            (root / 'd.json').write_text(json.dumps(manifest('C0-R1', 'https://host/z')))
+            def run():
+                result = subprocess.run([sys.executable, str(script), '--directory', str(root)],
+                                        capture_output=True, text=True, timeout=3, check=False)
+                return result, json.loads(result.stdout)
+            result, report = run()
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertEqual((report['passed'], report['refused']), (1, 3))
+            self.assertEqual([x['status'] for x in report['results']],
+                             ['REFUSED', 'REFUSED', 'REFUSED', 'STRUCTURE_ONLY_PASS'])
+            self.assertIn('DUPLICATE_OBJECT_ID', report['results'][0]['error_codes'])
+            self.assertIn('DUPLICATE_OBJECT_ID', report['results'][1]['error_codes'])
+            self.assertIn('CROSS_FILE_CONFLICT', report['results'][0]['error_codes'])
+            self.assertIn('CROSS_FILE_CONFLICT', report['results'][2]['error_codes'])
+            self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
+            self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+            self.assertEqual(report['network'], 'NO_NETWORK')
+            self.assertEqual(report['evidence']['status'], 'UNVERIFIED')
+            self.assertEqual({x['id'] for x in report['evidence']['gaps']},
+                             {'SOURCE_AUTHENTICITY', 'TRUST_ROOT', 'TRUSTED_TIME',
+                              'EXECUTION_ENVIRONMENT', 'OPERATOR_AUTHORIZATION'})
+            self.assertTrue(all(x['status'] == 'UNVERIFIED' for x in report['evidence']['gaps']))
+            self.assertRegex(report['audit_sha256'], r'^[0-9a-f]{64}$')
+            self.assertEqual(run()[1], report)
+            (root / 'd.json').write_text(json.dumps(manifest('C0-R1', 'https://host/z', 'c' * 64)))
+            self.assertNotEqual(run()[1]['audit_sha256'], report['audit_sha256'])
+
+    def test_directory_audit_duplicate_identical_object_and_bad_input(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'a.json').write_text(json.dumps(BASE))
+            (root / 'b.json').write_text(json.dumps(BASE))
+            (root / 'c.json').write_text('{')
+            result = subprocess.run([sys.executable, str(script), '--directory', str(root)],
+                                    capture_output=True, text=True, timeout=3, check=False)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual((report['passed'], report['refused']), (0, 3))
+            self.assertEqual(report['results'][0]['error_codes'], ['DUPLICATE_OBJECT_ID'])
+            self.assertEqual(report['results'][1]['error_codes'], ['DUPLICATE_OBJECT_ID'])
+            self.assertEqual(report['results'][2]['error_codes'], ['INVALID_MANIFEST'])
+            self.assertRegex(report['results'][2]['sha256'], r'^[0-9a-f]{64}$')
+            self.assertEqual(report['evidence']['status'], 'UNVERIFIED')
+
+    def test_directory_audit_valid_still_missing_external_evidence(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'valid.json').write_text(json.dumps(BASE))
+            result = subprocess.run([sys.executable, str(script), '--directory', str(root)],
+                                    capture_output=True, text=True, timeout=3, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report['status'], 'STRUCTURE_ONLY_PASS')
+            self.assertEqual((report['passed'], report['refused']), (1, 0))
+            self.assertEqual(report['evidence']['status'], 'UNVERIFIED')
+            self.assertEqual(len(report['evidence']['gaps']), 5)
+            self.assertRegex(report['audit_sha256'], r'^[0-9a-f]{64}$')
+            self.assertEqual(result.stderr, '')
+
+    def test_directory_audit_digest_size_conflict_and_unreadable_fingerprint(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            first = copy.deepcopy(BASE)
+            second = copy.deepcopy(BASE)
+            second['objects'][0].update(id='C0-P1', url='https://host/different',
+                                        bytes=99, max_bytes=99)
+            (root / 'a.json').write_text(json.dumps(first))
+            (root / 'b.json').write_text(json.dumps(second))
+            def run():
+                result = subprocess.run([sys.executable, str(script), '--directory', str(root)],
+                                        capture_output=True, text=True, timeout=3, check=False)
+                return result, json.loads(result.stdout)
+            result, report = run()
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertEqual([x['error_codes'] for x in report['results']],
+                             [['CROSS_FILE_CONFLICT'], ['CROSS_FILE_CONFLICT']])
+            self.assertRegex(report['audit_sha256'], r'^[0-9a-f]{64}$')
+            (root / 'b.json').unlink()
+            (root / 'b.json').symlink_to(root / 'a.json')
+            result, report = run()
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertEqual(report['audit_sha256'], None)
+            self.assertEqual((report['passed'], report['refused']), (1, 1))
+            self.assertEqual(report['results'][1]['error_codes'], ['INVALID_MANIFEST'])
+
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),
