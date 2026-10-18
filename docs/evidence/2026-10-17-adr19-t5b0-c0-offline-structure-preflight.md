@@ -94,3 +94,12 @@ For `--stdin-batch`, each bounded record is decoded as strict UTF-8 before JSON 
 **Hard invariants:** reuse existing at-most-64 directory entries, at-most-16 JSON manifests, safe no-follow reads, 16 KiB/line and 262,160-byte stdin total, cross-manifest duplicate/conflict refusal, strict UTF-8 for NDJSON, deterministic stdin:N labels, and CLI exclusivity before stdin consumption. No writes, downloads, host probes, root/source/clock adoption, collector, installer, real privileged Mac/UID502/APFS or Linux C activity. `NO_AUTHORIZATION`, `C0_COLLECT_HOLD` and `NO_NETWORK` remain invariant; C0/T5B execution and material admission remain HOLD. Semantic equality is not byte identity, cryptographic provenance or consent.
 
 **TDD plan:** RED subprocess tests for unchanged and changed semantic inventories, add/remove/change-field reporting, exit-3 opt-in, malformed/oversize stdin, invalid or over-64-entry/symlink directory, strict mixed non-JSON rejection and mode-conflict pre-read, then smallest shared-parser/semantic-diff implementation, focused GREEN + regression, docs parity and exact-head CI. This is one externally runnable reviewer workflow, not a new admission gate.
+
+**Usage (offline operator example):** keep a previous bounded manifest set as an untrusted directory baseline. Feed one JSON C0 proposal per NDJSON line from a closed producer:
+
+~~~sh
+cat successor-proposals.ndjson | python3 ops/t5b0/c0_manifest_preflight.py \
+  --compare-stdin-to-directory ./before-manifests --fail-on-change --require-json-only
+~~~
+
+The result always includes JSON keys status, before, after, object_diff, evidence, authorization, collection, network. Exit 0 / UNCHANGED means only the declared object-ID inventory and url/sha256/bytes/max_bytes fields are equal; filenames, JSON formatting, and exact source bytes need not match. Exit 3 / CHANGED is returned only with --fail-on-change and a valid semantic difference. Exit 2 / REFUSED means baseline or stream failed and object_diff.status is UNAVAILABLE, never a partial admission. Without the change gate, valid CHANGED exits 0 as in the prior directory semantic reviewer. Neither side is an authenticated reference.
