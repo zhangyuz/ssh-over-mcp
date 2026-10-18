@@ -102,16 +102,21 @@ def main():
     p.add_argument('manifest', type=Path)
     p.add_argument('--json', action='store_true', help='emit a machine-readable offline report')
     args = p.parse_args()
+    error_codes = []
     try:
         data = read_regular_manifest(args.manifest)
         doc = parse_manifest(data)
         errors = validate(doc)
+        if errors:
+            error_codes.append('INVALID_STRUCTURE')
     except (OSError, UnicodeError, ValueError, TypeError, RecursionError) as exc:
         errors = [f'unreadable/invalid manifest: {type(exc).__name__}']
+        error_codes.append('INVALID_MANIFEST')
     if args.json:
         print(json.dumps({
             'status': 'REFUSED' if errors else 'STRUCTURE_ONLY_PASS',
             'errors': errors,
+            'error_codes': error_codes,
             'authorization': 'NO_AUTHORIZATION',
             'collection': 'C0_COLLECT_HOLD',
             'network': 'NO_NETWORK',
