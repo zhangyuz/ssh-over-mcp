@@ -13,3 +13,15 @@ A `tests/ops` pytest bridge runs all offline C0 fixtures on both Python 3.13 and
 ## Canonical URL spelling (fail closed)
 
 The local syntax check additionally rejects percent-encoded path components (including encoded dot segments and separators), dot/empty path segments, backslashes, non-ASCII URL text, and malformed ports. This avoids ambiguous URL spellings and parser exceptions; it does **not** authenticate DNS, endpoint provenance, artifact immutability or approve fetching. No network is used.
+
+## Machine-readable offline result (`--json`)
+
+`python3 ops/t5b0/c0_manifest_preflight.py --json /path/to/proposal.json` prints one JSON object on stdout. Fields are `status` (`STRUCTURE_ONLY_PASS` or `REFUSED`), `errors` (array of diagnostic strings), `authorization` (`NO_AUTHORIZATION`), `collection` (`C0_COLLECT_HOLD`), and `network` (`NO_NETWORK`). Exit status remains 0 for a structurally valid proposal and 2 for refused/unreadable input. Without `--json`, the original text output and exit codes are unchanged. The JSON report is an **offline syntax/structure observation only**, not proof of artifact authenticity, source identity, network permission, operator consent, or Sigstore verification.
+
+Example successful output (field order is not contractual):
+
+```json
+{"status":"STRUCTURE_ONLY_PASS","errors":[],"authorization":"NO_AUTHORIZATION","collection":"C0_COLLECT_HOLD","network":"NO_NETWORK"}
+```
+
+Automations must check both process exit code and `status`, and must never treat `STRUCTURE_ONLY_PASS` as permission to collect or execute candidate materials.

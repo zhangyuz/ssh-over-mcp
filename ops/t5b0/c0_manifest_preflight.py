@@ -100,6 +100,7 @@ def read_regular_manifest(path):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('manifest', type=Path)
+    p.add_argument('--json', action='store_true', help='emit a machine-readable offline report')
     args = p.parse_args()
     try:
         data = read_regular_manifest(args.manifest)
@@ -107,6 +108,15 @@ def main():
         errors = validate(doc)
     except (OSError, UnicodeError, ValueError, TypeError, RecursionError) as exc:
         errors = [f'unreadable/invalid manifest: {type(exc).__name__}']
+    if args.json:
+        print(json.dumps({
+            'status': 'REFUSED' if errors else 'STRUCTURE_ONLY_PASS',
+            'errors': errors,
+            'authorization': 'NO_AUTHORIZATION',
+            'collection': 'C0_COLLECT_HOLD',
+            'network': 'NO_NETWORK',
+        }, sort_keys=True))
+        return 2 if errors else 0
     for err in errors:
         print('REFUSED:', err)
     if errors:
