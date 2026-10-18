@@ -742,6 +742,94 @@ class C0PreflightTests(unittest.TestCase):
                                   result.stderr)
                     self.assertEqual(result.stdout, '')
 
+    def test_stdin_preflight_json_and_legacy_text_without_disk_manifest(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        valid = json.dumps(BASE)
+        def run(data, *args):
+            return subprocess.run([sys.executable, str(script), '--stdin', *args],
+                                  input=data, capture_output=True, text=True,
+                                  timeout=4, check=False)
+        result = run(valid, '--json')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {
+            'status': 'STRUCTURE_ONLY_PASS', 'errors': [], 'error_codes': [],
+            'authorization': 'NO_AUTHORIZATION', 'collection': 'C0_COLLECT_HOLD',
+            'network': 'NO_NETWORK',
+        })
+        self.assertEqual(result.stderr, '')
+        result = run(valid)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout,
+                         'STRUCTURE_ONLY_PASS; C0_COLLECT_HOLD; NO_NETWORK; NO_AUTHORIZATION\n')
+
+    def test_stdin_preflight_refuses_structure_parse_and_oversize_without_leak(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        for name, payload, expected in (
+            ('structure', json.dumps({**BASE, 'approval': 'yes'}), 'INVALID_STRUCTURE'),
+            ('malformed', '{', 'INVALID_MANIFEST'),
+            ('duplicate', '{"schema":"x","schema":"x"}', 'INVALID_MANIFEST'),
+            ('oversized', 'SECRET' + 'x' * 16390, 'INVALID_MANIFEST'),
+            ('empty', '', 'INVALID_MANIFEST'),
+        ):
+            with self.subTest(name=name):
+                result = subprocess.run([sys.executable, str(script), '--stdin', '--json'],
+                                        input=payload, capture_output=True, text=True,
+                                        timeout=4, check=False)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                report = json.loads(result.stdout)
+                self.assertEqual(report['status'], 'REFUSED')
+                self.assertEqual(report['error_codes'], [expected])
+                self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
+                self.assertEqual(report['network'], 'NO_NETWORK')
+                self.assertNotIn('SECRET', result.stdout)
+                self.assertEqual(result.stderr, '')
+
+    def test_stdin_requires_utf8_without_json_encoding_autodetection(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        for encoding, expected in (
+            ('utf-8', 0), ('utf-8-sig', 0),
+            ('utf-16', 2), ('utf-16-le', 2), ('utf-16-be', 2),
+            ('utf-32', 2), ('utf-32-le', 2), ('utf-32-be', 2),
+        ):
+            for args in ([], ['--json']):
+                with self.subTest(encoding=encoding, args=args):
+                    result = subprocess.run(
+                        [sys.executable, str(script), '--stdin', *args],
+                        input=json.dumps(BASE).encode(encoding),
+                        capture_output=True, timeout=4, check=False)
+                    self.assertEqual(result.returncode, expected, result.stderr)
+                    self.assertEqual(result.stderr, b'')
+                    self.assertNotIn(BASE['objects'][0]['url'].encode(), result.stdout)
+                    if args:
+                        report = json.loads(result.stdout)
+                        self.assertEqual(report['error_codes'],
+                                         ['INVALID_MANIFEST'] if expected else [])
+                        self.assertEqual(report['status'],
+                                         'REFUSED' if expected else 'STRUCTURE_ONLY_PASS')
+                        self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
+                        self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+                        self.assertEqual(report['network'], 'NO_NETWORK')
+                    else:
+                        self.assertIn(b'REFUSED:' if expected else b'STRUCTURE_ONLY_PASS',
+                                      result.stdout)
+
+    def test_stdin_preflight_refuses_mixed_input_modes(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'a.json'
+            path.write_text(json.dumps(BASE))
+            for args in ([str(path)], ['--batch', str(path)],
+                         ['--directory', str(Path(folder))],
+                         ['--compare-directories', folder, folder]):
+                with self.subTest(args=args):
+                    result = subprocess.run([sys.executable, str(script), '--stdin', *args],
+                                            input=json.dumps(BASE), capture_output=True,
+                                            text=True, timeout=4, check=False)
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn('--stdin cannot be combined with other input modes',
+                                  result.stderr)
+                    self.assertEqual(result.stdout, '')
+
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),

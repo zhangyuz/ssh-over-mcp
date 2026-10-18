@@ -15,5 +15,5 @@ def test_c0_offline_manifest_adversarial_fixtures():
         capture_output=True,
         text=True,
         check=True,
-        timeout=15,
+        timeout=45,
     )
