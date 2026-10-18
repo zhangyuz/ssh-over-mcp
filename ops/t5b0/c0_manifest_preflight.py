@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 IDS = frozenset({'C0-W1', 'C0-P1', 'C0-R1', 'C0-T1'})
+MAX_DIRECTORY_ENTRIES = 64  # Bounds iteration even when non-JSON names are ignored.
 HEX = re.compile(r'^[0-9a-f]{64}$')
 FIELDS = frozenset({'id', 'url', 'sha256', 'bytes', 'max_bytes'})
 EVIDENCE_GAPS = (
@@ -201,20 +202,22 @@ def inspect_directory(directory, *, capture_inventory=False, require_json_only=F
             flags |= os.O_CLOEXEC
         fd = os.open(directory, flags)
         try:
+            names = []
             with os.scandir(fd) as entries:
-                if require_json_only:
-                    names = []
-                    for entry in entries:
-                        if not entry.name.endswith('.json'):
+                for count, entry in enumerate(entries, start=1):
+                    if count > MAX_DIRECTORY_ENTRIES:
+                        errors = ['directory must contain at most 64 total entries']
+                        break
+                    if not entry.name.endswith('.json'):
+                        if require_json_only:
                             errors = ['directory contains non-json entry']
                             break
-                        names.append(entry.name)
-                        if len(names) > 16:
-                            errors = ['directory must contain 1 to 16 .json entries']
-                            break
-                    names.sort()
-                else:
-                    names = sorted(entry.name for entry in entries if entry.name.endswith('.json'))
+                        continue
+                    names.append(entry.name)
+                    if len(names) > 16:
+                        errors = ['directory must contain 1 to 16 .json entries']
+                        break
+            names.sort()
             if not errors and not 1 <= len(names) <= 16:
                 errors = ['directory must contain 1 to 16 .json entries']
             if not errors:

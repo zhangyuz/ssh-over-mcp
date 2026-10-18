@@ -2266,11 +2266,10 @@ The offline two-directory reviewer now adds object-ID semantic `added`/`removed`
 ### 2026-10-18 Opt-in C0 offline review change gate
 
 `--compare-directories BEFORE AFTER --fail-on-change` adds a non-authorizing CI/reviewer exit-code gate (0 unchanged, 3 observed changed, 2 refused), while preserving byte-for-byte identical JSON reporting and default CLI exit codes. Refusal dominates change, and the flag is rejected outside compare mode. A matching untrusted pair is **not** an authorization or source authenticity proof; all evidence gaps remain `UNVERIFIED`. No CI workflow, collection, privileged Mac or Linux C changes; T5B holds persist.
-
-### 2026-10-18 Opt-in manifest-only C0 review intake
-
-A non-authorizing `--require-json-only` reviewer mode for `--directory` and `--compare-directories` refuses any immediate non-JSON entry before reading manifest bytes. Default behavior continues to ignore auxiliary names, while strict comparison preserves full refusal semantics and suppresses partial semantic inventory. Existing output schemas unchanged; no host privilege, network, collection, trust admission, CI workflow or Linux C change. The separate 64-entry resource cap is maintained in PR #287 and must be rebased into this feature before integration if #287 merges first. All ADR19 T5B gates remain HOLD.
-
 ### 2026-10-18 Optional C0 manifest-only directory intake
 
-The offline C0 directory reviewer supports `--require-json-only` for directory audit and compare modes. Strict mode refuses unexpected immediate non-JSON entries before reading any manifest; default mode preserves ignoring unrelated names, and single-file/batch invocations reject the option. Compare-mode refusal suppresses semantic object inventory. This adds no collection/admission authority, network, CI workflow, privileged Mac/UID502/APFS or Linux Slice C activity; all related gates remain HOLD.
+The offline C0 directory reviewer supports `--require-json-only` for directory audit and compare modes. Strict mode refuses unexpected immediate non-JSON entries before reading any manifest; both strict and default paths share a 64-total-entry resource cap; default mode preserves ignoring unrelated names, and single-file/batch invocations reject the option. Compare-mode refusal suppresses semantic object inventory. This adds no collection/admission authority, network, CI workflow, privileged Mac/UID502/APFS or Linux Slice C activity; all related gates remain HOLD.
+
+### 2026-10-18 Bounded C0 directory enumeration resource gate
+
+The offline directory and two-directory reviewer now bound **all** immediate entries (64 total) rather than only matching `.json` files. The 65th name refuses before any manifest is read, preventing unbounded iteration through ignored foreign names. Non-JSON files and nested directories remain ignored within the budget, preserving small-directory compatibility. Overflow yields `REFUSED`/exit 2 and no partial inventory; compare mode suppresses semantic object deltas on either-side refusal. No network, collection, authorizing trust proof, CI workflow, Mac/UID502/APFS or Linux Slice C change. All admission/collection gates remain HOLD.
