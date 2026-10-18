@@ -2266,3 +2266,7 @@ The offline two-directory reviewer now adds object-ID semantic `added`/`removed`
 ### 2026-10-18 Opt-in C0 offline review change gate
 
 `--compare-directories BEFORE AFTER --fail-on-change` adds a non-authorizing CI/reviewer exit-code gate (0 unchanged, 3 observed changed, 2 refused), while preserving byte-for-byte identical JSON reporting and default CLI exit codes. Refusal dominates change, and the flag is rejected outside compare mode. A matching untrusted pair is **not** an authorization or source authenticity proof; all evidence gaps remain `UNVERIFIED`. No CI workflow, collection, privileged Mac or Linux C changes; T5B holds persist.
+
+### 2026-10-18 Opt-in manifest-only C0 review intake
+
+A non-authorizing `--require-json-only` reviewer mode for `--directory` and `--compare-directories` refuses any immediate non-JSON entry before reading manifest bytes. Default behavior continues to ignore auxiliary names, while strict comparison preserves full refusal semantics and suppresses partial semantic inventory. Existing output schemas unchanged; no host privilege, network, collection, trust admission, CI workflow or Linux C change. The separate 64-entry resource cap is maintained in PR #287 and must be rebased into this feature before integration if #287 merges first. All ADR19 T5B gates remain HOLD.
