@@ -2258,3 +2258,7 @@ The existing offline directory auditor now provides a complete non-authorizing h
 ### 2026-10-18 C0 two-directory offline review diff
 
 The non-authorizing `--compare-directories BEFORE AFTER` reviewer workflow reuses bounded directory audits to compare sorted filenames, exact-read digests and per-file pass-to-refusal regressions, with complete before/after reports and deterministic `UNCHANGED`/`CHANGED`/`REFUSED` status. Any refused side fails closed (exit 2) and partial delta is diagnostic only. Existing single-file, batch and directory output contracts unchanged; no network, collection, authorization, privileged host, CI workflow or Linux C change. `C0_COLLECT_HOLD_INCOMPLETE` and T5B-0/T5B-1 remain HOLD.
+
+### 2026-10-18 C0 semantic object-level review delta
+
+The offline two-directory reviewer now adds object-ID semantic `added`/`removed`/changed-field deltas, independent of filename moves, from already-read fully validated manifests. It refuses to publish a semantic inventory if either bounded directory audit refused. No raw URL/digest values are echoed in `object_diff`; no network, collection, policy admission, privilege or CI changes. C0, T5B and Mac/UID502/APFS HOLD remain; Linux C deferred.
