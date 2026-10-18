@@ -2234,3 +2234,7 @@ An existing `tests/ops` pytest bridge runs `ops/t5b0` offline adversarial fixtur
 ### 2026-10-17 C0 canonical URL syntax hardening
 
 The offline C0 manifest structural checker refuses ambiguous URL spellings (percent-encoded components, dot/empty segments, backslashes, non-ASCII, malformed ports) with negative fixtures, without changing any trust or collection authority. `C0_COLLECT_HOLD_INCOMPLETE` remains in force.
+
+### 2026-10-17 C0 offline machine-readable report
+
+The bounded C0 preflight adds opt-in `--json` with a stable offline status/errors/safety-marker object, preserving legacy text and exit status. Valid/invalid/unreadable fixture tests run in the existing hosted dual-Python CI bridge. `STRUCTURE_ONLY_PASS` never authorizes collection or admission; `C0_COLLECT_HOLD_INCOMPLETE` and T5B-0/T5B-1 HOLD persist.

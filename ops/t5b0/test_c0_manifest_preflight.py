@@ -49,6 +49,43 @@ class C0PreflightTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn('NO_AUTHORIZATION', result.stdout)
 
+    def test_json_report_success_and_legacy_text(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            manifest = Path(folder) / 'valid.json'
+            manifest.write_text(json.dumps(BASE))
+            result = subprocess.run([sys.executable, str(script), '--json', str(manifest)],
+                                    capture_output=True, text=True, timeout=3, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout), {
+                'status': 'STRUCTURE_ONLY_PASS', 'errors': [],
+                'authorization': 'NO_AUTHORIZATION', 'collection': 'C0_COLLECT_HOLD',
+                'network': 'NO_NETWORK',
+            })
+            self.assertEqual(result.stderr, '')
+            legacy = subprocess.run([sys.executable, str(script), str(manifest)],
+                                    capture_output=True, text=True, timeout=3, check=False)
+            self.assertEqual(legacy.returncode, 0)
+            self.assertEqual(legacy.stdout, 'STRUCTURE_ONLY_PASS; C0_COLLECT_HOLD; NO_NETWORK; NO_AUTHORIZATION\n')
+
+    def test_json_report_failure_and_unreadable(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            manifest = Path(folder) / 'invalid.json'
+            manifest.write_text(json.dumps({**BASE, 'approval': 'yes'}))
+            for path in (manifest, Path(folder) / 'missing.json'):
+                with self.subTest(path=path):
+                    result = subprocess.run([sys.executable, str(script), '--json', str(path)],
+                                            capture_output=True, text=True, timeout=3, check=False)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    report = json.loads(result.stdout)
+                    self.assertEqual(report['status'], 'REFUSED')
+                    self.assertTrue(report['errors'])
+                    self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
+                    self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+                    self.assertEqual(report['network'], 'NO_NETWORK')
+                    self.assertEqual(result.stderr, '')
+
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),
