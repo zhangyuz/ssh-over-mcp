@@ -308,15 +308,23 @@ def main():
     p.add_argument('--directory', type=Path, help='audit 1–16 .json entries in a directory, offline')
     p.add_argument('--compare-directories', type=Path, nargs=2, metavar=('BEFORE', 'AFTER'),
                    help='offline review diff of two bounded directories')
+    p.add_argument('--fail-on-change', action='store_true',
+                   help='with --compare-directories, exit 3 on changed observations')
     p.add_argument('--batch', type=Path, nargs='+', metavar='MANIFEST',
                    help='inspect up to 16 manifests and emit one aggregate JSON report')
     args = p.parse_args()
+    if args.fail_on_change and args.compare_directories is None:
+        p.error('--fail-on-change requires --compare-directories')
     if args.compare_directories is not None:
         if args.manifest is not None or args.batch is not None or args.directory is not None:
             p.error('--compare-directories cannot be combined with other input modes')
         report = compare_directories(*args.compare_directories)
         print(json.dumps(report, sort_keys=True))
-        return 2 if report['status'] == 'REFUSED' else 0
+        if report['status'] == 'REFUSED':
+            return 2
+        if args.fail_on_change and report['status'] == 'CHANGED':
+            return 3
+        return 0
     if args.directory is not None:
         if args.manifest is not None or args.batch is not None:
             p.error('--directory cannot be combined with positional manifest or --batch')
