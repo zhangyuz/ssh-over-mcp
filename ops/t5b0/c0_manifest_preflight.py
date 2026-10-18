@@ -11,6 +11,13 @@ from urllib.parse import unquote, urlsplit
 IDS = frozenset({'C0-W1', 'C0-P1', 'C0-R1', 'C0-T1'})
 HEX = re.compile(r'^[0-9a-f]{64}$')
 FIELDS = frozenset({'id', 'url', 'sha256', 'bytes', 'max_bytes'})
+EVIDENCE_GAPS = (
+    ('SOURCE_AUTHENTICITY', 'Independent source identity and exact material provenance not verified'),
+    ('TRUST_ROOT', 'Out-of-band root, signing chain and transparency policy not verified'),
+    ('TRUSTED_TIME', 'Independent time, freshness, revocation and rollback policy not verified'),
+    ('EXECUTION_ENVIRONMENT', 'Isolated execution image, downloader and dependency closure not admitted'),
+    ('OPERATOR_AUTHORIZATION', 'Separate operator consent to collect or execute has not been granted'),
+)
 
 
 def validate(doc):
@@ -98,9 +105,10 @@ def read_regular_manifest(path, *, dir_fd=None):
         os.close(fd)
 
 
-def inspect_manifest(path, *, dir_fd=None, include_digest=False):
+def inspect_manifest(path, *, dir_fd=None, include_digest=False, capture_objects=False):
     error_codes = []
     digest = None
+    valid_objects = None
     try:
         data = read_regular_manifest(path, dir_fd=dir_fd)
         if include_digest:
@@ -109,6 +117,8 @@ def inspect_manifest(path, *, dir_fd=None, include_digest=False):
         errors = validate(doc)
         if errors:
             error_codes.append('INVALID_STRUCTURE')
+        elif capture_objects:
+            valid_objects = doc['objects']
     except (OSError, UnicodeError, ValueError, TypeError, RecursionError) as exc:
         errors = [f'unreadable/invalid manifest: {type(exc).__name__}']
         error_codes.append('INVALID_MANIFEST')
@@ -122,7 +132,63 @@ def inspect_manifest(path, *, dir_fd=None, include_digest=False):
     }
     if include_digest:
         report['sha256'] = digest
+    if capture_objects:
+        report['_objects'] = valid_objects
     return report
+
+
+def cross_file_consistency(results, objects_by_file):
+    """Compare only structurally valid objects, without reopening input paths."""
+    by_id, by_url, by_digest = {}, {}, {}
+    for index, objects in enumerate(objects_by_file):
+        if objects is None:
+            continue
+        for obj in objects:
+            for group, key in ((by_id, obj['id']), (by_url, obj['url']),
+                               (by_digest, obj['sha256'])):
+                group.setdefault(key, []).append((index, obj))
+
+    def refuse(members, code, reason):
+        for index in sorted({index for index, _ in members}):
+            item = results[index]
+            item['status'] = 'REFUSED'
+            if code not in item['error_codes']:
+                item['error_codes'].append(code)
+            if reason not in item['errors']:
+                item['errors'].append(reason)
+
+    for ident, members in sorted(by_id.items()):
+        if len({index for index, _ in members}) > 1:
+            refuse(members, 'DUPLICATE_OBJECT_ID', f'duplicate cross-file object id: {ident}')
+            if len({(obj['url'], obj['sha256'], obj['bytes'], obj['max_bytes'])
+                    for _, obj in members}) > 1:
+                refuse(members, 'CROSS_FILE_CONFLICT', f'conflicting cross-file object id: {ident}')
+    for url, members in sorted(by_url.items()):
+        if len({index for index, _ in members}) > 1 and len({
+                (obj['id'], obj['sha256'], obj['bytes'], obj['max_bytes'])
+                for _, obj in members}) > 1:
+            refuse(members, 'CROSS_FILE_CONFLICT', f'conflicting cross-file URL: {url}')
+    for digest, members in sorted(by_digest.items()):
+        if len({index for index, _ in members}) > 1 and len({
+                obj['bytes'] for _, obj in members}) > 1:
+            refuse(members, 'CROSS_FILE_CONFLICT', f'conflicting cross-file SHA256 size: {digest}')
+
+
+def audit_fingerprint(results):
+    """Deterministic digest of observed input names and exact-read byte digests."""
+    if not results or any(item['sha256'] is None for item in results):
+        return None
+    entries = [(Path(item['path']).name, item['sha256']) for item in results]
+    payload = json.dumps(entries, ensure_ascii=True, separators=(',', ':')).encode('ascii')
+    return hashlib.sha256(payload).hexdigest()
+
+
+def evidence_handoff():
+    return {
+        'status': 'UNVERIFIED',
+        'gaps': [{'id': ident, 'status': 'UNVERIFIED', 'reason': reason}
+                 for ident, reason in EVIDENCE_GAPS],
+    }
 
 
 def inspect_directory(directory):
@@ -139,9 +205,13 @@ def inspect_directory(directory):
             if not 1 <= len(names) <= 16:
                 errors = ['directory must contain 1 to 16 .json entries']
             else:
+                objects_by_file = []
                 for name in names:
-                    report = inspect_manifest(name, dir_fd=fd, include_digest=True)
+                    report = inspect_manifest(name, dir_fd=fd, include_digest=True,
+                                              capture_objects=True)
+                    objects_by_file.append(report.pop('_objects'))
                     results.append({'path': str(directory / name), **report})
+                cross_file_consistency(results, objects_by_file)
         finally:
             os.close(fd)
     except (OSError, ValueError) as exc:
@@ -168,6 +238,8 @@ def main():
             'errors': errors,
             'passed': sum(item['status'] == 'STRUCTURE_ONLY_PASS' for item in results),
             'refused': sum(item['status'] == 'REFUSED' for item in results),
+            'audit_sha256': audit_fingerprint(results),
+            'evidence': evidence_handoff(),
             'results': results,
             'authorization': 'NO_AUTHORIZATION',
             'collection': 'C0_COLLECT_HOLD',

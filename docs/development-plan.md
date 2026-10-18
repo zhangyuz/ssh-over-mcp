@@ -2250,3 +2250,7 @@ Added `--batch` for 1–16 independent local manifest inspections with a single 
 ### 2026-10-18 C0 offline directory audit (non-authorizing)
 
 The bounded `--directory` workflow performs deterministic, nonrecursive 1–16 `.json` entry structural audits with per-file exact-read SHA256, pass/refusal counts and fail-closed handling of empty, overflow, symlink and special-file inputs. Existing single-file and batch behavior remains unchanged. Digest is only a reproducibility aid, not proof of authenticity or collection permission. C0_COLLECT_HOLD_INCOMPLETE, T5B-0/T5B-1, Mac/UID502/APFS and Linux Slice C remain HOLD.
+
+### 2026-10-18 C0 cross-file audit and evidence handoff
+
+The existing offline directory auditor now provides a complete non-authorizing handoff: cross-file duplicate object ID and contradictory URL/digest/declared-size checks, deterministic exact-read input fingerprint, final per-file refusal codes and aggregate counts, and explicit five-category external-evidence gap checklist. Legacy single/`--batch` contracts unchanged; no network or collection. The digest is not an authenticated seal. `C0_COLLECT_HOLD_INCOMPLETE`, T5B-0/T5B-1, real Mac/UID502/APFS remain HOLD and Linux Slice C deferred.
