@@ -5,6 +5,7 @@ import json
 import os
 import re
 import stat
+import sys
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -137,6 +138,26 @@ def inspect_manifest(path, *, dir_fd=None, include_digest=False, capture_objects
         report['_objects'] = valid_objects
     return report
 
+
+def inspect_stdin():
+    """Parse at most 16 KiB of explicitly piped bytes; never touch the network."""
+    try:
+        data = sys.stdin.buffer.read(16385)
+        if len(data) > 16384:
+            raise ValueError('manifest too large')
+        errors = validate(parse_manifest(data))
+        error_codes = ['INVALID_STRUCTURE'] if errors else []
+    except (OSError, UnicodeError, ValueError, TypeError, RecursionError) as exc:
+        errors = [f'unreadable/invalid manifest: {type(exc).__name__}']
+        error_codes = ['INVALID_MANIFEST']
+    return {
+        'status': 'REFUSED' if errors else 'STRUCTURE_ONLY_PASS',
+        'errors': errors,
+        'error_codes': error_codes,
+        'authorization': 'NO_AUTHORIZATION',
+        'collection': 'C0_COLLECT_HOLD',
+        'network': 'NO_NETWORK',
+    }
 
 def cross_file_consistency(results, objects_by_file):
     """Compare only structurally valid objects, without reopening input paths."""
@@ -322,6 +343,7 @@ def compare_directories(before_path, after_path, *, require_json_only=False):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('manifest', type=Path, nargs='?')
+    p.add_argument('--stdin', action='store_true', help='validate <=16 KiB piped manifest offline')
     p.add_argument('--json', action='store_true', help='emit a machine-readable offline report')
     p.add_argument('--directory', type=Path, help='audit 1–16 .json entries in a directory, offline')
     p.add_argument('--compare-directories', type=Path, nargs=2, metavar=('BEFORE', 'AFTER'),
@@ -333,6 +355,9 @@ def main():
     p.add_argument('--batch', type=Path, nargs='+', metavar='MANIFEST',
                    help='inspect up to 16 manifests and emit one aggregate JSON report')
     args = p.parse_args()
+    if args.stdin and (args.manifest is not None or args.batch is not None
+                       or args.directory is not None or args.compare_directories is not None):
+        p.error('--stdin cannot be combined with other input modes')
     if args.fail_on_change and args.compare_directories is None:
         p.error('--fail-on-change requires --compare-directories')
     if args.require_json_only and args.compare_directories is None and args.directory is None:
@@ -373,9 +398,12 @@ def main():
             'network': 'NO_NETWORK',
         }, sort_keys=True))
         return 2 if refused else 0
-    if args.manifest is None:
-        p.error('manifest is required unless --batch is specified')
-    report = inspect_manifest(args.manifest)
+    if args.stdin:
+        report = inspect_stdin()
+    else:
+        if args.manifest is None:
+            p.error('manifest is required unless --batch or --stdin is specified')
+        report = inspect_manifest(args.manifest)
     if args.json:
         print(json.dumps(report, sort_keys=True))
         return 2 if report['errors'] else 0

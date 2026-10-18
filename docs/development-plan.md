@@ -2273,3 +2273,9 @@ The offline C0 directory reviewer supports `--require-json-only` for directory a
 ### 2026-10-18 Bounded C0 directory enumeration resource gate
 
 The offline directory and two-directory reviewer now bound **all** immediate entries (64 total) rather than only matching `.json` files. The 65th name refuses before any manifest is read, preventing unbounded iteration through ignored foreign names. Non-JSON files and nested directories remain ignored within the budget, preserving small-directory compatibility. Overflow yields `REFUSED`/exit 2 and no partial inventory; compare mode suppresses semantic object deltas on either-side refusal. No network, collection, authorizing trust proof, CI workflow, Mac/UID502/APFS or Linux Slice C change. All admission/collection gates remain HOLD.
+
+### 2026-10-18 C0 offline stdin proposal preflight
+
+Explicit `--stdin [--json]` lets offline automated pipelines validate one 16 KiB-capped untrusted proposal without writing temporary manifests. The exact existing parser/schema/refusal classification and default safety markers are reused; oversized, empty, malformed or unauthorized-approval forms refuse. Stdin is mutually exclusive with file/batch/directory/compare input modes. No filesystem, collector, network, trust admission, privileged Mac/UID502/APFS, CI or Linux C authority is introduced; C0 and T5B remains HOLD.
+
+Test-harness integration: the hosted C0 stdlib bridge subprocess has a 45-second safety timeout rather than the previous 15 seconds, to accommodate the growing bounded offline fixture suite on slower developer hosts; this does not add a CI job, elevate privileges, or alter product execution timeouts.
