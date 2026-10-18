@@ -830,6 +830,111 @@ class C0PreflightTests(unittest.TestCase):
                                   result.stderr)
                     self.assertEqual(result.stdout, '')
 
+    def test_stdin_batch_two_valid_manifests_and_stable_aggregate(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        other = copy.deepcopy(BASE)
+        other['objects'][0].update(id='C0-P1', url='https://host/second',
+                                   sha256='b' * 64, bytes=90, max_bytes=120)
+        payload = (json.dumps(BASE) + '\n' + json.dumps(other) + '\n').encode()
+        result = subprocess.run([sys.executable, str(script), '--stdin-batch'], input=payload,
+                                capture_output=True, timeout=5, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report['status'], 'STRUCTURE_ONLY_PASS')
+        self.assertEqual(report['errors'], [])
+        self.assertEqual([x['path'] for x in report['results']], ['stdin:1', 'stdin:2'])
+        self.assertEqual([x['status'] for x in report['results']],
+                         ['STRUCTURE_ONLY_PASS', 'STRUCTURE_ONLY_PASS'])
+        self.assertEqual((report['authorization'], report['collection'], report['network']),
+                         ('NO_AUTHORIZATION', 'C0_COLLECT_HOLD', 'NO_NETWORK'))
+        self.assertEqual(result.stderr, b'')
+
+    def test_stdin_batch_rejects_malformed_input_and_cross_manifest_conflicts(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        second = copy.deepcopy(BASE)
+        second['objects'][0].update(id='C0-P1', url='https://host/SECRET')
+        first = copy.deepcopy(BASE)
+        first['objects'][0]['url'] = 'https://host/SECRET'
+        for name, content, codes in (
+            ('malformed', (json.dumps(BASE) + '\n{' + '\n').encode(),
+             ['INVALID_MANIFEST']),
+            ('duplicate', (json.dumps(BASE) + '\n' + json.dumps(BASE)).encode(),
+             ['DUPLICATE_OBJECT_ID']),
+            ('conflict_url', (json.dumps(first) + '\n' + json.dumps(second)).encode(),
+             ['CROSS_FILE_CONFLICT']),
+        ):
+            with self.subTest(case=name):
+                result = subprocess.run([sys.executable, str(script), '--stdin-batch'],
+                                        input=content, capture_output=True,
+                                        timeout=5, check=False)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                report = json.loads(result.stdout)
+                self.assertEqual(report['status'], 'REFUSED')
+                self.assertEqual(len(report['results']), 2)
+                self.assertTrue(any(code in item['error_codes'] for code in codes
+                                    for item in report['results']))
+                self.assertNotIn(b'SECRET', result.stdout)
+                self.assertEqual(report['network'], 'NO_NETWORK')
+
+    def test_stdin_batch_total_and_line_limits_refuse_without_partial_output(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        for name, payload, expected in (
+            ('empty', b'', 'stdin batch must contain 1 to 16 manifests'),
+            ('too_many', b'{}\n' * 17, 'stdin batch must contain 1 to 16 manifests'),
+            ('long_line', b'X' * 16385 + b'\n', 'stdin batch line too large'),
+            ('oversized_total', b'X' * (16 * 16385 + 1), 'stdin batch exceeds total byte budget'),
+        ):
+            with self.subTest(case=name):
+                result = subprocess.run([sys.executable, str(script), '--stdin-batch'],
+                                        input=payload, capture_output=True,
+                                        timeout=5, check=False)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                report = json.loads(result.stdout)
+                self.assertEqual(report['status'], 'REFUSED')
+                self.assertEqual(report['errors'], [expected])
+                self.assertEqual(report['results'], [])
+                self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
+                self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+                self.assertEqual(result.stderr, b'')
+
+    def test_stdin_batch_requires_utf8_without_json_encoding_autodetection(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        for encoding, expected in (
+            ('utf-8', 0), ('utf-8-sig', 0),
+            ('utf-16', 2), ('utf-16-le', 2), ('utf-16-be', 2),
+            ('utf-32', 2), ('utf-32-le', 2), ('utf-32-be', 2),
+        ):
+            with self.subTest(encoding=encoding):
+                result = subprocess.run(
+                    [sys.executable, str(script), '--stdin-batch'],
+                    input=json.dumps(BASE).encode(encoding),
+                    capture_output=True, timeout=5, check=False)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                self.assertEqual(result.stderr, b'')
+                self.assertNotIn(BASE['objects'][0]['url'].encode(), result.stdout)
+                report = json.loads(result.stdout)
+                self.assertEqual(report['status'],
+                                 'REFUSED' if expected else 'STRUCTURE_ONLY_PASS')
+                self.assertEqual(report['results'][0]['error_codes'],
+                                 ['INVALID_MANIFEST'] if expected else [])
+                self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
+                self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+                self.assertEqual(report['network'], 'NO_NETWORK')
+
+    def test_stdin_batch_rejects_other_input_modes_before_reading(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        for args in (['--stdin'], ['--batch', 'anything.json'],
+                     ['--directory', 'anything'], ['--compare-directories', 'a', 'b'],
+                     ['--require-json-only'], ['--fail-on-change'], ['anything.json']):
+            with self.subTest(args=args):
+                result = subprocess.run([sys.executable, str(script), '--stdin-batch', *args],
+                                        input=b'SECRET', capture_output=True, timeout=5,
+                                        check=False)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(b'--stdin-batch cannot be combined with other input modes',
+                              result.stderr)
+                self.assertEqual(result.stdout, b'')
+
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),
