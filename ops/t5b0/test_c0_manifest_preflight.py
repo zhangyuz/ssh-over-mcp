@@ -201,6 +201,58 @@ class C0PreflightTests(unittest.TestCase):
                 (root / f'{i:02d}.json').write_text(json.dumps(BASE))
             self.assertEqual(run()['results'], [])
 
+    def test_directory_total_entry_budget_ignores_small_foreign_entries_then_refuses(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'valid.json').write_text(json.dumps(BASE))
+            for index in range(63):
+                (root / f'ignored-{index:03}.txt').write_text('ignored')
+            def run(*args):
+                result = subprocess.run([sys.executable, str(script), *args],
+                                        capture_output=True, text=True, timeout=4, check=False)
+                return result, json.loads(result.stdout)
+            ok, report = run('--directory', str(root))
+            self.assertEqual(ok.returncode, 0, ok.stderr)
+            self.assertEqual(report['status'], 'STRUCTURE_ONLY_PASS')
+            self.assertEqual((report['passed'], report['refused']), (1, 0))
+            self.assertEqual([Path(x['path']).name for x in report['results']], ['valid.json'])
+            (root / 'ignored-063.txt').write_text('extra')
+            refused, report = run('--directory', str(root))
+            self.assertEqual(refused.returncode, 2, refused.stderr)
+            self.assertEqual(report['status'], 'REFUSED')
+            self.assertEqual(report['errors'], ['directory must contain at most 64 total entries'])
+            self.assertEqual((report['passed'], report['refused'], report['results']), (0, 0, []))
+            self.assertIsNone(report['audit_sha256'])
+            self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
+            self.assertEqual(report['evidence']['status'], 'UNVERIFIED')
+            self.assertEqual(refused.stderr, '')
+
+    def test_compare_refuses_excess_ignored_entries_without_partial_semantic_inventory(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            before, after = (Path(folder) / name for name in ('before', 'after'))
+            before.mkdir()
+            after.mkdir()
+            for root in (before, after):
+                (root / 'valid.json').write_text(json.dumps(BASE))
+            for index in range(80):
+                (after / f'ignored-{index:03}.txt').write_text('ignored')
+            result = subprocess.run([sys.executable, str(script), '--compare-directories',
+                                     str(before), str(after), '--fail-on-change'],
+                                    capture_output=True, text=True, timeout=4, check=False)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report['status'], 'REFUSED')
+            self.assertEqual(report['before']['status'], 'STRUCTURE_ONLY_PASS')
+            self.assertEqual(report['after']['status'], 'REFUSED')
+            self.assertEqual(report['after']['results'], [])
+            self.assertIsNone(report['after']['audit_sha256'])
+            self.assertEqual(report['object_diff'],
+                             {'status': 'UNAVAILABLE', 'reason': 'DIRECTORY_AUDIT_REFUSED'})
+            self.assertEqual(report['network'], 'NO_NETWORK')
+            self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+
     def test_directory_success_special_file_and_directory_symlink(self):
         script = Path(__file__).with_name('c0_manifest_preflight.py')
         with tempfile.TemporaryDirectory() as folder:
