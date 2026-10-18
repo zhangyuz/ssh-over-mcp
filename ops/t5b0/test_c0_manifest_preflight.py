@@ -612,6 +612,136 @@ class C0PreflightTests(unittest.TestCase):
                     self.assertIn('--fail-on-change requires --compare-directories', result.stderr)
                     self.assertEqual(result.stdout, '')
 
+    def test_require_json_only_rejects_extra_entries_before_any_manifest_read(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'valid.json').write_text(json.dumps(BASE))
+            (root / 'note.txt').write_text('ignored by legacy mode')
+            def run(strict):
+                args = [sys.executable, str(script), '--directory', str(root)]
+                if strict:
+                    args.append('--require-json-only')
+                result = subprocess.run(args, capture_output=True, text=True, timeout=4, check=False)
+                return result, json.loads(result.stdout)
+            legacy, report = run(False)
+            self.assertEqual(legacy.returncode, 0, legacy.stderr)
+            self.assertEqual(report['status'], 'STRUCTURE_ONLY_PASS')
+            strict, report = run(True)
+            self.assertEqual(strict.returncode, 2, strict.stderr)
+            self.assertEqual(report['status'], 'REFUSED')
+            self.assertEqual(report['errors'], ['directory contains non-json entry'])
+            self.assertEqual((report['passed'], report['refused'], report['results']), (0, 0, []))
+            self.assertIsNone(report['audit_sha256'])
+            self.assertEqual(report['evidence']['status'], 'UNVERIFIED')
+            self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+            self.assertEqual(strict.stderr, '')
+            (root / 'note.txt').unlink()
+            strict, report = run(True)
+            self.assertEqual(strict.returncode, 0, strict.stderr)
+            self.assertEqual(report['status'], 'STRUCTURE_ONLY_PASS')
+            self.assertEqual(len(report['results']), 1)
+
+    def test_require_json_only_compare_refuses_partial_semantics(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            before, after = (Path(folder) / x for x in ('before', 'after'))
+            before.mkdir()
+            after.mkdir()
+            for directory in (before, after):
+                (directory / 'a.json').write_text(json.dumps(BASE))
+            (after / 'hidden').mkdir()
+            args = [sys.executable, str(script), '--compare-directories',
+                    str(before), str(after)]
+            baseline = subprocess.run(args, capture_output=True, text=True, timeout=4, check=False)
+            self.assertEqual(baseline.returncode, 0, baseline.stderr)
+            self.assertEqual(json.loads(baseline.stdout)['status'], 'UNCHANGED')
+            result = subprocess.run([*args, '--require-json-only', '--fail-on-change'],
+                                    capture_output=True, text=True, timeout=4, check=False)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report['status'], 'REFUSED')
+            self.assertEqual(report['before']['status'], 'STRUCTURE_ONLY_PASS')
+            self.assertEqual(report['after']['status'], 'REFUSED')
+            self.assertEqual(report['object_diff'],
+                             {'status': 'UNAVAILABLE', 'reason': 'DIRECTORY_AUDIT_REFUSED'})
+            self.assertEqual(report['after']['results'], [])
+            self.assertEqual(report['evidence']['status'], 'UNVERIFIED')
+
+    def test_strict_default_shared_total_entry_budget_and_refusal(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'a.json').write_text(json.dumps(BASE))
+            for idx in range(63):
+                (root / f'extra-{idx:03d}.txt').write_text('ignored by default')
+            def run(*flags):
+                proc = subprocess.run([sys.executable, str(script), '--directory', str(root),
+                                       *flags], capture_output=True, text=True, timeout=4, check=False)
+                return proc, json.loads(proc.stdout)
+            default, report = run()
+            self.assertEqual(default.returncode, 0, default.stderr)
+            self.assertEqual(report['status'], 'STRUCTURE_ONLY_PASS')
+            strict, report = run('--require-json-only')
+            self.assertEqual(strict.returncode, 2, strict.stderr)
+            self.assertEqual(report['results'], [])
+            self.assertEqual(report['errors'], ['directory contains non-json entry'])
+            (root / 'extra-063.txt').write_text('now 65 immediate entries')
+            default, report = run()
+            self.assertEqual(default.returncode, 2, default.stderr)
+            self.assertEqual(report['errors'], ['directory must contain at most 64 total entries'])
+            self.assertEqual(report['results'], [])
+            self.assertIsNone(report['audit_sha256'])
+            strict, report = run('--require-json-only')
+            self.assertEqual(strict.returncode, 2, strict.stderr)
+            self.assertEqual(report['status'], 'REFUSED')
+            self.assertEqual(report['results'], [])
+            self.assertIsNone(report['audit_sha256'])
+            self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+
+    def test_compare_strict_and_default_total_budget_never_leaks_objects_on_refusal(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            before, after = (Path(folder) / name for name in ('before', 'after'))
+            before.mkdir()
+            after.mkdir()
+            for root in (before, after):
+                (root / 'a.json').write_text(json.dumps(BASE))
+            for idx in range(65):
+                (after / f'foreign-{idx:03d}.txt').write_text('foreign')
+            for flags in ((), ('--require-json-only',)):
+                with self.subTest(flags=flags):
+                    proc = subprocess.run([sys.executable, str(script), '--compare-directories',
+                                           str(before), str(after), '--fail-on-change', *flags],
+                                          capture_output=True, text=True, timeout=4, check=False)
+                    self.assertEqual(proc.returncode, 2, proc.stderr)
+                    report = json.loads(proc.stdout)
+                    self.assertEqual(report['status'], 'REFUSED')
+                    self.assertEqual(report['before']['status'], 'STRUCTURE_ONLY_PASS')
+                    self.assertEqual(report['after']['status'], 'REFUSED')
+                    self.assertEqual(report['after']['results'], [])
+                    self.assertIsNone(report['after']['audit_sha256'])
+                    self.assertEqual(report['object_diff'],
+                                     {'status': 'UNAVAILABLE', 'reason': 'DIRECTORY_AUDIT_REFUSED'})
+                    self.assertEqual(report['network'], 'NO_NETWORK')
+
+    def test_require_json_only_rejects_unrelated_modes(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            manifest = root / 'a.json'
+            manifest.write_text(json.dumps(BASE))
+            for mode in ([], [str(manifest)], ['--json', str(manifest)],
+                         ['--batch', str(manifest)]):
+                with self.subTest(mode=mode):
+                    result = subprocess.run([sys.executable, str(script),
+                                             '--require-json-only', *mode],
+                                            capture_output=True, text=True, timeout=4, check=False)
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn('--require-json-only requires --directory or --compare-directories',
+                                  result.stderr)
+                    self.assertEqual(result.stdout, '')
+
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),

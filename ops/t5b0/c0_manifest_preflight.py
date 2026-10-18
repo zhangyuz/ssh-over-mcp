@@ -192,7 +192,7 @@ def evidence_handoff():
     }
 
 
-def inspect_directory(directory, *, capture_inventory=False):
+def inspect_directory(directory, *, capture_inventory=False, require_json_only=False):
     results = []
     errors = []
     inventory = {}
@@ -208,11 +208,15 @@ def inspect_directory(directory, *, capture_inventory=False):
                     if count > MAX_DIRECTORY_ENTRIES:
                         errors = ['directory must contain at most 64 total entries']
                         break
-                    if entry.name.endswith('.json'):
-                        names.append(entry.name)
-                        if len(names) > 16:
-                            errors = ['directory must contain 1 to 16 .json entries']
+                    if not entry.name.endswith('.json'):
+                        if require_json_only:
+                            errors = ['directory contains non-json entry']
                             break
+                        continue
+                    names.append(entry.name)
+                    if len(names) > 16:
+                        errors = ['directory must contain 1 to 16 .json entries']
+                        break
             names.sort()
             if not errors and not 1 <= len(names) <= 16:
                 errors = ['directory must contain 1 to 16 .json entries']
@@ -238,9 +242,10 @@ def inspect_directory(directory, *, capture_inventory=False):
     return results, errors
 
 
-def directory_report(directory, *, capture_inventory=False):
+def directory_report(directory, *, capture_inventory=False, require_json_only=False):
     """Return the exact legacy directory report shape for reuse by comparison."""
-    inspected = inspect_directory(directory, capture_inventory=capture_inventory)
+    inspected = inspect_directory(directory, capture_inventory=capture_inventory,
+                                  require_json_only=require_json_only)
     results, errors = inspected[:2]
     refused = bool(errors) or any(item['status'] == 'REFUSED' for item in results)
     report = {
@@ -276,10 +281,12 @@ def semantic_object_diff(before_inventory, after_inventory):
     }
 
 
-def compare_directories(before_path, after_path):
+def compare_directories(before_path, after_path, *, require_json_only=False):
     """Observe two independent offline snapshots; neither is a trusted baseline."""
-    before = directory_report(before_path, capture_inventory=True)
-    after = directory_report(after_path, capture_inventory=True)
+    before = directory_report(before_path, capture_inventory=True,
+                              require_json_only=require_json_only)
+    after = directory_report(after_path, capture_inventory=True,
+                             require_json_only=require_json_only)
     before_inventory = before.pop('_inventory')
     after_inventory = after.pop('_inventory')
     old = {Path(item['path']).name: item for item in before['results']}
@@ -321,15 +328,20 @@ def main():
                    help='offline review diff of two bounded directories')
     p.add_argument('--fail-on-change', action='store_true',
                    help='with --compare-directories, exit 3 on changed observations')
+    p.add_argument('--require-json-only', action='store_true',
+                   help='with directory audit or compare, refuse non-JSON immediate entries')
     p.add_argument('--batch', type=Path, nargs='+', metavar='MANIFEST',
                    help='inspect up to 16 manifests and emit one aggregate JSON report')
     args = p.parse_args()
     if args.fail_on_change and args.compare_directories is None:
         p.error('--fail-on-change requires --compare-directories')
+    if args.require_json_only and args.compare_directories is None and args.directory is None:
+        p.error('--require-json-only requires --directory or --compare-directories')
     if args.compare_directories is not None:
         if args.manifest is not None or args.batch is not None or args.directory is not None:
             p.error('--compare-directories cannot be combined with other input modes')
-        report = compare_directories(*args.compare_directories)
+        report = compare_directories(*args.compare_directories,
+                                     require_json_only=args.require_json_only)
         print(json.dumps(report, sort_keys=True))
         if report['status'] == 'REFUSED':
             return 2
@@ -339,7 +351,7 @@ def main():
     if args.directory is not None:
         if args.manifest is not None or args.batch is not None:
             p.error('--directory cannot be combined with positional manifest or --batch')
-        report = directory_report(args.directory)
+        report = directory_report(args.directory, require_json_only=args.require_json_only)
         print(json.dumps(report, sort_keys=True))
         return 2 if report['status'] == 'REFUSED' else 0
     if args.batch is not None:

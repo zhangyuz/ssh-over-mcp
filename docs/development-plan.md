@@ -2266,6 +2266,9 @@ The offline two-directory reviewer now adds object-ID semantic `added`/`removed`
 ### 2026-10-18 Opt-in C0 offline review change gate
 
 `--compare-directories BEFORE AFTER --fail-on-change` adds a non-authorizing CI/reviewer exit-code gate (0 unchanged, 3 observed changed, 2 refused), while preserving byte-for-byte identical JSON reporting and default CLI exit codes. Refusal dominates change, and the flag is rejected outside compare mode. A matching untrusted pair is **not** an authorization or source authenticity proof; all evidence gaps remain `UNVERIFIED`. No CI workflow, collection, privileged Mac or Linux C changes; T5B holds persist.
+### 2026-10-18 Optional C0 manifest-only directory intake
+
+The offline C0 directory reviewer supports `--require-json-only` for directory audit and compare modes. Strict mode refuses unexpected immediate non-JSON entries before reading any manifest; both strict and default paths share a 64-total-entry resource cap; default mode preserves ignoring unrelated names, and single-file/batch invocations reject the option. Compare-mode refusal suppresses semantic object inventory. This adds no collection/admission authority, network, CI workflow, privileged Mac/UID502/APFS or Linux Slice C activity; all related gates remain HOLD.
 
 ### 2026-10-18 Bounded C0 directory enumeration resource gate
 
