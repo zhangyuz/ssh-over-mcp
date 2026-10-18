@@ -180,7 +180,7 @@ def inspect_stdin_batch():
                 for index, line in enumerate(lines, start=1):
                     objects = None
                     try:
-                        doc = parse_manifest(line)
+                        doc = parse_manifest(line.decode('utf-8-sig'))
                         item_errors = validate(doc)
                         codes = ['INVALID_STRUCTURE'] if item_errors else []
                         if not item_errors:

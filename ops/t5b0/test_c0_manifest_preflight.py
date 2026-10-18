@@ -897,6 +897,30 @@ class C0PreflightTests(unittest.TestCase):
                 self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
                 self.assertEqual(result.stderr, b'')
 
+    def test_stdin_batch_requires_utf8_without_json_encoding_autodetection(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        for encoding, expected in (
+            ('utf-8', 0), ('utf-8-sig', 0),
+            ('utf-16', 2), ('utf-16-le', 2), ('utf-16-be', 2),
+            ('utf-32', 2), ('utf-32-le', 2), ('utf-32-be', 2),
+        ):
+            with self.subTest(encoding=encoding):
+                result = subprocess.run(
+                    [sys.executable, str(script), '--stdin-batch'],
+                    input=json.dumps(BASE).encode(encoding),
+                    capture_output=True, timeout=5, check=False)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                self.assertEqual(result.stderr, b'')
+                self.assertNotIn(BASE['objects'][0]['url'].encode(), result.stdout)
+                report = json.loads(result.stdout)
+                self.assertEqual(report['status'],
+                                 'REFUSED' if expected else 'STRUCTURE_ONLY_PASS')
+                self.assertEqual(report['results'][0]['error_codes'],
+                                 ['INVALID_MANIFEST'] if expected else [])
+                self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
+                self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+                self.assertEqual(report['network'], 'NO_NETWORK')
+
     def test_stdin_batch_rejects_other_input_modes_before_reading(self):
         script = Path(__file__).with_name('c0_manifest_preflight.py')
         for args in (['--stdin'], ['--batch', 'anything.json'],
