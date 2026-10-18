@@ -103,3 +103,11 @@ cat successor-proposals.ndjson | python3 ops/t5b0/c0_manifest_preflight.py \
 ~~~
 
 The result always includes JSON keys status, before, after, object_diff, evidence, authorization, collection, network. Exit 0 / UNCHANGED means only the declared object-ID inventory and url/sha256/bytes/max_bytes fields are equal; filenames, JSON formatting, and exact source bytes need not match. Exit 3 / CHANGED is returned only with --fail-on-change and a valid semantic difference. Exit 2 / REFUSED means baseline or stream failed and object_diff.status is UNAVAILABLE, never a partial admission. Without the change gate, valid CHANGED exits 0 as in the prior directory semantic reviewer. Neither side is an authenticated reference.
+
+## C0 race-aware regular-file observation (planned, 2026-10-18)
+
+**Bounded behavior:** when a C0 manifest is already held open via no-follow/nonblocking regular-file descriptor, compare the opened inode's device, inode number, type/mode, size, mtime_ns and ctime_ns before and after the existing bounded single read. Refuse (INVALID_MANIFEST/exit 2) when any differ, even if the byte count and resulting JSON are valid. Final digest, structure-only success and object inventory MUST derive from a checked stable read, never from observed in-place mutation.
+
+**Test-first plan:** inject deterministic same-inode, same-length rewrite at os.read into a valid test manifest. Demonstrate pre-fix false STRUCTURE_ONLY_PASS, then require refusal for both single-file and directory reviewer paths; include atime-only change that must not cause refusal because an ordinary read may update atime. Preserve unreadable/symlink/FIFO/oversize behavior, 64 directory entries, 16 manifest limit, and stdin modes. Run focused RED, minimum GREEN, full C0 regression, hosted bridge, lint, exact-head GitHub CI. No new CLI flag or network/collector/host authority.
+
+**Limit:** metadata rechecking reduces race windows but does NOT prove atomic snapshot consistency against a privileged attacker, immutable source provenance, or authenticity of any artifact. STRUCTURE_ONLY_PASS is non-authorizing. C0 collection, T5B admission, verifier, real Mac/UID502/APFS and Linux C remain HOLD.
