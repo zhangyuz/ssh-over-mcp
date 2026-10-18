@@ -1143,7 +1143,7 @@ class C0PreflightTests(unittest.TestCase):
         self.assertIn(b'--compare-directories', result.stdout)
         self.assertIn(b'--compare-stdin-to-directory', result.stdout)
         change_help = result.stdout.split(b'--fail-on-change', 2)[-1]
-        self.assertIn(b'--compare-stdin-to-directory', change_help)
+        self.assertIn(b'--compare-stdin-to-directory', change_help.replace(b'\n                        ', b''))
 
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),

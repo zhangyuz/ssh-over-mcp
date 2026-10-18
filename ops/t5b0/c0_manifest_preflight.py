@@ -199,18 +199,8 @@ def inspect_stdin_batch(*, capture_inventory=False):
                     })
                     objects_by_line.append(objects)
                 cross_file_consistency(results, objects_by_line)
-                # Only fixed diagnostics cross the stream boundary: do not echo
-                # untrusted URLs, digests or input bytes in conflict reasons.
-                for item in results:
-                    if 'DUPLICATE_OBJECT_ID' in item['error_codes'] or (
-                        'CROSS_FILE_CONFLICT' in item['error_codes']
-                    ):
-                        item['errors'] = [
-                            'duplicate cross-manifest object id' if code == 'DUPLICATE_OBJECT_ID'
-                            else 'conflicting cross-manifest object metadata'
-                            for code in item['error_codes']
-                            if code in ('DUPLICATE_OBJECT_ID', 'CROSS_FILE_CONFLICT')
-                        ]
+                # Only fixed diagnostics cross the untrusted stream boundary.
+                redact_cross_manifest_diagnostics(results)
     except (OSError, ValueError, TypeError) as exc:
         errors = [f'unreadable/invalid stdin batch: {type(exc).__name__}']
         results = []
@@ -232,6 +222,19 @@ def inspect_stdin_batch(*, capture_inventory=False):
                     inventory[obj['id']] = obj
         return report, inventory
     return report
+
+
+def redact_cross_manifest_diagnostics(results):
+    """Strip raw URL/digest conflict values from untrusted cross-record reports."""
+    for item in results:
+        if ('DUPLICATE_OBJECT_ID' in item['error_codes']
+                or 'CROSS_FILE_CONFLICT' in item['error_codes']):
+            item['errors'] = [
+                ('duplicate cross-manifest object id' if code == 'DUPLICATE_OBJECT_ID'
+                 else 'conflicting cross-manifest object metadata')
+                for code in item['error_codes']
+                if code in ('DUPLICATE_OBJECT_ID', 'CROSS_FILE_CONFLICT')
+            ]
 
 
 def cross_file_consistency(results, objects_by_file):
@@ -420,6 +423,9 @@ def compare_stdin_to_directory(before_directory, *, require_json_only=False):
     before = directory_report(before_directory, capture_inventory=True,
                               require_json_only=require_json_only)
     before_inventory = before.pop('_inventory')
+    # The reusable directory report retains its historical detailed diagnostics.
+    # Do not expose input-derived URL/digest conflict values in this new mode.
+    redact_cross_manifest_diagnostics(before['results'])
     after, after_inventory = inspect_stdin_batch(capture_inventory=True)
     refused = before['status'] == 'REFUSED' or after['status'] == 'REFUSED'
     object_diff = ({'status': 'UNAVAILABLE', 'reason': 'INPUT_AUDIT_REFUSED'}
@@ -450,7 +456,7 @@ def main():
     p.add_argument('--compare-stdin-to-directory', type=Path, metavar='BEFORE_DIR',
                    help='compare bounded piped NDJSON successor with offline directory baseline')
     p.add_argument('--fail-on-change', action='store_true',
-                   help='with --compare-directories, exit 3 on changed observations')
+                   help='with --compare-directories or --compare-stdin-to-directory, exit 3 on change')
     p.add_argument('--require-json-only', action='store_true',
                    help='with directory audit or compare, refuse non-JSON immediate entries')
     p.add_argument('--batch', type=Path, nargs='+', metavar='MANIFEST',
