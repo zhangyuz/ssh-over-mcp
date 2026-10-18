@@ -191,9 +191,10 @@ def evidence_handoff():
     }
 
 
-def inspect_directory(directory):
+def inspect_directory(directory, *, capture_inventory=False):
     results = []
     errors = []
+    inventory = {}
     try:
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         if hasattr(os, 'O_CLOEXEC'):
@@ -209,7 +210,11 @@ def inspect_directory(directory):
                 for name in names:
                     report = inspect_manifest(name, dir_fd=fd, include_digest=True,
                                               capture_objects=True)
-                    objects_by_file.append(report.pop('_objects'))
+                    objects = report.pop('_objects')
+                    objects_by_file.append(objects)
+                    if capture_inventory and objects is not None:
+                        for obj in objects:
+                            inventory[obj['id']] = obj
                     results.append({'path': str(directory / name), **report})
                 cross_file_consistency(results, objects_by_file)
         finally:
@@ -217,14 +222,17 @@ def inspect_directory(directory):
     except (OSError, ValueError) as exc:
         errors = [f'unreadable/invalid directory: {type(exc).__name__}']
         results = []
+    if capture_inventory:
+        return results, errors, inventory
     return results, errors
 
 
-def directory_report(directory):
+def directory_report(directory, *, capture_inventory=False):
     """Return the exact legacy directory report shape for reuse by comparison."""
-    results, errors = inspect_directory(directory)
+    inspected = inspect_directory(directory, capture_inventory=capture_inventory)
+    results, errors = inspected[:2]
     refused = bool(errors) or any(item['status'] == 'REFUSED' for item in results)
-    return {
+    report = {
         'status': 'REFUSED' if refused else 'STRUCTURE_ONLY_PASS',
         'errors': errors,
         'passed': sum(item['status'] == 'STRUCTURE_ONLY_PASS' for item in results),
@@ -236,12 +244,33 @@ def directory_report(directory):
         'collection': 'C0_COLLECT_HOLD',
         'network': 'NO_NETWORK',
     }
+    if capture_inventory:
+        report['_inventory'] = inspected[2]
+    return report
+
+
+def semantic_object_diff(before_inventory, after_inventory):
+    before_ids, after_ids = set(before_inventory), set(after_inventory)
+    changed = []
+    for ident in sorted(before_ids & after_ids):
+        fields = sorted(field for field in ('url', 'sha256', 'bytes', 'max_bytes')
+                        if before_inventory[ident][field] != after_inventory[ident][field])
+        if fields:
+            changed.append({'id': ident, 'fields': fields})
+    return {
+        'status': 'AVAILABLE',
+        'added': sorted(after_ids - before_ids),
+        'removed': sorted(before_ids - after_ids),
+        'changed': changed,
+    }
 
 
 def compare_directories(before_path, after_path):
     """Observe two independent offline snapshots; neither is a trusted baseline."""
-    before = directory_report(before_path)
-    after = directory_report(after_path)
+    before = directory_report(before_path, capture_inventory=True)
+    after = directory_report(after_path, capture_inventory=True)
+    before_inventory = before.pop('_inventory')
+    after_inventory = after.pop('_inventory')
     old = {Path(item['path']).name: item for item in before['results']}
     new = {Path(item['path']).name: item for item in after['results']}
     added = sorted(new.keys() - old.keys())
@@ -254,8 +283,11 @@ def compare_directories(before_path, after_path):
     refused = before['status'] == 'REFUSED' or after['status'] == 'REFUSED'
     status = ('REFUSED' if refused else
               'CHANGED' if added or removed or changed else 'UNCHANGED')
+    object_diff = ({'status': 'UNAVAILABLE', 'reason': 'DIRECTORY_AUDIT_REFUSED'}
+                   if refused else semantic_object_diff(before_inventory, after_inventory))
     return {
         'status': status,
+        'object_diff': object_diff,
         'before': before,
         'after': after,
         'added': added,

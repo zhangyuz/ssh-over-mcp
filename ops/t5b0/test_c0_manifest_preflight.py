@@ -425,6 +425,91 @@ class C0PreflightTests(unittest.TestCase):
             self.assertEqual(report['after']['results'], [])
             self.assertIsNone(report['after']['audit_sha256'])
 
+    def test_semantic_object_diff_across_filename_changes(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            before, after = (Path(folder) / name for name in ('before', 'after'))
+            before.mkdir()
+            after.mkdir()
+            doc = copy.deepcopy(BASE)
+            (before / 'old.json').write_text(json.dumps(doc))
+            (after / 'renamed.json').write_text(json.dumps(doc))
+            def run():
+                result = subprocess.run([sys.executable, str(script), '--compare-directories',
+                                         str(before), str(after)], capture_output=True, text=True,
+                                        timeout=4, check=False)
+                return result, json.loads(result.stdout)
+            result, report = run()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(report['status'], 'CHANGED')
+            self.assertEqual(report['object_diff'], {'status': 'AVAILABLE', 'added': [],
+                                                     'removed': [], 'changed': []})
+            doc['objects'][0]['sha256'] = 'b' * 64
+            doc['objects'][0]['bytes'] = 42
+            doc['objects'][0]['max_bytes'] = 42
+            (after / 'renamed.json').write_text(json.dumps(doc))
+            result, report = run()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(report['object_diff']['changed'],
+                             [{'id': 'C0-W1', 'fields': ['bytes', 'max_bytes', 'sha256']}])
+            self.assertNotIn('b' * 64, json.dumps(report['object_diff']))
+            self.assertEqual(report['object_diff']['added'], [])
+            self.assertEqual(report['object_diff']['removed'], [])
+
+    def test_semantic_object_add_remove_and_refused_suppression(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            before, after = (Path(folder) / name for name in ('before', 'after'))
+            before.mkdir()
+            after.mkdir()
+            first = copy.deepcopy(BASE)
+            second = copy.deepcopy(BASE)
+            second['objects'][0].update(id='C0-P1', url='https://host/other')
+            (before / 'a.json').write_text(json.dumps(first))
+            (after / 'b.json').write_text(json.dumps(second))
+            def run():
+                result = subprocess.run([sys.executable, str(script), '--compare-directories',
+                                         str(before), str(after)], capture_output=True, text=True,
+                                        timeout=4, check=False)
+                return result, json.loads(result.stdout)
+            result, report = run()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(report['object_diff'], {'status': 'AVAILABLE', 'added': ['C0-P1'],
+                                                     'removed': ['C0-W1'], 'changed': []})
+            (after / 'b.json').write_text('{')
+            result, report = run()
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertEqual(report['object_diff'], {'status': 'UNAVAILABLE',
+                                                     'reason': 'DIRECTORY_AUDIT_REFUSED'})
+            self.assertEqual(report['evidence']['status'], 'UNVERIFIED')
+
+    def test_semantic_object_diff_url_only_and_cross_file_refusal(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            before, after = (Path(folder) / name for name in ('before', 'after'))
+            before.mkdir()
+            after.mkdir()
+            doc = copy.deepcopy(BASE)
+            (before / 'a.json').write_text(json.dumps(doc))
+            doc['objects'][0]['url'] = 'https://host/changed'
+            (after / 'a.json').write_text(json.dumps(doc))
+            def run():
+                result = subprocess.run([sys.executable, str(script), '--compare-directories',
+                                         str(before), str(after)], capture_output=True, text=True,
+                                        timeout=4, check=False)
+                return result, json.loads(result.stdout)
+            result, report = run()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(report['object_diff']['changed'],
+                             [{'id': 'C0-W1', 'fields': ['url']}])
+            self.assertNotIn('https://host/changed', json.dumps(report['object_diff']))
+            (after / 'duplicate.json').write_text(json.dumps(doc))
+            result, report = run()
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertEqual(report['object_diff'], {'status': 'UNAVAILABLE',
+                                                     'reason': 'DIRECTORY_AUDIT_REFUSED'})
+            self.assertEqual(report['after']['refused'], 2)
+
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),
