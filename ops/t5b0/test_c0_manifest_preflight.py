@@ -784,6 +784,35 @@ class C0PreflightTests(unittest.TestCase):
                 self.assertNotIn('SECRET', result.stdout)
                 self.assertEqual(result.stderr, '')
 
+    def test_stdin_requires_utf8_without_json_encoding_autodetection(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        for encoding, expected in (
+            ('utf-8', 0), ('utf-8-sig', 0),
+            ('utf-16', 2), ('utf-16-le', 2), ('utf-16-be', 2),
+            ('utf-32', 2), ('utf-32-le', 2), ('utf-32-be', 2),
+        ):
+            for args in ([], ['--json']):
+                with self.subTest(encoding=encoding, args=args):
+                    result = subprocess.run(
+                        [sys.executable, str(script), '--stdin', *args],
+                        input=json.dumps(BASE).encode(encoding),
+                        capture_output=True, timeout=4, check=False)
+                    self.assertEqual(result.returncode, expected, result.stderr)
+                    self.assertEqual(result.stderr, b'')
+                    self.assertNotIn(BASE['objects'][0]['url'].encode(), result.stdout)
+                    if args:
+                        report = json.loads(result.stdout)
+                        self.assertEqual(report['error_codes'],
+                                         ['INVALID_MANIFEST'] if expected else [])
+                        self.assertEqual(report['status'],
+                                         'REFUSED' if expected else 'STRUCTURE_ONLY_PASS')
+                        self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
+                        self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+                        self.assertEqual(report['network'], 'NO_NETWORK')
+                    else:
+                        self.assertIn(b'REFUSED:' if expected else b'STRUCTURE_ONLY_PASS',
+                                      result.stdout)
+
     def test_stdin_preflight_refuses_mixed_input_modes(self):
         script = Path(__file__).with_name('c0_manifest_preflight.py')
         with tempfile.TemporaryDirectory() as folder:

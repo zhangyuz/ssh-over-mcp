@@ -145,7 +145,7 @@ def inspect_stdin():
         data = sys.stdin.buffer.read(16385)
         if len(data) > 16384:
             raise ValueError('manifest too large')
-        errors = validate(parse_manifest(data))
+        errors = validate(parse_manifest(data.decode('utf-8-sig')))
         error_codes = ['INVALID_STRUCTURE'] if errors else []
     except (OSError, UnicodeError, ValueError, TypeError, RecursionError) as exc:
         errors = [f'unreadable/invalid manifest: {type(exc).__name__}']
