@@ -616,6 +616,63 @@ class C0PreflightTests(unittest.TestCase):
             self.assertEqual(report['after']['results'], [])
             self.assertEqual(report['evidence']['status'], 'UNVERIFIED')
 
+    def test_strict_default_shared_total_entry_budget_and_refusal(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'a.json').write_text(json.dumps(BASE))
+            for idx in range(63):
+                (root / f'extra-{idx:03d}.txt').write_text('ignored by default')
+            def run(*flags):
+                proc = subprocess.run([sys.executable, str(script), '--directory', str(root),
+                                       *flags], capture_output=True, text=True, timeout=4, check=False)
+                return proc, json.loads(proc.stdout)
+            default, report = run()
+            self.assertEqual(default.returncode, 0, default.stderr)
+            self.assertEqual(report['status'], 'STRUCTURE_ONLY_PASS')
+            strict, report = run('--require-json-only')
+            self.assertEqual(strict.returncode, 2, strict.stderr)
+            self.assertEqual(report['results'], [])
+            self.assertEqual(report['errors'], ['directory contains non-json entry'])
+            (root / 'extra-063.txt').write_text('now 65 immediate entries')
+            default, report = run()
+            self.assertEqual(default.returncode, 2, default.stderr)
+            self.assertEqual(report['errors'], ['directory must contain at most 64 total entries'])
+            self.assertEqual(report['results'], [])
+            self.assertIsNone(report['audit_sha256'])
+            strict, report = run('--require-json-only')
+            self.assertEqual(strict.returncode, 2, strict.stderr)
+            self.assertEqual(report['status'], 'REFUSED')
+            self.assertEqual(report['results'], [])
+            self.assertIsNone(report['audit_sha256'])
+            self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+
+    def test_compare_strict_and_default_total_budget_never_leaks_objects_on_refusal(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            before, after = (Path(folder) / name for name in ('before', 'after'))
+            before.mkdir()
+            after.mkdir()
+            for root in (before, after):
+                (root / 'a.json').write_text(json.dumps(BASE))
+            for idx in range(65):
+                (after / f'foreign-{idx:03d}.txt').write_text('foreign')
+            for flags in ((), ('--require-json-only',)):
+                with self.subTest(flags=flags):
+                    proc = subprocess.run([sys.executable, str(script), '--compare-directories',
+                                           str(before), str(after), '--fail-on-change', *flags],
+                                          capture_output=True, text=True, timeout=4, check=False)
+                    self.assertEqual(proc.returncode, 2, proc.stderr)
+                    report = json.loads(proc.stdout)
+                    self.assertEqual(report['status'], 'REFUSED')
+                    self.assertEqual(report['before']['status'], 'STRUCTURE_ONLY_PASS')
+                    self.assertEqual(report['after']['status'], 'REFUSED')
+                    self.assertEqual(report['after']['results'], [])
+                    self.assertIsNone(report['after']['audit_sha256'])
+                    self.assertEqual(report['object_diff'],
+                                     {'status': 'UNAVAILABLE', 'reason': 'DIRECTORY_AUDIT_REFUSED'})
+                    self.assertEqual(report['network'], 'NO_NETWORK')
+
     def test_require_json_only_rejects_unrelated_modes(self):
         script = Path(__file__).with_name('c0_manifest_preflight.py')
         with tempfile.TemporaryDirectory() as folder:
