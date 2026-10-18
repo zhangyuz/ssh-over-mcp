@@ -510,6 +510,56 @@ class C0PreflightTests(unittest.TestCase):
                                                      'reason': 'DIRECTORY_AUDIT_REFUSED'})
             self.assertEqual(report['after']['refused'], 2)
 
+    def test_compare_fail_on_change_exit_codes_and_report_compatibility(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            before, after = (Path(folder) / name for name in ('before', 'after'))
+            before.mkdir()
+            after.mkdir()
+            (before / 'a.json').write_text(json.dumps(BASE))
+            (after / 'a.json').write_text(json.dumps(BASE))
+            def run(strict):
+                cmd = [sys.executable, str(script), '--compare-directories', str(before), str(after)]
+                if strict:
+                    cmd.append('--fail-on-change')
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=4, check=False)
+                return result, json.loads(result.stdout)
+            regular, regular_report = run(False)
+            strict, strict_report = run(True)
+            self.assertEqual((regular.returncode, strict.returncode), (0, 0))
+            self.assertEqual(regular_report, strict_report)
+            (after / 'renamed.json').write_text((after / 'a.json').read_text())
+            (after / 'a.json').unlink()
+            regular, regular_report = run(False)
+            strict, strict_report = run(True)
+            self.assertEqual((regular.returncode, strict.returncode), (0, 3))
+            self.assertEqual(regular_report, strict_report)
+            self.assertEqual(strict_report['status'], 'CHANGED')
+            self.assertEqual(strict_report['object_diff']['status'], 'AVAILABLE')
+            self.assertEqual(strict_report['object_diff']['changed'], [])
+            (after / 'renamed.json').write_text('{')
+            regular, regular_report = run(False)
+            strict, strict_report = run(True)
+            self.assertEqual((regular.returncode, strict.returncode), (2, 2))
+            self.assertEqual(regular_report, strict_report)
+            self.assertEqual(strict_report['status'], 'REFUSED')
+            self.assertEqual(strict_report['object_diff']['status'], 'UNAVAILABLE')
+
+    def test_fail_on_change_rejects_other_input_modes(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            manifest = root / 'a.json'
+            manifest.write_text(json.dumps(BASE))
+            for args in ([str(manifest)], ['--json', str(manifest)],
+                         ['--directory', str(root)], ['--batch', str(manifest)], []):
+                with self.subTest(args=args):
+                    result = subprocess.run([sys.executable, str(script), '--fail-on-change', *args],
+                                            capture_output=True, text=True, timeout=4, check=False)
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn('--fail-on-change requires --compare-directories', result.stderr)
+                    self.assertEqual(result.stdout, '')
+
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),

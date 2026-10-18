@@ -2262,3 +2262,7 @@ The non-authorizing `--compare-directories BEFORE AFTER` reviewer workflow reuse
 ### 2026-10-18 C0 semantic object-level review delta
 
 The offline two-directory reviewer now adds object-ID semantic `added`/`removed`/changed-field deltas, independent of filename moves, from already-read fully validated manifests. It refuses to publish a semantic inventory if either bounded directory audit refused. No raw URL/digest values are echoed in `object_diff`; no network, collection, policy admission, privilege or CI changes. C0, T5B and Mac/UID502/APFS HOLD remain; Linux C deferred.
+
+### 2026-10-18 Opt-in C0 offline review change gate
+
+`--compare-directories BEFORE AFTER --fail-on-change` adds a non-authorizing CI/reviewer exit-code gate (0 unchanged, 3 observed changed, 2 refused), while preserving byte-for-byte identical JSON reporting and default CLI exit codes. Refusal dominates change, and the flag is rejected outside compare mode. A matching untrusted pair is **not** an authorization or source authenticity proof; all evidence gaps remain `UNVERIFIED`. No CI workflow, collection, privileged Mac or Linux C changes; T5B holds persist.
