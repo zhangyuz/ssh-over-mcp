@@ -25,3 +25,7 @@ Example successful output (field order is not contractual):
 ```
 
 Automations must check both process exit code and `status`, and must never treat `STRUCTURE_ONLY_PASS` as permission to collect or execute candidate materials.
+
+## Stable machine-readable error categories
+
+The opt-in `--json` report adds `error_codes` as an array of stable identifiers. `[]` means no structural errors; `INVALID_STRUCTURE` means a parsed JSON manifest violated the C0 schema/semantic constraints; `INVALID_MANIFEST` means the file could not be read or parsed (including duplicate keys). The existing human-readable `errors` array remains diagnostic only, not a programmatic contract. A failure currently has exactly one category, and consumers should tolerate future additional categories. The CLI still exits 0 for structure-only success and 2 for refusal; all reports preserve `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, and `NO_NETWORK`. These categories grant no collection, provenance or verification authority.

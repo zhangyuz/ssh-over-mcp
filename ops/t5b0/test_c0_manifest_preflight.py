@@ -58,7 +58,7 @@ class C0PreflightTests(unittest.TestCase):
                                     capture_output=True, text=True, timeout=3, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout), {
-                'status': 'STRUCTURE_ONLY_PASS', 'errors': [],
+                'status': 'STRUCTURE_ONLY_PASS', 'errors': [], 'error_codes': [],
                 'authorization': 'NO_AUTHORIZATION', 'collection': 'C0_COLLECT_HOLD',
                 'network': 'NO_NETWORK',
             })
@@ -85,6 +85,28 @@ class C0PreflightTests(unittest.TestCase):
                     self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
                     self.assertEqual(report['network'], 'NO_NETWORK')
                     self.assertEqual(result.stderr, '')
+
+    def test_json_error_codes_are_stable_and_classified(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            cases = (
+                ('valid', json.dumps(BASE), 0, []),
+                ('structure', json.dumps({**BASE, 'approval': 'yes'}), 2, ['INVALID_STRUCTURE']),
+                ('malformed', '{', 2, ['INVALID_MANIFEST']),
+            )
+            for name, payload, code, expected in cases:
+                with self.subTest(name=name):
+                    manifest = root / (name + '.json')
+                    manifest.write_text(payload)
+                    result = subprocess.run([sys.executable, str(script), '--json', str(manifest)],
+                                            capture_output=True, text=True, timeout=3, check=False)
+                    self.assertEqual(result.returncode, code, result.stderr)
+                    self.assertEqual(json.loads(result.stdout)['error_codes'], expected)
+            missing = subprocess.run([sys.executable, str(script), '--json', str(root / 'missing.json')],
+                                     capture_output=True, text=True, timeout=3, check=False)
+            self.assertEqual(missing.returncode, 2)
+            self.assertEqual(json.loads(missing.stdout)['error_codes'], ['INVALID_MANIFEST'])
 
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
