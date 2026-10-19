@@ -2311,3 +2311,7 @@ The offline C0 directory reviewer now redacts raw URL and SHA-256 values from cr
 ### 2026-10-19 C0 offline refused directory internal inventory suppression
 
 A refused C0 directory audit now discards its **internal** semantic object inventory, even where some individual manifest files parsed and passed before a later malformed proposal, duplicate ID or URL/SHA conflict was discovered. This removes a partial-acceptance reuse hazard for directory and successor comparison consumers. Public report structure/exit codes remain intact, refused comparison object diffs stay UNAVAILABLE and stable valid inputs still yield complete inventory. No new collection/trust/host authority, network access, privilege, Linux C or CI changes; all C0/T5B and real Mac UID502/APFS HOLD gates persist.
+
+### 2026-10-19 C0 direct directory-inspector diagnostic redaction
+
+The offline C0 `inspect_directory` API now returns only fixed conflict diagnostics for duplicate object IDs, URL collisions and declared digest-size inconsistency, rather than leaving raw untrusted candidate URL/SHA-256 values in error strings for other consumers to log. The public CLI and directory-report wrappers already redacted these; their format and behavior do not change. Twelve RED→GREEN lower-level regression scenarios plus stable valid-directory behavior cover strict/default and inventory/non-inventory use. No network/material/verification/trust/privileged host/Linux C authority or CI-workflow changes; C0 and T5B HOLD gates persist.
