@@ -367,6 +367,9 @@ def inspect_directory(directory, *, capture_inventory=False, require_json_only=F
         errors = [f'unreadable/invalid directory: {type(exc).__name__}']
         results = []
         inventory = {}
+    # No refused directory may export a partially accepted semantic inventory.
+    if errors or any(item['status'] == 'REFUSED' for item in results):
+        inventory = {}
     if capture_inventory:
         return results, errors, inventory
     return results, errors
