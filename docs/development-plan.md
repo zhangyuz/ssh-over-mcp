@@ -2307,3 +2307,7 @@ The existing directory auditor now measures opened-directory identity and namesp
 ### 2026-10-19 C0 directory cross-file conflict output confidentiality
 
 The offline C0 directory reviewer now redacts raw URL and SHA-256 values from cross-file conflict diagnostic strings in directory audit and two-directory comparison, reusing the existing stream-mode sanitizer. This fixes a proven stdout/CI diagnostic exposure and retains all legacy report keys, stable error codes, exit statuses, default/strict directory resource budgets and no-authority markers. Only sensitive conflict error text is intentionally replaced by fixed category diagnostics. `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, `NO_NETWORK`, T5B/Mac UID502/APFS/Linux C HOLD remain unchanged.
+
+### 2026-10-19 C0 offline refused directory internal inventory suppression
+
+A refused C0 directory audit now discards its **internal** semantic object inventory, even where some individual manifest files parsed and passed before a later malformed proposal, duplicate ID or URL/SHA conflict was discovered. This removes a partial-acceptance reuse hazard for directory and successor comparison consumers. Public report structure/exit codes remain intact, refused comparison object diffs stay UNAVAILABLE and stable valid inputs still yield complete inventory. No new collection/trust/host authority, network access, privilege, Linux C or CI changes; all C0/T5B and real Mac UID502/APFS HOLD gates persist.
