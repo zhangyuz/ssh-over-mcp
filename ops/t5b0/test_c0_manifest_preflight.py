@@ -6,8 +6,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
 from pathlib import Path
+from unittest.mock import patch
 
 from c0_manifest_preflight import directory_report, inspect_manifest, parse_manifest, validate
 
@@ -1164,7 +1164,7 @@ class C0PreflightTests(unittest.TestCase):
                     observed = os.stat(manifest)
                     mutated = False
 
-                    def concurrent_rewrite(fd, byte_count):
+                    def concurrent_rewrite(fd, byte_count, initial=observed):
                         nonlocal mutated
                         if not mutated:
                             mutated = True
@@ -1173,8 +1173,8 @@ class C0PreflightTests(unittest.TestCase):
                                 writer.flush()
                                 os.fsync(writer.fileno())
                             # Force observable drift independent of filesystem clock resolution.
-                            os.utime(manifest, ns=(observed.st_atime_ns,
-                                                   observed.st_mtime_ns + 3_000_000_000))
+                            os.utime(manifest, ns=(initial.st_atime_ns,
+                                                   initial.st_mtime_ns + 3_000_000_000))
                         return real_read(fd, byte_count)
 
                     with patch('c0_manifest_preflight.os.read', side_effect=concurrent_rewrite):
