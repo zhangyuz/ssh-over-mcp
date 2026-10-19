@@ -1444,7 +1444,7 @@ class C0PreflightTests(unittest.TestCase):
                     with patch('c0_manifest_preflight.inspect_manifest',
                                side_effect=mutate_after_read):
                         if mode == 'directory':
-                            result = directory_report(before)
+                            result = directory_report(before, capture_inventory=True)
                         elif mode == 'compare_directories':
                             result = compare_directories(before, after)
                         else:
@@ -1462,6 +1462,8 @@ class C0PreflightTests(unittest.TestCase):
                     audited = result if mode == 'directory' else result['before']
                     self.assertEqual(audited['errors'], ['directory changed during audit'])
                     self.assertEqual(audited['results'], [])
+                    if mode == 'directory':
+                        self.assertEqual(audited['_inventory'], {})
                     self.assertIsNone(audited['audit_sha256'])
                     self.assertEqual((audited['passed'], audited['refused']), (0, 0))
                     self.assertEqual(audited['authorization'], 'NO_AUTHORIZATION')
