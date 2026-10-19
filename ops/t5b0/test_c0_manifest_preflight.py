@@ -1698,9 +1698,23 @@ class C0PreflightTests(unittest.TestCase):
                 self.assertEqual(validate(doc), [])
 
     def test_noncanonical_numeric_ipv4_host_refusal(self):
-        candidate = copy.deepcopy(BASE)
+        for host in ('192.0.2', '0300.0.2.1', '0xc0000201', '3221225985'):
+            with self.subTest(host=host):
+                candidate = copy.deepcopy(BASE)
+                candidate['objects'][0]['url'] = 'https://' + host + '/candidate.whl'
+                self.assertTrue(validate(candidate))
+        self.assertEqual(validate(copy.deepcopy(BASE)), [])
+        for host in ('192.0.2.1', '198.51.100.42', 'a.1.example'):
+            candidate = copy.deepcopy(BASE)
+            candidate['objects'][0]['url'] = 'https://' + host + '/candidate.whl'
+            self.assertEqual(validate(candidate), [])
         candidate['objects'][0]['url'] = 'https://192.0.2/candidate.whl'
-        self.assertTrue(validate(candidate))
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        run = subprocess.run([sys.executable, str(script), '--stdin', '--json'],
+                             input=json.dumps(candidate).encode(),
+                             capture_output=True, timeout=5, check=False)
+        self.assertEqual(run.returncode, 2)
+        self.assertEqual(json.loads(run.stdout)['status'], 'REFUSED')
 
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),

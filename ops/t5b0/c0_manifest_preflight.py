@@ -1,6 +1,7 @@
 """Offline, fail-closed structural preflight; NEVER downloads or approves collection."""
 import argparse
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -14,6 +15,7 @@ MAX_DIRECTORY_ENTRIES = 64  # Bounds iteration even when non-JSON names are igno
 HEX = re.compile(r'^[0-9a-f]{64}$')
 HOST_LABEL = re.compile(r'^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$')
 FIELDS = frozenset({'id', 'url', 'sha256', 'bytes', 'max_bytes'})
+NUMERIC_IP_HOST = re.compile(r'^(?:0x[0-9a-f]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|[0-9]+))*$')
 EVIDENCE_GAPS = (
     ('SOURCE_AUTHENTICITY', 'Independent source identity and exact material provenance not verified'),
     ('TRUST_ROOT', 'Out-of-band root, signing chain and transparency policy not verified'),
@@ -21,6 +23,16 @@ EVIDENCE_GAPS = (
     ('EXECUTION_ENVIRONMENT', 'Isolated execution image, downloader and dependency closure not admitted'),
     ('OPERATOR_AUTHORIZATION', 'Separate operator consent to collect or execute has not been granted'),
 )
+
+
+def noncanonical_numeric_ip_host(host):
+    """Reject alternative numeric IPv4 spellings without resolving DNS."""
+    if not NUMERIC_IP_HOST.fullmatch(host):
+        return False
+    try:
+        return str(ipaddress.IPv4Address(host)) != host
+    except ValueError:
+        return True
 
 
 def validate(doc):
@@ -66,6 +78,7 @@ def validate(doc):
                     or p.path == '/' or p.netloc != p.hostname
                     or len(p.hostname) > 253
                     or any(not HOST_LABEL.fullmatch(label) for label in p.hostname.split('.'))
+                    or noncanonical_numeric_ip_host(p.hostname)
                     or canonical_path != p.path or any(segment in ('.', '..', '') for segment in p.path.split('/')[1:])
                     or '\\' in p.path or any(ord(c) < 33 or ord(c) > 126 for c in url)):
                 errors.append(prefix + ': URL not pinned to a single HTTPS object path')

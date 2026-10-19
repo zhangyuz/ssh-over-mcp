@@ -2319,3 +2319,7 @@ The offline C0 `inspect_directory` API now returns only fixed conflict diagnosti
 ### 2026-10-19 C0 offline canonical HTTPS host spelling
 
 The untrusted C0 proposal preflight now refuses malformed or ambiguous HTTPS hostname labels (percent-host spellings, empty labels, leading/trailing dash/dot, underscore, excessive label/hostname length) while preserving structurally canonical lowercase ASCII DNS, punycode text, IPv4 literal and single-label controls. This fixes a TDD-confirmed structural false PASS; no DNS/network call, source-authentication assertion, collector permission, verifier execution, Mac UID502/APFS or Linux Slice C change is introduced. C0_COLLECT_HOLD/T5B and five UNVERIFIED evidence gates remain.
+
+### 2026-10-19 Offline C0 numeric IPv4 URL aliases
+
+The offline C0 structural preflight now rejects shorthand, integer, hex-prefixed and padded decimal numeric IPv4 host spellings that network clients may interpret inconsistently. Only exact canonical dotted-decimal IPv4 remains structurally eligible; DNS hostnames are unchanged. This neither resolves names nor authenticates origins, allows C0 collection, admits T5B roots/tools, or advances privileged macOS/UID502/APFS or Linux C gates.
