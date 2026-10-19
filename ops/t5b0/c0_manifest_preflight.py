@@ -12,6 +12,7 @@ from urllib.parse import unquote, urlsplit
 IDS = frozenset({'C0-W1', 'C0-P1', 'C0-R1', 'C0-T1'})
 MAX_DIRECTORY_ENTRIES = 64  # Bounds iteration even when non-JSON names are ignored.
 HEX = re.compile(r'^[0-9a-f]{64}$')
+HOST_LABEL = re.compile(r'^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$')
 FIELDS = frozenset({'id', 'url', 'sha256', 'bytes', 'max_bytes'})
 EVIDENCE_GAPS = (
     ('SOURCE_AUTHENTICITY', 'Independent source identity and exact material provenance not verified'),
@@ -63,6 +64,8 @@ def validate(doc):
             if (p.scheme != 'https' or not p.hostname or p.username or p.password
                     or port is not None or p.fragment or p.query or not p.path.startswith('/')
                     or p.path == '/' or p.netloc != p.hostname
+                    or len(p.hostname) > 253
+                    or any(not HOST_LABEL.fullmatch(label) for label in p.hostname.split('.'))
                     or canonical_path != p.path or any(segment in ('.', '..', '') for segment in p.path.split('/')[1:])
                     or '\\' in p.path or any(ord(c) < 33 or ord(c) > 126 for c in url)):
                 errors.append(prefix + ': URL not pinned to a single HTTPS object path')
