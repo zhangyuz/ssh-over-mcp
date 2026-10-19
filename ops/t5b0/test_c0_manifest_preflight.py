@@ -3,15 +3,24 @@ import copy
 import hashlib
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from c0_manifest_preflight import directory_report, inspect_manifest, parse_manifest, validate
+from c0_manifest_preflight import (
+    compare_directories,
+    compare_stdin_to_directory,
+    directory_report,
+    inspect_manifest,
+    parse_manifest,
+    validate,
+)
 
 BASE = {'schema': 'som-t5b0-c0-preflight-v1', 'approval': None,
         'objects': [{'id': 'C0-W1', 'url': 'https://files.pythonhosted.org/packages/sha256/immutable.whl',
@@ -1407,6 +1416,95 @@ class C0PreflightTests(unittest.TestCase):
                  '--json', str(path)], capture_output=True, timeout=5, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)['status'], 'STRUCTURE_ONLY_PASS')
+
+    def test_directory_namespace_mutation_refuses_without_partial_report(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            before = root / 'before'
+            after = root / 'after'
+            before.mkdir()
+            after.mkdir()
+            (before / 'candidate.json').write_text(json.dumps(BASE))
+            (after / 'candidate.json').write_text(json.dumps(BASE))
+
+            for mode in ('directory', 'compare_directories', 'compare_stdin'):
+                with self.subTest(mode=mode):
+                    notes = before / 'added.txt'
+                    notes.unlink(missing_ok=True)
+                    mutation_count = 0
+
+                    def mutate_after_read(path, *, audit_notes=notes, **kwargs):
+                        nonlocal mutation_count
+                        result = inspect_manifest(path, **kwargs)
+                        if mutation_count == 0:
+                            audit_notes.write_text('namespace changed after a valid manifest read')
+                        mutation_count += 1
+                        return result
+
+                    with patch('c0_manifest_preflight.inspect_manifest',
+                               side_effect=mutate_after_read):
+                        if mode == 'directory':
+                            result = directory_report(before, capture_inventory=True)
+                        elif mode == 'compare_directories':
+                            result = compare_directories(before, after)
+                        else:
+                            original = sys.stdin
+                            try:
+                                sys.stdin = SimpleNamespace(
+                                    buffer=BytesIO(json.dumps(BASE).encode()))
+                                result = compare_stdin_to_directory(before)
+                            finally:
+                                sys.stdin = original
+
+                    self.assertEqual(mutation_count, 1 if mode == 'directory' else
+                                     2 if mode == 'compare_directories' else 1)
+                    self.assertEqual(result['status'], 'REFUSED')
+                    audited = result if mode == 'directory' else result['before']
+                    self.assertEqual(audited['errors'], ['directory changed during audit'])
+                    self.assertEqual(audited['results'], [])
+                    if mode == 'directory':
+                        self.assertEqual(audited['_inventory'], {})
+                    self.assertIsNone(audited['audit_sha256'])
+                    self.assertEqual((audited['passed'], audited['refused']), (0, 0))
+                    self.assertEqual(audited['authorization'], 'NO_AUTHORIZATION')
+                    if mode != 'directory':
+                        self.assertEqual(result['object_diff']['status'], 'UNAVAILABLE')
+
+    def test_directory_stat_ctime_only_refuses_and_atime_only_passes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)
+            (directory / 'candidate.json').write_text(json.dumps(BASE))
+            real_fstat = os.fstat
+            for field, must_refuse in (('st_ctime_ns', True), ('st_atime_ns', False)):
+                with self.subTest(field=field):
+                    directory_stats = 0
+
+                    def only_one_stat_field_changes(fd, *, observed_field=field):
+                        nonlocal directory_stats
+                        observed = real_fstat(fd)
+                        if stat.S_ISDIR(observed.st_mode):
+                            directory_stats += 1
+                            if directory_stats == 2:
+                                keys = ('st_dev', 'st_ino', 'st_mode', 'st_size',
+                                        'st_mtime_ns', 'st_ctime_ns', 'st_atime_ns')
+                                data = {key: getattr(observed, key) for key in keys}
+                                data[observed_field] += 1_000_000_000
+                                return SimpleNamespace(**data)
+                        return observed
+
+                    with patch('c0_manifest_preflight.os.fstat',
+                               side_effect=only_one_stat_field_changes):
+                        report = directory_report(directory)
+                    self.assertEqual(directory_stats, 2)
+                    if must_refuse:
+                        self.assertEqual(report['status'], 'REFUSED')
+                        self.assertEqual(report['errors'], ['directory changed during audit'])
+                        self.assertEqual(report['results'], [])
+                        self.assertIsNone(report['audit_sha256'])
+                    else:
+                        self.assertEqual(report['status'], 'STRUCTURE_ONLY_PASS')
+                        self.assertEqual(report['passed'], 1)
+                        self.assertIsNotNone(report['audit_sha256'])
 
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),

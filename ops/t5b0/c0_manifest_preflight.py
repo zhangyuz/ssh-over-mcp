@@ -322,6 +322,7 @@ def inspect_directory(directory, *, capture_inventory=False, require_json_only=F
             flags |= os.O_CLOEXEC
         fd = os.open(directory, flags)
         try:
+            initial = os.fstat(fd)
             names = []
             with os.scandir(fd) as entries:
                 for count, entry in enumerate(entries, start=1):
@@ -352,11 +353,20 @@ def inspect_directory(directory, *, capture_inventory=False, require_json_only=F
                             inventory[obj['id']] = obj
                     results.append({'path': str(directory / name), **report})
                 cross_file_consistency(results, objects_by_file)
+            final = os.fstat(fd)
+            # Namespace drift can invalidate a scan even if each file read is stable.
+            # Atime is omitted because a normal directory enumeration may change it.
+            fields = ('st_dev', 'st_ino', 'st_mode', 'st_mtime_ns', 'st_ctime_ns')
+            if any(getattr(initial, field) != getattr(final, field) for field in fields):
+                errors = ['directory changed during audit']
+                results = []
+                inventory = {}
         finally:
             os.close(fd)
     except (OSError, ValueError) as exc:
         errors = [f'unreadable/invalid directory: {type(exc).__name__}']
         results = []
+        inventory = {}
     if capture_inventory:
         return results, errors, inventory
     return results, errors
