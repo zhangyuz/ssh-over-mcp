@@ -2315,3 +2315,7 @@ A refused C0 directory audit now discards its **internal** semantic object inven
 ### 2026-10-19 C0 direct directory-inspector diagnostic redaction
 
 The offline C0 `inspect_directory` API now returns only fixed conflict diagnostics for duplicate object IDs, URL collisions and declared digest-size inconsistency, rather than leaving raw untrusted candidate URL/SHA-256 values in error strings for other consumers to log. The public CLI and directory-report wrappers already redacted these; their format and behavior do not change. Twelve RED→GREEN lower-level regression scenarios plus stable valid-directory behavior cover strict/default and inventory/non-inventory use. No network/material/verification/trust/privileged host/Linux C authority or CI-workflow changes; C0 and T5B HOLD gates persist.
+
+### 2026-10-19 C0 offline canonical HTTPS host spelling
+
+The untrusted C0 proposal preflight now refuses malformed or ambiguous HTTPS hostname labels (percent-host spellings, empty labels, leading/trailing dash/dot, underscore, excessive label/hostname length) while preserving structurally canonical lowercase ASCII DNS, punycode text, IPv4 literal and single-label controls. This fixes a TDD-confirmed structural false PASS; no DNS/network call, source-authentication assertion, collector permission, verifier execution, Mac UID502/APFS or Linux Slice C change is introduced. C0_COLLECT_HOLD/T5B and five UNVERIFIED evidence gates remain.
