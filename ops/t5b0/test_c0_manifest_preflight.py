@@ -8,11 +8,19 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from c0_manifest_preflight import directory_report, inspect_manifest, parse_manifest, validate
+from c0_manifest_preflight import (
+    compare_directories,
+    compare_stdin_to_directory,
+    directory_report,
+    inspect_manifest,
+    parse_manifest,
+    validate,
+)
 
 BASE = {'schema': 'som-t5b0-c0-preflight-v1', 'approval': None,
         'objects': [{'id': 'C0-W1', 'url': 'https://files.pythonhosted.org/packages/sha256/immutable.whl',
@@ -1410,9 +1418,6 @@ class C0PreflightTests(unittest.TestCase):
             self.assertEqual(json.loads(result.stdout)['status'], 'STRUCTURE_ONLY_PASS')
 
     def test_directory_namespace_mutation_refuses_without_partial_report(self):
-        from c0_manifest_preflight import compare_directories, compare_stdin_to_directory
-        from io import BytesIO
-
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             before = root / 'before'
@@ -1428,11 +1433,11 @@ class C0PreflightTests(unittest.TestCase):
                     notes.unlink(missing_ok=True)
                     mutation_count = 0
 
-                    def mutate_after_read(path, **kwargs):
+                    def mutate_after_read(path, *, audit_notes=notes, **kwargs):
                         nonlocal mutation_count
                         result = inspect_manifest(path, **kwargs)
                         if mutation_count == 0:
-                            notes.write_text('namespace changed after a valid manifest read')
+                            audit_notes.write_text('namespace changed after a valid manifest read')
                         mutation_count += 1
                         return result
 
@@ -1472,7 +1477,7 @@ class C0PreflightTests(unittest.TestCase):
                 with self.subTest(field=field):
                     directory_stats = 0
 
-                    def only_one_stat_field_changes(fd):
+                    def only_one_stat_field_changes(fd, *, observed_field=field):
                         nonlocal directory_stats
                         observed = real_fstat(fd)
                         if stat.S_ISDIR(observed.st_mode):
@@ -1481,7 +1486,7 @@ class C0PreflightTests(unittest.TestCase):
                                 keys = ('st_dev', 'st_ino', 'st_mode', 'st_size',
                                         'st_mtime_ns', 'st_ctime_ns', 'st_atime_ns')
                                 data = {key: getattr(observed, key) for key in keys}
-                                data[field] += 1_000_000_000
+                                data[observed_field] += 1_000_000_000
                                 return SimpleNamespace(**data)
                         return observed
 
