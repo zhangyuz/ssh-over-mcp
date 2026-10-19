@@ -367,6 +367,8 @@ def inspect_directory(directory, *, capture_inventory=False, require_json_only=F
         errors = [f'unreadable/invalid directory: {type(exc).__name__}']
         results = []
         inventory = {}
+    # Sanitize at the direct directory interface, not only in CLI wrappers.
+    redact_cross_manifest_diagnostics(results)
     # No refused directory may export a partially accepted semantic inventory.
     if errors or any(item['status'] == 'REFUSED' for item in results):
         inventory = {}
