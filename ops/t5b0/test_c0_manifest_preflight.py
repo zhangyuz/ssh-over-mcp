@@ -1506,6 +1506,70 @@ class C0PreflightTests(unittest.TestCase):
                         self.assertEqual(report['passed'], 1)
                         self.assertIsNotNone(report['audit_sha256'])
 
+    def test_directory_conflict_diagnostics_never_echo_raw_url_or_sha(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        private_url = 'https://secret.example/opaque-candidate-bundle'
+        private_sha = 'c' * 64
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            before = root / 'before'
+            after = root / 'after'
+            before.mkdir()
+            after.mkdir()
+            first = copy.deepcopy(BASE['objects'][0])
+            first['url'] = private_url
+            first['sha256'] = private_sha
+            second = copy.deepcopy(first)
+            second['id'] = 'C0-P1'
+            for case in ('url_conflict', 'digest_size_conflict'):
+                with self.subTest(case=case):
+                    candidate = copy.deepcopy(second)
+                    if case == 'url_conflict':
+                        candidate['sha256'] = 'd' * 64
+                    else:
+                        candidate['url'] = 'https://other.example/different'
+                        candidate['bytes'] = 101
+                        candidate['max_bytes'] = 101
+                    for path in (before, after):
+                        (path / '1.json').write_text(json.dumps({
+                            **BASE, 'objects': [first]}))
+                        (path / '2.json').write_text(json.dumps({
+                            **BASE, 'objects': [candidate]}))
+                    for strict in (False, True):
+                        flag = ['--require-json-only'] if strict else []
+                        for mode, args in (
+                            ('directory', ['--directory', str(before), *flag]),
+                            ('two-directories', ['--compare-directories',
+                                                 str(before), str(after), *flag]),
+                            ('stream-successor', ['--compare-stdin-to-directory',
+                                                  str(before), *flag]),
+                        ):
+                            with self.subTest(mode=mode, strict=strict):
+                                input_bytes = (json.dumps({
+                                    **BASE, 'objects': [first]}).encode() + b'\n'
+                                    if mode == 'stream-successor' else None)
+                                result = subprocess.run(
+                                    [sys.executable, str(script), *args],
+                                    input=input_bytes, capture_output=True,
+                                    timeout=6, check=False)
+                                self.assertEqual(result.returncode, 2, (case, args))
+                                self.assertNotIn(private_url.encode(), result.stdout)
+                                self.assertNotIn(private_sha.encode(), result.stdout)
+                                report = json.loads(result.stdout)
+                                self.assertEqual(report['status'], 'REFUSED')
+                                audited = (report if mode == 'directory'
+                                           else report['before'])
+                                self.assertTrue(any(
+                                    'CROSS_FILE_CONFLICT' in item['error_codes']
+                                    for item in audited['results']))
+                                if mode != 'directory':
+                                    self.assertEqual(
+                                        report['object_diff']['status'], 'UNAVAILABLE')
+                                self.assertEqual(
+                                    report['authorization'], 'NO_AUTHORIZATION')
+                                self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+                                self.assertEqual(report['network'], 'NO_NETWORK')
+
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),
