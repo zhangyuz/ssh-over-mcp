@@ -1577,6 +1577,36 @@ class C0PreflightTests(unittest.TestCase):
                                 self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
                                 self.assertEqual(report['network'], 'NO_NETWORK')
 
+    def test_refused_directory_never_returns_partial_internal_inventory(self):
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)
+            first = copy.deepcopy(BASE)
+            other = copy.deepcopy(BASE)
+            other['objects'][0]['id'] = 'C0-P1'
+            other['objects'][0]['sha256'] = 'b' * 64
+            cases = (
+                ('cross_file_url_conflict', first, other),
+                ('duplicate_cross_file_id', first, first),
+                ('invalid_second_manifest', first, None),
+            )
+            for name, left, right in cases:
+                with self.subTest(case=name):
+                    (directory / 'first.json').write_text(json.dumps(left))
+                    second = ('{' if right is None else json.dumps(right))
+                    (directory / 'second.json').write_text(second)
+                    report = directory_report(directory, capture_inventory=True)
+                    self.assertEqual(report['status'], 'REFUSED')
+                    self.assertEqual(report['_inventory'], {})
+                    self.assertGreaterEqual(report['refused'], 1)
+                    self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
+                    self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+                    self.assertEqual(report['network'], 'NO_NETWORK')
+            (directory / 'second.json').unlink()
+            allowed = directory_report(directory, capture_inventory=True)
+            self.assertEqual(allowed['status'], 'STRUCTURE_ONLY_PASS')
+            self.assertEqual(allowed['_inventory'], {'C0-W1': first['objects'][0]})
+            self.assertEqual(allowed['passed'], 1)
+
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),
