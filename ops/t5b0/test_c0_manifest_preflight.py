@@ -1662,6 +1662,41 @@ class C0PreflightTests(unittest.TestCase):
                              ['STRUCTURE_ONLY_PASS'])
             self.assertEqual(objects, {'C0-W1': source})
 
+    def test_noncanonical_https_hostname_refuses_without_network(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        invalid_hosts = (
+            'exa%6dple.org',
+            'bad..example.org',
+            '.example.org',
+            'example.org.',
+            '-bad.example.org',
+            'bad-.example.org',
+            'bad_host.example.org',
+            'a' * 64 + '.example.org',
+            'a' * 63 + '.' + 'b' * 63 + '.' + 'c' * 63 + '.' + 'd' * 63,
+        )
+        for host in invalid_hosts:
+            with self.subTest(host=host):
+                doc = copy.deepcopy(BASE)
+                doc['objects'][0]['url'] = f'https://{host}/pinned.whl'
+                errors = validate(doc)
+                self.assertTrue(any('URL not pinned' in item for item in errors),
+                                (host, errors))
+                for args in (['--stdin', '--json'], ['--stdin']):
+                    with self.subTest(args=args):
+                        run = subprocess.run(
+                            [sys.executable, str(script), *args],
+                            input=json.dumps(doc).encode(), capture_output=True,
+                            timeout=5, check=False)
+                        self.assertEqual(run.returncode, 2, (host, args, run.stdout))
+                        self.assertNotIn(b'STRUCTURE_ONLY_PASS', run.stdout)
+        for host in ('example.org', 'sub1.example-foo.org',
+                     'xn--bcher-kva.example', '192.0.2.1', 'host'):
+            with self.subTest(accepted_host=host):
+                doc = copy.deepcopy(BASE)
+                doc['objects'][0]['url'] = f'https://{host}/pinned.whl'
+                self.assertEqual(validate(doc), [])
+
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),
