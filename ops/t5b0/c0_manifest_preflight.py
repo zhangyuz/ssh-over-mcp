@@ -35,6 +35,8 @@ def validate(doc):
     if not isinstance(objects, list) or not 1 <= len(objects) <= len(IDS):
         return errors + ['objects must be finite nonempty list of at most four']
     seen = set()
+    seen_urls = set()
+    sha_sizes = {}
     for i, obj in enumerate(objects):
         prefix = f'objects[{i}]'
         if not isinstance(obj, dict) or set(obj) != FIELDS:
@@ -64,8 +66,18 @@ def validate(doc):
                     or canonical_path != p.path or any(segment in ('.', '..', '') for segment in p.path.split('/')[1:])
                     or '\\' in p.path or any(ord(c) < 33 or ord(c) > 126 for c in url)):
                 errors.append(prefix + ': URL not pinned to a single HTTPS object path')
+            elif url in seen_urls:
+                errors.append(prefix + ': duplicate object URL')
+            else:
+                seen_urls.add(url)
         if not isinstance(obj['sha256'], str) or not HEX.fullmatch(obj['sha256']):
             errors.append(prefix + ': missing SHA256')
+        elif type(obj['bytes']) is int and obj['bytes'] > 0:
+            previous_size = sha_sizes.get(obj['sha256'])
+            if previous_size is not None and previous_size != obj['bytes']:
+                errors.append(prefix + ': conflicting SHA256 declared bytes')
+            else:
+                sha_sizes[obj['sha256']] = obj['bytes']
         size, cap = obj['bytes'], obj['max_bytes']
         if type(size) is not int or type(cap) is not int or not (0 < size <= cap <= 100_000_000):
             errors.append(prefix + ': invalid size/cap')

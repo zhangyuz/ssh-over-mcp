@@ -1334,6 +1334,80 @@ class C0PreflightTests(unittest.TestCase):
             self.assertEqual(aggregate['refused'], 0)
             self.assertEqual(aggregate['authorization'], 'NO_AUTHORIZATION')
 
+
+    def test_intra_manifest_conflicts_refuse_every_existing_entrypoint(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            input_dir = root / 'input'
+            before = root / 'before'
+            input_dir.mkdir()
+            before.mkdir()
+            (before / 'base.json').write_text(json.dumps(BASE))
+            first = copy.deepcopy(BASE['objects'][0])
+            second = copy.deepcopy(first)
+            second['id'] = 'C0-P1'
+            cases = (
+                ('duplicate_url_different_digest', {
+                    **second, 'sha256': 'b' * 64}),
+                ('duplicate_url_same_metadata', second),
+                ('shared_sha_different_size', {
+                    **second, 'url': 'https://host/second', 'bytes': 101,
+                    'max_bytes': 101}),
+            )
+            for label, other in cases:
+                with self.subTest(case=label):
+                    doc = copy.deepcopy(BASE)
+                    doc['objects'].append(other)
+                    payload = json.dumps(doc).encode()
+                    file_path = input_dir / 'proposal.json'
+                    file_path.write_bytes(payload)
+                    for mode, options in (
+                        ('single', ['--json', str(file_path)]),
+                        ('stdin', ['--stdin', '--json']),
+                        ('batch', ['--batch', str(file_path)]),
+                        ('stdin_batch', ['--stdin-batch']),
+                        ('directory', ['--directory', str(input_dir)]),
+                        ('compare', ['--compare-stdin-to-directory', str(before)]),
+                        ('compare_dirs', ['--compare-directories', str(before), str(input_dir)]),
+                    ):
+                        with self.subTest(mode=mode):
+                            result = subprocess.run(
+                                [sys.executable, str(script), *options],
+                                input=payload if mode in ('stdin', 'stdin_batch', 'compare') else None,
+                                capture_output=True, timeout=5, check=False)
+                            self.assertEqual(result.returncode, 2, (label, mode, result.stderr))
+                            report = json.loads(result.stdout)
+                            self.assertEqual(report['status'], 'REFUSED')
+                            entry = (report['after']['results'][0] if mode in ('compare', 'compare_dirs') else
+                                     report['results'][0] if mode in ('batch', 'stdin_batch', 'directory')
+                                     else report)
+                            self.assertIn('INVALID_STRUCTURE', entry['error_codes'])
+                            self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
+                            self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+                            self.assertEqual(report['network'], 'NO_NETWORK')
+                            if mode in ('compare', 'compare_dirs'):
+                                self.assertEqual(report['object_diff']['status'], 'UNAVAILABLE')
+                            self.assertNotIn(b'https://host/second', result.stdout)
+                            self.assertNotIn(b'bbbbbbbb', result.stdout)
+
+    def test_intra_manifest_same_digest_same_size_distinct_urls_is_allowed(self):
+        doc = copy.deepcopy(BASE)
+        second = copy.deepcopy(doc['objects'][0])
+        second['id'] = 'C0-P1'
+        second['url'] = 'https://host/mirror'
+        doc['objects'].append(second)
+        self.assertEqual(validate(doc), [])
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'mirror.json'
+            path.write_text(json.dumps(doc))
+            result = subprocess.run(
+                [sys.executable, str(Path(__file__).with_name('c0_manifest_preflight.py')),
+                 '--json', str(path)], capture_output=True, timeout=5, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)['status'], 'STRUCTURE_ONLY_PASS')
+
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),
