@@ -102,6 +102,15 @@ def read_regular_manifest(path, *, dir_fd=None):
             raise ValueError('manifest too large')
         if len(data) != info.st_size:
             raise ValueError('manifest size changed during read')
+        after = os.fstat(fd)
+        # A same-length rewrite can otherwise yield valid JSON and a false
+        # structure-only PASS. Atime is omitted: ordinary reads may update it.
+        initial_identity = (info.st_dev, info.st_ino, info.st_mode, info.st_size,
+                            info.st_mtime_ns, info.st_ctime_ns)
+        final_identity = (after.st_dev, after.st_ino, after.st_mode, after.st_size,
+                          after.st_mtime_ns, after.st_ctime_ns)
+        if final_identity != initial_identity:
+            raise ValueError('manifest changed during read')
         return data
     finally:
         os.close(fd)

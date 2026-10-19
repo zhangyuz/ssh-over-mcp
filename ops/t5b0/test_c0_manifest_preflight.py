@@ -1,5 +1,6 @@
 """Purely offline negative/positive structural fixtures; no network."""
 import copy
+import hashlib
 import json
 import os
 import subprocess
@@ -7,8 +8,10 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
-from c0_manifest_preflight import parse_manifest, validate
+from c0_manifest_preflight import directory_report, inspect_manifest, parse_manifest, validate
 
 BASE = {'schema': 'som-t5b0-c0-preflight-v1', 'approval': None,
         'objects': [{'id': 'C0-W1', 'url': 'https://files.pythonhosted.org/packages/sha256/immutable.whl',
@@ -1144,6 +1147,192 @@ class C0PreflightTests(unittest.TestCase):
         self.assertIn(b'--compare-stdin-to-directory', result.stdout)
         change_help = result.stdout.split(b'--fail-on-change', 2)[-1]
         self.assertIn(b'--compare-stdin-to-directory', change_help.replace(b'\n                        ', b''))
+
+    def test_regular_manifest_same_size_inplace_rewrite_refuses_before_reporting(self):
+        script_obj = copy.deepcopy(BASE)
+        modified = copy.deepcopy(BASE)
+        modified['objects'][0]['sha256'] = 'b' * 64
+        original_bytes = json.dumps(script_obj).encode()
+        modified_bytes = json.dumps(modified).encode()
+        self.assertEqual(len(original_bytes), len(modified_bytes))
+
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)
+            manifest = directory / 'candidate.json'
+            real_read = os.read
+            for mode in ('single', 'directory'):
+                with self.subTest(mode=mode):
+                    manifest.write_bytes(original_bytes)
+                    observed = os.stat(manifest)
+                    mutated = False
+
+                    def concurrent_rewrite(fd, byte_count, initial=observed):
+                        nonlocal mutated
+                        if not mutated:
+                            mutated = True
+                            with manifest.open('r+b') as writer:
+                                writer.write(modified_bytes)
+                                writer.flush()
+                                os.fsync(writer.fileno())
+                            # Force observable drift independent of filesystem clock resolution.
+                            os.utime(manifest, ns=(initial.st_atime_ns,
+                                                   initial.st_mtime_ns + 3_000_000_000))
+                        return real_read(fd, byte_count)
+
+                    with patch('c0_manifest_preflight.os.read', side_effect=concurrent_rewrite):
+                        if mode == 'single':
+                            report = inspect_manifest(manifest)
+                        else:
+                            report = directory_report(directory)
+                    self.assertTrue(mutated)
+                    self.assertEqual(report['status'], 'REFUSED')
+                    self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+                    self.assertEqual(report['network'], 'NO_NETWORK')
+                    error_report = report if mode == 'single' else report['results'][0]
+                    self.assertEqual(error_report['error_codes'], ['INVALID_MANIFEST'])
+                    self.assertNotIn(modified['objects'][0]['sha256'],
+                                     json.dumps(error_report))
+
+    def test_regular_manifest_restored_mtime_ctime_only_drift_refuses(self):
+        original = json.dumps(BASE).encode()
+        other = copy.deepcopy(BASE)
+        other['objects'][0]['sha256'] = 'c' * 64
+        replacement = json.dumps(other).encode()
+        self.assertEqual(len(original), len(replacement))
+
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)
+            manifest = directory / 'candidate.json'
+            real_fstat, real_read = os.fstat, os.read
+            for mode in ('single', 'directory'):
+                with self.subTest(mode=mode):
+                    manifest.write_bytes(original)
+                    start = os.stat(manifest)
+                    snapshots = []
+                    mutations = {'rewritten': False}
+
+                    def monitored_fstat(fd, initial=start, seen=snapshots,
+                                        state=mutations):
+                        current = real_fstat(fd)
+                        if (current.st_dev, current.st_ino) != (initial.st_dev, initial.st_ino):
+                            return current
+                        # Synthetic fstat timestamp delta is deterministic on APFS/ext4.
+                        # All metadata except ctime stays identical across observations.
+                        result = SimpleNamespace(
+                            st_dev=initial.st_dev, st_ino=initial.st_ino,
+                            st_mode=initial.st_mode, st_size=initial.st_size,
+                            st_mtime_ns=initial.st_mtime_ns,
+                            st_ctime_ns=initial.st_ctime_ns + (
+                                3_000_000_000 if state['rewritten'] else 0),
+                            st_atime_ns=initial.st_atime_ns,
+                        )
+                        seen.append(result)
+                        return result
+
+                    def rewrite_then_read(fd, count, initial=start,
+                                              state=mutations):
+                        state['rewritten'] = True
+                        with manifest.open('r+b') as writer:
+                            writer.write(replacement)
+                            writer.flush()
+                            os.fsync(writer.fileno())
+                        os.utime(manifest, ns=(initial.st_atime_ns, initial.st_mtime_ns))
+                        self.assertEqual(os.stat(manifest).st_mtime_ns,
+                                         initial.st_mtime_ns)
+                        return real_read(fd, count)
+
+                    with patch('c0_manifest_preflight.os.fstat',
+                               side_effect=monitored_fstat), patch(
+                                   'c0_manifest_preflight.os.read',
+                                   side_effect=rewrite_then_read):
+                        report = (inspect_manifest(manifest, include_digest=True,
+                                                   capture_objects=True)
+                                  if mode == 'single' else directory_report(directory))
+                    self.assertTrue(mutations['rewritten'])
+                    self.assertEqual(len(snapshots), 2)
+                    initial, final = snapshots
+                    self.assertEqual(
+                        (initial.st_dev, initial.st_ino, initial.st_mode, initial.st_size,
+                         initial.st_mtime_ns, initial.st_atime_ns),
+                        (final.st_dev, final.st_ino, final.st_mode, final.st_size,
+                         final.st_mtime_ns, final.st_atime_ns))
+                    self.assertNotEqual(initial.st_ctime_ns, final.st_ctime_ns)
+                    self.assertEqual(report['status'], 'REFUSED')
+                    self.assertEqual(report['network'], 'NO_NETWORK')
+                    self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+                    if mode == 'single':
+                        self.assertEqual(report['error_codes'], ['INVALID_MANIFEST'])
+                        self.assertIsNone(report['sha256'])
+                        self.assertIsNone(report['_objects'])
+                    else:
+                        self.assertEqual(report['results'][0]['error_codes'],
+                                         ['INVALID_MANIFEST'])
+                        self.assertIsNone(report['results'][0]['sha256'])
+                        self.assertEqual(report['refused'], 1)
+
+    def test_regular_manifest_atime_only_drift_does_not_refuse(self):
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)
+            manifest = directory / 'candidate.json'
+            data = json.dumps(BASE).encode()
+            manifest.write_bytes(data)
+            original = os.stat(manifest)
+            real_fstat = os.fstat
+            for mode in ('single', 'directory'):
+                with self.subTest(mode=mode):
+                    snapshots = []
+
+                    def monitored_fstat(fd, seen=snapshots):
+                        current = real_fstat(fd)
+                        if (current.st_dev, current.st_ino) != (original.st_dev,
+                                                               original.st_ino):
+                            return current
+                        result = SimpleNamespace(
+                            st_dev=original.st_dev, st_ino=original.st_ino,
+                            st_mode=original.st_mode, st_size=original.st_size,
+                            st_mtime_ns=original.st_mtime_ns,
+                            st_ctime_ns=original.st_ctime_ns,
+                            st_atime_ns=original.st_atime_ns + (
+                                3_000_000_000 if seen else 0),
+                        )
+                        seen.append(result)
+                        return result
+
+                    with patch('c0_manifest_preflight.os.fstat',
+                               side_effect=monitored_fstat):
+                        report = (inspect_manifest(manifest, include_digest=True,
+                                                   capture_objects=True)
+                                  if mode == 'single' else directory_report(directory))
+                    self.assertEqual(len(snapshots), 2)
+                    initial, final = snapshots
+                    self.assertNotEqual(initial.st_atime_ns, final.st_atime_ns)
+                    self.assertEqual(
+                        (initial.st_dev, initial.st_ino, initial.st_mode, initial.st_size,
+                         initial.st_mtime_ns, initial.st_ctime_ns),
+                        (final.st_dev, final.st_ino, final.st_mode, final.st_size,
+                         final.st_mtime_ns, final.st_ctime_ns))
+                    self.assertEqual(report['status'], 'STRUCTURE_ONLY_PASS')
+                    self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
+                    if mode == 'single':
+                        self.assertEqual(report['error_codes'], [])
+                        self.assertEqual(report['sha256'], hashlib.sha256(data).hexdigest())
+                        self.assertEqual(report['_objects'], BASE['objects'])
+                    else:
+                        self.assertEqual(report['passed'], 1)
+                        self.assertEqual(report['refused'], 0)
+
+    def test_regular_manifest_unchanged_bytes_still_pass(self):
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)
+            manifest = directory / 'candidate.json'
+            manifest.write_bytes(json.dumps(BASE).encode())
+            one = inspect_manifest(manifest)
+            aggregate = directory_report(directory)
+            self.assertEqual(one['status'], 'STRUCTURE_ONLY_PASS')
+            self.assertEqual(aggregate['status'], 'STRUCTURE_ONLY_PASS')
+            self.assertEqual(aggregate['passed'], 1)
+            self.assertEqual(aggregate['refused'], 0)
+            self.assertEqual(aggregate['authorization'], 'NO_AUTHORIZATION')
 
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
