@@ -1697,6 +1697,11 @@ class C0PreflightTests(unittest.TestCase):
                 doc['objects'][0]['url'] = f'https://{host}/pinned.whl'
                 self.assertEqual(validate(doc), [])
 
+    def test_noncanonical_numeric_ipv4_host_refusal(self):
+        candidate = copy.deepcopy(BASE)
+        candidate['objects'][0]['url'] = 'https://192.0.2/candidate.whl'
+        self.assertTrue(validate(candidate))
+
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),
