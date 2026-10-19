@@ -1138,14 +1138,21 @@ class C0PreflightTests(unittest.TestCase):
                     self.assertNotIn(b'SENTINEL_BASELINE_URL', result.stdout)
                     self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
                     self.assertEqual(report['network'], 'NO_NETWORK')
-                    # Existing standalone directory report retains its prior error contract.
+                    # Directory and streamed compare now share fixed conflict diagnostics.
                     legacy = subprocess.run([sys.executable, str(script), '--directory',
                                              str(before)], capture_output=True,
                                             timeout=5, check=False)
                     self.assertEqual(legacy.returncode, 2, legacy.stderr)
-                    self.assertIn(
-                        b'conflicting cross-file URL:' if name == 'url' else
-                        b'conflicting cross-file SHA256 size:', legacy.stdout)
+                    standalone = json.loads(legacy.stdout)
+                    self.assertEqual(standalone['status'], 'REFUSED')
+                    self.assertTrue(all(
+                        'CROSS_FILE_CONFLICT' in row['error_codes']
+                        for row in standalone['results']))
+                    self.assertTrue(all(
+                        'conflicting cross-manifest object metadata' in row['errors']
+                        for row in standalone['results']))
+                    self.assertNotIn(url.encode(), legacy.stdout)
+                    self.assertNotIn(digest.encode(), legacy.stdout)
 
     def test_stdin_directory_compare_help_mentions_both_change_modes(self):
         script = Path(__file__).with_name('c0_manifest_preflight.py')
