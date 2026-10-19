@@ -17,6 +17,7 @@ from c0_manifest_preflight import (
     compare_directories,
     compare_stdin_to_directory,
     directory_report,
+    inspect_directory,
     inspect_manifest,
     parse_manifest,
     validate,
@@ -1606,6 +1607,60 @@ class C0PreflightTests(unittest.TestCase):
             self.assertEqual(allowed['status'], 'STRUCTURE_ONLY_PASS')
             self.assertEqual(allowed['_inventory'], {'C0-W1': first['objects'][0]})
             self.assertEqual(allowed['passed'], 1)
+
+    def test_direct_directory_inspection_redacts_cross_file_values(self):
+        """Direct callers must get the same sanitized boundary as CLI wrappers."""
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            url = 'https://sensitive.example/opaque-untrusted-metadata'
+            digest = 'e' * 64
+            source = copy.deepcopy(BASE['objects'][0])
+            source.update(url=url, sha256=digest)
+            cases = {
+                'url': {**source, 'id': 'C0-P1', 'sha256': 'f' * 64},
+                'sha-size': {**source, 'id': 'C0-P1',
+                             'url': 'https://second.example/other',
+                             'bytes': 101, 'max_bytes': 101},
+                'duplicate-id': {**source, 'url': 'https://second.example/other',
+                                 'sha256': 'f' * 64},
+            }
+            for name, second in cases.items():
+                with self.subTest(case=name):
+                    (root / 'first.json').write_text(json.dumps({
+                        **BASE, 'objects': [source]}))
+                    (root / 'second.json').write_text(json.dumps({
+                        **BASE, 'objects': [second]}))
+                    for strict in (False, True):
+                        for capture in (False, True):
+                            with self.subTest(strict=strict, capture=capture):
+                                observed = inspect_directory(
+                                    root, capture_inventory=capture,
+                                    require_json_only=strict)
+                                results, errors = observed[:2]
+                                self.assertEqual(errors, [])
+                                self.assertTrue(all(item['status'] == 'REFUSED'
+                                                    for item in results))
+                                payload = json.dumps(results)
+                                self.assertNotIn(url, payload)
+                                self.assertNotIn(digest, payload)
+                                if capture:
+                                    self.assertEqual(observed[2], {})
+                                for row in results:
+                                    self.assertTrue(any(
+                                        code in row['error_codes']
+                                        for code in ('CROSS_FILE_CONFLICT',
+                                                     'DUPLICATE_OBJECT_ID')))
+                                    self.assertTrue(all(
+                                        error in ('duplicate cross-manifest object id',
+                                                  'conflicting cross-manifest object metadata')
+                                        for error in row['errors']))
+            (root / 'second.json').unlink()
+            accepted, errors, objects = inspect_directory(
+                root, capture_inventory=True)
+            self.assertEqual(errors, [])
+            self.assertEqual([r['status'] for r in accepted],
+                             ['STRUCTURE_ONLY_PASS'])
+            self.assertEqual(objects, {'C0-W1': source})
 
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
