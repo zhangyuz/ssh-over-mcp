@@ -377,6 +377,8 @@ def directory_report(directory, *, capture_inventory=False, require_json_only=Fa
     inspected = inspect_directory(directory, capture_inventory=capture_inventory,
                                   require_json_only=require_json_only)
     results, errors = inspected[:2]
+    # Directory reports can reach CI logs; never echo proposal URLs or digests.
+    redact_cross_manifest_diagnostics(results)
     refused = bool(errors) or any(item['status'] == 'REFUSED' for item in results)
     report = {
         'status': 'REFUSED' if refused else 'STRUCTURE_ONLY_PASS',

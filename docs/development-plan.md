@@ -2303,3 +2303,7 @@ The offline C0 reviewer now enforces that each object URL is unique **within** o
 ### 2026-10-19 C0 offline directory namespace drift refusal
 
 The existing directory auditor now measures opened-directory identity and namespace-change timestamps before and after scanning and reading. Observed drift refuses the aggregate without returning partial manifest results, audit digest or semantic inventory, even if already-read manifests independently passed. Deterministic tests include live directory mutation during read, ctime-only drift rejection and atime-only non-rejection for direct/compare paths; limits and no-follow protections remain. This is not an atomic snapshot, material provenance, network/collection authorization or T5B/Mac/UID502/APFS/Linux C release approval; all corresponding HOLD markers persist.
+
+### 2026-10-19 C0 directory cross-file conflict output confidentiality
+
+The offline C0 directory reviewer now redacts raw URL and SHA-256 values from cross-file conflict diagnostic strings in directory audit and two-directory comparison, reusing the existing stream-mode sanitizer. This fixes a proven stdout/CI diagnostic exposure and retains all legacy report keys, stable error codes, exit statuses, default/strict directory resource budgets and no-authority markers. Only sensitive conflict error text is intentionally replaced by fixed category diagnostics. `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, `NO_NETWORK`, T5B/Mac UID502/APFS/Linux C HOLD remain unchanged.
