@@ -6,9 +6,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
-from c0_manifest_preflight import parse_manifest, validate
+from c0_manifest_preflight import directory_report, inspect_manifest, parse_manifest, validate
 
 BASE = {'schema': 'som-t5b0-c0-preflight-v1', 'approval': None,
         'objects': [{'id': 'C0-W1', 'url': 'https://files.pythonhosted.org/packages/sha256/immutable.whl',
@@ -1144,6 +1145,64 @@ class C0PreflightTests(unittest.TestCase):
         self.assertIn(b'--compare-stdin-to-directory', result.stdout)
         change_help = result.stdout.split(b'--fail-on-change', 2)[-1]
         self.assertIn(b'--compare-stdin-to-directory', change_help.replace(b'\n                        ', b''))
+
+    def test_regular_manifest_same_size_inplace_rewrite_refuses_before_reporting(self):
+        script_obj = copy.deepcopy(BASE)
+        modified = copy.deepcopy(BASE)
+        modified['objects'][0]['sha256'] = 'b' * 64
+        original_bytes = json.dumps(script_obj).encode()
+        modified_bytes = json.dumps(modified).encode()
+        self.assertEqual(len(original_bytes), len(modified_bytes))
+
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)
+            manifest = directory / 'candidate.json'
+            real_read = os.read
+            for mode in ('single', 'directory'):
+                with self.subTest(mode=mode):
+                    manifest.write_bytes(original_bytes)
+                    observed = os.stat(manifest)
+                    mutated = False
+
+                    def concurrent_rewrite(fd, byte_count):
+                        nonlocal mutated
+                        if not mutated:
+                            mutated = True
+                            with manifest.open('r+b') as writer:
+                                writer.write(modified_bytes)
+                                writer.flush()
+                                os.fsync(writer.fileno())
+                            # Force observable drift independent of filesystem clock resolution.
+                            os.utime(manifest, ns=(observed.st_atime_ns,
+                                                   observed.st_mtime_ns + 3_000_000_000))
+                        return real_read(fd, byte_count)
+
+                    with patch('c0_manifest_preflight.os.read', side_effect=concurrent_rewrite):
+                        if mode == 'single':
+                            report = inspect_manifest(manifest)
+                        else:
+                            report = directory_report(directory)
+                    self.assertTrue(mutated)
+                    self.assertEqual(report['status'], 'REFUSED')
+                    self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+                    self.assertEqual(report['network'], 'NO_NETWORK')
+                    error_report = report if mode == 'single' else report['results'][0]
+                    self.assertEqual(error_report['error_codes'], ['INVALID_MANIFEST'])
+                    self.assertNotIn(modified['objects'][0]['sha256'],
+                                     json.dumps(error_report))
+
+    def test_regular_manifest_unchanged_bytes_still_pass(self):
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)
+            manifest = directory / 'candidate.json'
+            manifest.write_bytes(json.dumps(BASE).encode())
+            one = inspect_manifest(manifest)
+            aggregate = directory_report(directory)
+            self.assertEqual(one['status'], 'STRUCTURE_ONLY_PASS')
+            self.assertEqual(aggregate['status'], 'STRUCTURE_ONLY_PASS')
+            self.assertEqual(aggregate['passed'], 1)
+            self.assertEqual(aggregate['refused'], 0)
+            self.assertEqual(aggregate['authorization'], 'NO_AUTHORIZATION')
 
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
