@@ -1369,6 +1369,7 @@ class C0PreflightTests(unittest.TestCase):
                         ('stdin_batch', ['--stdin-batch']),
                         ('directory', ['--directory', str(input_dir)]),
                         ('compare', ['--compare-stdin-to-directory', str(before)]),
+                        ('compare_dirs', ['--compare-directories', str(before), str(input_dir)]),
                     ):
                         with self.subTest(mode=mode):
                             result = subprocess.run(
@@ -1378,14 +1379,14 @@ class C0PreflightTests(unittest.TestCase):
                             self.assertEqual(result.returncode, 2, (label, mode, result.stderr))
                             report = json.loads(result.stdout)
                             self.assertEqual(report['status'], 'REFUSED')
-                            entry = (report['after']['results'][0] if mode == 'compare' else
+                            entry = (report['after']['results'][0] if mode in ('compare', 'compare_dirs') else
                                      report['results'][0] if mode in ('batch', 'stdin_batch', 'directory')
                                      else report)
                             self.assertIn('INVALID_STRUCTURE', entry['error_codes'])
                             self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
                             self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
                             self.assertEqual(report['network'], 'NO_NETWORK')
-                            if mode == 'compare':
+                            if mode in ('compare', 'compare_dirs'):
                                 self.assertEqual(report['object_diff']['status'], 'UNAVAILABLE')
                             self.assertNotIn(b'https://host/second', result.stdout)
                             self.assertNotIn(b'bbbbbbbb', result.stdout)
