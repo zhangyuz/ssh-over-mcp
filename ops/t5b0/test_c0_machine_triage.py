@@ -52,6 +52,36 @@ class MachineTriageTests(unittest.TestCase):
         self.assertEqual(data['next_action_codes'], ['STOP_UNKNOWN_REVIEW_STATUS'])
         self.assertNotIn('UNRECOGNIZED_PRIVATE_STATUS', json.dumps(data))
 
+    def test_all_nine_cli_modes_have_non_authorizing_machine_actions(self):
+        import tempfile
+        from pathlib import Path
+
+        data = json.dumps(VALID).encode()
+        with tempfile.TemporaryDirectory() as root:
+            old, new = Path(root) / 'old', Path(root) / 'new'
+            old.mkdir()
+            new.mkdir()
+            (old / 'private.json').write_bytes(data)
+            (new / 'private.json').write_bytes(data)
+            modes = [([old / 'private.json'], b''),
+                     (['--batch', old / 'private.json'], b''),
+                     (['--directory', old], b''),
+                     (['--stdin'], data), (['--stdin-batch'], data),
+                     (['--compare-directories', old, new], b''),
+                     (['--compare-stdin-to-directory', old], data),
+                     (['--compare-stdin-before-directory', new], data),
+                     (['--compare-stdin-batches'], data + b'\n---\n' + data)]
+            for args, incoming in modes:
+                with self.subTest(args=args):
+                    code, output, err = run([*args, '--summary-json'], incoming)
+                    self.assertEqual((code, err), (0, ''))
+                    report = json.loads(output)
+                    self.assertEqual(report['next_action_codes'],
+                                     ['VERIFY_INDEPENDENT_EVIDENCE'])
+                    self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
+                    for secret in (root, 'private.json', 'https://'):
+                        self.assertNotIn(secret, output)
+
     def test_cli_triage_is_private_and_matches_exit(self):
         original = json.dumps(VALID).encode()
         altered = copy.deepcopy(VALID)
