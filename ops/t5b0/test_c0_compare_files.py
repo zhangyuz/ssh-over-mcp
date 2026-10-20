@@ -1,13 +1,18 @@
 """Direct pair-of-files C0 offline review contracts; no collection authorization."""
 import copy
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
+import c0_manifest_preflight as c0
 from test_c0_guidance import VALID
 
 SCRIPT = Path(__file__).with_name('c0_manifest_preflight.py')
@@ -106,7 +111,8 @@ class CompareFilesTests(unittest.TestCase):
                     self.assertEqual((proc.returncode, proc.stderr), (2, b''))
                     self.assertEqual(report['status'], 'REFUSED')
                     self.check_private(proc.stdout.decode())
-                    self.assertEqual(report['object_diff']['status'], 'UNAVAILABLE') if '--json' in fmt else None
+                    if '--json' in fmt:
+                        self.assertEqual(report['object_diff']['status'], 'UNAVAILABLE')
                     if '--summary-json' in fmt:
                         self.assertEqual(report['object_changes'], 'UNAVAILABLE')
                         self.assertIsNone(report['object_change_counts'])
@@ -133,6 +139,41 @@ class CompareFilesTests(unittest.TestCase):
                     self.after.unlink()
                 elif kind == 'directory':
                     self.after.rmdir()
+
+    def test_conflicting_input_modes_never_read_files_or_stdin(self):
+        class NoRead:
+            def read(self, *args):
+                raise AssertionError('must reject before reading stdin')
+
+        error = io.StringIO()
+        with patch.object(sys, 'argv', [str(SCRIPT), '--compare-files',
+                                        str(self.before), str(self.after), '--stdin']), \
+                patch.object(sys, 'stdin', SimpleNamespace(buffer=NoRead())), \
+                patch.object(c0, 'inspect_manifest', side_effect=AssertionError('read file')), \
+                redirect_stdout(io.StringIO()), redirect_stderr(error), \
+                self.assertRaises(SystemExit) as raised:
+            c0.main()
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn('cannot be combined', error.getvalue())
+
+    def test_exact_16k_file_limit_and_audit_repeats_deterministically(self):
+        encoded = json.dumps(VALID).encode()
+        at_limit = encoded + b' ' * (16384 - len(encoded))
+        self.before.write_bytes(at_limit)
+        self.after.write_bytes(encoded)
+        first, info = invoke(['--compare-files', self.before, self.after,
+                              '--summary-json', '--fail-on-change'])
+        second, _ = invoke(['--compare-files', self.before, self.after,
+                            '--summary-json', '--fail-on-change'])
+        self.assertEqual(first.returncode, 0)
+        self.assertEqual(info['status'], 'UNCHANGED')
+        self.assertEqual(first.stdout, second.stdout)
+        self.after.write_bytes(at_limit + b' ')
+        refused, report = invoke(['--compare-files', self.before, self.after,
+                                  '--summary-json'])
+        self.assertEqual(refused.returncode, 2)
+        self.assertEqual(report['status'], 'REFUSED')
+        self.assertIsNone(report['object_change_counts'])
 
     def test_strict_option_and_all_other_modes_conflict_pre_read(self):
         other_flags = [('--stdin',), ('--stdin-batch',), ('--compare-stdin-batches',),

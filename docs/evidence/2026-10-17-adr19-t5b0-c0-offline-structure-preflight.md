@@ -311,3 +311,48 @@ Exit codes remain 0/2/3; existing 64 directory names / 16 manifests /
 does **not** authenticate, download, run or authorize material; preserve
 `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, `NO_NETWORK`, all five `UNVERIFIED`
 gaps and all T5B/Mac UID502/APFS/Linux C HOLDs.
+
+## Direct two-manifest offline reviewer (`--compare-files`, 2026-10-20)
+
+Use this mode when two individual proposal files already exist and an operator
+needs an offline structural semantic diff without packaging each into a
+one-entry directory or rewriting them into NDJSON. The files are independent,
+untrusted observations, not a trusted baseline or approved software artifacts.
+
+```sh
+# Synthetic local examples; no network/material collection.
+workdir=$(mktemp -d)
+python3 - "$workdir" <<'PY_SAMPLE'
+import copy, json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+before = {'schema': 'som-t5b0-c0-preflight-v1', 'approval': None,
+          'objects': [{'id': 'C0-W1', 'url': 'https://example.org/sample.whl',
+                       'sha256': 'a'*64, 'bytes': 100, 'max_bytes': 100}]}
+after = copy.deepcopy(before)
+after['objects'][0]['max_bytes'] = 120
+(root / 'before.json').write_text(json.dumps(before))
+(root / 'after.json').write_text(json.dumps(after))
+PY_SAMPLE
+python3 ops/t5b0/c0_manifest_preflight.py --compare-files \
+  "$workdir/before.json" "$workdir/after.json" --summary-json --fail-on-change
+# Expected: CHANGED, exit 3, review_mode FILE_COMPARISON,
+# object_change_counts.changed 1, never actual URL, path or SHA256.
+# Make the two files identical => UNCHANGED/exit 0, counts all zero.
+# Replace either file with malformed JSON => REFUSED/exit 2,
+# object_changes UNAVAILABLE and object_change_counts null.
+rm -rf "$workdir"
+```
+
+Both reads use the existing no-follow, race-aware regular-file reader with a
+separate 16,384-byte ceiling. FIFO, directory, symlink and missing files refuse
+without blocking or disclosing input paths in private summary output. Inputs are
+not downloaded, written by the CLI, trusted, admitted or executed; the example
+creates and removes only temporary *synthetic* files. CLI mutually excludes
+other intake modes and `--require-json-only`, including checks **before any
+input is read**. The legacy JSON report includes bounded object identifiers and
+field *names* but never candidate URLs/digests; `--summary-json` omits even
+identifiers and includes a fixed `FILE_COMPARISON` mode label. The `v1` envelope
+remains a structural report-format identifier, not provenance or authorization.
+T5B/Mac UID502/APFS/Linux C and all five evidence verification gates remain HOLD.
+
+Test with `python3 -m unittest discover -s ops/t5b0 -p test_c0_compare_files.py -v`.
