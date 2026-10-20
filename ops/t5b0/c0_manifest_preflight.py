@@ -76,7 +76,8 @@ def validate(doc):
             # Reject encoded path separators/dot segments and noncanonical spellings.
             # No URL here is a download authorization or an endpoint allowlist.
             canonical_path = unquote(p.path)
-            if (p.scheme != 'https' or not p.hostname or p.username or p.password
+            if (p.scheme != 'https' or not url.startswith('https://')
+                    or not p.hostname or p.username or p.password
                     or port is not None or '?' in url or '#' in url
                     or p.fragment or p.query or not p.path.startswith('/')
                     or p.path == '/' or p.netloc != p.hostname
