@@ -669,8 +669,12 @@ def render_summary_json(report):
                                  ('added', 'removed', 'changed', 'regressions')}
     delta = report.get('object_diff')
     if delta is not None:
-        result['object_changes'] = ('UNAVAILABLE' if report['status'] == 'REFUSED'
-                                    or delta['status'] != 'AVAILABLE' else 'AVAILABLE')
+        available = report['status'] != 'REFUSED' and delta['status'] == 'AVAILABLE'
+        result['object_changes'] = 'AVAILABLE' if available else 'UNAVAILABLE'
+        # Refusal never means zero changes: comparison was not completed.
+        result['object_change_counts'] = (
+            {key: len(delta[key]) for key in ('added', 'removed', 'changed')}
+            if available else None)
     return json.dumps(result, sort_keys=True)
 
 
