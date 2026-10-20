@@ -2375,3 +2375,7 @@ file/stream bounds and 0/2/3 exit semantics remain unchanged. Both
 reading input. No external material, network, root/tool/clock admission,
 privileged Mac UID502/APFS or Linux C authorization is added; all C0/T5B and
 release gates remain HOLD.
+
+### C0 offline machine-readable reviewer summary (PR #309)
+
+The C0 preflight CLI offers opt-in `--summary-json` on all nine offline input/compare modes. The output is an allowlisted JSON object containing status, fixed `NO_AUTHORIZATION`/`C0_COLLECT_HOLD`/`NO_NETWORK` boundary markers, five unverified evidence-gap codes, bounded pass/refusal counts and fixed refusal categories; compare reports also include bounded file counts and availability-only object-diff classification. It intentionally omits input paths, filenames, object URLs, digests, raw diagnostics and inventories. `--summary-json` is mutually exclusive with `--summary`, `--json` and `--guidance`; the legacy JSON and text interfaces and exit codes 0/2/3 are unchanged. This is a structural observation, never collection or execution authorization.
