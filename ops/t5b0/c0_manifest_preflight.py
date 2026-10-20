@@ -629,9 +629,12 @@ def render_guidance(report):
     elif report['status'] == 'CHANGED':
         lines.append('  Review observed changes in object IDs, field names and '
                      'file counts; compare again before requesting separate approval.')
-    elif report['status'] in ('UNCHANGED', 'STRUCTURE_ONLY_PASS'):
-        lines.append('  No structural changes or errors were observed; obtain '
-                     'independent source, trust, time, environment and operator evidence.')
+    elif report['status'] == 'STRUCTURE_ONLY_PASS':
+        lines.append('  Input passed structural checks only; obtain independent '
+                     'source, trust, time, environment and operator evidence.')
+    elif report['status'] == 'UNCHANGED':
+        lines.append('  No compared changes were observed; obtain independent '
+                     'source, trust, time, environment and operator evidence.')
     else:
         lines.append('  Unrecognized review status; inspect locally and do not rely on this result.')
     lines.append('  Do not collect, execute, install or grant access based on this report.')

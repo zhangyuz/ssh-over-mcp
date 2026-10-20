@@ -120,6 +120,16 @@ class GuidanceTests(unittest.TestCase):
             self.assertIn('Review local input bounds', result[1])
             self.assertNotIn('independent source', result[1].split('Next actions:')[1])
 
+    def test_pass_and_unchanged_guidance_have_distinct_claims(self):
+        passed = c0.render_guidance({'status': 'STRUCTURE_ONLY_PASS'})
+        unchanged = c0.render_guidance({'status': 'UNCHANGED'})
+        self.assertIn('Input passed structural checks only', passed)
+        self.assertNotIn('No compared changes', passed)
+        self.assertIn('No compared changes were observed', unchanged)
+        for output in (passed, unchanged):
+            self.assertIn('independent source', output)
+            self.assertIn('Do not collect', output)
+
     def test_unknown_status_refuses_to_suggest_success(self):
         output = c0.render_guidance({'status': 'UNEXPECTED'})
         self.assertIn('Unrecognized review status', output)
