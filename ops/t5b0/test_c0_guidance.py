@@ -136,6 +136,63 @@ class GuidanceTests(unittest.TestCase):
         self.assertNotIn('No structural changes or errors', output)
         self.assertIn('Do not collect', output)
 
+    def test_machine_summary_all_modes_and_privacy(self):
+        payload = json.dumps(VALID).encode()
+        with tempfile.TemporaryDirectory() as root:
+            before = Path(root) / 'before'
+            after = Path(root) / 'after'
+            before.mkdir()
+            after.mkdir()
+            (before / 'secret.json').write_bytes(payload)
+            (after / 'secret.json').write_bytes(payload)
+            modes = [([before / 'secret.json'], b''), (['--batch', before / 'secret.json'], b''),
+                     (['--directory', before], b''), (['--stdin'], payload),
+                     (['--stdin-batch'], payload),
+                     (['--compare-directories', before, after], b''),
+                     (['--compare-stdin-to-directory', before], payload),
+                     (['--compare-stdin-before-directory', after], payload),
+                     (['--compare-stdin-batches'], payload + b'\n---\n' + payload)]
+            for args, data in modes:
+                with self.subTest(args=args):
+                    code, output, stderr = run([*args, '--summary-json'], data)
+                    self.assertEqual((code, stderr), (0, ''))
+                    report = json.loads(output)
+                    self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
+                    self.assertEqual(report['network'], 'NO_NETWORK')
+                    self.assertEqual(len(report['evidence_gaps']), 5)
+                    self.assertIn(report['status'], ('STRUCTURE_ONLY_PASS', 'UNCHANGED'))
+                    for secret in (root, 'secret.json', 'secret.wheel', 'https://', 'a' * 64):
+                        self.assertNotIn(secret, output)
+
+    def test_machine_summary_keeps_aggregate_and_record_refusal_codes(self):
+        report = {'status': 'REFUSED', 'errors': ['private directory issue'],
+                  'results': [{'status': 'REFUSED', 'error_codes': ['INVALID_STRUCTURE'],
+                               'errors': ['private manifest URL https://secret.invalid']}],
+                  'authorization': 'NO_AUTHORIZATION', 'collection': 'C0_COLLECT_HOLD',
+                  'network': 'NO_NETWORK'}
+        output = c0.render_summary_json(report)
+        parsed = json.loads(output)
+        self.assertEqual(parsed['input']['error_codes'],
+                         ['INPUT_AUDIT_REFUSED', 'INVALID_STRUCTURE'])
+        self.assertNotIn('private', output)
+        self.assertNotIn('https://', output)
+
+    def test_machine_summary_refusal_and_conflicts(self):
+        code, output, _ = run(['--stdin', '--summary-json'], b'{')
+        self.assertEqual(code, 2)
+        report = json.loads(output)
+        self.assertEqual(report['status'], 'REFUSED')
+        self.assertEqual(report['input']['refused'], 1)
+        self.assertEqual(report['input']['error_codes'],
+                         ['INPUT_AUDIT_REFUSED', 'INVALID_MANIFEST'])
+        for args in (['--stdin', '--summary-json', '--json'],
+                     ['--stdin', '--summary-json', '--summary'],
+                     ['--stdin', '--summary-json', '--guidance']):
+            with self.subTest(args=args):
+                code, _, stderr = run(args, b'{')
+                self.assertEqual(code, 2)
+                self.assertIn('not allowed', stderr)
+
     def test_format_conflicts_reject_before_input(self):
         class NeverRead:
             def read(self, *args):

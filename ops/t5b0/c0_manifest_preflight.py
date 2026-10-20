@@ -641,8 +641,43 @@ def render_guidance(report):
     return '\n'.join(lines)
 
 
-def emit_report(report, *, summary=False, guidance=False):
-    if summary:
+def render_summary_json(report):
+    """Machine-readable allowlisted observations; never serialize source values."""
+    def audit_counts(audit):
+        records = audit.get('results', [audit])
+        allowed = frozenset(GUIDANCE_ACTIONS)
+        codes = sorted({code for item in records if item['status'] == 'REFUSED'
+                        for code in item.get('error_codes', []) if code in allowed})
+        if audit.get('errors') or (audit['status'] == 'REFUSED' and not codes):
+            codes = sorted(set(codes) | {'INPUT_AUDIT_REFUSED'})
+        return {'status': audit['status'], 'observed': len(records),
+                'passed': sum(item['status'] == 'STRUCTURE_ONLY_PASS' for item in records),
+                'refused': sum(item['status'] == 'REFUSED' for item in records),
+                'error_codes': codes}
+
+    result = {'status': report['status'], 'authorization': 'NO_AUTHORIZATION',
+              'collection': 'C0_COLLECT_HOLD', 'network': 'NO_NETWORK',
+              'evidence_gaps': [key for key, _ in EVIDENCE_GAPS]}
+    if 'before' in report:
+        result['before'] = audit_counts(report['before'])
+        result['after'] = audit_counts(report['after'])
+    else:
+        result['input'] = audit_counts(report)
+    if all(key in report for key in ('added', 'removed', 'changed', 'regressions')):
+        result['file_counts_partial'] = report['status'] == 'REFUSED'
+        result['file_counts'] = {key: len(report[key]) for key in
+                                 ('added', 'removed', 'changed', 'regressions')}
+    delta = report.get('object_diff')
+    if delta is not None:
+        result['object_changes'] = ('UNAVAILABLE' if report['status'] == 'REFUSED'
+                                    or delta['status'] != 'AVAILABLE' else 'AVAILABLE')
+    return json.dumps(result, sort_keys=True)
+
+
+def emit_report(report, *, summary=False, guidance=False, summary_json=False):
+    if summary_json:
+        print(render_summary_json(report))
+    elif summary:
         output = render_summary(report)
         if guidance:
             output += '\n' + render_guidance(report)
@@ -660,6 +695,8 @@ def main():
     p.add_argument('--json', action='store_true', help='emit a machine-readable offline report')
     p.add_argument('--summary', action='store_true',
                    help='emit a private human-readable offline review; excludes --json')
+    p.add_argument('--summary-json', action='store_true',
+                   help='emit allowlisted privacy-safe machine-readable offline review')
     p.add_argument('--guidance', action='store_true',
                    help='with --summary, append fixed privacy-safe remediation guidance')
     p.add_argument('--directory', type=Path, help='audit 1–16 .json entries in a directory, offline')
@@ -679,6 +716,8 @@ def main():
     p.add_argument('--batch', type=Path, nargs='+', metavar='MANIFEST',
                    help='inspect up to 16 manifests and emit one aggregate JSON report')
     args = p.parse_args()
+    if args.summary_json and (args.summary or args.json or args.guidance):
+        p.error('--summary-json not allowed with --summary, --json or --guidance')
     if args.summary and args.json:
         p.error('--summary cannot be combined with --json')
     if args.guidance and not args.summary:
@@ -723,7 +762,8 @@ def main():
                 'or --compare-stdin-to-directory or --compare-stdin-before-directory')
     if args.compare_stdin_batches:
         report = compare_paired_stdin_batches()
-        emit_report(report, summary=args.summary, guidance=args.guidance)
+        emit_report(report, summary=args.summary, guidance=args.guidance,
+                    summary_json=args.summary_json)
         if report['status'] == 'REFUSED':
             return 2
         if args.fail_on_change and report['status'] == 'CHANGED':
@@ -731,12 +771,14 @@ def main():
         return 0
     if args.stdin_batch:
         report = inspect_stdin_batch()
-        emit_report(report, summary=args.summary, guidance=args.guidance)
+        emit_report(report, summary=args.summary, guidance=args.guidance,
+                    summary_json=args.summary_json)
         return 2 if report['status'] == 'REFUSED' else 0
     if args.compare_stdin_before_directory is not None:
         report = compare_stdin_before_directory(
             args.compare_stdin_before_directory, require_json_only=args.require_json_only)
-        emit_report(report, summary=args.summary, guidance=args.guidance)
+        emit_report(report, summary=args.summary, guidance=args.guidance,
+                    summary_json=args.summary_json)
         if report['status'] == 'REFUSED':
             return 2
         if args.fail_on_change and report['status'] == 'CHANGED':
@@ -745,7 +787,8 @@ def main():
     if args.compare_stdin_to_directory is not None:
         report = compare_stdin_to_directory(
             args.compare_stdin_to_directory, require_json_only=args.require_json_only)
-        emit_report(report, summary=args.summary, guidance=args.guidance)
+        emit_report(report, summary=args.summary, guidance=args.guidance,
+                    summary_json=args.summary_json)
         if report['status'] == 'REFUSED':
             return 2
         if args.fail_on_change and report['status'] == 'CHANGED':
@@ -756,7 +799,8 @@ def main():
             p.error('--compare-directories cannot be combined with other input modes')
         report = compare_directories(*args.compare_directories,
                                      require_json_only=args.require_json_only)
-        emit_report(report, summary=args.summary, guidance=args.guidance)
+        emit_report(report, summary=args.summary, guidance=args.guidance,
+                    summary_json=args.summary_json)
         if report['status'] == 'REFUSED':
             return 2
         if args.fail_on_change and report['status'] == 'CHANGED':
@@ -766,7 +810,8 @@ def main():
         if args.manifest is not None or args.batch is not None:
             p.error('--directory cannot be combined with positional manifest or --batch')
         report = directory_report(args.directory, require_json_only=args.require_json_only)
-        emit_report(report, summary=args.summary, guidance=args.guidance)
+        emit_report(report, summary=args.summary, guidance=args.guidance,
+                    summary_json=args.summary_json)
         return 2 if report['status'] == 'REFUSED' else 0
     if args.batch is not None:
         if args.manifest is not None:
@@ -786,7 +831,8 @@ def main():
             'collection': 'C0_COLLECT_HOLD',
             'network': 'NO_NETWORK',
         }
-        emit_report(report, summary=args.summary, guidance=args.guidance)
+        emit_report(report, summary=args.summary, guidance=args.guidance,
+                    summary_json=args.summary_json)
         return 2 if refused else 0
     if args.stdin:
         report = inspect_stdin()
@@ -794,8 +840,9 @@ def main():
         if args.manifest is None:
             p.error('manifest is required unless --batch or --stdin is specified')
         report = inspect_manifest(args.manifest)
-    if args.json or args.summary:
-        emit_report(report, summary=args.summary, guidance=args.guidance)
+    if args.json or args.summary or args.summary_json:
+        emit_report(report, summary=args.summary, guidance=args.guidance,
+                    summary_json=args.summary_json)
         return 2 if report['errors'] else 0
     for err in report['errors']:
         print('REFUSED:', err)
