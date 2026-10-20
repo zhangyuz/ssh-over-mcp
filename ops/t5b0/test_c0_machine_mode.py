@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import c0_manifest_preflight as c0
 from test_c0_guidance import VALID, run
 
 
@@ -38,6 +39,19 @@ class MachineModeTests(unittest.TestCase):
                         self.assertNotIn(secret, output)
                     old = run([*flags, '--summary'], incoming)
                     self.assertEqual(code, old[0])
+
+    def test_non_summary_formats_and_untrusted_mode_cannot_leak(self):
+        data = json.dumps(VALID).encode()
+        code, legacy, err = run(['--stdin', '--json'], data)
+        self.assertEqual((code, err), (0, ''))
+        self.assertNotIn('review_mode', json.loads(legacy))
+        code, text_summary, err = run(['--stdin', '--summary'], data)
+        self.assertEqual((code, err), (0, ''))
+        self.assertNotIn('review_mode', text_summary)
+        malformed = c0.render_summary_json({'status': 'STRUCTURE_ONLY_PASS'},
+                                            review_mode='SECRET_URL_https://evil.invalid')
+        self.assertNotIn('review_mode', json.loads(malformed))
+        self.assertNotIn('evil.invalid', malformed)
 
     def test_mode_retained_for_refused_input_and_changed_compare(self):
         data = json.dumps(VALID).encode()

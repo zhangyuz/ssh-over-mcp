@@ -653,7 +653,14 @@ MACHINE_REPORT_STATUSES = frozenset({
 })
 
 
-def render_summary_json(report):
+REVIEW_MODES = frozenset({
+    'MANIFEST_FILE', 'FILE_BATCH', 'DIRECTORY', 'STDIN_MANIFEST', 'STDIN_BATCH',
+    'DIRECTORY_COMPARISON', 'DIRECTORY_TO_STDIN', 'STDIN_TO_DIRECTORY',
+    'PAIRED_STDIN_COMPARISON',
+})
+
+
+def render_summary_json(report, *, review_mode=None):
     """Machine-readable allowlisted observations; never serialize source values."""
     def audit_counts(audit):
         records = audit.get('results', [audit])
@@ -674,6 +681,8 @@ def render_summary_json(report):
     result = {'status': status, 'authorization': 'NO_AUTHORIZATION',
               'collection': 'C0_COLLECT_HOLD', 'network': 'NO_NETWORK',
               'evidence_gaps': [key for key, _ in EVIDENCE_GAPS]}
+    if review_mode in REVIEW_MODES:
+        result['review_mode'] = review_mode
     if 'before' in report:
         result['before'] = audit_counts(report['before'])
         result['after'] = audit_counts(report['after'])
@@ -706,9 +715,10 @@ def render_summary_json(report):
     return json.dumps(result, sort_keys=True)
 
 
-def emit_report(report, *, summary=False, guidance=False, summary_json=False):
+def emit_report(report, *, summary=False, guidance=False, summary_json=False,
+                review_mode=None):
     if summary_json:
-        print(render_summary_json(report))
+        print(render_summary_json(report, review_mode=review_mode))
     elif summary:
         output = render_summary(report)
         if guidance:
@@ -792,10 +802,22 @@ def main():
             and args.compare_stdin_before_directory is None):
         p.error('--require-json-only requires --directory or --compare-directories '
                 'or --compare-stdin-to-directory or --compare-stdin-before-directory')
+    # Fixed labels reflect the selected local input route, never an input value.
+    review_mode = (
+        'PAIRED_STDIN_COMPARISON' if args.compare_stdin_batches else
+        'STDIN_TO_DIRECTORY' if args.compare_stdin_before_directory is not None else
+        'DIRECTORY_TO_STDIN' if args.compare_stdin_to_directory is not None else
+        'DIRECTORY_COMPARISON' if args.compare_directories is not None else
+        'STDIN_BATCH' if args.stdin_batch else
+        'STDIN_MANIFEST' if args.stdin else
+        'DIRECTORY' if args.directory is not None else
+        'FILE_BATCH' if args.batch is not None else
+        'MANIFEST_FILE'
+    )
     if args.compare_stdin_batches:
         report = compare_paired_stdin_batches()
         emit_report(report, summary=args.summary, guidance=args.guidance,
-                    summary_json=args.summary_json)
+                    summary_json=args.summary_json, review_mode=review_mode)
         if report['status'] == 'REFUSED':
             return 2
         if args.fail_on_change and report['status'] == 'CHANGED':
@@ -804,13 +826,13 @@ def main():
     if args.stdin_batch:
         report = inspect_stdin_batch()
         emit_report(report, summary=args.summary, guidance=args.guidance,
-                    summary_json=args.summary_json)
+                    summary_json=args.summary_json, review_mode=review_mode)
         return 2 if report['status'] == 'REFUSED' else 0
     if args.compare_stdin_before_directory is not None:
         report = compare_stdin_before_directory(
             args.compare_stdin_before_directory, require_json_only=args.require_json_only)
         emit_report(report, summary=args.summary, guidance=args.guidance,
-                    summary_json=args.summary_json)
+                    summary_json=args.summary_json, review_mode=review_mode)
         if report['status'] == 'REFUSED':
             return 2
         if args.fail_on_change and report['status'] == 'CHANGED':
@@ -820,7 +842,7 @@ def main():
         report = compare_stdin_to_directory(
             args.compare_stdin_to_directory, require_json_only=args.require_json_only)
         emit_report(report, summary=args.summary, guidance=args.guidance,
-                    summary_json=args.summary_json)
+                    summary_json=args.summary_json, review_mode=review_mode)
         if report['status'] == 'REFUSED':
             return 2
         if args.fail_on_change and report['status'] == 'CHANGED':
@@ -832,7 +854,7 @@ def main():
         report = compare_directories(*args.compare_directories,
                                      require_json_only=args.require_json_only)
         emit_report(report, summary=args.summary, guidance=args.guidance,
-                    summary_json=args.summary_json)
+                    summary_json=args.summary_json, review_mode=review_mode)
         if report['status'] == 'REFUSED':
             return 2
         if args.fail_on_change and report['status'] == 'CHANGED':
@@ -843,7 +865,7 @@ def main():
             p.error('--directory cannot be combined with positional manifest or --batch')
         report = directory_report(args.directory, require_json_only=args.require_json_only)
         emit_report(report, summary=args.summary, guidance=args.guidance,
-                    summary_json=args.summary_json)
+                    summary_json=args.summary_json, review_mode=review_mode)
         return 2 if report['status'] == 'REFUSED' else 0
     if args.batch is not None:
         if args.manifest is not None:
@@ -864,7 +886,7 @@ def main():
             'network': 'NO_NETWORK',
         }
         emit_report(report, summary=args.summary, guidance=args.guidance,
-                    summary_json=args.summary_json)
+                    summary_json=args.summary_json, review_mode=review_mode)
         return 2 if refused else 0
     if args.stdin:
         report = inspect_stdin()
@@ -874,7 +896,7 @@ def main():
         report = inspect_manifest(args.manifest)
     if args.json or args.summary or args.summary_json:
         emit_report(report, summary=args.summary, guidance=args.guidance,
-                    summary_json=args.summary_json)
+                    summary_json=args.summary_json, review_mode=review_mode)
         return 2 if report['errors'] else 0
     for err in report['errors']:
         print('REFUSED:', err)
