@@ -648,7 +648,7 @@ def render_summary_json(report):
         allowed = frozenset(GUIDANCE_ACTIONS)
         codes = sorted({code for item in records if item['status'] == 'REFUSED'
                         for code in item.get('error_codes', []) if code in allowed})
-        if audit['status'] == 'REFUSED' and not codes:
+        if audit.get('errors') or (audit['status'] == 'REFUSED' and not codes):
             codes = sorted(set(codes) | {'INPUT_AUDIT_REFUSED'})
         return {'status': audit['status'], 'observed': len(records),
                 'passed': sum(item['status'] == 'STRUCTURE_ONLY_PASS' for item in records),

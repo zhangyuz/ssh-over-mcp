@@ -164,13 +164,27 @@ class GuidanceTests(unittest.TestCase):
                     for secret in (root, 'secret.json', 'secret.wheel', 'https://', 'a' * 64):
                         self.assertNotIn(secret, output)
 
+    def test_machine_summary_keeps_aggregate_and_record_refusal_codes(self):
+        report = {'status': 'REFUSED', 'errors': ['private directory issue'],
+                  'results': [{'status': 'REFUSED', 'error_codes': ['INVALID_STRUCTURE'],
+                               'errors': ['private manifest URL https://secret.invalid']}],
+                  'authorization': 'NO_AUTHORIZATION', 'collection': 'C0_COLLECT_HOLD',
+                  'network': 'NO_NETWORK'}
+        output = c0.render_summary_json(report)
+        parsed = json.loads(output)
+        self.assertEqual(parsed['input']['error_codes'],
+                         ['INPUT_AUDIT_REFUSED', 'INVALID_STRUCTURE'])
+        self.assertNotIn('private', output)
+        self.assertNotIn('https://', output)
+
     def test_machine_summary_refusal_and_conflicts(self):
         code, output, _ = run(['--stdin', '--summary-json'], b'{')
         self.assertEqual(code, 2)
         report = json.loads(output)
         self.assertEqual(report['status'], 'REFUSED')
         self.assertEqual(report['input']['refused'], 1)
-        self.assertEqual(report['input']['error_codes'], ['INVALID_MANIFEST'])
+        self.assertEqual(report['input']['error_codes'],
+                         ['INPUT_AUDIT_REFUSED', 'INVALID_MANIFEST'])
         for args in (['--stdin', '--summary-json', '--json'],
                      ['--stdin', '--summary-json', '--summary'],
                      ['--stdin', '--summary-json', '--guidance']):
