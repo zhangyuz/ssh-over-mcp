@@ -2343,3 +2343,7 @@ The offline C0 HTTPS URL preflight now rejects alternative scheme-capitalization
 ### 2026-10-19 C0 malformed percent URL path syntax
 
 The offline C0 proposal preflight now refuses malformed percent-escapes that `unquote` otherwise returns unchanged, preserving the existing rejection of well-formed percent-encoded paths. Fixed `INVALID_STRUCTURE`/report/exit semantics, 64-entry/16-manifest/16KiB budgets, safety markers and all T5B/root/tool/privileged macOS/Linux C HOLDs remain. No network or collection authority is added.
+
+### 2026-10-20 C0 raw URL path character canonicalization
+
+Offline C0 proposal preflight now rejects six literal HTTPS path characters that WHATWG URL parsers would percent-encode (`<`, `>`, double quote, braces, backtick). Normal ASCII paths and compatible punctuation remain unchanged. This is an `INVALID_STRUCTURE`-only offline consistency hardening, not a URL fetch, signer/source authentication, C0 collection authorization or change to T5B/Mac UID502/APFS/Linux C safety gates; all caps and five `UNVERIFIED` evidence gaps remain.
