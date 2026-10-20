@@ -84,7 +84,8 @@ def validate(doc):
                     or len(p.hostname) > 253
                     or any(not HOST_LABEL.fullmatch(label) for label in p.hostname.split('.'))
                     or noncanonical_numeric_ip_host(p.hostname)
-                    or canonical_path != p.path or any(segment in ('.', '..', '') for segment in p.path.split('/')[1:])
+                    or '%' in p.path or canonical_path != p.path
+                    or any(segment in ('.', '..', '') for segment in p.path.split('/')[1:])
                     or '\\' in p.path or any(ord(c) < 33 or ord(c) > 126 for c in url)):
                 errors.append(prefix + ': URL not pinned to a single HTTPS object path')
             elif url in seen_urls:

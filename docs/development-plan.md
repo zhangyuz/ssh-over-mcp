@@ -2339,3 +2339,7 @@ The offline C0 structural validator now rejects query/fragment delimiters even i
 ### 2026-10-19 C0 canonical lowercase HTTPS scheme spelling
 
 The offline C0 HTTPS URL preflight now rejects alternative scheme-capitalization spellings that `urlsplit` otherwise canonicalizes in its parsed `scheme` field. The shared fail-closed validator requires the literal `https://` prefix, retaining existing INVALID_STRUCTURE, error/exit/report contracts and canonical HTTPS positive controls. No DNS/network, C0 material collection, source/root/tool trust, privileged Mac UID502/APFS, Linux C release or resource-limit change; all security HOLDs persist.
+
+### 2026-10-19 C0 malformed percent URL path syntax
+
+The offline C0 proposal preflight now refuses malformed percent-escapes that `unquote` otherwise returns unchanged, preserving the existing rejection of well-formed percent-encoded paths. Fixed `INVALID_STRUCTURE`/report/exit semantics, 64-entry/16-manifest/16KiB budgets, safety markers and all T5B/root/tool/privileged macOS/Linux C HOLDs remain. No network or collection authority is added.
