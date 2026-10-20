@@ -2323,3 +2323,7 @@ The untrusted C0 proposal preflight now refuses malformed or ambiguous HTTPS hos
 ### 2026-10-19 Offline C0 numeric IPv4 URL aliases
 
 The offline C0 structural preflight now rejects shorthand, integer, hex-prefixed and padded decimal numeric IPv4 host spellings that network clients may interpret inconsistently. Only exact canonical dotted-decimal IPv4 remains structurally eligible; DNS hostnames are unchanged. This neither resolves names nor authenticates origins, allows C0 collection, admits T5B roots/tools, or advances privileged macOS/UID502/APFS or Linux C gates.
+
+### 2026-10-19 C0 offline numeric final DNS label handling
+
+The structurally pinned HTTPS URL validator now refuses mixed-label hostnames with decimal or hex-like final labels that URL clients interpret in an IPv4 parsing context. Canonical IPv4 and ordinary DNS hosts with numeric interior labels remain eligible. No network, authenticity assertion, collection or privilege authorization changed; all C0/T5B/Mac/Linux HOLD gates persist.
