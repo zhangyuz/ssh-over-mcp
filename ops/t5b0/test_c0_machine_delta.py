@@ -62,6 +62,25 @@ class MachineDeltaTests(unittest.TestCase):
                 self.assertIsNone(report['object_change_counts'])
                 self.assertNotIn('https://', output)
 
+    def test_refused_directory_comparison_reports_unavailable_not_zero(self):
+        payload = json.dumps(VALID).encode()
+        with tempfile.TemporaryDirectory() as tmp:
+            before, after = Path(tmp) / 'before', Path(tmp) / 'after'
+            before.mkdir()
+            after.mkdir()
+            (before / 'private.json').write_bytes(payload)
+            (after / 'private.json').write_text('{')
+            code, output, err = run(['--compare-directories', before, after,
+                                     '--summary-json', '--fail-on-change'])
+            self.assertEqual((code, err), (2, ''))
+            report = json.loads(output)
+            self.assertEqual(report['status'], 'REFUSED')
+            self.assertEqual(report['object_changes'], 'UNAVAILABLE')
+            self.assertIsNone(report['object_change_counts'])
+            self.assertTrue(report['file_counts_partial'])
+            self.assertNotIn('private.json', output)
+            self.assertNotIn(tmp, output)
+
     def test_added_removed_counts_are_bounded_no_object_ids(self):
         newer = copy.deepcopy(VALID)
         newer['objects'][0]['id'] = 'C0-P1'

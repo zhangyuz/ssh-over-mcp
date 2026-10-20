@@ -2379,3 +2379,9 @@ release gates remain HOLD.
 ### C0 offline machine-readable reviewer summary (PR #309)
 
 The C0 preflight CLI offers opt-in `--summary-json` on all nine offline input/compare modes. The output is an allowlisted JSON object containing status, fixed `NO_AUTHORIZATION`/`C0_COLLECT_HOLD`/`NO_NETWORK` boundary markers, five unverified evidence-gap codes, bounded pass/refusal counts and fixed refusal categories; compare reports also include bounded file counts and availability-only object-diff classification. It intentionally omits input paths, filenames, object URLs, digests, raw diagnostics and inventories. `--summary-json` is mutually exclusive with `--summary`, `--json` and `--guidance`; the legacy JSON and text interfaces and exit codes 0/2/3 are unchanged. This is a structural observation, never collection or execution authorization.
+
+### 2026-10-20 C0 machine-readable bounded semantic change counters (next feature)
+
+The offline `--summary-json` review now reports `object_change_counts` for each of the four compare modes. For a complete valid comparison the counters `added`, `removed`, and `changed` give bounded object-ID cardinalities only (never the ID values, filenames, URLs, digests or raw diagnostics). A valid unchanged snapshot returns three zeros. Refused or unavailable semantic comparison returns JSON `null`, **not zero**, alongside `object_changes: UNAVAILABLE` to avoid mistaken change-free acceptance; non-comparison modes omit the counters. The already-required `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, `NO_NETWORK` and all five `UNVERIFIED` independent evidence gaps remain, as do no-collection and T5B/Mac UID502/APFS/Linux C HOLD. This is a machine/operator observation convenience, not authority to download, execute or approve.
+
+Example: `python ops/t5b0/c0_manifest_preflight.py --compare-directories OLD_DIR NEW_DIR --summary-json --fail-on-change`. Valid observed changes still exit 3, refusals exit 2; valid unchanged exits 0.
