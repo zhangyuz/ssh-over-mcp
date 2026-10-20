@@ -1730,6 +1730,61 @@ class C0PreflightTests(unittest.TestCase):
                 candidate['objects'][0]['url'] = 'https://' + host + '/pinned.whl'
                 self.assertEqual(validate(candidate), [])
 
+    def test_empty_hex_ipv4_tail_refuses_all_offline_intake_modes(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            before = root / 'before'
+            after = root / 'after'
+            before.mkdir()
+            after.mkdir()
+            (before / 'a.json').write_text(json.dumps(BASE))
+            for host in ('example.0x', 'a.0x', '0x'):
+                with self.subTest(host=host):
+                    invalid = copy.deepcopy(BASE)
+                    invalid['objects'][0]['url'] = f'https://{host}/candidate.whl'
+                    raw = json.dumps(invalid)
+                    (after / 'candidate.json').write_text(raw)
+                    candidate = root / 'candidate.json'
+                    candidate.write_text(raw)
+                    calls = (
+                        ('file', ['--json', str(candidate)], None),
+                        ('stdin', ['--stdin', '--json'], raw.encode()),
+                        ('batch', ['--batch', str(candidate)], None),
+                        ('ndjson', ['--stdin-batch'], raw.encode() + bytes([10])),
+                        ('directory', ['--directory', str(after)], None),
+                        ('compare_dirs', ['--compare-directories', str(before),
+                                          str(after), '--fail-on-change'], None),
+                        ('compare_stream', ['--compare-stdin-to-directory', str(before),
+                                            '--fail-on-change'], raw.encode() + bytes([10])),
+                    )
+                    for mode, args, piped in calls:
+                        with self.subTest(mode=mode):
+                            run = subprocess.run(
+                                [sys.executable, str(script), *args], input=piped,
+                                capture_output=True, timeout=5, check=False)
+                            self.assertEqual(run.returncode, 2, (host, mode, run.stdout))
+                            report = json.loads(run.stdout)
+                            self.assertEqual(report['status'], 'REFUSED')
+                            self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
+                            self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+                            self.assertEqual(report['network'], 'NO_NETWORK')
+                            if mode in ('compare_dirs', 'compare_stream'):
+                                self.assertEqual(report['object_diff']['status'],
+                                                 'UNAVAILABLE')
+                            if mode in ('file', 'stdin'):
+                                self.assertEqual(report['error_codes'], ['INVALID_STRUCTURE'])
+                            else:
+                                side = (report['after'] if mode == 'compare_stream' else
+                                        report['after'] if mode == 'compare_dirs' else report)
+                                self.assertIn('INVALID_STRUCTURE',
+                                              side['results'][0]['error_codes'])
+            for host in ('example.0xg', 'a.1.example', '192.0.2.1'):
+                with self.subTest(accepted=host):
+                    valid = copy.deepcopy(BASE)
+                    valid['objects'][0]['url'] = f'https://{host}/candidate.whl'
+                    self.assertEqual(validate(valid), [])
+
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),
