@@ -213,3 +213,59 @@ Each side is audited by the same `inspect_stdin_batch` cross-record validation u
 Illustrative stdin stream (proposal metadata only, never a collection instruction): `<before NDJSON lines>\n---\n<after NDJSON lines>\n`. The full C0 schema, ID limits and cross-record consistency checks still apply separately to each side. The existing directory↔stream and two-directory review modes and their legacy reports/error messages remain unchanged; the P3 review finding on the `--fail-on-change` help now lists all four comparison modes.
 
 This is structural review of untrusted proposals, **not source authenticity, signer verification, a safe downloader or operator authorization**. All outputs remain `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, `NO_NETWORK`, with five independent evidence gaps `UNVERIFIED`. No T5B root/source/tool/material acceptance, protected Mac UID502/APFS operation, Linux Slice C authorization, or directory 64-entry/16-JSON/no-follow/race restriction is relaxed.
+
+
+## Human-readable offline review (`--summary`, 2026-10-20)
+
+Add `--summary` to any existing single-file, `--stdin`, `--batch`,
+`--stdin-batch`, directory or comparison command to produce a concise text
+report for a terminal or review discussion. `--summary` and `--json` are
+mutually exclusive and their combination is rejected before input is read.
+Without `--summary`, every existing JSON/text output contract is unchanged.
+
+The report shows the final status, per-side status and observed record counts,
+numbered refused records with fixed error categories, file-change counts for
+directory comparisons, and semantic object additions/removals/changed field
+names. All paths, filenames, raw diagnostics, URLs, digest values and declared
+sizes are omitted. Record numbers refer to the original report's order (directory
+entries are lexically sorted); they are not trusted object identity. Use the
+existing JSON output locally when detailed path diagnostics are needed. A
+pre-read refusal can show zero observed records; a refused directory's file
+counts are explicitly partial diagnostics. Neither means complete inspection.
+Semantic changes remain `UNAVAILABLE` if either input is refused.
+
+Output is deterministic for the same observed input. This option changes only
+presentation: existing 64-entry / 16-manifest / 16KiB budgets, regular-file,
+no-follow, race detection and cross-record checks still apply. Exit codes stay
+0 for structure-only success or a valid comparison, 2 for refusal, and 3 for a
+valid change when `--fail-on-change` is selected. Every summary, including
+single-file summaries, states `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, `NO_NETWORK`
+and all five `UNVERIFIED` evidence gaps. It never reads a previously generated
+report as trusted input, writes a report file, fetches material or authorizes
+collection or execution. T5B/source/root/tool, original Mac UID502/APFS and
+Linux Slice C HOLD gates remain unchanged.
+
+Reproducible positive/changed/refused acceptance with synthetic proposal text
+only (no candidate material or network):
+
+```sh
+python3 - <<'PY_SAMPLE' | python3 ops/t5b0/c0_manifest_preflight.py --compare-stdin-batches --summary --fail-on-change
+import copy
+import json
+before = {'schema': 'som-t5b0-c0-preflight-v1', 'approval': None,
+          'objects': [{'id': 'C0-W1', 'url': 'https://example.org/sample.whl',
+                       'sha256': 'a' * 64, 'bytes': 100, 'max_bytes': 100}]}
+after = copy.deepcopy(before)
+after['objects'][0]['max_bytes'] = 120
+print(json.dumps(before))
+print('---')
+print(json.dumps(after))
+PY_SAMPLE
+# Expected: CHANGED; Changed C0-W1: max_bytes; process exit 3.
+# Remove the max_bytes assignment for UNCHANGED and exit 0.
+# Replace the final print with print('{') for REFUSED / UNAVAILABLE and exit 2.
+```
+
+Run `python3 -m unittest discover -s ops/t5b0 -p 'test_c0_summary.py' -v`
+for runnable all-mode, output-privacy, terminal-injection, refusal-priority,
+FIFO/size-limit, option-conflict and legacy-output acceptance coverage.
