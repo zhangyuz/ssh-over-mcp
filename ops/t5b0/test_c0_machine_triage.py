@@ -52,6 +52,32 @@ class MachineTriageTests(unittest.TestCase):
         self.assertEqual(data['next_action_codes'], ['STOP_UNKNOWN_REVIEW_STATUS'])
         self.assertNotIn('UNRECOGNIZED_PRIVATE_STATUS', json.dumps(data))
 
+    def test_real_invalid_schema_routes_to_repair_and_no_approval(self):
+        invalid = copy.deepcopy(VALID)
+        invalid['approval'] = 'private-approval-should-never-echo'
+        code, output, err = run(['--stdin', '--summary-json'],
+                                json.dumps(invalid).encode())
+        self.assertEqual((code, err), (2, ''))
+        result = json.loads(output)
+        self.assertEqual(result['status'], 'REFUSED')
+        self.assertEqual(result['next_action_codes'],
+                         ['REVIEW_INPUT_AUDIT', 'REPAIR_INVALID_STRUCTURE',
+                          'RETRY_OFFLINE_REVIEW'])
+        self.assertEqual(result['collection'], 'C0_COLLECT_HOLD')
+        self.assertNotIn('private-approval', output)
+        self.assertNotIn('VERIFY_INDEPENDENT_EVIDENCE', output)
+
+    def test_real_batch_duplicate_id_routes_to_offline_resolution(self):
+        data = json.dumps(VALID).encode()
+        code, output, err = run(['--stdin-batch', '--summary-json'],
+                                data + b'\n' + data)
+        self.assertEqual((code, err), (2, ''))
+        result = json.loads(output)
+        self.assertIn('RESOLVE_DUPLICATE_OBJECT_ID', result['next_action_codes'])
+        self.assertIn('RETRY_OFFLINE_REVIEW', result['next_action_codes'])
+        self.assertNotIn('VERIFY_INDEPENDENT_EVIDENCE', result['next_action_codes'])
+        self.assertNotIn('https://', output)
+
     def test_all_nine_cli_modes_have_non_authorizing_machine_actions(self):
         import tempfile
         from pathlib import Path
