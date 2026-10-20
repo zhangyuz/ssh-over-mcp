@@ -82,6 +82,35 @@ class MixedFileStreamTests(unittest.TestCase):
                         self.assertEqual(report['before']['status'], 'STRUCTURE_ONLY_PASS')
                         self.assertEqual(report['after']['status'], 'STRUCTURE_ONLY_PASS')
 
+    def test_added_removed_ids_follow_baseline_direction(self):
+        changed = copy.deepcopy(VALID)
+        changed['objects'][0]['id'] = 'C0-P1'
+        for mode, _ in MODES:
+            with self.subTest(mode=mode):
+                proc, report = invoke(mode, self.file, json.dumps(changed).encode(),
+                                      '--fail-on-change')
+                self.assertEqual(proc.returncode, 3, proc.stderr)
+                delta = report['object_diff']
+                self.assertEqual(delta['status'], 'AVAILABLE')
+                if mode == '--compare-file-to-stdin':
+                    self.assertEqual((delta['added'], delta['removed']),
+                                     (['C0-P1'], ['C0-W1']))
+                else:
+                    self.assertEqual((delta['added'], delta['removed']),
+                                     (['C0-W1'], ['C0-P1']))
+
+    def test_exact_byte_limit_per_independent_input(self):
+        exact = self.data + b' ' * (16384 - len(self.data))
+        for mode, _ in MODES:
+            with self.subTest(mode=mode):
+                self.file.write_bytes(exact)
+                proc, report = invoke(mode, self.file, exact, '--summary-json')
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual(report['status'], 'UNCHANGED')
+                self.assertEqual(report['object_change_counts'],
+                                 {'added': 0, 'removed': 0, 'changed': 0})
+                self.assert_private(proc.stdout.decode())
+
     def test_refusal_either_side_and_16k_limits(self):
         for mode, label in MODES:
             for file_data, pipe_data in ((b'{', self.data), (self.data, b'{'),

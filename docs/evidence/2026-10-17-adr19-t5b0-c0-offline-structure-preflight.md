@@ -356,3 +356,47 @@ remains a structural report-format identifier, not provenance or authorization.
 T5B/Mac UID502/APFS/Linux C and all five evidence verification gates remain HOLD.
 
 Test with `python3 -m unittest discover -s ops/t5b0 -p test_c0_compare_files.py -v`.
+
+## Compare one regular manifest with piped single JSON (2026-10-20)
+
+Two complementary offline C0 commands compare an existing untrusted local
+manifest file with exactly one **unpersisted** JSON proposal streamed from
+standard input. No NDJSON framing, staging directory or downloader is needed.
+
+```sh
+# First create two synthetic local test inputs, not candidate material.
+workdir=$(mktemp -d)
+python3 - "$workdir" <<'PY_SAMPLE'
+import copy, json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+old = {'schema': 'som-t5b0-c0-preflight-v1', 'approval': None,
+       'objects': [{'id': 'C0-W1', 'url': 'https://example.org/synthetic.whl',
+                    'sha256': 'a' * 64, 'bytes': 100, 'max_bytes': 100}]}
+new = copy.deepcopy(old)
+new['objects'][0]['max_bytes'] = 110
+(root / 'old.json').write_text(json.dumps(old))
+(root / 'new.json').write_text(json.dumps(new))
+PY_SAMPLE
+# File baseline -> piped successor: expected CHANGED, exit 3.
+python3 ops/t5b0/c0_manifest_preflight.py --compare-file-to-stdin \
+  "$workdir/old.json" --summary-json --fail-on-change < "$workdir/new.json"
+# Piped baseline -> file successor: expected CHANGED, exit 3.
+python3 ops/t5b0/c0_manifest_preflight.py --compare-stdin-to-file \
+  "$workdir/new.json" --summary-json --fail-on-change < "$workdir/old.json"
+# Replace piped JSON with a '{' for REFUSED, exit 2, semantic UNAVAILABLE.
+rm -rf "$workdir"
+```
+
+Both directions enforce independent 16,384-byte ceilings. Local file reads use
+the existing O_NOFOLLOW, nonblocking regular-file and same-FD race check; the
+stdin reader caps bytes without storing content on disk. Either-side invalid,
+missing, symlink, FIFO or oversized input fails closed; no partial inventory or
+zero-change claim on refusal. Comparison direction affects added/removed IDs.
+The `--summary-json` envelope uses fixed `FILE_TO_STDIN` or `STDIN_TO_FILE`
+mode tags but never echoes the local path, user URL, hash or object ID; the
+ordinary legacy report can include only already-allowlisted semantic IDs and
+field names, not arbitrary raw source URLs or SHA values. The operation does
+not verify trust, collect, download, approve or execute material; T5B/Mac
+UID502/APFS/Linux C and all five independent evidence checks remain HOLD.
+
+Run `python3 -m unittest discover -s ops/t5b0 -p test_c0_mixed_file_stdin.py -v`.
