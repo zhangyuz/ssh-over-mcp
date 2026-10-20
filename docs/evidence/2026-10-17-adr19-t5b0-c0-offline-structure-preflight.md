@@ -269,3 +269,45 @@ PY_SAMPLE
 Run `python3 -m unittest discover -s ops/t5b0 -p 'test_c0_summary.py' -v`
 for runnable all-mode, output-privacy, terminal-injection, refusal-priority,
 FIFO/size-limit, option-conflict and legacy-output acceptance coverage.
+
+## Offline reviewer operator next-action guidance (2026-10-20)
+
+Add `--summary --guidance` to **any of the existing nine** single, batch,
+directory, stdin or comparison inspection modes to append deterministic,
+privacy-safe **next-action hints**. Examples:
+
+```sh
+# A malformed local input: exit 2 with INVALID_MANIFEST guidance.
+printf '{' | python3 ops/t5b0/c0_manifest_preflight.py --stdin --summary --guidance
+
+# A valid but untrusted single proposal: exit 0, external evidence remains UNVERIFIED.
+python3 - <<'PY_SAMPLE' | python3 ops/t5b0/c0_manifest_preflight.py --stdin --summary --guidance
+import json
+print(json.dumps({'schema': 'som-t5b0-c0-preflight-v1', 'approval': None,
+                  'objects': [{'id': 'C0-W1',
+                               'url': 'https://example.org/synthetic.whl',
+                               'sha256': 'a'*64, 'bytes': 100, 'max_bytes': 100}]}))
+PY_SAMPLE
+
+# For any existing before/after reviewer, append --guidance to
+# --summary --fail-on-change: exit 3 for a valid changed proposal.
+```
+
+The guidance is a fixed allowlisted mapping from stable error codes to safe
+local corrective steps (invalid/oversized or malformed input, schema error,
+duplicate IDs, cross-record disagreement, or bounded audit refusal). Refusal
+takes precedence over any changed data and does not suggest accepting a partial
+semantic inventory. A valid change calls for human review, **not approval**.
+An unchanged/structurally valid observation says to gather independent
+source, trust-root, trusted-time, execution-environment and operator evidence;
+it never claims that these gaps are resolved.
+
+No untrusted error text, path, filename, URL, digest, raw byte count or terminal
+escape is copied into the hints. All existing `--summary` output remains an
+exact prefix of guidance output; calls without `--guidance` are unchanged.
+`--guidance` requires `--summary` and rejects `--json` *before input reads*.
+Exit codes remain 0/2/3; existing 64 directory names / 16 manifests /
+16 KiB per manifest / same-FD checks are unchanged. This opt-in tool
+does **not** authenticate, download, run or authorize material; preserve
+`NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, `NO_NETWORK`, all five `UNVERIFIED`
+gaps and all T5B/Mac UID502/APFS/Linux C HOLDs.

@@ -2360,3 +2360,18 @@ Add `--compare-stdin-batches`, a non-authorizing two-snapshot NDJSON reviewer wi
 ### 2026-10-20 Human-readable C0 offline review
 
 Operators can add `--summary` to every existing C0 intake/comparison mode for a deterministic, privacy-preserving text review: observed record statuses/counts, fixed refusal categories, directory file-change counts and semantic object IDs/changed fields. Raw paths/filenames/URLs/digests/diagnostics are omitted; refused snapshots never expose semantic changes, and partial file counts are explicitly labeled. Existing output and exit0/2/3 behavior remain without the option; --json conflicts before input reads. All five evidence gaps remain UNVERIFIED and C0/T5B/source/root/tool/Mac UID502/APFS/Linux C HOLD stays in force. The runbook includes a reproducible positive/change/refusal user workflow; this presentation capability adds no collection or execution authority.
+
+### 2026-10-20 C0 private offline reviewer next-action guidance
+
+The offline C0 review now supports opt-in `--summary --guidance` across all
+nine existing modes. From fixed, allowlisted error codes and the aggregate
+status only, operators receive deterministic steps for correcting invalid local
+input, schema errors, conflicting records and bounded audits; valid changes
+require review, and a pass still requires independent source/trust/clock/host/
+operator evidence. Refused comparisons never offer approval or partial
+semantic inventory. Existing JSON/plain/summary modes, safety markers, strict
+file/stream bounds and 0/2/3 exit semantics remain unchanged. Both
+`--guidance` without `--summary` and `--json --guidance` reject before
+reading input. No external material, network, root/tool/clock admission,
+privileged Mac UID502/APFS or Linux C authorization is added; all C0/T5B and
+release gates remain HOLD.

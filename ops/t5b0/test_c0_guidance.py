@@ -120,6 +120,12 @@ class GuidanceTests(unittest.TestCase):
             self.assertIn('Review local input bounds', result[1])
             self.assertNotIn('independent source', result[1].split('Next actions:')[1])
 
+    def test_unknown_status_refuses_to_suggest_success(self):
+        output = c0.render_guidance({'status': 'UNEXPECTED'})
+        self.assertIn('Unrecognized review status', output)
+        self.assertNotIn('No structural changes or errors', output)
+        self.assertIn('Do not collect', output)
+
     def test_format_conflicts_reject_before_input(self):
         class NeverRead:
             def read(self, *args):
