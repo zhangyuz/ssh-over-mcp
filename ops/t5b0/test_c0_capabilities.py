@@ -6,6 +6,7 @@ import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import c0_manifest_preflight as preflight
@@ -43,7 +44,7 @@ class CapabilityDiscoveryTests(unittest.TestCase):
         self.assertNotIn('https://', run.stdout.decode())
         self.assertNotIn('sha256', run.stdout.decode())
         second = subprocess.run([sys.executable, str(SCRIPT), '--capabilities-json'],
-                                capture_output=True, timeout=6)
+                                capture_output=True, timeout=6, check=False)
         self.assertEqual(run.stdout, second.stdout)
 
     def test_capabilities_conflicts_pre_read_with_all_mode_families(self):
@@ -77,6 +78,25 @@ class CapabilityDiscoveryTests(unittest.TestCase):
                 self.assertEqual(stdout.getvalue(), '')
                 self.assertIn('--capabilities-json cannot be combined',
                               stderr.getvalue())
+
+    def test_success_does_not_touch_stdin_file_or_directory(self):
+        class NoRead:
+            def read(self, *args, **kwargs):
+                raise AssertionError('capability request must not touch stdin')
+
+        output = io.StringIO()
+        with patch.object(sys, 'argv', [str(SCRIPT), '--capabilities-json']), \
+                patch.object(sys, 'stdin', SimpleNamespace(buffer=NoRead())), \
+                patch.object(preflight, 'inspect_manifest',
+                             side_effect=AssertionError('must not touch file')), \
+                patch.object(preflight, 'inspect_stdin',
+                             side_effect=AssertionError('must not read stdin')), \
+                patch.object(preflight, 'directory_report',
+                             side_effect=AssertionError('must not scan directory')), \
+                redirect_stdout(output), redirect_stderr(io.StringIO()):
+            self.assertEqual(preflight.main(), 0)
+        self.assertEqual(json.loads(output.getvalue())['schema'],
+                         'som-t5b0-c0-capabilities-v1')
 
     def test_capability_report_is_never_an_authorization(self):
         report = preflight.render_capabilities_json()

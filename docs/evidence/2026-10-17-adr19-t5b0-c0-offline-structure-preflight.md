@@ -450,3 +450,28 @@ does not satisfy independent source, trust, time, environment or operator
 verification. C0/T5B/Mac UID502/APFS/Linux C HOLD persists.
 
 Run `python3 -m unittest discover -s ops/t5b0 -p test_c0_file_directory_compare.py -v`.
+
+## Read-free machine capability discovery (next offline slice)
+
+Automation can discover supported offline review modes and resource ceilings
+*without* opening local proposal files, reading stdin, contacting a network
+endpoint, trusting manifests or collecting material:
+
+```sh
+python3 ops/t5b0/c0_manifest_preflight.py --capabilities-json
+```
+
+The output is deterministic JSON with fixed code-defined keys: `schema`
+(`som-t5b0-c0-capabilities-v1`), `review_schema`, alphabetically sorted
+`review_modes`, `limits`, the three non-authorizing boundary markers and the
+five UNVERIFIED evidence-gap IDs. The ceilings are 16 KiB per manifest,
+64 total directory entries (including ignored names), 16 directory/NDJSON/batch
+manifests and four objects per manifest. The command must not be mixed with
+any input/comparison mode, output flag, strict-directory mode or
+`--fail-on-change`; parser rejection occurs before data reads. No paths,
+URLs, object IDs or raw diagnostics are exposed by this capability catalog.
+A compatible report schema does **not** certify the source, manifest trust,
+clock, execution environment or operator consent. All C0/T5B/Mac UID502/APFS
+and Linux C HOLD boundaries remain in force.
+
+Run `python3 -m unittest discover -s ops/t5b0 -p test_c0_capabilities.py -v`.

@@ -712,6 +712,29 @@ REVIEW_MODES = frozenset({
 })
 
 
+CAPABILITIES_SCHEMA = 'som-t5b0-c0-capabilities-v1'
+
+
+def render_capabilities_json():
+    """Publish only fixed offline capabilities; never reflect source inputs."""
+    return json.dumps({
+        'schema': CAPABILITIES_SCHEMA,
+        'review_schema': REVIEW_SUMMARY_SCHEMA,
+        'review_modes': sorted(REVIEW_MODES),
+        'limits': {
+            'manifest_bytes': 16384,
+            'directory_entries': MAX_DIRECTORY_ENTRIES,
+            'directory_manifests': 16,
+            'batch_manifests': 16,
+            'objects_per_manifest': len(IDS),
+        },
+        'authorization': 'NO_AUTHORIZATION',
+        'collection': 'C0_COLLECT_HOLD',
+        'network': 'NO_NETWORK',
+        'evidence_gaps': [key for key, _ in EVIDENCE_GAPS],
+    }, sort_keys=True)
+
+
 def render_summary_json(report, *, review_mode=None):
     """Machine-readable allowlisted observations; never serialize source values."""
     def audit_counts(audit):
@@ -792,6 +815,8 @@ def main():
                    help='emit a private human-readable offline review; excludes --json')
     p.add_argument('--summary-json', action='store_true',
                    help='emit allowlisted privacy-safe machine-readable offline review')
+    p.add_argument('--capabilities-json', action='store_true',
+                   help='print a static, non-authorizing JSON catalog without reading inputs')
     p.add_argument('--guidance', action='store_true',
                    help='with --summary, append fixed privacy-safe remediation guidance')
     p.add_argument('--directory', type=Path, help='audit 1–16 .json entries in a directory, offline')
@@ -825,6 +850,23 @@ def main():
     p.add_argument('--batch', type=Path, nargs='+', metavar='MANIFEST',
                    help='inspect up to 16 manifests and emit one aggregate JSON report')
     args = p.parse_args()
+    if args.capabilities_json:
+        # Discovery is deliberately input-free, and must never mix with audit routes.
+        if (args.manifest is not None or args.batch is not None
+                or args.stdin or args.stdin_batch or args.directory is not None
+                or args.compare_file_to_directory is not None
+                or args.compare_directory_to_file is not None
+                or args.compare_file_to_stdin is not None
+                or args.compare_stdin_to_file is not None
+                or args.compare_files is not None or args.compare_directories is not None
+                or args.compare_stdin_to_directory is not None
+                or args.compare_stdin_before_directory is not None
+                or args.compare_stdin_batches or args.fail_on_change
+                or args.require_json_only or args.json or args.summary
+                or args.summary_json or args.guidance):
+            p.error('--capabilities-json cannot be combined with input or report options')
+        print(render_capabilities_json())
+        return 0
     # Validate the new input route before reading any file or stdin bytes.
     if (args.compare_file_to_directory is not None
             or args.compare_directory_to_file is not None) and (
