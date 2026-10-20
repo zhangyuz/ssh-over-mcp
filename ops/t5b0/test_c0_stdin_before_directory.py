@@ -106,6 +106,55 @@ class ReverseStreamedCompareTests(unittest.TestCase):
                 self.assertEqual(report['network'], 'NO_NETWORK')
                 self.assertNotIn('_inventory', json.dumps(report))
 
+    def test_all_object_fields_and_add_remove_changes(self):
+        for field, new_value in (('url', 'https://host/updated.whl'),
+                                 ('sha256', 'c' * 64),
+                                 ('bytes', 2), ('max_bytes', 3)):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
+                before = copy.deepcopy(BASE)
+                before['objects'][0]['max_bytes'] = 2
+                after = copy.deepcopy(before)
+                after['objects'][0][field] = new_value
+                proc, report = run_review(
+                    Path(tmp), [before], {'a.json': after}, ('--fail-on-change',))
+                self.assertEqual(proc.returncode, 3, proc.stderr)
+                self.assertEqual(report['object_diff'], {
+                    'status': 'AVAILABLE', 'added': [], 'removed': [],
+                    'changed': [{'id': 'C0-W1', 'fields': [field]}]})
+        with tempfile.TemporaryDirectory() as tmp:
+            after = copy.deepcopy(BASE)
+            after['objects'][0]['id'] = 'C0-P1'
+            after['objects'][0]['url'] = 'https://host/second.whl'
+            proc, report = run_review(
+                Path(tmp), [BASE], {'next.json': after}, ('--fail-on-change',))
+            self.assertEqual(proc.returncode, 3, proc.stderr)
+            self.assertEqual(report['object_diff'], {
+                'status': 'AVAILABLE', 'added': ['C0-P1'],
+                'removed': ['C0-W1'], 'changed': []})
+            self.assertNotIn('https://host/second.whl', proc.stdout.decode())
+
+    def test_default_directory_cap_64_passes_and_65_refuses(self):
+        for extra_count, accepted in ((63, True), (64, False)):
+            with self.subTest(extra_count=extra_count), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                after = root / 'successor'
+                after.mkdir()
+                (after / 'a.json').write_text(json.dumps(BASE))
+                for i in range(extra_count):
+                    (after / f'z{i:02}.txt').write_text('')
+                proc = subprocess.run(
+                    [sys.executable, str(SCRIPT), '--compare-stdin-before-directory',
+                     str(after)], input=json.dumps(BASE).encode() + bytes([10]),
+                    capture_output=True, timeout=8, check=False)
+                report = json.loads(proc.stdout)
+                self.assertEqual(proc.returncode, 0 if accepted else 2)
+                self.assertEqual(report['status'], 'UNCHANGED' if accepted else 'REFUSED')
+                self.assertEqual(report['object_diff']['status'],
+                                 'AVAILABLE' if accepted else 'UNAVAILABLE')
+                if not accepted:
+                    self.assertEqual(report['after']['errors'],
+                                     ['directory must contain at most 64 total entries'])
+
     def test_incompatible_modes_rejected_at_cli(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -2347,3 +2347,7 @@ The offline C0 proposal preflight now refuses malformed percent-escapes that `un
 ### 2026-10-20 C0 raw URL path character canonicalization
 
 Offline C0 proposal preflight now rejects six literal HTTPS path characters that WHATWG URL parsers would percent-encode (`<`, `>`, double quote, braces, backtick). Normal ASCII paths and compatible punctuation remain unchanged. This is an `INVALID_STRUCTURE`-only offline consistency hardening, not a URL fetch, signer/source authentication, C0 collection authorization or change to T5B/Mac UID502/APFS/Linux C safety gates; all caps and five `UNVERIFIED` evidence gaps remain.
+
+### 2026-10-20 C0 symmetric streamed baseline review
+
+The non-authorizing C0 offline reviewer now supports `--compare-stdin-before-directory AFTER_DIR`: bounded, untrusted NDJSON stdin as baseline and a separately audited directory successor as new snapshot, complementing the existing directory-to-stream direction. Both directions share a single semantic report composer to retain `UNCHANGED`/ `CHANGED`/ `REFUSED` contracts, `object_diff=UNAVAILABLE` on either refusal and optional change-gate exit 3. New tests exercise added/removed IDs, URL/digest/declared size/cap changes, strict/default directory 64/65-entry ceilings, 1–16/16KiB streamed limits, diagnostic redaction, option mutual exclusion and both-side refusal. This does **not** authenticate sources, grant collection, change 64/16/16KiB budgets, add network use or advance C0/T5B, Mac UID502/APFS or Linux C HOLD gates.
