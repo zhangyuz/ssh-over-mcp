@@ -2331,3 +2331,7 @@ The structurally pinned HTTPS URL validator now refuses mixed-label hostnames wi
 ### 2026-10-19 C0 numeric DNS-tail independent review follow-up
 
 An independent P2 review of PR #300 found that terminal bare `0x` (with no following hex digits) escaped the numeric URL-host suffix guard. Offline C0 now refuses it using the existing `INVALID_STRUCTURE` contract, verified by 3 host cases × 7 intake/compare entrypoints plus accepted `0xg`, numeric interior labels and canonical IPv4 controls. No DNS resolution, C0 collection permission, trust-root/tool admission, privileged Mac UID502/APFS, Linux C or resource-budget change; all evidence gaps remain `UNVERIFIED`.
+
+### 2026-10-19 C0 empty HTTPS URL delimiters
+
+The offline C0 structural validator now rejects query/fragment delimiters even if their contents are empty. The earlier `urlsplit().query`/`.fragment` truthiness tests missed `?`, `#` and `?#` terminal spellings; common shared validation now fails closed under the existing error code in all file/stdin/batch/directory/compare modes. Normal pinned HTTPS URLs, safety markers, resource limits and C0/T5B/Mac UID502/APFS/Linux C HOLD remain unchanged; no collection or network authorization is created.
