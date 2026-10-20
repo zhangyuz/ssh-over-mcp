@@ -517,6 +517,20 @@ def compare_stdin_before_directory(after_directory, *, require_json_only=False):
     return compare_stream_directory_reports(before, before_inventory, after, after_inventory)
 
 
+def compare_manifest_files(before_path, after_path):
+    """Compare two independent, bounded regular-file reads; never trust either."""
+    before = inspect_manifest(before_path, capture_objects=True)
+    after = inspect_manifest(after_path, capture_objects=True)
+    before_objects = before.pop('_objects')
+    after_objects = after.pop('_objects')
+    before_inventory = ({obj['id']: obj for obj in before_objects}
+                        if before['status'] != 'REFUSED' else {})
+    after_inventory = ({obj['id']: obj for obj in after_objects}
+                       if after['status'] != 'REFUSED' else {})
+    return compare_stream_directory_reports(
+        before, before_inventory, after, after_inventory)
+
+
 def compare_paired_stdin_batches():
     """Review two untrusted NDJSON snapshots separated by an exact LF---LF."""
     delimiter = b'\n---\n'
@@ -659,7 +673,7 @@ REVIEW_SUMMARY_SCHEMA = 'som-t5b0-c0-summary-json-v1'
 REVIEW_MODES = frozenset({
     'MANIFEST_FILE', 'FILE_BATCH', 'DIRECTORY', 'STDIN_MANIFEST', 'STDIN_BATCH',
     'DIRECTORY_COMPARISON', 'DIRECTORY_TO_STDIN', 'STDIN_TO_DIRECTORY',
-    'PAIRED_STDIN_COMPARISON',
+    'PAIRED_STDIN_COMPARISON', 'FILE_COMPARISON',
 })
 
 
@@ -746,6 +760,8 @@ def main():
     p.add_argument('--guidance', action='store_true',
                    help='with --summary, append fixed privacy-safe remediation guidance')
     p.add_argument('--directory', type=Path, help='audit 1–16 .json entries in a directory, offline')
+    p.add_argument('--compare-files', type=Path, nargs=2, metavar=('BEFORE', 'AFTER'),
+                   help='offline semantic comparison of two <=16 KiB regular-file manifests')
     p.add_argument('--compare-directories', type=Path, nargs=2, metavar=('BEFORE', 'AFTER'),
                    help='offline review diff of two bounded directories')
     p.add_argument('--compare-stdin-to-directory', type=Path, metavar='BEFORE_DIR',
@@ -756,12 +772,22 @@ def main():
                    help='compare bounded before/after NDJSON separated by LF---LF; supports --fail-on-change')
     p.add_argument('--fail-on-change', action='store_true',
                    help='with --compare-directories or --compare-stdin-to-directory, exit 3 on change; '
-                        'also --compare-stdin-before-directory and --compare-stdin-batches')
+                        'also --compare-stdin-before-directory, --compare-stdin-batches '
+                        'and --compare-files')
     p.add_argument('--require-json-only', action='store_true',
                    help='with directory audit or compare, refuse non-JSON immediate entries')
     p.add_argument('--batch', type=Path, nargs='+', metavar='MANIFEST',
                    help='inspect up to 16 manifests and emit one aggregate JSON report')
     args = p.parse_args()
+    # Validate the new input route before reading any file or stdin bytes.
+    if args.compare_files is not None and (
+            args.manifest is not None or args.batch is not None
+            or args.stdin or args.stdin_batch or args.directory is not None
+            or args.compare_directories is not None
+            or args.compare_stdin_to_directory is not None
+            or args.compare_stdin_before_directory is not None
+            or args.compare_stdin_batches or args.require_json_only):
+        p.error('--compare-files cannot be combined with other input modes or --require-json-only')
     if args.summary_json and (args.summary or args.json or args.guidance):
         p.error('--summary-json not allowed with --summary, --json or --guidance')
     if args.summary and args.json:
@@ -794,13 +820,14 @@ def main():
     if args.stdin and (args.manifest is not None or args.batch is not None
                        or args.directory is not None or args.compare_directories is not None):
         p.error('--stdin cannot be combined with other input modes')
-    if (args.fail_on_change and args.compare_directories is None
+    if (args.fail_on_change and args.compare_files is None
+            and args.compare_directories is None
             and args.compare_stdin_to_directory is None
             and args.compare_stdin_before_directory is None
             and not args.compare_stdin_batches):
         p.error('--fail-on-change requires --compare-directories or '
                 '--compare-stdin-to-directory or --compare-stdin-before-directory '
-                'or --compare-stdin-batches')
+                'or --compare-stdin-batches or --compare-files')
     if (args.require_json_only and args.compare_directories is None and args.directory is None
             and args.compare_stdin_to_directory is None
             and args.compare_stdin_before_directory is None):
@@ -808,6 +835,7 @@ def main():
                 'or --compare-stdin-to-directory or --compare-stdin-before-directory')
     # Fixed labels reflect the selected local input route, never an input value.
     review_mode = (
+        'FILE_COMPARISON' if args.compare_files is not None else
         'PAIRED_STDIN_COMPARISON' if args.compare_stdin_batches else
         'STDIN_TO_DIRECTORY' if args.compare_stdin_before_directory is not None else
         'DIRECTORY_TO_STDIN' if args.compare_stdin_to_directory is not None else
@@ -818,6 +846,15 @@ def main():
         'FILE_BATCH' if args.batch is not None else
         'MANIFEST_FILE'
     )
+    if args.compare_files is not None:
+        report = compare_manifest_files(*args.compare_files)
+        emit_report(report, summary=args.summary, guidance=args.guidance,
+                    summary_json=args.summary_json, review_mode=review_mode)
+        if report['status'] == 'REFUSED':
+            return 2
+        if args.fail_on_change and report['status'] == 'CHANGED':
+            return 3
+        return 0
     if args.compare_stdin_batches:
         report = compare_paired_stdin_batches()
         emit_report(report, summary=args.summary, guidance=args.guidance,
