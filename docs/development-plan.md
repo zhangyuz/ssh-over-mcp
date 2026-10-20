@@ -2335,3 +2335,7 @@ An independent P2 review of PR #300 found that terminal bare `0x` (with no follo
 ### 2026-10-19 C0 empty HTTPS URL delimiters
 
 The offline C0 structural validator now rejects query/fragment delimiters even if their contents are empty. The earlier `urlsplit().query`/`.fragment` truthiness tests missed `?`, `#` and `?#` terminal spellings; common shared validation now fails closed under the existing error code in all file/stdin/batch/directory/compare modes. Normal pinned HTTPS URLs, safety markers, resource limits and C0/T5B/Mac UID502/APFS/Linux C HOLD remain unchanged; no collection or network authorization is created.
+
+### 2026-10-19 C0 canonical lowercase HTTPS scheme spelling
+
+The offline C0 HTTPS URL preflight now rejects alternative scheme-capitalization spellings that `urlsplit` otherwise canonicalizes in its parsed `scheme` field. The shared fail-closed validator requires the literal `https://` prefix, retaining existing INVALID_STRUCTURE, error/exit/report contracts and canonical HTTPS positive controls. No DNS/network, C0 material collection, source/root/tool trust, privileged Mac UID502/APFS, Linux C release or resource-limit change; all security HOLDs persist.
