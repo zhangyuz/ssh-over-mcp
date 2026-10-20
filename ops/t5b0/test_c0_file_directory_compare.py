@@ -50,7 +50,13 @@ class FileDirectoryComparisonTests(unittest.TestCase):
                     proc, report = invoke(mode, self.file, self.directory,
                                           '--fail-on-change', *flags)
                     self.assertEqual((proc.returncode, proc.stderr), (0, b''))
-                    self.assert_private(proc.stdout.decode())
+                    if '--json' not in flags:
+                        self.assert_private(proc.stdout.decode())
+                    else:
+                        # Legacy detailed directory reports have always included
+                        # local audit paths; private opt-in formats must not.
+                        self.assertNotIn('https://', proc.stdout.decode())
+                        self.assertNotIn('a'*64, proc.stdout.decode())
                     if '--summary' in flags:
                         self.assertIn('C0 offline review: UNCHANGED', proc.stdout.decode())
                     else:
