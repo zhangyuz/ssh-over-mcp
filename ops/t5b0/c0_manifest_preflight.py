@@ -653,6 +653,9 @@ MACHINE_REPORT_STATUSES = frozenset({
 })
 
 
+REVIEW_SUMMARY_SCHEMA = 'som-t5b0-c0-summary-json-v1'
+
+
 REVIEW_MODES = frozenset({
     'MANIFEST_FILE', 'FILE_BATCH', 'DIRECTORY', 'STDIN_MANIFEST', 'STDIN_BATCH',
     'DIRECTORY_COMPARISON', 'DIRECTORY_TO_STDIN', 'STDIN_TO_DIRECTORY',
@@ -678,7 +681,8 @@ def render_summary_json(report, *, review_mode=None):
 
     raw_status = report['status']
     status = raw_status if raw_status in MACHINE_REPORT_STATUSES else 'REFUSED'
-    result = {'status': status, 'authorization': 'NO_AUTHORIZATION',
+    result = {'status': status, 'review_schema': REVIEW_SUMMARY_SCHEMA,
+              'authorization': 'NO_AUTHORIZATION',
               'collection': 'C0_COLLECT_HOLD', 'network': 'NO_NETWORK',
               'evidence_gaps': [key for key, _ in EVIDENCE_GAPS]}
     if review_mode in REVIEW_MODES:
