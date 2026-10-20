@@ -146,6 +146,41 @@ class PairedStdinCompareTests(unittest.TestCase):
                 self.assertEqual(proc.returncode, 2)
                 self.assertEqual(report['object_diff']['status'], 'UNAVAILABLE')
 
+    def test_valid_four_id_snapshots_are_order_independent(self):
+        identifiers = ('C0-W1', 'C0-P1', 'C0-R1', 'C0-T1')
+        docs = []
+        for index, ident in enumerate(identifiers):
+            manifest = copy.deepcopy(BASE)
+            manifest['objects'][0]['id'] = ident
+            manifest['objects'][0]['url'] = f'https://host/{index}.whl'
+            manifest['objects'][0]['sha256'] = f'{index:064x}'
+            docs.append(manifest)
+        proc, report = invoke(payload(docs, docs[::-1]), '--fail-on-change')
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(report['status'], 'UNCHANGED')
+        self.assertEqual(report['object_diff']['status'], 'AVAILABLE')
+        self.assertEqual(len(report['before']['results']), 4)
+        self.assertEqual(len(report['after']['results']), 4)
+        self.assertNotIn('https://host/', proc.stdout.decode())
+
+    def test_exact_per_record_byte_limit_on_each_side(self):
+        compact = json.dumps(BASE).encode()
+        self.assertLess(len(compact), 16384)
+        at_cap = compact + b' ' * (16384 - len(compact))
+        over_cap = at_cap + b' '
+        for before, after, code, status in (
+            (at_cap, compact, 0, 'UNCHANGED'),
+            (compact, at_cap, 0, 'UNCHANGED'),
+            (over_cap, compact, 2, 'REFUSED'),
+            (compact, over_cap, 2, 'REFUSED'),
+        ):
+            with self.subTest(before_bytes=len(before), after_bytes=len(after)):
+                proc, report = invoke(payload(before, after), '--fail-on-change')
+                self.assertEqual(proc.returncode, code, proc.stderr)
+                self.assertEqual(report['status'], status)
+                if code == 2:
+                    self.assertEqual(report['object_diff']['status'], 'UNAVAILABLE')
+
     def test_all_other_modes_and_strict_flag_are_incompatible(self):
         for extra in (('--stdin',), ('--stdin-batch',), ('--directory', 'no-dir'),
                       ('--compare-directories', 'a', 'b'),

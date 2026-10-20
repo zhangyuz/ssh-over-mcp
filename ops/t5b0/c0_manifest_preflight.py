@@ -204,12 +204,13 @@ def inspect_stdin():
         'network': 'NO_NETWORK',
     }
 
-def inspect_stdin_batch(*, capture_inventory=False):
+def inspect_stdin_batch(*, capture_inventory=False, data=None):
     """Audit bounded NDJSON proposals from stdin; never interpret them as consent."""
     results = []
     errors = []
     try:
-        data = sys.stdin.buffer.read(16 * 16385 + 1)
+        if data is None:
+            data = sys.stdin.buffer.read(16 * 16385 + 1)
         if len(data) > 16 * 16385:
             errors = ['stdin batch exceeds total byte budget']
         else:
@@ -516,6 +517,30 @@ def compare_stdin_before_directory(after_directory, *, require_json_only=False):
     return compare_stream_directory_reports(before, before_inventory, after, after_inventory)
 
 
+def compare_paired_stdin_batches():
+    """Review two untrusted NDJSON snapshots separated by an exact LF---LF."""
+    delimiter = b'\n---\n'
+    maximum = 2 * 16 * 16385 + len(delimiter)
+    try:
+        data = sys.stdin.buffer.read(maximum + 1)
+        if len(data) > maximum or data.count(delimiter) != 1:
+            raise ValueError('paired stdin framing or total byte budget invalid')
+    except (OSError, ValueError, TypeError) as exc:
+        error = f'unreadable/invalid paired stdin: {type(exc).__name__}'
+        refused = {
+            'status': 'REFUSED', 'errors': [error], 'results': [],
+            'authorization': 'NO_AUTHORIZATION',
+            'collection': 'C0_COLLECT_HOLD', 'network': 'NO_NETWORK',
+        }
+        return compare_stream_directory_reports(refused, {}, dict(refused), {})
+    before_data, after_data = data.split(delimiter)
+    before, before_inventory = inspect_stdin_batch(
+        capture_inventory=True, data=before_data)
+    after, after_inventory = inspect_stdin_batch(
+        capture_inventory=True, data=after_data)
+    return compare_stream_directory_reports(before, before_inventory, after, after_inventory)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('manifest', type=Path, nargs='?')
@@ -530,13 +555,24 @@ def main():
                    help='compare bounded piped NDJSON successor with offline directory baseline')
     p.add_argument('--compare-stdin-before-directory', type=Path, metavar='AFTER_DIR',
                    help='compare piped NDJSON baseline with directory successor; --fail-on-change supported')
+    p.add_argument('--compare-stdin-batches', action='store_true',
+                   help='compare bounded before/after NDJSON separated by LF---LF; supports --fail-on-change')
     p.add_argument('--fail-on-change', action='store_true',
-                   help='with --compare-directories or --compare-stdin-to-directory, exit 3 on change')
+                   help='with --compare-directories or --compare-stdin-to-directory, exit 3 on change; '
+                        'also --compare-stdin-before-directory and --compare-stdin-batches')
     p.add_argument('--require-json-only', action='store_true',
                    help='with directory audit or compare, refuse non-JSON immediate entries')
     p.add_argument('--batch', type=Path, nargs='+', metavar='MANIFEST',
                    help='inspect up to 16 manifests and emit one aggregate JSON report')
     args = p.parse_args()
+    if args.compare_stdin_batches and (
+            args.stdin or args.stdin_batch or args.manifest is not None
+            or args.batch is not None or args.directory is not None
+            or args.compare_directories is not None
+            or args.compare_stdin_to_directory is not None
+            or args.compare_stdin_before_directory is not None
+            or args.require_json_only):
+        p.error('--compare-stdin-batches cannot be combined with other input modes or --require-json-only')
     if args.compare_stdin_before_directory is not None and (
             args.stdin or args.stdin_batch or args.manifest is not None
             or args.batch is not None or args.directory is not None
@@ -557,14 +593,24 @@ def main():
         p.error('--stdin cannot be combined with other input modes')
     if (args.fail_on_change and args.compare_directories is None
             and args.compare_stdin_to_directory is None
-            and args.compare_stdin_before_directory is None):
+            and args.compare_stdin_before_directory is None
+            and not args.compare_stdin_batches):
         p.error('--fail-on-change requires --compare-directories or '
-                '--compare-stdin-to-directory or --compare-stdin-before-directory')
+                '--compare-stdin-to-directory or --compare-stdin-before-directory '
+                'or --compare-stdin-batches')
     if (args.require_json_only and args.compare_directories is None and args.directory is None
             and args.compare_stdin_to_directory is None
             and args.compare_stdin_before_directory is None):
         p.error('--require-json-only requires --directory or --compare-directories '
                 'or --compare-stdin-to-directory or --compare-stdin-before-directory')
+    if args.compare_stdin_batches:
+        report = compare_paired_stdin_batches()
+        print(json.dumps(report, sort_keys=True))
+        if report['status'] == 'REFUSED':
+            return 2
+        if args.fail_on_change and report['status'] == 'CHANGED':
+            return 3
+        return 0
     if args.stdin_batch:
         report = inspect_stdin_batch()
         print(json.dumps(report, sort_keys=True))
