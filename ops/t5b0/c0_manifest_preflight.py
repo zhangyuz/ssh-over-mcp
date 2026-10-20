@@ -184,18 +184,19 @@ def inspect_manifest(path, *, dir_fd=None, include_digest=False, capture_objects
     return report
 
 
-def inspect_stdin():
+def inspect_stdin(*, capture_inventory=False):
     """Parse at most 16 KiB of explicitly piped bytes; never touch the network."""
     try:
         data = sys.stdin.buffer.read(16385)
         if len(data) > 16384:
             raise ValueError('manifest too large')
-        errors = validate(parse_manifest(data.decode('utf-8-sig')))
+        doc = parse_manifest(data.decode('utf-8-sig'))
+        errors = validate(doc)
         error_codes = ['INVALID_STRUCTURE'] if errors else []
     except (OSError, UnicodeError, ValueError, TypeError, RecursionError) as exc:
         errors = [f'unreadable/invalid manifest: {type(exc).__name__}']
         error_codes = ['INVALID_MANIFEST']
-    return {
+    report = {
         'status': 'REFUSED' if errors else 'STRUCTURE_ONLY_PASS',
         'errors': errors,
         'error_codes': error_codes,
@@ -203,6 +204,10 @@ def inspect_stdin():
         'collection': 'C0_COLLECT_HOLD',
         'network': 'NO_NETWORK',
     }
+    if capture_inventory:
+        return report, ({obj['id']: obj for obj in doc['objects']} if not errors else {})
+    return report
+
 
 def inspect_stdin_batch(*, capture_inventory=False, data=None):
     """Audit bounded NDJSON proposals from stdin; never interpret them as consent."""
@@ -531,6 +536,18 @@ def compare_manifest_files(before_path, after_path):
         before, before_inventory, after, after_inventory)
 
 
+def compare_file_and_stdin(file_path, *, stdin_before=False):
+    """Compare one bounded regular-file manifest and one unpersisted stdin manifest."""
+    disk = inspect_manifest(file_path, capture_objects=True)
+    objects = disk.pop('_objects')
+    disk_inventory = ({obj['id']: obj for obj in objects}
+                      if disk['status'] != 'REFUSED' else {})
+    stream, stream_inventory = inspect_stdin(capture_inventory=True)
+    if stdin_before:
+        return compare_stream_directory_reports(stream, stream_inventory, disk, disk_inventory)
+    return compare_stream_directory_reports(disk, disk_inventory, stream, stream_inventory)
+
+
 def compare_paired_stdin_batches():
     """Review two untrusted NDJSON snapshots separated by an exact LF---LF."""
     delimiter = b'\n---\n'
@@ -673,7 +690,7 @@ REVIEW_SUMMARY_SCHEMA = 'som-t5b0-c0-summary-json-v1'
 REVIEW_MODES = frozenset({
     'MANIFEST_FILE', 'FILE_BATCH', 'DIRECTORY', 'STDIN_MANIFEST', 'STDIN_BATCH',
     'DIRECTORY_COMPARISON', 'DIRECTORY_TO_STDIN', 'STDIN_TO_DIRECTORY',
-    'PAIRED_STDIN_COMPARISON', 'FILE_COMPARISON',
+    'PAIRED_STDIN_COMPARISON', 'FILE_COMPARISON', 'FILE_TO_STDIN', 'STDIN_TO_FILE',
 })
 
 
@@ -760,6 +777,10 @@ def main():
     p.add_argument('--guidance', action='store_true',
                    help='with --summary, append fixed privacy-safe remediation guidance')
     p.add_argument('--directory', type=Path, help='audit 1–16 .json entries in a directory, offline')
+    p.add_argument('--compare-file-to-stdin', type=Path, metavar='BEFORE_FILE',
+                   help='compare bounded offline manifest file with one piped successor JSON')
+    p.add_argument('--compare-stdin-to-file', type=Path, metavar='AFTER_FILE',
+                   help='compare one piped baseline JSON with bounded offline manifest file')
     p.add_argument('--compare-files', type=Path, nargs=2, metavar=('BEFORE', 'AFTER'),
                    help='offline semantic comparison of two <=16 KiB regular-file manifests')
     p.add_argument('--compare-directories', type=Path, nargs=2, metavar=('BEFORE', 'AFTER'),
@@ -773,13 +794,23 @@ def main():
     p.add_argument('--fail-on-change', action='store_true',
                    help='with --compare-directories or --compare-stdin-to-directory, exit 3 on change; '
                         'also --compare-stdin-before-directory, --compare-stdin-batches '
-                        'and --compare-files')
+                        'and --compare-files, --compare-file-to-stdin or --compare-stdin-to-file')
     p.add_argument('--require-json-only', action='store_true',
                    help='with directory audit or compare, refuse non-JSON immediate entries')
     p.add_argument('--batch', type=Path, nargs='+', metavar='MANIFEST',
                    help='inspect up to 16 manifests and emit one aggregate JSON report')
     args = p.parse_args()
     # Validate the new input route before reading any file or stdin bytes.
+    if (args.compare_file_to_stdin is not None or args.compare_stdin_to_file is not None) and (
+            args.manifest is not None or args.batch is not None
+            or args.stdin or args.stdin_batch or args.directory is not None
+            or args.compare_files is not None or args.compare_directories is not None
+            or args.compare_stdin_to_directory is not None
+            or args.compare_stdin_before_directory is not None
+            or args.compare_stdin_batches or args.require_json_only
+            or (args.compare_file_to_stdin is not None and args.compare_stdin_to_file is not None)):
+        p.error('--compare-file-to-stdin/--compare-stdin-to-file cannot be combined '
+                'with other input modes or --require-json-only')
     if args.compare_files is not None and (
             args.manifest is not None or args.batch is not None
             or args.stdin or args.stdin_batch or args.directory is not None
@@ -821,13 +852,15 @@ def main():
                        or args.directory is not None or args.compare_directories is not None):
         p.error('--stdin cannot be combined with other input modes')
     if (args.fail_on_change and args.compare_files is None
+            and args.compare_file_to_stdin is None and args.compare_stdin_to_file is None
             and args.compare_directories is None
             and args.compare_stdin_to_directory is None
             and args.compare_stdin_before_directory is None
             and not args.compare_stdin_batches):
         p.error('--fail-on-change requires --compare-directories or '
                 '--compare-stdin-to-directory or --compare-stdin-before-directory '
-                'or --compare-stdin-batches or --compare-files')
+                'or --compare-stdin-batches or --compare-files or '
+                '--compare-file-to-stdin or --compare-stdin-to-file')
     if (args.require_json_only and args.compare_directories is None and args.directory is None
             and args.compare_stdin_to_directory is None
             and args.compare_stdin_before_directory is None):
@@ -835,6 +868,8 @@ def main():
                 'or --compare-stdin-to-directory or --compare-stdin-before-directory')
     # Fixed labels reflect the selected local input route, never an input value.
     review_mode = (
+        'FILE_TO_STDIN' if args.compare_file_to_stdin is not None else
+        'STDIN_TO_FILE' if args.compare_stdin_to_file is not None else
         'FILE_COMPARISON' if args.compare_files is not None else
         'PAIRED_STDIN_COMPARISON' if args.compare_stdin_batches else
         'STDIN_TO_DIRECTORY' if args.compare_stdin_before_directory is not None else
@@ -846,6 +881,17 @@ def main():
         'FILE_BATCH' if args.batch is not None else
         'MANIFEST_FILE'
     )
+    if args.compare_file_to_stdin is not None or args.compare_stdin_to_file is not None:
+        stdin_before = args.compare_stdin_to_file is not None
+        path = (args.compare_stdin_to_file if stdin_before else args.compare_file_to_stdin)
+        report = compare_file_and_stdin(path, stdin_before=stdin_before)
+        emit_report(report, summary=args.summary, guidance=args.guidance,
+                    summary_json=args.summary_json, review_mode=review_mode)
+        if report['status'] == 'REFUSED':
+            return 2
+        if args.fail_on_change and report['status'] == 'CHANGED':
+            return 3
+        return 0
     if args.compare_files is not None:
         report = compare_manifest_files(*args.compare_files)
         emit_report(report, summary=args.summary, guidance=args.guidance,
