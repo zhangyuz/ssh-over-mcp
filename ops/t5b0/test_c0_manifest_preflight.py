@@ -1943,6 +1943,57 @@ class C0PreflightTests(unittest.TestCase):
                     good['objects'][0]['url'] = 'https://host' + path
                     self.assertEqual(validate(good) == [], accepted)
 
+    def test_whatwg_reserialized_path_characters_refuse_all_intakes(self):
+        script = Path(__file__).with_name('c0_manifest_preflight.py')
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            before, after = root / 'before', root / 'after'
+            before.mkdir()
+            after.mkdir()
+            (before / 'a.json').write_text(json.dumps(BASE))
+            for ch in ('<', '>', '"', '{', '}', chr(96)):
+                with self.subTest(raw_char=ch):
+                    invalid = copy.deepcopy(BASE)
+                    invalid['objects'][0]['url'] = f'https://host/pkg{ch}name.whl'
+                    self.assertTrue(any('URL not pinned' in e
+                                        for e in validate(invalid)))
+                    raw = json.dumps(invalid)
+                    candidate = root / 'candidate.json'
+                    candidate.write_text(raw)
+                    (after / 'candidate.json').write_text(raw)
+                    stream = raw.encode() + bytes([10])
+                    modes = (
+                        ('file', ['--json', str(candidate)], None),
+                        ('stdin', ['--stdin', '--json'], raw.encode()),
+                        ('batch', ['--batch', str(candidate)], None),
+                        ('ndjson', ['--stdin-batch'], stream),
+                        ('directory', ['--directory', str(after)], None),
+                        ('compare_dirs', ['--compare-directories', str(before),
+                                          str(after), '--fail-on-change'], None),
+                        ('compare_stream', ['--compare-stdin-to-directory', str(before),
+                                            '--fail-on-change'], stream),
+                    )
+                    for mode, args, piped in modes:
+                        with self.subTest(mode=mode):
+                            run = subprocess.run(
+                                [sys.executable, str(script), *args],
+                                input=piped, capture_output=True,
+                                timeout=5, check=False)
+                            self.assertEqual(run.returncode, 2, (ch, mode, run.stdout))
+                            report = json.loads(run.stdout)
+                            self.assertEqual(report['status'], 'REFUSED')
+                            self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
+                            self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+                            self.assertEqual(report['network'], 'NO_NETWORK')
+                            if mode.startswith('compare'):
+                                self.assertEqual(report['object_diff']['status'], 'UNAVAILABLE')
+            for ch in ('|', '^', chr(39), '[', ']', ';', ':', '+'):
+                with self.subTest(allowed_punctuation=ch):
+                    valid = copy.deepcopy(BASE)
+                    valid['objects'][0]['url'] = f'https://host/pkg{ch}name.whl'
+                    self.assertEqual(validate(valid), [])
+            self.assertEqual(validate(copy.deepcopy(BASE)), [])
+
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),
