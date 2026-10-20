@@ -152,9 +152,9 @@ class SummaryTests(unittest.TestCase):
         output, error = io.StringIO(), io.StringIO()
         with patch.object(sys, 'argv', [str(SCRIPT), '--stdin', '--json', '--summary']), \
                 patch.object(sys, 'stdin', SimpleNamespace(buffer=NoRead())), \
-                redirect_stdout(output), redirect_stderr(error):
-            with self.assertRaises(SystemExit) as caught:
-                c0.main()
+                redirect_stdout(output), redirect_stderr(error), \
+                self.assertRaises(SystemExit) as caught:
+            c0.main()
         self.assertEqual(caught.exception.code, 2)
         self.assertIn('--summary cannot be combined with --json', error.getvalue())
         self.assertEqual(output.getvalue(), '')

@@ -541,6 +541,58 @@ def compare_paired_stdin_batches():
     return compare_stream_directory_reports(before, before_inventory, after, after_inventory)
 
 
+def render_summary(report):
+    """Render only controlled classifications; omit all input paths and values."""
+    lines = [f"C0 offline review: {report['status']}",
+             'Offline structure observation only; does not authorize collection or execution.',
+             'NO_AUTHORIZATION; C0_COLLECT_HOLD; NO_NETWORK']
+    sides = (('Before', report['before']), ('After', report['after'])) if 'before' in report else (
+        ('Input', report),)
+    for label, audit in sides:
+        records = audit.get('results', [audit])
+        passed = sum(item['status'] == 'STRUCTURE_ONLY_PASS' for item in records)
+        refused = sum(item['status'] == 'REFUSED' for item in records)
+        lines.append(f"{label}: {audit['status']}; records observed={len(records)}, "
+                     f"passed={passed}, refused={refused}")
+        if audit.get('errors'):
+            lines.append(f'{label} diagnostics: INPUT_AUDIT_REFUSED')
+        for index, item in enumerate(records, start=1):
+            if item['status'] != 'REFUSED':
+                continue
+            codes = sorted(set(item.get('error_codes', [])) & {
+                'INVALID_MANIFEST', 'INVALID_STRUCTURE', 'DUPLICATE_OBJECT_ID',
+                'CROSS_FILE_CONFLICT'})
+            lines.append(f"  Record {index}: REFUSED; {', '.join(codes) or 'INPUT_AUDIT_REFUSED'}")
+    if all(key in report for key in ('added', 'removed', 'changed', 'regressions')):
+        lines.append('Observed file changes: ' + ', '.join(
+            f'{key}={len(report[key])}' for key in ('added', 'removed', 'changed', 'regressions')))
+        if report['status'] == 'REFUSED':
+            lines.append('File counts are partial diagnostics, not a complete inventory.')
+    delta = report.get('object_diff')
+    if delta is not None:
+        if report['status'] == 'REFUSED' or delta['status'] != 'AVAILABLE':
+            lines.append('Object changes: UNAVAILABLE')
+        elif not any(delta[key] for key in ('added', 'removed', 'changed')):
+            lines.append('Object changes: none')
+        else:
+            lines.append('Object changes: AVAILABLE')
+            for key in ('added', 'removed'):
+                identifiers = sorted(set(delta[key]) & IDS)
+                if identifiers:
+                    lines.append(f"{key.title()}: {', '.join(identifiers)}")
+            for item in delta['changed']:
+                if item['id'] in IDS:
+                    fields = sorted(set(item['fields']) & (FIELDS - {'id'}))
+                    lines.append(f"Changed {item['id']}: {', '.join(fields)}")
+    lines.append('Evidence: UNVERIFIED')
+    lines.extend(f'  {key}: UNVERIFIED' for key, _ in EVIDENCE_GAPS)
+    return '\n'.join(lines)
+
+
+def emit_report(report, *, summary=False):
+    print(render_summary(report) if summary else json.dumps(report, sort_keys=True))
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('manifest', type=Path, nargs='?')
@@ -548,6 +600,8 @@ def main():
     p.add_argument('--stdin-batch', action='store_true',
                    help='audit 1–16 newline-delimited <=16 KiB C0 proposals offline')
     p.add_argument('--json', action='store_true', help='emit a machine-readable offline report')
+    p.add_argument('--summary', action='store_true',
+                   help='emit a private human-readable offline review; excludes --json')
     p.add_argument('--directory', type=Path, help='audit 1–16 .json entries in a directory, offline')
     p.add_argument('--compare-directories', type=Path, nargs=2, metavar=('BEFORE', 'AFTER'),
                    help='offline review diff of two bounded directories')
@@ -565,6 +619,8 @@ def main():
     p.add_argument('--batch', type=Path, nargs='+', metavar='MANIFEST',
                    help='inspect up to 16 manifests and emit one aggregate JSON report')
     args = p.parse_args()
+    if args.summary and args.json:
+        p.error('--summary cannot be combined with --json')
     if args.compare_stdin_batches and (
             args.stdin or args.stdin_batch or args.manifest is not None
             or args.batch is not None or args.directory is not None
@@ -605,7 +661,7 @@ def main():
                 'or --compare-stdin-to-directory or --compare-stdin-before-directory')
     if args.compare_stdin_batches:
         report = compare_paired_stdin_batches()
-        print(json.dumps(report, sort_keys=True))
+        emit_report(report, summary=args.summary)
         if report['status'] == 'REFUSED':
             return 2
         if args.fail_on_change and report['status'] == 'CHANGED':
@@ -613,12 +669,12 @@ def main():
         return 0
     if args.stdin_batch:
         report = inspect_stdin_batch()
-        print(json.dumps(report, sort_keys=True))
+        emit_report(report, summary=args.summary)
         return 2 if report['status'] == 'REFUSED' else 0
     if args.compare_stdin_before_directory is not None:
         report = compare_stdin_before_directory(
             args.compare_stdin_before_directory, require_json_only=args.require_json_only)
-        print(json.dumps(report, sort_keys=True))
+        emit_report(report, summary=args.summary)
         if report['status'] == 'REFUSED':
             return 2
         if args.fail_on_change and report['status'] == 'CHANGED':
@@ -627,7 +683,7 @@ def main():
     if args.compare_stdin_to_directory is not None:
         report = compare_stdin_to_directory(
             args.compare_stdin_to_directory, require_json_only=args.require_json_only)
-        print(json.dumps(report, sort_keys=True))
+        emit_report(report, summary=args.summary)
         if report['status'] == 'REFUSED':
             return 2
         if args.fail_on_change and report['status'] == 'CHANGED':
@@ -638,7 +694,7 @@ def main():
             p.error('--compare-directories cannot be combined with other input modes')
         report = compare_directories(*args.compare_directories,
                                      require_json_only=args.require_json_only)
-        print(json.dumps(report, sort_keys=True))
+        emit_report(report, summary=args.summary)
         if report['status'] == 'REFUSED':
             return 2
         if args.fail_on_change and report['status'] == 'CHANGED':
@@ -648,7 +704,7 @@ def main():
         if args.manifest is not None or args.batch is not None:
             p.error('--directory cannot be combined with positional manifest or --batch')
         report = directory_report(args.directory, require_json_only=args.require_json_only)
-        print(json.dumps(report, sort_keys=True))
+        emit_report(report, summary=args.summary)
         return 2 if report['status'] == 'REFUSED' else 0
     if args.batch is not None:
         if args.manifest is not None:
@@ -660,14 +716,15 @@ def main():
             results = [{'path': str(path), **inspect_manifest(path)} for path in args.batch]
             errors = []
         refused = bool(errors) or any(item['status'] == 'REFUSED' for item in results)
-        print(json.dumps({
+        report = {
             'status': 'REFUSED' if refused else 'STRUCTURE_ONLY_PASS',
             'errors': errors,
             'results': results,
             'authorization': 'NO_AUTHORIZATION',
             'collection': 'C0_COLLECT_HOLD',
             'network': 'NO_NETWORK',
-        }, sort_keys=True))
+        }
+        emit_report(report, summary=args.summary)
         return 2 if refused else 0
     if args.stdin:
         report = inspect_stdin()
@@ -675,8 +732,8 @@ def main():
         if args.manifest is None:
             p.error('manifest is required unless --batch or --stdin is specified')
         report = inspect_manifest(args.manifest)
-    if args.json:
-        print(json.dumps(report, sort_keys=True))
+    if args.json or args.summary:
+        emit_report(report, summary=args.summary)
         return 2 if report['errors'] else 0
     for err in report['errors']:
         print('REFUSED:', err)
