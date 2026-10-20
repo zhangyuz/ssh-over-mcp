@@ -2327,3 +2327,7 @@ The offline C0 structural preflight now rejects shorthand, integer, hex-prefixed
 ### 2026-10-19 C0 offline numeric final DNS label handling
 
 The structurally pinned HTTPS URL validator now refuses mixed-label hostnames with decimal or hex-like final labels that URL clients interpret in an IPv4 parsing context. Canonical IPv4 and ordinary DNS hosts with numeric interior labels remain eligible. No network, authenticity assertion, collection or privilege authorization changed; all C0/T5B/Mac/Linux HOLD gates persist.
+
+### 2026-10-19 C0 numeric DNS-tail independent review follow-up
+
+An independent P2 review of PR #300 found that terminal bare `0x` (with no following hex digits) escaped the numeric URL-host suffix guard. Offline C0 now refuses it using the existing `INVALID_STRUCTURE` contract, verified by 3 host cases × 7 intake/compare entrypoints plus accepted `0xg`, numeric interior labels and canonical IPv4 controls. No DNS resolution, C0 collection permission, trust-root/tool admission, privileged Mac UID502/APFS, Linux C or resource-budget change; all evidence gaps remain `UNVERIFIED`.

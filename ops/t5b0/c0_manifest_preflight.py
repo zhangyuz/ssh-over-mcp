@@ -27,6 +27,8 @@ EVIDENCE_GAPS = (
 
 def noncanonical_numeric_ip_host(host):
     """Reject alternative numeric IPv4 spellings without resolving DNS."""
+    if host.rsplit('.', 1)[-1] == '0x':
+        return True
     if not NUMERIC_IP_HOST.fullmatch(host):
         # Numeric final DNS labels take the IPv4 parsing path in URL clients.
         return bool(NUMERIC_IP_HOST.fullmatch(host.rsplit('.', 1)[-1]))
