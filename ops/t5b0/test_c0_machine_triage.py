@@ -1,0 +1,136 @@
+"""Fail-closed remediation routing for privacy-safe machine review."""
+import copy
+import json
+import unittest
+
+import c0_manifest_preflight as c0
+from test_c0_guidance import VALID, run
+
+
+class MachineTriageTests(unittest.TestCase):
+    def test_known_results_offer_only_non_authorizing_triage(self):
+        expectations = {
+            'STRUCTURE_ONLY_PASS': ['VERIFY_INDEPENDENT_EVIDENCE'],
+            'UNCHANGED': ['VERIFY_INDEPENDENT_EVIDENCE'],
+            'CHANGED': ['REVIEW_OBSERVED_CHANGES', 'VERIFY_INDEPENDENT_EVIDENCE'],
+        }
+        for status, codes in expectations.items():
+            with self.subTest(status=status):
+                data = json.loads(c0.render_summary_json({'status': status}))
+                self.assertEqual(data['next_action_codes'], codes)
+                self.assertEqual(data['authorization'], 'NO_AUTHORIZATION')
+                self.assertEqual(data['collection'], 'C0_COLLECT_HOLD')
+
+    def test_refusal_routes_allowlisted_categories_and_audit_level(self):
+        fake = {'status': 'REFUSED', 'errors': ['private https://elsewhere.invalid'],
+                'results': [{'status': 'REFUSED', 'error_codes': [
+                    'INVALID_STRUCTURE', 'CROSS_FILE_CONFLICT', 'PRIVATE_INJECTED_CODE']}]}
+        serialized = c0.render_summary_json(fake)
+        data = json.loads(serialized)
+        self.assertEqual(data['next_action_codes'], [
+            'REVIEW_INPUT_AUDIT', 'REPAIR_INVALID_STRUCTURE',
+            'RESOLVE_CROSS_FILE_CONFLICT', 'RETRY_OFFLINE_REVIEW'])
+        self.assertNotIn('PRIVATE_INJECTED_CODE', serialized)
+        self.assertNotIn('elsewhere.invalid', serialized)
+        self.assertNotIn('https://', serialized)
+        self.assertNotIn('VERIFY_INDEPENDENT_EVIDENCE', data['next_action_codes'])
+
+    def test_mixed_refused_compared_side_cannot_offer_change_review(self):
+        before = {'status': 'STRUCTURE_ONLY_PASS', 'results': [
+            {'status': 'STRUCTURE_ONLY_PASS'}]}
+        after = {'status': 'REFUSED', 'errors': [], 'results': [
+            {'status': 'REFUSED', 'error_codes': ['INVALID_MANIFEST']}]}
+        fake = {'status': 'REFUSED', 'before': before, 'after': after,
+                'object_diff': {'status': 'UNAVAILABLE'}}
+        result = json.loads(c0.render_summary_json(fake))
+        self.assertEqual(result['next_action_codes'], [
+            'REPAIR_INVALID_MANIFEST', 'RETRY_OFFLINE_REVIEW'])
+        self.assertNotIn('REVIEW_OBSERVED_CHANGES', result['next_action_codes'])
+
+    def test_unknown_status_fails_closed(self):
+        data = json.loads(c0.render_summary_json({'status': 'UNRECOGNIZED_PRIVATE_STATUS'}))
+        self.assertEqual(data['next_action_codes'], ['STOP_UNKNOWN_REVIEW_STATUS'])
+        self.assertNotIn('UNRECOGNIZED_PRIVATE_STATUS', json.dumps(data))
+
+    def test_real_invalid_schema_routes_to_repair_and_no_approval(self):
+        invalid = copy.deepcopy(VALID)
+        invalid['approval'] = 'private-approval-should-never-echo'
+        code, output, err = run(['--stdin', '--summary-json'],
+                                json.dumps(invalid).encode())
+        self.assertEqual((code, err), (2, ''))
+        result = json.loads(output)
+        self.assertEqual(result['status'], 'REFUSED')
+        self.assertEqual(result['next_action_codes'],
+                         ['REVIEW_INPUT_AUDIT', 'REPAIR_INVALID_STRUCTURE',
+                          'RETRY_OFFLINE_REVIEW'])
+        self.assertEqual(result['collection'], 'C0_COLLECT_HOLD')
+        self.assertNotIn('private-approval', output)
+        self.assertNotIn('VERIFY_INDEPENDENT_EVIDENCE', output)
+
+    def test_real_batch_duplicate_id_routes_to_offline_resolution(self):
+        data = json.dumps(VALID).encode()
+        code, output, err = run(['--stdin-batch', '--summary-json'],
+                                data + b'\n' + data)
+        self.assertEqual((code, err), (2, ''))
+        result = json.loads(output)
+        self.assertIn('RESOLVE_DUPLICATE_OBJECT_ID', result['next_action_codes'])
+        self.assertIn('RETRY_OFFLINE_REVIEW', result['next_action_codes'])
+        self.assertNotIn('VERIFY_INDEPENDENT_EVIDENCE', result['next_action_codes'])
+        self.assertNotIn('https://', output)
+
+    def test_all_nine_cli_modes_have_non_authorizing_machine_actions(self):
+        import tempfile
+        from pathlib import Path
+
+        data = json.dumps(VALID).encode()
+        with tempfile.TemporaryDirectory() as root:
+            old, new = Path(root) / 'old', Path(root) / 'new'
+            old.mkdir()
+            new.mkdir()
+            (old / 'private.json').write_bytes(data)
+            (new / 'private.json').write_bytes(data)
+            modes = [([old / 'private.json'], b''),
+                     (['--batch', old / 'private.json'], b''),
+                     (['--directory', old], b''),
+                     (['--stdin'], data), (['--stdin-batch'], data),
+                     (['--compare-directories', old, new], b''),
+                     (['--compare-stdin-to-directory', old], data),
+                     (['--compare-stdin-before-directory', new], data),
+                     (['--compare-stdin-batches'], data + b'\n---\n' + data)]
+            for args, incoming in modes:
+                with self.subTest(args=args):
+                    code, output, err = run([*args, '--summary-json'], incoming)
+                    self.assertEqual((code, err), (0, ''))
+                    report = json.loads(output)
+                    self.assertEqual(report['next_action_codes'],
+                                     ['VERIFY_INDEPENDENT_EVIDENCE'])
+                    self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
+                    for secret in (root, 'private.json', 'https://'):
+                        self.assertNotIn(secret, output)
+
+    def test_cli_triage_is_private_and_matches_exit(self):
+        original = json.dumps(VALID).encode()
+        altered = copy.deepcopy(VALID)
+        altered['objects'][0]['sha256'] = 'b' * 64
+        modified = json.dumps(altered).encode()
+        for input_data, status, exit_code, expected_code in (
+            (original + b'\n---\n' + original, 'UNCHANGED', 0,
+             'VERIFY_INDEPENDENT_EVIDENCE'),
+            (original + b'\n---\n' + modified, 'CHANGED', 3,
+             'REVIEW_OBSERVED_CHANGES'),
+            (original + b'\n---\n{', 'REFUSED', 2,
+             'REPAIR_INVALID_MANIFEST'),
+        ):
+            with self.subTest(status=status):
+                code, output, err = run(['--compare-stdin-batches', '--summary-json',
+                                         '--fail-on-change'], input_data)
+                self.assertEqual((code, err), (exit_code, ''))
+                data = json.loads(output)
+                self.assertEqual(data['status'], status)
+                self.assertIn(expected_code, data['next_action_codes'])
+                self.assertNotIn('https://', output)
+                self.assertNotIn('b' * 64, output)
+
+
+if __name__ == '__main__':
+    unittest.main()

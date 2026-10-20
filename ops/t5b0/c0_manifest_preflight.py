@@ -641,21 +641,37 @@ def render_guidance(report):
     return '\n'.join(lines)
 
 
+MACHINE_REVIEW_ACTION_CODES = (
+    ('INPUT_AUDIT_REFUSED', 'REVIEW_INPUT_AUDIT'),
+    ('INVALID_MANIFEST', 'REPAIR_INVALID_MANIFEST'),
+    ('INVALID_STRUCTURE', 'REPAIR_INVALID_STRUCTURE'),
+    ('DUPLICATE_OBJECT_ID', 'RESOLVE_DUPLICATE_OBJECT_ID'),
+    ('CROSS_FILE_CONFLICT', 'RESOLVE_CROSS_FILE_CONFLICT'),
+)
+MACHINE_REPORT_STATUSES = frozenset({
+    'REFUSED', 'CHANGED', 'UNCHANGED', 'STRUCTURE_ONLY_PASS',
+})
+
+
 def render_summary_json(report):
     """Machine-readable allowlisted observations; never serialize source values."""
     def audit_counts(audit):
         records = audit.get('results', [audit])
+        safe_status = (audit['status'] if audit['status'] in MACHINE_REPORT_STATUSES
+                       else 'REFUSED')
         allowed = frozenset(GUIDANCE_ACTIONS)
         codes = sorted({code for item in records if item['status'] == 'REFUSED'
                         for code in item.get('error_codes', []) if code in allowed})
         if audit.get('errors') or (audit['status'] == 'REFUSED' and not codes):
             codes = sorted(set(codes) | {'INPUT_AUDIT_REFUSED'})
-        return {'status': audit['status'], 'observed': len(records),
+        return {'status': safe_status, 'observed': len(records),
                 'passed': sum(item['status'] == 'STRUCTURE_ONLY_PASS' for item in records),
                 'refused': sum(item['status'] == 'REFUSED' for item in records),
                 'error_codes': codes}
 
-    result = {'status': report['status'], 'authorization': 'NO_AUTHORIZATION',
+    raw_status = report['status']
+    status = raw_status if raw_status in MACHINE_REPORT_STATUSES else 'REFUSED'
+    result = {'status': status, 'authorization': 'NO_AUTHORIZATION',
               'collection': 'C0_COLLECT_HOLD', 'network': 'NO_NETWORK',
               'evidence_gaps': [key for key, _ in EVIDENCE_GAPS]}
     if 'before' in report:
@@ -669,12 +685,24 @@ def render_summary_json(report):
                                  ('added', 'removed', 'changed', 'regressions')}
     delta = report.get('object_diff')
     if delta is not None:
-        available = report['status'] != 'REFUSED' and delta['status'] == 'AVAILABLE'
+        available = status != 'REFUSED' and delta['status'] == 'AVAILABLE'
         result['object_changes'] = 'AVAILABLE' if available else 'UNAVAILABLE'
         # Refusal never means zero changes: comparison was not completed.
         result['object_change_counts'] = (
             {key: len(delta[key]) for key in ('added', 'removed', 'changed')}
             if available else None)
+    if raw_status not in MACHINE_REPORT_STATUSES:
+        actions = ['STOP_UNKNOWN_REVIEW_STATUS']
+    elif status == 'REFUSED':
+        audits = (result['before'], result['after']) if 'before' in result else (result['input'],)
+        errors = {code for audit in audits for code in audit['error_codes']}
+        actions = [action for code, action in MACHINE_REVIEW_ACTION_CODES if code in errors]
+        actions.append('RETRY_OFFLINE_REVIEW')
+    elif status == 'CHANGED':
+        actions = ['REVIEW_OBSERVED_CHANGES', 'VERIFY_INDEPENDENT_EVIDENCE']
+    else:
+        actions = ['VERIFY_INDEPENDENT_EVIDENCE']
+    result['next_action_codes'] = actions
     return json.dumps(result, sort_keys=True)
 
 
