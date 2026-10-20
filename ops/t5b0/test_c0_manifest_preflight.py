@@ -1716,6 +1716,20 @@ class C0PreflightTests(unittest.TestCase):
         self.assertEqual(run.returncode, 2)
         self.assertEqual(json.loads(run.stdout)['status'], 'REFUSED')
 
+    def test_numeric_dns_suffix_is_not_canonical_https_host(self):
+        for host in ('example.123', 'abc.127.1', 'a.0x7f',
+                     'sub.example.0001', 'foo.0x7f000001'):
+            with self.subTest(rejected_host=host):
+                candidate = copy.deepcopy(BASE)
+                candidate['objects'][0]['url'] = 'https://' + host + '/pinned.whl'
+                self.assertTrue(any('URL not pinned' in e for e in validate(candidate)))
+        for host in ('192.0.2.1', 'host', 'www.example.org',
+                     'a.1.example', 'xn--bcher-kva.example'):
+            with self.subTest(accepted_host=host):
+                candidate = copy.deepcopy(BASE)
+                candidate['objects'][0]['url'] = 'https://' + host + '/pinned.whl'
+                self.assertEqual(validate(candidate), [])
+
     def test_fail_closed(self):
         for key, value in [('url', 'http://example.org/object'), ('url', 'https://example.org/x?latest=1'),
                            ('url', 'https://evil@host/path'), ('url', 'https://host/../path'),
