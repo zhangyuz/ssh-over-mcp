@@ -591,3 +591,44 @@ five independent UNVERIFIED evidence gaps remain. No network, trust, material
 collection or privileged host authorization is granted.
 
 Run `python3 -m unittest discover -s ops/t5b0 -p test_c0_local_batch_directory.py -v`.
+
+## Direct local NDJSON baseline versus piped NDJSON successor (next slice)
+
+```sh
+workdir=$(mktemp -d)
+python3 - "$workdir" <<'PY_SAMPLE'
+import copy, json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+a = {'schema': 'som-t5b0-c0-preflight-v1', 'approval': None,
+     'objects': [{'id':'C0-W1','url':'https://example.org/synthetic.whl',
+                  'sha256':'a'*64,'bytes':100,'max_bytes':100}]}
+b = copy.deepcopy(a)
+b['objects'][0]['max_bytes'] = 101
+(root/'before.ndjson').write_text(json.dumps(a)+'\n')
+(root/'after.ndjson').write_text(json.dumps(b)+'\n')
+PY_SAMPLE
+# Both routes show private CHANGED with exit 3; no input source URL/hash leaks.
+cat "$workdir/after.ndjson" | python3 ops/t5b0/c0_manifest_preflight.py \
+  --compare-batch-file-to-stdin-batch "$workdir/before.ndjson" \
+  --summary-json --fail-on-change
+cat "$workdir/before.ndjson" | python3 ops/t5b0/c0_manifest_preflight.py \
+  --compare-stdin-batch-to-batch-file "$workdir/after.ndjson" \
+  --summary-json --fail-on-change
+rm -rf "$workdir"
+```
+
+Both inputs remain untrusted and separately bounded to **262,160 bytes** total,
+**1–16 UTF-8 NDJSON records** each ≤**16,384 bytes**. Disk uses the existing
+nonblocking regular-only no-follow same-FD audited reader; stdin uses a
+strict one-time bounded read. Unsafe/bad encoding, duplicates, metadata
+conflicts, malformed or excessive data on either side refuses (`exit 2`,
+semantic `UNAVAILABLE`, private count `null`), never partial success. Valid
+unchanged exits 0; change exits 0/3 with `--fail-on-change`; BEFORE→AFTER
+orients additions/removals. Option conflicts fail **before** file/stream reads;
+`--require-json-only` is directory-only. The fixed private labels
+`LOCAL_BATCH_TO_STDIN_BATCH` and `STDIN_BATCH_TO_LOCAL_BATCH` exclude raw
+paths, URLs, digests and IDs. No privilege, trust root, source admission,
+network or collection granted; all five independent UNVERIFIED evidence gaps
+and C0/T5B/Mac UID502/APFS/Linux C HOLDs remain.
+
+Run `python3 -m unittest discover -s ops/t5b0 -p test_c0_local_batch_stream_compare.py -v`.
