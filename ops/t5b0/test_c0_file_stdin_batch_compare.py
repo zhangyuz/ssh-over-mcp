@@ -37,7 +37,8 @@ class SingleFileStdinBatchTests(unittest.TestCase):
         self.manifest.write_bytes(self.base)
 
     def private(self, text):
-        for token in (str(self.root), 'private-', 'https://', 'a'*64, 'b'*64):
+        for token in (str(self.root), 'private-', 'https://', 'a'*64, 'b'*64,
+                      'C0-W1', 'C0-P1'):
             self.assertNotIn(token, text)
 
     def test_both_directions_unchanged_all_presentations(self):
@@ -163,6 +164,8 @@ class SingleFileStdinBatchTests(unittest.TestCase):
                 self.assertEqual((p.returncode, p.stderr), (2, b''))
                 self.assertEqual(data['status'], 'REFUSED')
                 self.assertIsNone(data['object_change_counts'])
+                self.assertEqual(data['before']['status'], 'REFUSED')
+                self.assertEqual(data['after']['status'], 'REFUSED')
                 self.private(p.stdout.decode())
 
     def test_exact_single_manifest_and_line_byte_ceiling(self):
