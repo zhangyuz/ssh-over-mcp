@@ -201,6 +201,10 @@ class SingleFileStdinBatchTests(unittest.TestCase):
             report = json.loads(output.getvalue())
             self.assertEqual(report['status'], 'REFUSED')
             self.assertIsNone(report['object_change_counts'])
+            self.assertEqual(
+                (report['before']['status'], report['after']['status']),
+                ('REFUSED', 'STRUCTURE_ONLY_PASS') if mode == MODES[0][0]
+                else ('STRUCTURE_ONLY_PASS', 'REFUSED'))
             self.private(output.getvalue())
 
     def test_colliding_modes_reject_without_accessing_sources(self):
