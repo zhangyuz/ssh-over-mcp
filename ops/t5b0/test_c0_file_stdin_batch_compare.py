@@ -141,6 +141,65 @@ class SingleFileStdinBatchTests(unittest.TestCase):
                         self.manifest.unlink()
                     self.manifest.write_bytes(self.base)
 
+    def test_cross_record_metadata_conflict_and_both_side_refusal(self):
+        conflicting = copy.deepcopy(VALID)
+        conflicting['objects'][0].update(id='C0-P1', sha256='b'*64)
+        # Reuses the original URL with contradictory digest/length metadata.
+        cross = self.base+b'\n'+json.dumps(conflicting).encode()+b'\n'
+        for mode, label in MODES:
+            with self.subTest(mode=mode, reason='cross_record'):
+                self.manifest.write_bytes(self.base)
+                p, data = invoke(mode, self.manifest, cross,
+                                 '--summary-json', '--fail-on-change')
+                self.assertEqual((p.returncode, p.stderr), (2, b''))
+                self.assertEqual(data['review_mode'], label)
+                self.assertEqual(data['status'], 'REFUSED')
+                self.assertIsNone(data['object_change_counts'])
+                self.assertIn('RESOLVE_CROSS_FILE_CONFLICT', data['next_action_codes'])
+                self.private(p.stdout.decode())
+            with self.subTest(mode=mode, reason='both_refused'):
+                self.manifest.write_bytes(b'{')
+                p, data = invoke(mode, self.manifest, b'{', '--summary-json')
+                self.assertEqual((p.returncode, p.stderr), (2, b''))
+                self.assertEqual(data['status'], 'REFUSED')
+                self.assertIsNone(data['object_change_counts'])
+                self.private(p.stdout.decode())
+
+    def test_exact_single_manifest_and_line_byte_ceiling(self):
+        padded = self.base + b' ' * (16384 - len(self.base))
+        self.assertEqual(len(padded), 16384)
+        for mode, _ in MODES:
+            self.manifest.write_bytes(padded)
+            p, data = invoke(mode, self.manifest, padded+b'\n', '--summary-json')
+            self.assertEqual((p.returncode, p.stderr), (0, b''))
+            self.assertEqual(data['status'], 'UNCHANGED')
+            self.private(p.stdout.decode())
+            p, data = invoke(mode, self.manifest, b'', '--summary-json')
+            self.assertEqual((p.returncode, data['status']), (2, 'REFUSED'))
+            self.assertIsNone(data['object_change_counts'])
+            p, data = invoke(mode, self.manifest, b'\n', '--summary-json')
+            self.assertEqual((p.returncode, data['status']), (2, 'REFUSED'))
+            self.assertIsNone(data['object_change_counts'])
+
+    def test_stdin_is_audited_even_when_local_file_refuses(self):
+        for mode, _ in MODES:
+            self.manifest.write_bytes(b'{')
+            output = io.StringIO()
+            stdin = io.TextIOWrapper(io.BytesIO(self.base+b'\n'), encoding='utf-8')
+            with patch.object(sys, 'argv', [str(SCRIPT), mode,
+                                            str(self.manifest), '--summary-json']), \
+                    patch.object(sys, 'stdin', stdin), \
+                    patch.object(cli, 'inspect_stdin_batch',
+                                 wraps=cli.inspect_stdin_batch) as batch_spy, \
+                    redirect_stdout(output):
+                rc = cli.main()
+            self.assertEqual(rc, 2)
+            batch_spy.assert_called_once_with(capture_inventory=True)
+            report = json.loads(output.getvalue())
+            self.assertEqual(report['status'], 'REFUSED')
+            self.assertIsNone(report['object_change_counts'])
+            self.private(output.getvalue())
+
     def test_colliding_modes_reject_without_accessing_sources(self):
         class NoRead:
             @property
