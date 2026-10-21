@@ -632,3 +632,47 @@ network or collection granted; all five independent UNVERIFIED evidence gaps
 and C0/T5B/Mac UID502/APFS/Linux C HOLDs remain.
 
 Run `python3 -m unittest discover -s ops/t5b0 -p test_c0_local_batch_stream_compare.py -v`.
+
+## Direct manifest file vs NDJSON stdin batch (symmetric offline review)
+
+```sh
+workdir=$(mktemp -d)
+python3 - "$workdir" <<'PY_SAMPLE'
+import copy, json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+old = {'schema': 'som-t5b0-c0-preflight-v1', 'approval': None,
+       'objects': [{'id':'C0-W1','url':'https://example.org/synthetic.whl',
+                    'sha256':'a'*64,'bytes':100,'max_bytes':100}]}
+new = copy.deepcopy(old)
+new['objects'][0]['max_bytes'] = 101
+(root/'before.json').write_text(json.dumps(old))
+(root/'after.json').write_text(json.dumps(new))
+(root/'before.ndjson').write_text(json.dumps(old) + '\n')
+(root/'after.ndjson').write_text(json.dumps(new) + '\n')
+PY_SAMPLE
+# Valid CHANGED/exit 3 in either direction, no paths/URLs/digests/IDs in private JSON.
+cat "$workdir/after.ndjson" | python3 ops/t5b0/c0_manifest_preflight.py \
+  --compare-file-to-stdin-batch "$workdir/before.json" \
+  --summary-json --fail-on-change
+cat "$workdir/before.ndjson" | python3 ops/t5b0/c0_manifest_preflight.py \
+  --compare-stdin-batch-to-file "$workdir/after.json" \
+  --summary-json --fail-on-change
+rm -rf "$workdir"
+```
+
+The local single manifest has a hard 16,384-byte cap, regular-only no-follow,
+nonblocking single-FD identity and race checks. Stdin NDJSON is independently
+bounded to **262,160 bytes**, **1–16 UTF-8 records**, each ≤**16,384 bytes**.
+Invalid encoding, duplicate or conflicting records, malformed JSON, unsafe or
+oversized files/streams on either side => `REFUSED`, exit 2, semantic
+`UNAVAILABLE`, private counts `null`, never partial diff. Valid unchanged 0,
+changed 0/3 when `--fail-on-change`; input order is the semantic baseline.
+Directory-only `--require-json-only`, any conflicting input mode or mixed
+read-free capability discovery is rejected before consuming stdin or files.
+Versioned private machine labels `FILE_TO_STDIN_BATCH` and
+`STDIN_BATCH_TO_FILE` are allowlisted and omit source paths, URLs, digests
+and IDs; all C0/T5B/Mac UID502/APFS/Linux C HOLD, no-network/no-authorization,
+and five independently UNVERIFIED gaps remain. No privilege, trust, network
+or material collection is granted.
+
+Run `python3 -m unittest discover -s ops/t5b0 -p test_c0_file_stdin_batch_compare.py -v`.
