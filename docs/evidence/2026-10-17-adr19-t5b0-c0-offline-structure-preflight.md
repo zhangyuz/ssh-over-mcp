@@ -400,3 +400,53 @@ not verify trust, collect, download, approve or execute material; T5B/Mac
 UID502/APFS/Linux C and all five independent evidence checks remain HOLD.
 
 Run `python3 -m unittest discover -s ops/t5b0 -p test_c0_mixed_file_stdin.py -v`.
+
+## Direct file and directory snapshot comparison (next offline slice)
+
+These two commands compare one untrusted on-disk manifest and a bounded
+collection of untrusted manifest files in a directory, without converting the
+single input into NDJSON or staging a second directory. The specified BEFORE
+side is the baseline for semantic object-ID additions/removals, **not a trusted
+source**.
+
+```sh
+workdir=$(mktemp -d)
+mkdir "$workdir/snapshot"
+python3 - "$workdir" <<'PY_SAMPLE'
+import copy, json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+before = {'schema': 'som-t5b0-c0-preflight-v1', 'approval': None,
+          'objects': [{'id': 'C0-W1', 'url': 'https://example.org/synthetic.whl',
+                       'sha256': 'a'*64, 'bytes': 100, 'max_bytes': 100}]}
+after = copy.deepcopy(before)
+after['objects'][0]['max_bytes'] = 101
+(root / 'single.json').write_text(json.dumps(before))
+(root / 'snapshot' / 'new.json').write_text(json.dumps(after))
+PY_SAMPLE
+# Both examples are valid CHANGED; --fail-on-change returns exit 3.
+python3 ops/t5b0/c0_manifest_preflight.py \
+  --compare-file-to-directory "$workdir/single.json" "$workdir/snapshot" \
+  --summary-json --fail-on-change
+python3 ops/t5b0/c0_manifest_preflight.py \
+  --compare-directory-to-file "$workdir/snapshot" "$workdir/single.json" \
+  --summary-json --fail-on-change --require-json-only
+# Make the two proposals equal: UNCHANGED/exit 0.
+# Replace either proposal with '{': REFUSED/exit 2, changes unavailable/null.
+rm -rf "$workdir"
+```
+
+The file uses the existing regular-only, O_NOFOLLOW, nonblocking, same-FD
+race-aware max 16 KiB reader. The directory independently enforces a 64-total
+entry bound, 1–16 `.json` manifest bound and 16 KiB per manifest with stable
+refusal. Strict `--require-json-only` rejects even one extraneous entry. No
+partial or zero-change object inventory is released on either-side refusal.
+The versioned private `--summary-json` includes `FILE_TO_DIRECTORY` or
+`DIRECTORY_TO_FILE`, allowlisted change counts and fixed triage codes; it
+excludes paths, filenames, candidate URLs/digests, object IDs and raw errors.
+The historical detailed JSON report may include local directory entry paths
+and observed file-content digests as before; it is **not** the private report
+format. The operation does not download, trust, admit or execute anything and
+does not satisfy independent source, trust, time, environment or operator
+verification. C0/T5B/Mac UID502/APFS/Linux C HOLD persists.
+
+Run `python3 -m unittest discover -s ops/t5b0 -p test_c0_file_directory_compare.py -v`.

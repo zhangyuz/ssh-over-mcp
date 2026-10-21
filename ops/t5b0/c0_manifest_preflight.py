@@ -548,6 +548,23 @@ def compare_file_and_stdin(file_path, *, stdin_before=False):
     return compare_stream_directory_reports(disk, disk_inventory, stream, stream_inventory)
 
 
+def compare_file_and_directory(file_path, directory_path, *, directory_before=False,
+                               require_json_only=False):
+    """Observe one bounded local manifest and one bounded directory snapshot."""
+    single = inspect_manifest(file_path, capture_objects=True)
+    file_objects = single.pop('_objects')
+    file_inventory = ({obj['id']: obj for obj in file_objects}
+                      if single['status'] != 'REFUSED' else {})
+    many = directory_report(directory_path, capture_inventory=True,
+                            require_json_only=require_json_only)
+    directory_inventory = many.pop('_inventory')
+    if directory_before:
+        return compare_stream_directory_reports(
+            many, directory_inventory, single, file_inventory)
+    return compare_stream_directory_reports(
+        single, file_inventory, many, directory_inventory)
+
+
 def compare_paired_stdin_batches():
     """Review two untrusted NDJSON snapshots separated by an exact LF---LF."""
     delimiter = b'\n---\n'
@@ -691,6 +708,7 @@ REVIEW_MODES = frozenset({
     'MANIFEST_FILE', 'FILE_BATCH', 'DIRECTORY', 'STDIN_MANIFEST', 'STDIN_BATCH',
     'DIRECTORY_COMPARISON', 'DIRECTORY_TO_STDIN', 'STDIN_TO_DIRECTORY',
     'PAIRED_STDIN_COMPARISON', 'FILE_COMPARISON', 'FILE_TO_STDIN', 'STDIN_TO_FILE',
+    'FILE_TO_DIRECTORY', 'DIRECTORY_TO_FILE',
 })
 
 
@@ -777,6 +795,12 @@ def main():
     p.add_argument('--guidance', action='store_true',
                    help='with --summary, append fixed privacy-safe remediation guidance')
     p.add_argument('--directory', type=Path, help='audit 1–16 .json entries in a directory, offline')
+    p.add_argument('--compare-file-to-directory', type=Path, nargs=2,
+                   metavar=('BEFORE_FILE', 'AFTER_DIR'),
+                   help='compare one untrusted manifest file to a bounded directory snapshot')
+    p.add_argument('--compare-directory-to-file', type=Path, nargs=2,
+                   metavar=('BEFORE_DIR', 'AFTER_FILE'),
+                   help='compare a bounded directory snapshot to one untrusted manifest file')
     p.add_argument('--compare-file-to-stdin', type=Path, metavar='BEFORE_FILE',
                    help='compare bounded offline manifest file with one piped successor JSON')
     p.add_argument('--compare-stdin-to-file', type=Path, metavar='AFTER_FILE',
@@ -794,13 +818,28 @@ def main():
     p.add_argument('--fail-on-change', action='store_true',
                    help='with --compare-directories or --compare-stdin-to-directory, exit 3 on change; '
                         'also --compare-stdin-before-directory, --compare-stdin-batches '
-                        'and --compare-files, --compare-file-to-stdin or --compare-stdin-to-file')
+                        'and --compare-files, --compare-file-to-stdin or --compare-stdin-to-file; '
+                        'also --compare-file-to-directory and --compare-directory-to-file')
     p.add_argument('--require-json-only', action='store_true',
                    help='with directory audit or compare, refuse non-JSON immediate entries')
     p.add_argument('--batch', type=Path, nargs='+', metavar='MANIFEST',
                    help='inspect up to 16 manifests and emit one aggregate JSON report')
     args = p.parse_args()
     # Validate the new input route before reading any file or stdin bytes.
+    if (args.compare_file_to_directory is not None
+            or args.compare_directory_to_file is not None) and (
+            args.manifest is not None or args.batch is not None
+            or args.stdin or args.stdin_batch or args.directory is not None
+            or args.compare_files is not None or args.compare_directories is not None
+            or args.compare_file_to_stdin is not None
+            or args.compare_stdin_to_file is not None
+            or args.compare_stdin_to_directory is not None
+            or args.compare_stdin_before_directory is not None
+            or args.compare_stdin_batches
+            or (args.compare_file_to_directory is not None
+                and args.compare_directory_to_file is not None)):
+        p.error('--compare-file-to-directory/--compare-directory-to-file cannot be combined '
+                'with other input modes')
     if (args.compare_file_to_stdin is not None or args.compare_stdin_to_file is not None) and (
             args.manifest is not None or args.batch is not None
             or args.stdin or args.stdin_batch or args.directory is not None
@@ -851,7 +890,8 @@ def main():
     if args.stdin and (args.manifest is not None or args.batch is not None
                        or args.directory is not None or args.compare_directories is not None):
         p.error('--stdin cannot be combined with other input modes')
-    if (args.fail_on_change and args.compare_files is None
+    if (args.fail_on_change and args.compare_file_to_directory is None
+            and args.compare_directory_to_file is None and args.compare_files is None
             and args.compare_file_to_stdin is None and args.compare_stdin_to_file is None
             and args.compare_directories is None
             and args.compare_stdin_to_directory is None
@@ -860,14 +900,20 @@ def main():
         p.error('--fail-on-change requires --compare-directories or '
                 '--compare-stdin-to-directory or --compare-stdin-before-directory '
                 'or --compare-stdin-batches or --compare-files or '
-                '--compare-file-to-stdin or --compare-stdin-to-file')
-    if (args.require_json_only and args.compare_directories is None and args.directory is None
+                '--compare-file-to-stdin or --compare-stdin-to-file or '
+                '--compare-file-to-directory or --compare-directory-to-file')
+    if (args.require_json_only and args.compare_file_to_directory is None
+            and args.compare_directory_to_file is None
+            and args.compare_directories is None and args.directory is None
             and args.compare_stdin_to_directory is None
             and args.compare_stdin_before_directory is None):
         p.error('--require-json-only requires --directory or --compare-directories '
-                'or --compare-stdin-to-directory or --compare-stdin-before-directory')
+                'or --compare-stdin-to-directory or --compare-stdin-before-directory '
+                'or --compare-file-to-directory or --compare-directory-to-file')
     # Fixed labels reflect the selected local input route, never an input value.
     review_mode = (
+        'FILE_TO_DIRECTORY' if args.compare_file_to_directory is not None else
+        'DIRECTORY_TO_FILE' if args.compare_directory_to_file is not None else
         'FILE_TO_STDIN' if args.compare_file_to_stdin is not None else
         'STDIN_TO_FILE' if args.compare_stdin_to_file is not None else
         'FILE_COMPARISON' if args.compare_files is not None else
@@ -881,6 +927,22 @@ def main():
         'FILE_BATCH' if args.batch is not None else
         'MANIFEST_FILE'
     )
+    if args.compare_file_to_directory is not None or args.compare_directory_to_file is not None:
+        directory_before = args.compare_directory_to_file is not None
+        if directory_before:
+            directory_path, file_path = args.compare_directory_to_file
+        else:
+            file_path, directory_path = args.compare_file_to_directory
+        report = compare_file_and_directory(
+            file_path, directory_path, directory_before=directory_before,
+            require_json_only=args.require_json_only)
+        emit_report(report, summary=args.summary, guidance=args.guidance,
+                    summary_json=args.summary_json, review_mode=review_mode)
+        if report['status'] == 'REFUSED':
+            return 2
+        if args.fail_on_change and report['status'] == 'CHANGED':
+            return 3
+        return 0
     if args.compare_file_to_stdin is not None or args.compare_stdin_to_file is not None:
         stdin_before = args.compare_stdin_to_file is not None
         path = (args.compare_stdin_to_file if stdin_before else args.compare_file_to_stdin)
