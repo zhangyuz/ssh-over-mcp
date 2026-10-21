@@ -251,6 +251,9 @@ def test_inventory_first_pass_refusal_label_is_exact_index_only(case, monkeypatc
             raise mod.inventory.InventoryError()
         return collect(*args, **kw)
     monkeypatch.setattr(mod.inventory, "collect_residual_inventory", refuse)
+    # A live filesystem scan may legitimately report "unstable" (e.g. an
+    # atime/metadata change while probing). Isolate the intended phase mapping.
+    monkeypatch.setattr(mod, "_probe_rejected_inventory", lambda _fd: "unresolved")
     with pytest.raises(mod.inventory.InventoryError):
         mod.main([])
     assert mod._REFUSAL_PHASE == f"inventory-a-{index}-probe-unresolved"
@@ -307,7 +310,10 @@ def test_catalog_two_first_pass_reports_fixed_nested_metadata_reason_only(
     assert (tmp / "recover").is_dir()
 
 
-def test_failed_inventory_diagnostic_never_turns_refusal_into_success(case, monkeypatch):
+@pytest.mark.parametrize("probe_reason", ["unresolved", "unstable"])
+def test_failed_inventory_diagnostic_never_turns_refusal_into_success(
+    case, monkeypatch, capsys, probe_reason
+):
     mod, _, _ = case
     original = mod.inventory.collect_residual_inventory
     calls = 0
@@ -318,6 +324,15 @@ def test_failed_inventory_diagnostic_never_turns_refusal_into_success(case, monk
             raise mod.inventory.InventoryError()
         return original(*a, **kw)
     monkeypatch.setattr(mod.inventory, "collect_residual_inventory", refuse)
+    # Probe is independently exercised by the nested-metadata tests. Here
+    # force each permitted diagnostic to assert fail-closed phase propagation.
+    probes = []
+    def probe(fd):
+        probes.append(fd)
+        return probe_reason
+    monkeypatch.setattr(mod, "_probe_rejected_inventory", probe)
     with pytest.raises(mod.inventory.InventoryError):
         mod.inspect_residuals()
-    assert mod._REFUSAL_PHASE == "inventory-a-2-probe-unresolved"
+    assert len(probes) == 1
+    assert mod._REFUSAL_PHASE == f"inventory-a-2-probe-{probe_reason}"
+    assert capsys.readouterr().out == ""
