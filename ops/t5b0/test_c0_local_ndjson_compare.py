@@ -1,13 +1,17 @@
 """Compare a bounded regular manifest with a bounded NDJSON batch file offline."""
 import copy
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
+import c0_manifest_preflight as cli
 from test_c0_guidance import VALID
 
 SCRIPT = Path(__file__).with_name('c0_manifest_preflight.py')
@@ -149,6 +153,41 @@ class LocalNdjsonComparisonTests(unittest.TestCase):
             proc, report = run(mode, self.manifest, self.batch, '--summary-json')
             self.assertEqual(proc.returncode, 2)
             self.assertIsNone(report['object_change_counts'])
+
+    def test_exact_one_line_and_total_ndjson_file_byte_boundaries(self):
+        padded = self.base + b' '*(16384-len(self.base)) + b'\n'
+        self.batch.write_bytes(padded)
+        for mode, _ in MODES:
+            with self.subTest(mode=mode):
+                proc, report = run(mode, self.manifest, self.batch,
+                                   '--summary-json', '--fail-on-change')
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual(report['status'], 'UNCHANGED')
+                self.private(proc.stdout.decode())
+        self.batch.write_bytes(b'X' * (16*16385))
+        self.assertEqual(len(cli.read_regular_manifest(
+            self.batch, max_bytes=16*16385)), 16*16385)
+        self.batch.write_bytes(b'X' * (16*16385+1))
+        with self.assertRaises(ValueError):
+            cli.read_regular_manifest(self.batch, max_bytes=16*16385)
+
+    def test_colliding_modes_never_read_either_local_input(self):
+        for mode, _ in MODES:
+            with self.subTest(mode=mode):
+                operands = ((self.manifest, self.batch)
+                            if mode == MODES[0][0] else (self.batch, self.manifest))
+                args = [str(SCRIPT), mode, *map(str, operands), '--stdin']
+                errors = io.StringIO()
+                with patch.object(sys, 'argv', args), \
+                        patch.object(cli, 'inspect_manifest',
+                                     side_effect=AssertionError('read manifest')), \
+                        patch.object(cli, 'inspect_local_ndjson_batch',
+                                     side_effect=AssertionError('read batch')), \
+                        redirect_stdout(io.StringIO()), redirect_stderr(errors), \
+                        self.assertRaises(SystemExit) as raised:
+                    cli.main()
+                self.assertEqual(raised.exception.code, 2)
+                self.assertIn('cannot be combined', errors.getvalue())
 
     def test_invalid_option_mixes_reject_pre_read(self):
         for mode, _ in MODES:
