@@ -1,13 +1,17 @@
 """Compare bounded local NDJSON file with bounded directory either direction."""
 import copy
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
+import c0_manifest_preflight as cli
 from test_c0_guidance import VALID
 
 SCRIPT = Path(__file__).with_name('c0_manifest_preflight.py')
@@ -155,6 +159,66 @@ class LocalBatchDirectoryTests(unittest.TestCase):
                     elif kind != 'missing':
                         self.batch.unlink()
                     self.batch.write_bytes(self.original+b'\n')
+
+    def test_cross_record_duplicate_and_metadata_conflict_each_side(self):
+        changed = copy.deepcopy(VALID)
+        changed['objects'][0].update(id='C0-P1', sha256='b'*64)
+        for source in ('batch', 'directory'):
+            for reason, other, code in (
+                    ('duplicate', copy.deepcopy(VALID), 'RESOLVE_DUPLICATE_OBJECT_ID'),
+                    ('conflicting_url', changed, 'RESOLVE_CROSS_FILE_CONFLICT')):
+                with self.subTest(source=source, reason=reason):
+                    self.batch.write_bytes(self.original + b'\n')
+                    self.entry.write_bytes(self.original)
+                    second = json.dumps(other).encode()
+                    second_path = self.directory / 'secret-two.json'
+                    if source == 'batch':
+                        second_path.unlink(missing_ok=True)
+                        self.batch.write_bytes(self.original + b'\n' + second + b'\n')
+                    else:
+                        second_path.write_bytes(second)
+                    for mode, _ in MODES:
+                        p, data = invoke(mode, self.batch, self.directory,
+                                         '--summary-json', '--fail-on-change')
+                        self.assertEqual((p.returncode, p.stderr), (2, b''))
+                        self.assertEqual(data['status'], 'REFUSED')
+                        self.assertIsNone(data['object_change_counts'])
+                        self.assertIn(code, data['next_action_codes'])
+                        self.private(p.stdout.decode())
+                    second_path.unlink(missing_ok=True)
+
+    def test_mode_collisions_do_not_read_file_directory_or_stdin(self):
+        class NoReadStdin:
+            @property
+            def buffer(self):
+                raise AssertionError('read stdin buffer')
+
+            def read(self, *_a, **_kw):
+                raise AssertionError('read stdin')
+
+        for mode, _ in MODES:
+            operands = ((self.batch, self.directory) if mode == MODES[0][0]
+                        else (self.directory, self.batch))
+            for extra in (('--stdin',), ('--stdin-batch',),
+                          ('--compare-batch-files', self.batch, self.batch),
+                          ('--directory', self.directory),
+                          ('--capabilities-json',)):
+                with self.subTest(mode=mode, extra=extra):
+                    args = [str(SCRIPT), mode, *map(str, operands),
+                            *map(str, extra)]
+                    output, errors = io.StringIO(), io.StringIO()
+                    with patch.object(sys, 'argv', args), \
+                            patch.object(sys, 'stdin', NoReadStdin()), \
+                            patch.object(cli, 'inspect_local_ndjson_batch',
+                                         side_effect=AssertionError('read batch')), \
+                            patch.object(cli, 'directory_report',
+                                         side_effect=AssertionError('scan dir')), \
+                            redirect_stdout(output), redirect_stderr(errors), \
+                            self.assertRaises(SystemExit) as raised:
+                        cli.main()
+                    self.assertEqual(raised.exception.code, 2)
+                    self.assertEqual(output.getvalue(), '')
+                    self.assertIn('cannot be combined', errors.getvalue())
 
     def test_colliding_source_modes_error_before_output(self):
         for mode, _ in MODES:
