@@ -522,3 +522,25 @@ formats remain available. All C0/T5B/Mac UID502/APFS/Linux C HOLD and five
 UNVERIFIED evidence gaps continue.
 
 Run `python3 -m unittest discover -s ops/t5b0 -p test_c0_local_ndjson_compare.py -v`.
+
+## Offline comparison of two local NDJSON proposal snapshots
+
+```sh
+python3 ops/t5b0/c0_manifest_preflight.py --compare-batch-files \
+  BEFORE.ndjson AFTER.ndjson --summary-json --fail-on-change
+```
+
+Both inputs are untrusted, independently audited bounded regular files
+(no-follow, nonblocking, same-FD race-aware open/read) containing 1–16 UTF-8
+NDJSON manifest records, each <=16,384 bytes, with a **262,160 byte** local
+file cap. The shared validator rejects duplicate object IDs or cross-record
+metadata conflicts. The baseline direction is purely for semantic comparison;
+no provenance, trust or execution authority is inferred. Valid same content
+returns `UNCHANGED`/0; valid changes `CHANGED`/3 with the flag; either-side
+refusal `REFUSED`/2 and private diff counts `null`. Private JSON has the fixed
+`LOCAL_BATCH_COMPARISON` mode label, no paths/URLs/hashes/object IDs, and
+remains explicitly `NO_AUTHORIZATION`, `NO_NETWORK`, `C0_COLLECT_HOLD` with
+five independent evidence gaps UNVERIFIED. C0/T5B, Mac UID502/APFS and Linux C
+HOLDs persist.
+
+Run `python3 -m unittest discover -s ops/t5b0 -p test_c0_two_local_ndjson.py -v`.
