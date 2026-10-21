@@ -544,3 +544,50 @@ five independent evidence gaps UNVERIFIED. C0/T5B, Mac UID502/APFS and Linux C
 HOLDs persist.
 
 Run `python3 -m unittest discover -s ops/t5b0 -p test_c0_two_local_ndjson.py -v`.
+
+## Compare local NDJSON and directory proposals in both directions (next slice)
+
+Two distinct offline routes use an untrusted local NDJSON snapshot and an
+independently audited bounded directory snapshot. BEFORE is a **comparison
+baseline only**, never a trusted source or authorization:
+
+```sh
+workdir=$(mktemp -d)
+mkdir "$workdir/directory"
+python3 - "$workdir" <<'PY_SAMPLE'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+a = {'schema': 'som-t5b0-c0-preflight-v1', 'approval': None,
+     'objects': [{'id': 'C0-W1', 'url': 'https://example.org/synthetic.whl',
+                  'sha256': 'a'*64, 'bytes': 100, 'max_bytes': 100}]}
+b = {'schema': 'som-t5b0-c0-preflight-v1', 'approval': None,
+     'objects': [{'id': 'C0-W1', 'url': 'https://example.org/synthetic.whl',
+                  'sha256': 'a'*64, 'bytes': 100, 'max_bytes': 101}]}
+(root / 'batch.ndjson').write_text(json.dumps(a) + '\n')
+(root / 'directory' / 'proposal.json').write_text(json.dumps(b))
+PY_SAMPLE
+# CHANGED/exit 3, private object counts; no source path/URL/digest displayed.
+python3 ops/t5b0/c0_manifest_preflight.py \
+  --compare-batch-file-to-directory "$workdir/batch.ndjson" "$workdir/directory" \
+  --summary-json --fail-on-change
+python3 ops/t5b0/c0_manifest_preflight.py \
+  --compare-directory-to-batch-file "$workdir/directory" "$workdir/batch.ndjson" \
+  --summary-json --fail-on-change --require-json-only
+rm -rf "$workdir"
+```
+
+The file remains regular-only/O_NOFOLLOW/nonblocking/race-aware and bounded to
+262,160 bytes, 1–16 NDJSON manifests of ≤16,384 bytes per line. The directory
+remains at most **64 total entries including ignored names**, 1–16 `.json`
+files each ≤16,384 bytes, same no-follow metadata checks. Strict
+`--require-json-only` constrains only the directory side. Either-side
+malformed/unsafe/oversized/cross-record conflict refusal gives exit 2,
+semantic `UNAVAILABLE` and JSON count `null`, without partial inventories;
+valid unchanged exit 0, change exits 0 or 3 with `--fail-on-change`.
+Private versioned `--summary-json` emits fixed `BATCH_FILE_TO_DIRECTORY` or
+`DIRECTORY_TO_BATCH_FILE` and never echoes paths, filenames, candidate URLs,
+digests, IDs or raw diagnostics. All C0/T5B/Mac UID502/APFS/Linux C HOLD and
+five independent UNVERIFIED evidence gaps remain. No network, trust, material
+collection or privileged host authorization is granted.
+
+Run `python3 -m unittest discover -s ops/t5b0 -p test_c0_local_batch_directory.py -v`.
