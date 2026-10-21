@@ -475,3 +475,50 @@ clock, execution environment or operator consent. All C0/T5B/Mac UID502/APFS
 and Linux C HOLD boundaries remain in force.
 
 Run `python3 -m unittest discover -s ops/t5b0 -p test_c0_capabilities.py -v`.
+
+## Compare one manifest and one *local* NDJSON snapshot file (2026-10-20)
+
+The operator can compare one bounded on-disk manifest to a bounded NDJSON
+snapshot file without piping stdin or creating a second directory. Both inputs
+remain untrusted and observation-only; BEFORE determines semantic ID direction,
+not any privileged or approved baseline.
+
+```sh
+workdir=$(mktemp -d)
+python3 - "$workdir" <<'PY_SAMPLE'
+import copy, json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+old = {'schema':'som-t5b0-c0-preflight-v1','approval':None,
+       'objects':[{'id':'C0-W1','url':'https://example.org/synthetic.whl',
+                   'sha256':'a'*64,'bytes':100,'max_bytes':100}]}
+new = copy.deepcopy(old)
+new['objects'][0]['max_bytes'] = 105
+(root/'before.json').write_text(json.dumps(old))
+(root/'after.ndjson').write_text(json.dumps(new) + '\n')
+PY_SAMPLE
+# CHANGED/exit 3; JSON contains no source paths/URLs/hashes/IDs.
+python3 ops/t5b0/c0_manifest_preflight.py --compare-file-to-batch \
+  "$workdir/before.json" "$workdir/after.ndjson" \
+  --summary-json --fail-on-change
+# Inverted baseline: same result counts but opposite ID addition/removal direction.
+python3 ops/t5b0/c0_manifest_preflight.py --compare-batch-to-file \
+  "$workdir/after.ndjson" "$workdir/before.json" \
+  --summary-json --fail-on-change
+rm -rf "$workdir"
+```
+
+The single manifest is bounded to 16,384 bytes; the entire NDJSON file to
+`16 * 16385` = **262,160 bytes**; each of 1–16 lines must not exceed 16,384
+bytes excluding its newline. Both files are read once with no-follow,
+nonblocking regular-file and metadata/race protections. Invalid encoding,
+malformed JSON, oversized input, symlink/FIFO/directory, duplicates or
+cross-proposal metadata conflicts refuse without a partial inventory.
+Refusal exits 2, valid unchanged exits 0, valid change exits 3 with
+`--fail-on-change`. The machine envelope emits fixed `FILE_TO_BATCH` or
+`BATCH_TO_FILE` review modes, static `review_schema` and triage codes, omits
+input paths/filenames/URLs/digests/object IDs, and never authorizes collection,
+trust, network access or privileged host operations. Other legacy output
+formats remain available. All C0/T5B/Mac UID502/APFS/Linux C HOLD and five
+UNVERIFIED evidence gaps continue.
+
+Run `python3 -m unittest discover -s ops/t5b0 -p test_c0_local_ndjson_compare.py -v`.

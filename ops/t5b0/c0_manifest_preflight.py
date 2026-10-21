@@ -122,7 +122,7 @@ def parse_manifest(data):
                       parse_constant=lambda _: (_ for _ in ()).throw(ValueError('nonfinite number')))
 
 
-def read_regular_manifest(path, *, dir_fd=None):
+def read_regular_manifest(path, *, dir_fd=None, max_bytes=16384):
     flags = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW
     if hasattr(os, 'O_CLOEXEC'):
         flags |= os.O_CLOEXEC
@@ -131,10 +131,10 @@ def read_regular_manifest(path, *, dir_fd=None):
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
             raise ValueError('manifest is not a regular file')
-        if info.st_size > 16384:
+        if info.st_size > max_bytes:
             raise ValueError('manifest too large')
-        data = os.read(fd, 16385)
-        if len(data) > 16384:
+        data = os.read(fd, max_bytes + 1)
+        if len(data) > max_bytes:
             raise ValueError('manifest too large')
         if len(data) != info.st_size:
             raise ValueError('manifest size changed during read')
@@ -565,6 +565,32 @@ def compare_file_and_directory(file_path, directory_path, *, directory_before=Fa
         single, file_inventory, many, directory_inventory)
 
 
+def inspect_local_ndjson_batch(path):
+    """Reuse the bounded NDJSON validator on a safe, no-follow local file."""
+    try:
+        data = read_regular_manifest(path, max_bytes=16 * 16385)
+    except (OSError, ValueError, TypeError) as exc:
+        return ({'status': 'REFUSED',
+                 'errors': [f'unreadable/invalid offline batch: {type(exc).__name__}'],
+                 'results': [], 'authorization': 'NO_AUTHORIZATION',
+                 'collection': 'C0_COLLECT_HOLD', 'network': 'NO_NETWORK'}, {})
+    return inspect_stdin_batch(capture_inventory=True, data=data)
+
+
+def compare_manifest_and_local_batch(manifest_path, batch_path, *, batch_before=False):
+    """Compare two bounded untrusted local observations without network access."""
+    single = inspect_manifest(manifest_path, capture_objects=True)
+    objects = single.pop('_objects')
+    single_inventory = ({obj['id']: obj for obj in objects}
+                        if single['status'] != 'REFUSED' else {})
+    batch, batch_inventory = inspect_local_ndjson_batch(batch_path)
+    if batch_before:
+        return compare_stream_directory_reports(batch, batch_inventory,
+                                                single, single_inventory)
+    return compare_stream_directory_reports(single, single_inventory,
+                                            batch, batch_inventory)
+
+
 def compare_paired_stdin_batches():
     """Review two untrusted NDJSON snapshots separated by an exact LF---LF."""
     delimiter = b'\n---\n'
@@ -708,7 +734,7 @@ REVIEW_MODES = frozenset({
     'MANIFEST_FILE', 'FILE_BATCH', 'DIRECTORY', 'STDIN_MANIFEST', 'STDIN_BATCH',
     'DIRECTORY_COMPARISON', 'DIRECTORY_TO_STDIN', 'STDIN_TO_DIRECTORY',
     'PAIRED_STDIN_COMPARISON', 'FILE_COMPARISON', 'FILE_TO_STDIN', 'STDIN_TO_FILE',
-    'FILE_TO_DIRECTORY', 'DIRECTORY_TO_FILE',
+    'FILE_TO_DIRECTORY', 'DIRECTORY_TO_FILE', 'FILE_TO_BATCH', 'BATCH_TO_FILE',
 })
 
 
@@ -726,6 +752,7 @@ def render_capabilities_json():
             'directory_entries': MAX_DIRECTORY_ENTRIES,
             'directory_manifests': 16,
             'batch_manifests': 16,
+            'batch_file_bytes': 16 * 16385,
             'objects_per_manifest': len(IDS),
         },
         'authorization': 'NO_AUTHORIZATION',
@@ -820,6 +847,12 @@ def main():
     p.add_argument('--guidance', action='store_true',
                    help='with --summary, append fixed privacy-safe remediation guidance')
     p.add_argument('--directory', type=Path, help='audit 1–16 .json entries in a directory, offline')
+    p.add_argument('--compare-file-to-batch', type=Path, nargs=2,
+                   metavar=('BEFORE_FILE', 'AFTER_NDJSON'),
+                   help='compare one bounded manifest with a bounded local NDJSON batch')
+    p.add_argument('--compare-batch-to-file', type=Path, nargs=2,
+                   metavar=('BEFORE_NDJSON', 'AFTER_FILE'),
+                   help='compare bounded local NDJSON batch with one bounded manifest')
     p.add_argument('--compare-file-to-directory', type=Path, nargs=2,
                    metavar=('BEFORE_FILE', 'AFTER_DIR'),
                    help='compare one untrusted manifest file to a bounded directory snapshot')
@@ -850,12 +883,30 @@ def main():
     p.add_argument('--batch', type=Path, nargs='+', metavar='MANIFEST',
                    help='inspect up to 16 manifests and emit one aggregate JSON report')
     args = p.parse_args()
+    if ((args.compare_file_to_batch is not None or args.compare_batch_to_file is not None)
+            and not args.capabilities_json
+            and (args.manifest is not None or args.batch is not None
+                or args.stdin or args.stdin_batch or args.directory is not None
+                or args.compare_files is not None or args.compare_directories is not None
+                or args.compare_file_to_directory is not None
+                or args.compare_directory_to_file is not None
+                or args.compare_file_to_stdin is not None
+                or args.compare_stdin_to_file is not None
+                or args.compare_stdin_to_directory is not None
+                or args.compare_stdin_before_directory is not None
+                or args.compare_stdin_batches or args.require_json_only
+                or (args.compare_file_to_batch is not None
+                    and args.compare_batch_to_file is not None))):
+        p.error('--compare-file-to-batch/--compare-batch-to-file cannot be combined '
+                'with other input modes, discovery or --require-json-only')
     if args.capabilities_json:
         # Discovery is deliberately input-free, and must never mix with audit routes.
         if (args.manifest is not None or args.batch is not None
                 or args.stdin or args.stdin_batch or args.directory is not None
                 or args.compare_file_to_directory is not None
                 or args.compare_directory_to_file is not None
+                or args.compare_file_to_batch is not None
+                or args.compare_batch_to_file is not None
                 or args.compare_file_to_stdin is not None
                 or args.compare_stdin_to_file is not None
                 or args.compare_files is not None or args.compare_directories is not None
@@ -932,7 +983,9 @@ def main():
     if args.stdin and (args.manifest is not None or args.batch is not None
                        or args.directory is not None or args.compare_directories is not None):
         p.error('--stdin cannot be combined with other input modes')
-    if (args.fail_on_change and args.compare_file_to_directory is None
+    if (args.fail_on_change and args.compare_file_to_batch is None
+            and args.compare_batch_to_file is None
+            and args.compare_file_to_directory is None
             and args.compare_directory_to_file is None and args.compare_files is None
             and args.compare_file_to_stdin is None and args.compare_stdin_to_file is None
             and args.compare_directories is None
@@ -943,7 +996,8 @@ def main():
                 '--compare-stdin-to-directory or --compare-stdin-before-directory '
                 'or --compare-stdin-batches or --compare-files or '
                 '--compare-file-to-stdin or --compare-stdin-to-file or '
-                '--compare-file-to-directory or --compare-directory-to-file')
+                '--compare-file-to-directory or --compare-directory-to-file or '
+                '--compare-file-to-batch or --compare-batch-to-file')
     if (args.require_json_only and args.compare_file_to_directory is None
             and args.compare_directory_to_file is None
             and args.compare_directories is None and args.directory is None
@@ -954,6 +1008,8 @@ def main():
                 'or --compare-file-to-directory or --compare-directory-to-file')
     # Fixed labels reflect the selected local input route, never an input value.
     review_mode = (
+        'FILE_TO_BATCH' if args.compare_file_to_batch is not None else
+        'BATCH_TO_FILE' if args.compare_batch_to_file is not None else
         'FILE_TO_DIRECTORY' if args.compare_file_to_directory is not None else
         'DIRECTORY_TO_FILE' if args.compare_directory_to_file is not None else
         'FILE_TO_STDIN' if args.compare_file_to_stdin is not None else
@@ -969,6 +1025,21 @@ def main():
         'FILE_BATCH' if args.batch is not None else
         'MANIFEST_FILE'
     )
+    if args.compare_file_to_batch is not None or args.compare_batch_to_file is not None:
+        batch_before = args.compare_batch_to_file is not None
+        if batch_before:
+            batch_path, manifest_path = args.compare_batch_to_file
+        else:
+            manifest_path, batch_path = args.compare_file_to_batch
+        report = compare_manifest_and_local_batch(
+            manifest_path, batch_path, batch_before=batch_before)
+        emit_report(report, summary=args.summary, guidance=args.guidance,
+                    summary_json=args.summary_json, review_mode=review_mode)
+        if report['status'] == 'REFUSED':
+            return 2
+        if args.fail_on_change and report['status'] == 'CHANGED':
+            return 3
+        return 0
     if args.compare_file_to_directory is not None or args.compare_directory_to_file is not None:
         directory_before = args.compare_directory_to_file is not None
         if directory_before:

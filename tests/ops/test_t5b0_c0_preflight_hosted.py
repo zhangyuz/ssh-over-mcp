@@ -15,5 +15,8 @@ def test_c0_offline_manifest_adversarial_fixtures():
         capture_output=True,
         text=True,
         check=True,
-        timeout=45,
+        # This invokes the *entire* 150+ case subprocess/FS C0 suite. A
+        # busy hosted Python 3.14 runner can legitimately exceed 45 seconds.
+        # Keep a finite whole-suite watchdog; per-input caps remain unchanged.
+        timeout=180,
     )

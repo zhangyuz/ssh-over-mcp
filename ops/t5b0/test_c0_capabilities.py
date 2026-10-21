@@ -16,7 +16,7 @@ EXPECTED_MODES = {
     'MANIFEST_FILE', 'FILE_BATCH', 'DIRECTORY', 'STDIN_MANIFEST', 'STDIN_BATCH',
     'DIRECTORY_COMPARISON', 'DIRECTORY_TO_STDIN', 'STDIN_TO_DIRECTORY',
     'PAIRED_STDIN_COMPARISON', 'FILE_COMPARISON', 'FILE_TO_STDIN', 'STDIN_TO_FILE',
-    'FILE_TO_DIRECTORY', 'DIRECTORY_TO_FILE',
+    'FILE_TO_DIRECTORY', 'DIRECTORY_TO_FILE', 'FILE_TO_BATCH', 'BATCH_TO_FILE',
 }
 
 
@@ -34,7 +34,7 @@ class CapabilityDiscoveryTests(unittest.TestCase):
         self.assertEqual(report['limits'], {
             'manifest_bytes': 16384, 'directory_entries': 64,
             'directory_manifests': 16, 'batch_manifests': 16,
-            'objects_per_manifest': 4,
+            'objects_per_manifest': 4, 'batch_file_bytes': 16 * 16385,
         })
         self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
         self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
@@ -51,7 +51,9 @@ class CapabilityDiscoveryTests(unittest.TestCase):
         options = [
             ['example.json'], ['--batch', 'example.json'], ['--directory', 'folder'],
             ['--stdin'], ['--stdin-batch'], ['--compare-files', 'one', 'two'],
-            ['--compare-directories', 'one', 'two'], ['--compare-file-to-stdin', 'one'],
+            ['--compare-directories', 'one', 'two'],
+            ['--compare-file-to-batch', 'one', 'two'],
+            ['--compare-batch-to-file', 'one', 'two'], ['--compare-file-to-stdin', 'one'],
             ['--compare-stdin-to-file', 'two'],
             ['--compare-file-to-directory', 'one', 'two'],
             ['--compare-directory-to-file', 'one', 'two'],
