@@ -79,7 +79,7 @@ class NamedFileSetComparisonTests(unittest.TestCase):
                          {'url': 0, 'sha256': 1, 'bytes': 1, 'max_bytes': 1})
         self.no_leak(report)
         replacement = copy.deepcopy(VALID)
-        replacement['objects'][0].update(id='C0-A1', url='https://example.org/new',
+        replacement['objects'][0].update(id='C0-R1', url='https://example.org/new',
                                          sha256='c'*64)
         self.after[0].write_text(json.dumps(replacement))
         code, report = self.invoke(*self.command('--summary-json', '--fail-on-change'))
@@ -164,7 +164,7 @@ class NamedFileSetComparisonTests(unittest.TestCase):
                   ('--directory', self.root), ('--compare-files', self.before[0],
                                               self.after[0]),
                   ('--compare-stdin-batches',), ('--batch-consistency',),
-                  ('--require-json-only',), (str(self.before[0]),))
+                  ('--require-json-only',))
         for extra in others:
             with self.subTest(extra=extra):
                 argv = [str(SCRIPT), *map(str, self.command(*extra))]

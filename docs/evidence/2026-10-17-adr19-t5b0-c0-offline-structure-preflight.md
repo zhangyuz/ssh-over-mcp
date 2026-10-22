@@ -786,3 +786,41 @@ source authenticity, cryptographic trust, material collection, privileged host
 execution, T5B admission or approval. `NO_NETWORK`, `NO_AUTHORIZATION`,
 `C0_COLLECT_HOLD`, all five independently `UNVERIFIED` evidence gaps and
 Mac UID502/APFS, T5B and Linux C HOLDs remain unchanged.
+
+## Direct two-set named-manifest comparison (2026-10-22; structural only)
+
+For operators who already have named local manifests, compare two explicitly
+separate file lists **without** making a directory, NDJSON batch, or network
+request. File order only labels observed records; semantic object IDs determine
+addition, removal and changed metadata, not source filenames.
+
+```sh
+python3 ops/t5b0/c0_manifest_preflight.py \
+  --compare-before-files old1.json old2.json \
+  --compare-after-files new1.json new2.json \
+  --summary-json --fail-on-change
+```
+
+Each list must contain **1–16 files**. The operation refuses either overlong
+list before opening any file on either side. Each file is read once through
+the existing ≤16,384-byte no-follow/nonblocking regular-file, same-FD identity
+and modification-time checks, duplicate-key/strict UTF-8/shape validator and
+cross-file duplicate-ID, URL and digest-size consistency checks. Each side is
+audited independently, even when a valid-length opposite side refuses.
+On either-side refusal, status is `REFUSED` (exit 2), semantic
+`object_changes=UNAVAILABLE`, `object_change_counts:null`, and
+`object_field_change_counts:null`. No partial inventory becomes an empty or
+successful diff. Fully valid unchanged returns 0; changed returns 0 or 3
+with `--fail-on-change`. Metadata changes are source values in the legacy
+detailed report only as already permitted; the private allowlisted
+`--summary-json` emits **counts only**, fixed `NAMED_FILES_COMPARISON` label,
+existing version `som-t5b0-c0-summary-json-v1` and static triage codes.
+The same fixed mode is advertised read-free in `--capabilities-json`.
+Mixed inputs and missing one list, `--batch-consistency`, directory-only
+`--require-json-only` and conflicting discovery reject before file or stdin
+access. Existing single-input and other comparison interfaces are unchanged.
+
+This is an observation only. `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`,
+`NO_NETWORK`, five independently `UNVERIFIED` evidence gaps and all T5B,
+Mac UID502/APFS and Linux C HOLDs remain; no file download, material
+collection, signature verification or privileged host action is enabled.

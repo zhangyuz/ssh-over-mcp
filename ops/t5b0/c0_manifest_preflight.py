@@ -565,6 +565,47 @@ def compare_file_and_directory(file_path, directory_path, *, directory_before=Fa
         single, file_inventory, many, directory_inventory)
 
 
+
+def inspect_named_manifest_set(paths):
+    """Strict, no-reopen audit of 1–16 individually named local manifests."""
+    if not 1 <= len(paths) <= 16:
+        return ({'status': 'REFUSED', 'results': [],
+                 'errors': ['named file set must contain 1 to 16 manifests'],
+                 'authorization': 'NO_AUTHORIZATION',
+                 'collection': 'C0_COLLECT_HOLD', 'network': 'NO_NETWORK'}, {})
+    results, objects_by_file = [], []
+    for path in paths:
+        inspected = inspect_manifest(path, capture_objects=True)
+        objects_by_file.append(inspected.pop('_objects'))
+        results.append({'path': str(path), **inspected})
+    cross_file_consistency(results, objects_by_file)
+    redact_cross_manifest_diagnostics(results)
+    refused = any(item['status'] == 'REFUSED' for item in results)
+    report = {'status': 'REFUSED' if refused else 'STRUCTURE_ONLY_PASS',
+              'errors': [], 'results': results,
+              'authorization': 'NO_AUTHORIZATION',
+              'collection': 'C0_COLLECT_HOLD', 'network': 'NO_NETWORK'}
+    inventory = {}
+    if not refused:
+        for objects in objects_by_file:
+            for obj in objects:
+                inventory[obj['id']] = obj
+    return report, inventory
+
+
+def compare_named_manifest_sets(before_files, after_files):
+    """Offline semantic comparison; both sets remain untrusted and non-authorizing."""
+    # Reject oversized lists before touching either set of source files.
+    if len(before_files) > 16 or len(after_files) > 16:
+        refused = lambda: {'status': 'REFUSED', 'errors': ['too many named files'],
+                           'results': [], 'authorization': 'NO_AUTHORIZATION',
+                           'collection': 'C0_COLLECT_HOLD', 'network': 'NO_NETWORK'}
+        return compare_stream_directory_reports(refused(), {}, refused(), {})
+    before, before_inv = inspect_named_manifest_set(before_files)
+    after, after_inv = inspect_named_manifest_set(after_files)
+    return compare_stream_directory_reports(before, before_inv, after, after_inv)
+
+
 def inspect_local_ndjson_batch(path):
     """Reuse the bounded NDJSON validator on a safe, no-follow local file."""
     try:
@@ -795,7 +836,8 @@ REVIEW_MODES = frozenset({
     'FILE_TO_DIRECTORY', 'DIRECTORY_TO_FILE', 'FILE_TO_BATCH', 'BATCH_TO_FILE',
     'LOCAL_BATCH_COMPARISON', 'BATCH_FILE_TO_DIRECTORY',
     'DIRECTORY_TO_BATCH_FILE', 'LOCAL_BATCH_TO_STDIN_BATCH',
-    'STDIN_BATCH_TO_LOCAL_BATCH', 'FILE_BATCH_CONSISTENT', 'FILE_TO_STDIN_BATCH',
+    'STDIN_BATCH_TO_LOCAL_BATCH', 'FILE_BATCH_CONSISTENT',
+    'NAMED_FILES_COMPARISON', 'FILE_TO_STDIN_BATCH',
     'STDIN_BATCH_TO_FILE', 'LOCAL_BATCH_TO_STDIN', 'STDIN_TO_LOCAL_BATCH',
 })
 
@@ -979,14 +1021,36 @@ def main():
                         '--compare-batch-file-to-stdin-batch and '
                         '--compare-stdin-batch-to-batch-file, '
                         '--compare-file-to-stdin-batch, --compare-stdin-batch-to-file, '
-                        '--compare-batch-file-to-stdin and --compare-stdin-to-batch-file')
+                        '--compare-batch-file-to-stdin and --compare-stdin-to-batch-file, '
+                        '--compare-before-files and --compare-after-files')
     p.add_argument('--require-json-only', action='store_true',
                    help='with directory audit or compare, refuse non-JSON immediate entries')
     p.add_argument('--batch', type=Path, nargs='+', metavar='MANIFEST',
                    help='inspect up to 16 manifests and emit one aggregate JSON report')
     p.add_argument('--batch-consistency', action='store_true',
                    help='with --batch, also reject cross-file IDs and conflicting metadata offline')
+    p.add_argument('--compare-before-files', type=Path, nargs='+', metavar='BEFORE_JSON',
+                   help='directly compare a 1–16 local JSON manifest baseline set')
+    p.add_argument('--compare-after-files', type=Path, nargs='+', metavar='AFTER_JSON',
+                   help='directly compare a 1–16 local JSON successor set')
     args = p.parse_args()
+    # Paired file lists are one exclusive input mode. Reject before any read.
+    if ((args.compare_before_files is not None or args.compare_after_files is not None)
+            and args.capabilities_json):
+        p.error('--capabilities-json cannot be combined with input or report options')
+    if args.compare_before_files is not None or args.compare_after_files is not None:
+        conflicts = (args.compare_before_files is None
+                     or args.compare_after_files is None
+                     or args.manifest is not None or args.batch is not None
+                     or args.batch_consistency or args.stdin or args.stdin_batch
+                     or args.directory is not None or args.require_json_only
+                     or any((value is not None and value is not False)
+                            for key, value in vars(args).items()
+                            if key.startswith('compare_') and key not in
+                            ('compare_before_files', 'compare_after_files')))
+        if conflicts:
+            p.error('--compare-before-files/--compare-after-files require one exclusive '
+                    'paired input mode; no other input or directory strict flag')
     # Check the opt-in family before any source opening or stdin read.
     # Legacy --batch remains independent per-file unless explicitly requested.
     other_inputs = (
@@ -1230,7 +1294,8 @@ def main():
     if args.stdin and (args.manifest is not None or args.batch is not None
                        or args.directory is not None or args.compare_directories is not None):
         p.error('--stdin cannot be combined with other input modes')
-    if (args.fail_on_change and args.compare_batch_file_to_stdin is None
+    if (args.fail_on_change and args.compare_before_files is None
+            and args.compare_batch_file_to_stdin is None
             and args.compare_stdin_to_batch_file is None
             and args.compare_file_to_stdin_batch is None
             and args.compare_stdin_batch_to_file is None
@@ -1272,6 +1337,7 @@ def main():
                 'or --compare-batch-file-to-directory or --compare-directory-to-batch-file')
     # Fixed labels reflect the selected local input route, never an input value.
     review_mode = (
+        'NAMED_FILES_COMPARISON' if args.compare_before_files is not None else
         'LOCAL_BATCH_TO_STDIN' if args.compare_batch_file_to_stdin is not None else
         'STDIN_TO_LOCAL_BATCH' if args.compare_stdin_to_batch_file is not None else
         'FILE_TO_STDIN_BATCH' if args.compare_file_to_stdin_batch is not None else
@@ -1299,6 +1365,16 @@ def main():
         'FILE_BATCH' if args.batch is not None else
         'MANIFEST_FILE'
     )
+    if args.compare_before_files is not None:
+        report = compare_named_manifest_sets(args.compare_before_files,
+                                             args.compare_after_files)
+        emit_report(report, summary=args.summary, guidance=args.guidance,
+                    summary_json=args.summary_json, review_mode=review_mode)
+        if report['status'] == 'REFUSED':
+            return 2
+        if args.fail_on_change and report['status'] == 'CHANGED':
+            return 3
+        return 0
     if (args.compare_batch_file_to_stdin is not None
             or args.compare_stdin_to_batch_file is not None):
         stdin_before = args.compare_stdin_to_batch_file is not None
