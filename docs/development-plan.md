@@ -2582,3 +2582,22 @@ real input, reports and other discovery flags reject before any I/O. This is
 non-authorizing metadata only: no new collection, network, signer/source
 trust or privilege, and all five UNVERIFIED gaps and T5B/Mac UID502/APFS/
 Linux C holds remain.
+
+### 2026-10-22 Integrated offline C0 multi-case review plan (larger operator feature)
+
+Add a standalone bounded, source-free-of-authority
+`python3 ops/t5b0/c0_review_plan.py PLAN.json [--fail-on-change]` workflow.
+One strictly validated local plan (≤16KiB) describes 1–8 before/after cases,
+each using 1–16 local manifest JSON files or one regular bounded NDJSON file;
+no more than 32 unique local source names per plan. All referenced names are
+relative ASCII basenames, opened against one local directory FD with
+no-follow/nonblocking regular-only same-FD checks; **all plan constraints
+reject before any source file read** and each source is observed once/cached
+across cases. Reuse existing validator, duplicate/conflicting record checks and
+semantic diff. One fixed private versioned result reports per-case numeric
+changes without paths, object IDs, URLs or SHA values. Valid 0/3 CI gate;
+any refused source makes *every* case result unavailable, emits no partial
+success and exits2, with aggregate counts null. No legacy CLI changes or
+material collection/trust/host privilege. Preserve all five independently
+UNVERIFIED gaps, NO_NETWORK/NO_AUTHORIZATION/C0_COLLECT_HOLD and T5B/Mac
+UID502/APFS/Linux C HOLDs.

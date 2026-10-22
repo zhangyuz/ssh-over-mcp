@@ -1023,3 +1023,62 @@ reads**. This is static metadata only, not execution, acquisition,
 authentication, authorization or release. Existing one-item contract,
 recipe lookup, recipe catalog, capability and report schemas remain identical;
 T5B/Mac UID502/APFS/Linux C HOLDs persist.
+
+## Bounded multi-case local comparison plan runner (2026-10-22)
+
+A single **non-authorizing offline command** performs one to eight different
+local snapshot comparisons with fixed private results and an optional CI
+difference gate; operators need not run a dozen separate comparison commands:
+
+```sh
+python3 ops/t5b0/c0_review_plan.py /path/to/plan.json --fail-on-change
+```
+
+The plan is a regular JSON file (maximum 16,384 bytes) with strict v1 shape:
+
+```json
+{
+  "schema": "som-t5b0-c0-review-plan-v1",
+  "cases": [
+    {"before": {"json_files": ["baseline-a.json", "baseline-b.json"]},
+     "after": {"ndjson_file": "proposed.ndjson"}},
+    {"before": {"ndjson_file": "proposed.ndjson"},
+     "after": {"json_files": ["accepted-a.json", "accepted-b.json"]}}
+  ]
+}
+```
+
+Each `before` or `after` uses **exactly one** source form: a list of 1–16
+individually named local manifest JSON files or one local NDJSON file (up to
+262,160 bytes / 16 records of 16,384 bytes). There are **1–8 cases** and at
+most **32 unique referenced source names across the entire plan**. All source
+names are short ASCII-only basenames in the plan's parent directory: no
+absolute paths, path separators, traversal, user-supplied URLs, private
+identifiers or implicit globbing. The plan and all sources are read with the
+existing regular-only/no-follow/nonblocking/same-FD size/race checks, anchored
+to a single opened no-follow parent directory descriptor. **The entire plan is
+schema/count/name validated before reading any referenced source.** Each
+referenced source file is inspected **at most once per run**, cached in memory
+and reused across cases to avoid multiple, mutually inconsistent observations
+if a file changes between case evaluations. Any source type collision or any
+per-side structural/cross-file ID/URL/digest-size conflict is a refusal.
+
+Output is one deterministic allowlisted
+`som-t5b0-c0-review-plan-summary-v1` envelope with 1-based case indexes,
+`UNCHANGED` / `CHANGED` per case, private object add/remove/change counters
+and fixed field-change histograms. No plan/source paths, object IDs, URLs,
+hashes or raw parser errors leave the process. All cases valid and unchanged:
+exit `0`; any valid change: exit `0`, or `3` if `--fail-on-change` is supplied.
+**Any** invalid plan, unsafe input, special file, symlink, over-limit source or
+refused comparison fails **the entire run** as `REFUSED`/exit `2`, with empty
+case results and `null` aggregate counters—not misleading partial results.
+It writes nothing and never consumes stdin or uses the network.
+
+All semantic input checks reuse the existing trusted-in-code C0 validator and
+cross-record consistency/semantic-delta engine. This capability does not
+provide authenticity or trusted signer evidence, authorize material collection,
+execute downloaded code, change privileges or release a component.
+`NO_NETWORK`, `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, five independently
+`UNVERIFIED` evidence gaps, T5B/Mac UID502/APFS/Linux C HOLDs remain intact.
+The existing C0 input-mode CLI and catalog, recipe, capability and private
+summary schemas are unchanged.

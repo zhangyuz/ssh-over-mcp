@@ -1,6 +1,5 @@
 """Integrated C0 multi-case local review plan: real operator positive/refusal paths."""
 import copy
-import io
 import json
 import os
 import subprocess
@@ -183,8 +182,8 @@ class LocalMulticasePlanTests(unittest.TestCase):
 
     def test_duplicate_referenced_files_read_once_across_cases(self):
         # The same file has one same-FD bounded snapshot for the whole plan.
-        import c0_review_plan as runner
         import c0_manifest_preflight as c0
+        import c0_review_plan as runner
         opened = []
         original = c0.read_regular_manifest
         def recording(path, *args, **kwargs):
@@ -208,6 +207,45 @@ class LocalMulticasePlanTests(unittest.TestCase):
                    {'before': side_json(source_names[32]),
                     'after': side_json('base.json')}])
         self.assertEqual(self.privacy(self.invoke().stdout)['status'], 'REFUSED')
+
+    def test_preflight_rejects_all_plan_constraints_before_source_inspection(self):
+        import c0_manifest_preflight as c0
+        import c0_review_plan as runner
+        cases = [{'before': side_json(*[f'v{i}.json' for i in range(16)]),
+                  'after': side_json(*[f'v{i}.json' for i in range(16, 32)])},
+                 {'before': side_json('v32.json'),
+                  'after': side_batch('v33.ndjson')}]
+        self.plan(cases)
+        with patch.object(c0, 'inspect_manifest',
+                          side_effect=AssertionError('referenced source must not be read')), \
+                patch.object(c0, 'inspect_stdin_batch',
+                             side_effect=AssertionError('NDJSON must not be parsed')):
+            exit_code, report = runner.review_plan(self.root / 'plan.json')
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(report['cases'], [])
+        self.assertIsNone(report['changed_cases'])
+
+    def test_added_removed_objects_have_directional_private_counts(self):
+        self.plan([{'before': side_json('base.json', 'second.json'),
+                    'after': side_batch('base.ndjson')},
+                   {'before': side_batch('base.ndjson'),
+                    'after': side_json('base.json', 'second.json')}])
+        run = self.invoke('--fail-on-change')
+        self.assertEqual((run.returncode, run.stderr), (3, b''))
+        report = self.privacy(run.stdout)
+        self.assertEqual(report['cases'][0]['object_change_counts'],
+                         {'added': 0, 'removed': 1, 'changed': 0})
+        self.assertEqual(report['cases'][1]['object_change_counts'],
+                         {'added': 1, 'removed': 0, 'changed': 0})
+        self.assertEqual((report['changed_cases'], report['unchanged_cases']), (2, 0))
+
+    def test_parent_directory_last_component_symlink_refuses(self):
+        linked = self.root.parent / (self.root.name + '-linked')
+        linked.symlink_to(self.root, target_is_directory=True)
+        self.addCleanup(linked.unlink)
+        result = self.invoke(plan=linked / 'plan.json')
+        self.assertEqual((result.returncode, result.stderr), (2, b''))
+        self.assertEqual(self.privacy(result.stdout)['status'], 'REFUSED')
 
     def test_cli_options_and_unchanged_filesystem(self):
         prior = {p.name: p.read_bytes() for p in self.root.iterdir()}
