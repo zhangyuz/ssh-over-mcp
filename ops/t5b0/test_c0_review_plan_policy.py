@@ -1,6 +1,5 @@
 """Integrated opt-in fail-closed numeric/field CI policy for offline C0 plans."""
 import copy
-import io
 import json
 import os
 import subprocess
@@ -119,7 +118,7 @@ class PlanPolicyTests(unittest.TestCase):
         self.assertEqual(doc['cases'][0]['violation_codes'], ['CASE_DENY_SHA256'])
 
     def test_added_removed_and_total_budget_gates(self):
-        self.make_plan([('old.json', 'added.json'), ('old.json', 'removed.json')])
+        self.make_plan([('old.json', 'added.json'), ('added.json', 'old.json')])
         p = self.invoke()
         self.assertEqual(p.returncode, 3)
         doc = self.check_private(p.stdout)

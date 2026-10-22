@@ -2601,3 +2601,21 @@ success and exits2, with aggregate counts null. No legacy CLI changes or
 material collection/trust/host privilege. Preserve all five independently
 UNVERIFIED gaps, NO_NETWORK/NO_AUTHORIZATION/C0_COLLECT_HOLD and T5B/Mac
 UID502/APFS/Linux C HOLDs.
+
+### 2026-10-22 Integrated multi-case offline review policy CI gates
+
+Extend the previously delivered 1–8-case local offline plan runner with
+`--policy-file POLICY.json`: a bounded ≤4096-byte no-follow regular local JSON
+policy mapping exactly one numeric and field-change budget per plan case, plus
+aggregate caps on changed-case count and total added/removed/changed objects.
+Plan and policy are fully validated before opening any referenced sources;
+policy file cannot be the plan or a reviewed source. No network, stdin,
+collection, authority or trust. Use the existing single-observation cached
+C0 semantic counter results. Emit fixed value-free per-case policy pass/violate
+statuses, field-specific gate codes and global budget codes; permit valid
+bounded changes (exit0), refuse over-budget or prohibited changes (exit3),
+and return all-or-nothing REFUSED/2 with null totals for invalid policy,
+unsafe files or unreviewable sources. Legacy no-policy CLI and summary v1
+behavior are untouched, and --policy-file conflicts with --fail-on-change
+pre-read. All existing five UNVERIFIED gaps and C0/T5B/Mac UID502/APFS/
+Linux C authority HOLDs persist.

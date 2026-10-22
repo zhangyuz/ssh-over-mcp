@@ -21,6 +21,86 @@ MAX_CHECKS = 8
 MAX_SOURCES = 32
 SAFE_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,79}')
 
+POLICY_SCHEMA = 'som-t5b0-c0-review-policy-v1'
+POLICY_SUMMARY_SCHEMA = 'som-t5b0-c0-review-policy-summary-v1'
+FIELDS = ('url', 'sha256', 'bytes', 'max_bytes')
+BUDGET_KEYS = ('max_added', 'max_removed', 'max_changed')
+CASE_KEYS = frozenset((*BUDGET_KEYS, 'deny_changed_fields'))
+AGGREGATE_KEYS = frozenset((*BUDGET_KEYS, 'max_changed_cases'))
+
+
+def _policy_refusal():
+    output = _refusal()
+    output.update(schema=POLICY_SUMMARY_SCHEMA, review_status=None,
+                  policy_violation_cases=None, aggregate_violation_codes=[])
+    return output
+
+
+def _validate_policy(data, count):
+    policy = c0.parse_manifest(data.decode('utf-8-sig'))
+    if (not isinstance(policy, dict)
+            or set(policy) != {'schema', 'case_limits', 'aggregate_limits'}
+            or policy['schema'] != POLICY_SCHEMA
+            or not isinstance(policy['case_limits'], list)
+            or len(policy['case_limits']) != count
+            or not isinstance(policy['aggregate_limits'], dict)
+            or set(policy['aggregate_limits']) != AGGREGATE_KEYS):
+        raise ValueError('invalid policy schema or cardinality')
+    for rule in policy['case_limits']:
+        if not isinstance(rule, dict) or set(rule) != CASE_KEYS:
+            raise ValueError('invalid case policy')
+        fields = rule['deny_changed_fields']
+        if (not isinstance(fields, list) or not all(isinstance(x, str) for x in fields)
+                or fields != [x for x in FIELDS if x in fields]):
+            raise ValueError('invalid denied field set')
+        for key in BUDGET_KEYS:
+            _budget(rule[key])
+    for key in AGGREGATE_KEYS:
+        _budget(policy['aggregate_limits'][key])
+    return policy
+
+
+def _budget(value):
+    if type(value) is not int or not 0 <= value <= 4096:
+        raise ValueError('invalid numeric budget')
+    return value
+
+
+def _apply_policy(summary, policy):
+    result = dict(summary)
+    result['schema'] = POLICY_SUMMARY_SCHEMA
+    result['review_status'] = summary['status']
+    totals = {key: 0 for key in ('added', 'removed', 'changed')}
+    annotated = []
+    for record, rule in zip(summary['cases'], policy['case_limits'], strict=True):
+        counts = record['object_change_counts']
+        fields = record['object_field_change_counts']
+        violations = []
+        for kind in ('added', 'removed', 'changed'):
+            totals[kind] += counts[kind]
+            if counts[kind] > rule['max_' + kind]:
+                violations.append('CASE_MAX_' + kind.upper())
+        for field in rule['deny_changed_fields']:
+            if fields[field] > 0:
+                violations.append('CASE_DENY_' + field.upper())
+        annotated.append({**record, 'policy_status': 'VIOLATION' if violations else 'PASS',
+                          'violation_codes': sorted(violations)})
+    limits = policy['aggregate_limits']
+    aggregate_codes = []
+    for kind in ('added', 'removed', 'changed'):
+        if totals[kind] > limits['max_' + kind]:
+            aggregate_codes.append('TOTAL_MAX_' + kind.upper())
+    if summary['changed_cases'] > limits['max_changed_cases']:
+        aggregate_codes.append('TOTAL_MAX_CHANGED_CASES')
+    violations = sum(x['policy_status'] == 'VIOLATION' for x in annotated)
+    overall = bool(violations or aggregate_codes)
+    result.update(status='POLICY_VIOLATION' if overall else 'POLICY_PASS',
+                  cases=annotated, policy_violation_cases=violations,
+                  aggregate_violation_codes=sorted(aggregate_codes),
+                  next_action_codes=(['REVIEW_POLICY_VIOLATIONS', 'VERIFY_INDEPENDENT_EVIDENCE']
+                                     if overall else ['VERIFY_INDEPENDENT_EVIDENCE']))
+    return (3 if overall else 0), result
+
 
 def _refusal():
     return {
@@ -123,12 +203,15 @@ def _side_report(spec, dir_fd, cache):
     return result, inventory
 
 
-def review_plan(path):
-    """Return (exit_code_without_change_gate, private_report); never writes."""
+def review_plan(path, *, policy_name=None):
+    """Review an offline plan; opt-in policy is checked before source reads."""
     try:
         path = Path(path)
         if not _safe_name(path.name):
             raise ValueError('unsafe plan file name')
+        if policy_name is not None and (not _safe_name(policy_name)
+                                        or policy_name == path.name):
+            raise ValueError('invalid policy file name')
         flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_DIRECTORY
         if hasattr(os, 'O_CLOEXEC'):
             flags |= os.O_CLOEXEC
@@ -138,6 +221,14 @@ def review_plan(path):
                 raise ValueError('source directory is not regular')
             plan_bytes = c0.read_regular_manifest(path.name, dir_fd=dir_fd)
             cases = _validated_cases(plan_bytes, path.name)
+            policy = None
+            if policy_name is not None:
+                # Policy is a separate safe regular file; validate its shape and
+                # full case alignment before opening any referenced source.
+                if any(policy_name in names for case in cases for _, names in case):
+                    raise ValueError('policy cannot be a reviewed source')
+                policy = _validate_policy(c0.read_regular_manifest(
+                    policy_name, dir_fd=dir_fd, max_bytes=4096), len(cases))
             cache, results = {}, []
             for idx, (before_spec, after_spec) in enumerate(cases, start=1):
                 before, old = _side_report(before_spec, dir_fd, cache)
@@ -168,22 +259,26 @@ def review_plan(path):
             'collection': 'C0_COLLECT_HOLD',
             'evidence_gaps': [key for key, _ in c0.EVIDENCE_GAPS],
         }
-        return 0, result
+        return _apply_policy(result, policy) if policy is not None else (0, result)
     except (OSError, ValueError, TypeError, UnicodeError, RecursionError):
-        return 2, _refusal()
+        return 2, _policy_refusal() if policy_name is not None else _refusal()
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('plan', type=Path, help='bounded local JSON plan; all sources are sibling basenames')
     parser.add_argument('--fail-on-change', action='store_true', help='exit 3 if any valid case changes')
+    parser.add_argument('--policy-file', metavar='POLICY_JSON',
+                        help='enforce a bounded local case/aggregate offline change-budget policy')
     if argv is None:
         import sys
         argv = sys.argv[1:]
     if argv.count('--fail-on-change') > 1:
         parser.error('--fail-on-change may occur once')
     args = parser.parse_args(argv)
-    exit_code, result = review_plan(args.plan)
+    if args.policy_file is not None and args.fail_on_change:
+        parser.error('--policy-file and --fail-on-change are mutually exclusive')
+    exit_code, result = review_plan(args.plan, policy_name=args.policy_file)
     print(json.dumps(result, sort_keys=True))
     if exit_code != 0:
         return exit_code
