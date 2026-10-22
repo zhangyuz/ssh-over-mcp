@@ -20,7 +20,7 @@ EXPECTED_MODES = {
     'DIRECTORY_TO_BATCH_FILE', 'LOCAL_BATCH_TO_STDIN_BATCH',
     'STDIN_BATCH_TO_LOCAL_BATCH', 'FILE_TO_STDIN_BATCH',
     'STDIN_BATCH_TO_FILE', 'LOCAL_BATCH_TO_STDIN', 'STDIN_TO_LOCAL_BATCH',
-    'FILE_BATCH_CONSISTENT',
+    'FILE_BATCH_CONSISTENT', 'NAMED_FILES_COMPARISON',
 }
 
 
@@ -55,6 +55,8 @@ class CapabilityDiscoveryTests(unittest.TestCase):
         options = [
             ['example.json'], ['--batch', 'example.json'], ['--directory', 'folder'],
             ['--batch-consistency'],
+            ['--compare-before-files', 'before.json'],
+            ['--compare-after-files', 'after.json'],
             ['--stdin'], ['--stdin-batch'], ['--compare-files', 'one', 'two'],
             ['--compare-directories', 'one', 'two'],
             ['--compare-batch-files', 'one', 'two'],

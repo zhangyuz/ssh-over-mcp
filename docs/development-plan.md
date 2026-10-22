@@ -2470,3 +2470,22 @@ capability discovery reject pre-read; static capabilities and versioned
 object IDs, URLs or hashes. Actual file bounds, legacy interfaces, no network
 or collection, five UNVERIFIED trust/evidence gaps and T5B/Mac UID502/APFS/
 Linux C holds are unchanged. No authorization, source acceptance or release.
+
+### 2026-10-22 Compare two explicit local named-manifest sets directly
+
+The C0 offline preflight adds a single bounded operator comparison route:
+`--compare-before-files BEFORE.json [..] --compare-after-files AFTER.json [..]`
+with **1–16 files per side**, without staging directories or NDJSON files.
+Each already-local manifest is opened with existing regular-only/no-follow,
+nonblocking, same-FD race-aware 16KiB byte budget; two distinct sides each
+reuse cross-manifest ID/URL/digest-size validation. Valid differences produce
+`CHANGED`/exit0 or exit3 under `--fail-on-change`, unchanged 0, and any-side
+refusal exit2 with semantic `UNAVAILABLE` and privacy-safe counts `null`
+rather than zero. Both lists over-budget are refused before any path read.
+Fixed `NAMED_FILES_COMPARISON` is available in static capabilities and the
+versioned opt-in private JSON envelope with no path, object ID, digest or URL
+leak; legacy modes and all existing bounds remain intact. This offline
+structure-only capability confers no evidence authenticity, source or signer
+trust, material collection, network access, host execution or authorization.
+All five independently UNVERIFIED evidence gaps and T5B/Mac UID502/APFS/
+Linux C HOLDs persist.
