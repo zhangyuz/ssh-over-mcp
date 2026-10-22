@@ -978,6 +978,65 @@ def render_recipe_json(recipe_id):
         'evidence_gaps': catalog['evidence_gaps'],
     }, sort_keys=True)
 
+
+RECIPE_CONTRACT_SCHEMA = 'som-t5b0-c0-recipe-contract-json-v1'
+
+# Strict source-side budgets for the ten reviewed curated recipes only.
+# Roles are structural and not a claim of authenticated evidence.
+RECIPE_SOURCE_ROLES = {
+    'inspect-one-file': (('input', 'LOCAL_JSON', 1),),
+    'inspect-stdin-manifest': (('input', 'STDIN_JSON', 1),),
+    'inspect-stdin-batch': (('input', 'STDIN_NDJSON', 1),),
+    'inspect-named-files-consistently': (('input', 'LOCAL_JSON', 16),),
+    'compare-two-named-file-sets': (('before', 'LOCAL_JSON', 16),
+                                    ('after', 'LOCAL_JSON', 16)),
+    'compare-named-files-to-stdin-batch': (('before', 'LOCAL_JSON', 16),
+                                           ('after', 'STDIN_NDJSON', 1)),
+    'compare-stdin-batch-to-named-files': (('before', 'STDIN_NDJSON', 1),
+                                           ('after', 'LOCAL_JSON', 16)),
+    'compare-named-files-to-saved-batch': (('before', 'LOCAL_JSON', 16),
+                                           ('after', 'LOCAL_NDJSON', 1)),
+    'compare-saved-batch-to-named-files': (('before', 'LOCAL_NDJSON', 1),
+                                           ('after', 'LOCAL_JSON', 16)),
+    'compare-two-saved-batches': (('before', 'LOCAL_NDJSON', 1),
+                                  ('after', 'LOCAL_NDJSON', 1)),
+}
+
+
+def render_recipe_contract_json(recipe_id):
+    """Export the curated recipe's fixed source budgets with no source I/O."""
+    single = render_recipe_json(recipe_id)
+    roles = RECIPE_SOURCE_ROLES.get(recipe_id)
+    if single is None or roles is None:
+        return None
+    selected = json.loads(single)
+    source_specs = []
+    for role, source_format, max_sources in roles:
+        json_only = source_format in ('LOCAL_JSON', 'STDIN_JSON')
+        source_specs.append({
+            'role': role,
+            'format': source_format,
+            'min_sources': 1,
+            'max_sources': max_sources,
+            'max_bytes_per_source': 16384 if json_only else 16 * 16385,
+            'max_records_per_source': 1 if json_only else 16,
+            'max_bytes_per_record': None if json_only else 16384,
+        })
+    return json.dumps({
+        'schema': RECIPE_CONTRACT_SCHEMA,
+        'review_schema': selected['review_schema'],
+        'catalog_scope': selected['catalog_scope'],
+        'recipe': selected['recipe'],
+        'sources': source_specs,
+        'non_authorizing_exit_code': 0,
+        'refused_exit_code': 2,
+        'changed_exit_code': 3 if len(roles) == 2 else None,
+        'authorization': 'NO_AUTHORIZATION',
+        'collection': 'C0_COLLECT_HOLD',
+        'network': 'NO_NETWORK',
+        'evidence_gaps': selected['evidence_gaps'],
+    }, sort_keys=True)
+
 def render_summary_json(report, *, review_mode=None):
     """Machine-readable allowlisted observations; never serialize source values."""
     def audit_counts(audit):
@@ -1070,6 +1129,8 @@ def main():
                    help='show curated fixed argv-array offline review examples without reading inputs')
     p.add_argument('--recipe-json', metavar='RECIPE_ID',
                    help='show exactly one curated static argv-array example, by ID, with no input I/O')
+    p.add_argument('--recipe-contract-json', metavar='RECIPE_ID',
+                   help='show one fixed non-authorizing source/limit contract without input I/O')
     p.add_argument('--guidance', action='store_true',
                    help='with --summary, append fixed privacy-safe remediation guidance')
     p.add_argument('--directory', type=Path, help='audit 1–16 .json entries in a directory, offline')
@@ -1166,6 +1227,15 @@ def main():
     p.add_argument('--against-batch-file', type=Path, metavar='NDJSON',
                    help='required independent local NDJSON file in named-files/batch comparison')
     args = p.parse_args()
+    if args.recipe_contract_json is not None:
+        if any(value is not None and value is not False
+               for key, value in vars(args).items() if key != 'recipe_contract_json'):
+            p.error('--recipe-contract-json cannot be combined with input or report options')
+        contract = render_recipe_contract_json(args.recipe_contract_json)
+        if contract is None:
+            p.error('--recipe-contract-json requires a known static recipe ID')
+        print(contract)
+        return 0
     if args.recipe_json is not None:
         # Recipe lookup is input-free, mutually exclusive with every other
         # parsed selector and report flag. Refuse before touching sources.
