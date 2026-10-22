@@ -865,6 +865,12 @@ def render_summary_json(report, *, review_mode=None):
         result['object_change_counts'] = (
             {key: len(delta[key]) for key in ('added', 'removed', 'changed')}
             if available else None)
+        # A fixed, value-free field histogram applies only to matched IDs.
+        # Added/removed IDs are counted separately, never as four edits.
+        fields = ('url', 'sha256', 'bytes', 'max_bytes')
+        result['object_field_change_counts'] = (
+            {field: sum(field in change['fields'] for change in delta['changed'])
+             for field in fields} if available else None)
     if raw_status not in MACHINE_REPORT_STATUSES:
         actions = ['STOP_UNKNOWN_REVIEW_STATUS']
     elif status == 'REFUSED':

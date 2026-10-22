@@ -722,3 +722,33 @@ independent UNVERIFIED gaps, `NO_NETWORK`, `NO_AUTHORIZATION`,
 `C0_COLLECT_HOLD`, and C0/T5B/Mac UID502/APFS/Linux C HOLD remain.
 
 Run `python3 -m unittest discover -s ops/t5b0 -p test_c0_local_batch_stdin_manifest_compare.py -v`.
+
+### Offline C0 machine field-change triage (2026-10-22; non-authorizing)
+
+The opt-in `--summary-json` comparison report now includes the additive,
+privacy-safe `object_field_change_counts` histogram with **exactly** four
+fixed keys: `url`, `sha256`, `bytes`, and `max_bytes`. Counts measure how many
+matched object IDs have that field changed; multiple changed fields on one ID
+can yield a sum larger than `object_change_counts.changed`. Added and removed
+IDs are **not** interpreted as four edited fields. A valid unchanged or
+added/removed-only comparison gives four zeros; if either side refuses,
+`object_field_change_counts` is JSON `null` alongside `object_changes:
+UNAVAILABLE` and `object_change_counts:null`, never a false zero-delta.
+
+For example:
+
+```sh
+python3 ops/t5b0/c0_manifest_preflight.py \
+  --compare-files BEFORE.json AFTER.json --summary-json --fail-on-change
+# With one matching ID changed only in SHA256, expected field counts:
+# {"url":0,"sha256":1,"bytes":0,"max_bytes":0} (exit 3).
+```
+
+The field names are trusted static literals, not input. Private output never
+contains object IDs, source paths, URLs, SHA256 values or raw diagnostics.
+This is an additive optional field under `som-t5b0-c0-summary-json-v1`;
+`--json`, human summary, guidance, fixed modes, capability discovery and
+0/2/3 exit semantics remain intact. It is an offline observation only:
+`NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, `NO_NETWORK`, five independently
+UNVERIFIED provenance/trust/time/environment/operator gaps, and all T5B,
+Mac UID502/APFS and Linux C HOLDs remain in force.
