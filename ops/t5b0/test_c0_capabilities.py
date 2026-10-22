@@ -19,7 +19,7 @@ EXPECTED_MODES = {
     'FILE_TO_DIRECTORY', 'DIRECTORY_TO_FILE', 'FILE_TO_BATCH', 'BATCH_TO_FILE', 'LOCAL_BATCH_COMPARISON', 'BATCH_FILE_TO_DIRECTORY',
     'DIRECTORY_TO_BATCH_FILE', 'LOCAL_BATCH_TO_STDIN_BATCH',
     'STDIN_BATCH_TO_LOCAL_BATCH', 'FILE_TO_STDIN_BATCH',
-    'STDIN_BATCH_TO_FILE',
+    'STDIN_BATCH_TO_FILE', 'LOCAL_BATCH_TO_STDIN', 'STDIN_TO_LOCAL_BATCH',
 }
 
 
@@ -58,6 +58,8 @@ class CapabilityDiscoveryTests(unittest.TestCase):
             ['--compare-batch-files', 'one', 'two'],
             ['--compare-batch-file-to-directory', 'one', 'two'],
             ['--compare-batch-file-to-stdin-batch', 'one'],
+            ['--compare-batch-file-to-stdin', 'one'],
+            ['--compare-stdin-to-batch-file', 'one'],
             ['--compare-file-to-stdin-batch', 'one'],
             ['--compare-stdin-batch-to-file', 'one'],
             ['--compare-stdin-batch-to-batch-file', 'one'],

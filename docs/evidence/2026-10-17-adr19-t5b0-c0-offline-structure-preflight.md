@@ -676,3 +676,49 @@ and five independently UNVERIFIED gaps remain. No privilege, trust, network
 or material collection is granted.
 
 Run `python3 -m unittest discover -s ops/t5b0 -p test_c0_file_stdin_batch_compare.py -v`.
+
+## Direct local NDJSON batch versus piped single-manifest comparison (both directions)
+
+These examples compare untrusted structural proposal snapshots only; they do **not**
+authorize fetching, installing, signing, executing or collecting anything.
+
+```sh
+workdir=$(mktemp -d)
+python3 - "$workdir" <<'PY_SAMPLE'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+old = {'schema': 'som-t5b0-c0-preflight-v1', 'approval': None,
+       'objects': [{'id':'C0-W1','url':'https://example.org/synthetic.whl',
+                    'sha256':'a'*64,'bytes':100,'max_bytes':100}]}
+new = {**old, 'objects': [{**old['objects'][0], 'max_bytes': 101}]}
+(root/'before.ndjson').write_text(json.dumps(old) + '\n')
+(root/'after.ndjson').write_text(json.dumps(new) + '\n')
+(root/'before.json').write_text(json.dumps(old))
+(root/'after.json').write_text(json.dumps(new))
+PY_SAMPLE
+# Valid semantic CHANGED/exit 3; no paths/URLs/digests/object IDs in --summary-json.
+cat "$workdir/after.json" | python3 ops/t5b0/c0_manifest_preflight.py \
+  --compare-batch-file-to-stdin "$workdir/before.ndjson" \
+  --summary-json --fail-on-change
+cat "$workdir/before.json" | python3 ops/t5b0/c0_manifest_preflight.py \
+  --compare-stdin-to-batch-file "$workdir/after.ndjson" \
+  --summary-json --fail-on-change
+rm -rf "$workdir"
+```
+
+The on-disk NDJSON batch uses existing `O_NOFOLLOW` nonblocking regular-file
+same-FD race checks; at most **262,160 total bytes**, **1–16** lines, at most
+**16,384 bytes** per line. The single stdin JSON is independently limited to
+**16,384 bytes**. Unreadable/nonregular/oversized/invalid/duplicate/conflicting
+inputs refuse (exit 2), semantic difference `UNAVAILABLE`, machine count `null`
+for either-side failure (including both refused), with no partial success.
+UNCHANGED exits 0; CHANGED exits 0 or 3 with `--fail-on-change`. The selected
+order determines BEFORE→AFTER orientation. Conflicting input flags and
+`--require-json-only` refuse before touching files or stdin. `--summary-json`
+uses allowlisted fixed `LOCAL_BATCH_TO_STDIN` or `STDIN_TO_LOCAL_BATCH`, never
+paths, names, URLs, digests, IDs or raw diagnostic strings. Static
+`--capabilities-json` advertises both without reading input. The five
+independent UNVERIFIED gaps, `NO_NETWORK`, `NO_AUTHORIZATION`,
+`C0_COLLECT_HOLD`, and C0/T5B/Mac UID502/APFS/Linux C HOLD remain.
+
+Run `python3 -m unittest discover -s ops/t5b0 -p test_c0_local_batch_stdin_manifest_compare.py -v`.
