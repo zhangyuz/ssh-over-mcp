@@ -905,3 +905,45 @@ without authenticity, provenance, trusted signer, time/environment binding,
 material collection, host privilege or release authority. `NO_NETWORK`,
 `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, five independently `UNVERIFIED`
 evidence gaps, Mac UID502/APFS, T5B and Linux C HOLD remain unchanged.
+
+## Read-free curated offline operator CLI recipe discovery (2026-10-22)
+
+For workflow authors who need to choose among many structurally different
+C0 offline input modes without guessing flag order, run:
+
+```sh
+python3 ops/t5b0/c0_manifest_preflight.py --recipes-json
+```
+
+The stable, versioned `som-t5b0-c0-recipes-v1` response contains **10 curated
+fixed argv-array examples**, not shell expressions or a claim to enumerate
+every mode. Each record includes a deterministic recipe ID, one existing
+allowlisted `review_mode`, an explicit stdin format (`NONE`, `JSON` or
+`NDJSON`) and a bounded `argv` string array showing correct input flags,
+static demonstration file names and private `--summary-json` output;
+comparison examples use `--fail-on-change`. Substitute real *existing*
+local input paths and pipe appropriate source bytes when directed. For
+example, the named-files-to-saved-batch recipe is an argv array equivalent
+to the preceding section's no-staging direct comparison. The catalog includes
+single JSON, single stdin JSON, piped NDJSON, strict named-file batch audit,
+named-set comparisons, named-file versus stdin NDJSON (both directions),
+named-file versus saved NDJSON (both directions), and saved batch pairs.
+
+Discovery **never opens a file, enumerates a directory, reads stdin or
+starts network I/O**. `--recipes-json` refuses any positional input,
+other input option, capability discovery, mixed report output or
+`--fail-on-change` before source reads. Its body is static, deterministically
+sorted, bounded (less than 8KiB), safe to parse as JSON, and contains no
+source identifiers, URLs, SHA256 values or arbitrary diagnostic strings.
+All 10 included argv arrays are tested by running the real CLI against
+bounded valid local fixtures (and supplied stdin data where applicable),
+covering both positive structure-only and unchanged outcomes, in addition
+to invalid/missing input refusal behavior. The preexisting
+`--capabilities-json` schema `som-t5b0-c0-capabilities-v1` and all private
+review schemas are unmodified.
+
+Published examples remain **untrusted structure-only observations**, not an
+approval or proof of evidence origin. No material collection, signer trust,
+network access or privileged host operation is enabled; `NO_AUTHORIZATION`,
+`NO_NETWORK`, `C0_COLLECT_HOLD`, all five independently `UNVERIFIED`
+evidence gaps and T5B/Mac UID502/APFS/Linux C HOLDs persist.

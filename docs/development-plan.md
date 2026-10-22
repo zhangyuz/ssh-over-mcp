@@ -2525,3 +2525,21 @@ leak or change to default routes. Existing NO_NETWORK/NO_AUTHORIZATION/
 C0_COLLECT_HOLD, all five UNVERIFIED evidence gaps, T5B/Mac UID502/APFS/
 Linux C HOLDs remain. No signer/source trust, material collection,
 privileged host action or release authority is conveyed.
+
+### 2026-10-22 Read-free curated C0 operator recipe discovery
+
+The C0 preflight exposes no-input `--recipes-json`, returning a bounded
+versioned `som-t5b0-c0-recipes-v1` catalog of 10 **curated**, fixed argv-array
+examples (not shell commands nor exhaustive coverage) with stable IDs,
+existing fixed review mode labels, stdin format and safe local demo names.
+This makes single-file/stream, strict named batch, named-pair, stdin-batch,
+local saved-batch and symmetric direct comparisons practically discoverable
+without accidentally guessing input-mode combinations or authorization.
+Every example is executed with real positive fixtures in regression tests;
+invalid/missing source paths return structured refusal. Catalog discovery
+rejects **all** other input/discovery/report flags before I/O, reads no
+file/directory/stdin and cannot access network. No modification to existing
+capabilities-v1 or summary-v1 schemas, default behavior, resource ceilings,
+0/2/3 change gates, evidence trust, material collection, privileged host,
+T5B/Mac UID502/APFS/Linux C HOLDs. Five independently UNVERIFIED gaps and
+NO_NETWORK/NO_AUTHORIZATION/C0_COLLECT_HOLD remain.

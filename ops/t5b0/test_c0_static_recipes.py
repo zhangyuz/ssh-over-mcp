@@ -1,8 +1,10 @@
 """Read-free curated C0 operator recipes, with examples checked against the CLI."""
+import copy
 import io
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -10,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import c0_manifest_preflight as c0
+from test_c0_guidance import VALID
 
 SCRIPT = Path(__file__).with_name('c0_manifest_preflight.py')
 IDS = {
@@ -82,6 +85,42 @@ class StaticRecipesTests(unittest.TestCase):
                 self.assertEqual(report['status'], 'REFUSED')
                 self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
                 self.assertEqual(report['network'], 'NO_NETWORK')
+
+    def test_all_curated_recipes_work_on_valid_local_demo_inputs(self):
+        # Concrete end-to-end examples, not just parser smoke tests.
+        _, catalog = self.discover()
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            first = copy.deepcopy(VALID)
+            second = copy.deepcopy(VALID)
+            second['objects'][0].update(id='C0-P1', url='https://example.org/b',
+                                        sha256='b' * 64)
+            for name, data in {
+                'example.json': first, 'one.json': first, 'two.json': second,
+                'before-a.json': first, 'before-b.json': second,
+                'after-a.json': first, 'after-b.json': second,
+            }.items():
+                (root_path / name).write_text(json.dumps(data))
+            stream = (json.dumps(first) + '\n' + json.dumps(second) + '\n').encode()
+            for name in ('before.ndjson', 'after.ndjson'):
+                (root_path / name).write_bytes(stream)
+            for entry in catalog['recipes']:
+                with self.subTest(recipe=entry['id']):
+                    incoming = (json.dumps(first).encode() if entry['stdin_format'] == 'JSON'
+                                else stream if entry['stdin_format'] == 'NDJSON' else b'')
+                    run = subprocess.run([sys.executable, str(SCRIPT), *entry['argv']],
+                                         cwd=root_path, input=incoming,
+                                         capture_output=True, timeout=6, check=False)
+                    self.assertEqual((run.returncode, run.stderr), (0, b''))
+                    report = json.loads(run.stdout)
+                    self.assertIn(report['status'], ('STRUCTURE_ONLY_PASS', 'UNCHANGED'))
+                    self.assertEqual(report['review_mode'], entry['review_mode'])
+                    self.assertEqual(report['authorization'], 'NO_AUTHORIZATION')
+                    self.assertEqual(report['collection'], 'C0_COLLECT_HOLD')
+                    self.assertEqual(report['network'], 'NO_NETWORK')
+                    self.assertNotIn('https://', run.stdout.decode())
+                    self.assertNotIn('C0-W1', run.stdout.decode())
+                    self.assertNotIn(str(root_path), run.stdout.decode())
 
     def test_discovery_cannot_open_any_file_directory_or_stdin(self):
         class NoRead:
