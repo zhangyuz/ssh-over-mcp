@@ -903,6 +903,59 @@ def render_capabilities_json():
     }, sort_keys=True)
 
 
+
+RECIPES_SCHEMA = 'som-t5b0-c0-recipes-v1'
+
+# A deliberately small, reviewed list of *argv arrays*, not shell commands.
+# These placeholders are fixed literals. No source files or stdin are read.
+REVIEW_RECIPES = (
+    ('inspect-one-file', 'MANIFEST_FILE', 'NONE',
+     ('example.json', '--summary-json')),
+    ('inspect-stdin-manifest', 'STDIN_MANIFEST', 'JSON',
+     ('--stdin', '--summary-json')),
+    ('inspect-stdin-batch', 'STDIN_BATCH', 'NDJSON',
+     ('--stdin-batch', '--summary-json')),
+    ('inspect-named-files-consistently', 'FILE_BATCH_CONSISTENT', 'NONE',
+     ('--batch', 'one.json', 'two.json', '--batch-consistency', '--summary-json')),
+    ('compare-two-named-file-sets', 'NAMED_FILES_COMPARISON', 'NONE',
+     ('--compare-before-files', 'before-a.json', 'before-b.json',
+      '--compare-after-files', 'after-a.json', 'after-b.json',
+      '--summary-json', '--fail-on-change')),
+    ('compare-named-files-to-stdin-batch', 'NAMED_FILES_TO_STDIN_BATCH', 'NDJSON',
+     ('--compare-files-to-stdin-batch', 'before-a.json', 'before-b.json',
+      '--summary-json', '--fail-on-change')),
+    ('compare-stdin-batch-to-named-files', 'STDIN_BATCH_TO_NAMED_FILES', 'NDJSON',
+     ('--compare-stdin-batch-to-files', 'after-a.json', 'after-b.json',
+      '--summary-json', '--fail-on-change')),
+    ('compare-named-files-to-saved-batch', 'NAMED_FILES_TO_LOCAL_BATCH', 'NONE',
+     ('--compare-files-to-batch-file', 'before-a.json', 'before-b.json',
+      '--against-batch-file', 'after.ndjson', '--summary-json', '--fail-on-change')),
+    ('compare-saved-batch-to-named-files', 'LOCAL_BATCH_TO_NAMED_FILES', 'NONE',
+     ('--compare-batch-file-to-files', 'after-a.json', 'after-b.json',
+      '--against-batch-file', 'before.ndjson', '--summary-json', '--fail-on-change')),
+    ('compare-two-saved-batches', 'LOCAL_BATCH_COMPARISON', 'NONE',
+     ('--compare-batch-files', 'before.ndjson', 'after.ndjson',
+      '--summary-json', '--fail-on-change')),
+)
+
+
+def render_recipes_json():
+    """Emit curated source-free invocation examples; never imply trust/approval."""
+    return json.dumps({
+        'schema': RECIPES_SCHEMA,
+        'review_schema': REVIEW_SUMMARY_SCHEMA,
+        'catalog_scope': 'CURATED_NOT_EXHAUSTIVE',
+        'recipes': [
+            {'id': recipe_id, 'review_mode': mode, 'stdin_format': stdin_format,
+             'argv': list(argv)}
+            for recipe_id, mode, stdin_format, argv in sorted(REVIEW_RECIPES)
+        ],
+        'authorization': 'NO_AUTHORIZATION',
+        'collection': 'C0_COLLECT_HOLD',
+        'network': 'NO_NETWORK',
+        'evidence_gaps': [key for key, _ in EVIDENCE_GAPS],
+    }, sort_keys=True)
+
 def render_summary_json(report, *, review_mode=None):
     """Machine-readable allowlisted observations; never serialize source values."""
     def audit_counts(audit):
@@ -991,6 +1044,8 @@ def main():
                    help='emit allowlisted privacy-safe machine-readable offline review')
     p.add_argument('--capabilities-json', action='store_true',
                    help='print a static, non-authorizing JSON catalog without reading inputs')
+    p.add_argument('--recipes-json', action='store_true',
+                   help='show curated fixed argv-array offline review examples without reading inputs')
     p.add_argument('--guidance', action='store_true',
                    help='with --summary, append fixed privacy-safe remediation guidance')
     p.add_argument('--directory', type=Path, help='audit 1–16 .json entries in a directory, offline')
@@ -1087,6 +1142,14 @@ def main():
     p.add_argument('--against-batch-file', type=Path, metavar='NDJSON',
                    help='required independent local NDJSON file in named-files/batch comparison')
     args = p.parse_args()
+    if args.recipes_json:
+        # A no-input discovery request must never be mixed with any report or
+        # source option; check the entire parsed namespace before all I/O.
+        if any(value is not None and value is not False
+               for key, value in vars(args).items() if key != 'recipes_json'):
+            p.error('--recipes-json cannot be combined with input or report options')
+        print(render_recipes_json())
+        return 0
     # The pair is one exclusive mode; reject all ambiguous combinations pre-read.
     named_batch_flags = ('compare_files_to_batch_file', 'compare_batch_file_to_files')
     named_batch_mode = any(getattr(args, key) is not None for key in named_batch_flags)
