@@ -70,6 +70,27 @@ class FieldDeltaSummaryTests(unittest.TestCase):
         self.assertEqual(result['object_field_change_counts'],
                          {'url': 0, 'sha256': 2, 'bytes': 1, 'max_bytes': 0})
 
+    def test_directory_and_local_batch_comparisons_share_same_histogram(self):
+        changed = copy.deepcopy(self.original)
+        changed['sha256'] = 'b'*64
+        self.new.write_bytes(document([changed]))
+        snapshot = self.root / 'secret-snapshot'
+        snapshot.mkdir()
+        (snapshot / 'secret-entry.json').write_bytes(self.new.read_bytes())
+        local_batch = self.root / 'secret-proposals.ndjson'
+        local_batch.write_bytes(self.old.read_bytes() + b'\n')
+        cases = (('--compare-directories',), ('--compare-batch-file-to-directory',))
+        old_dir = self.root / 'secret-old-directory'
+        old_dir.mkdir()
+        (old_dir / 'secret-entry.json').write_bytes(self.old.read_bytes())
+        for route, in cases:
+            operands = ((old_dir, snapshot) if route == '--compare-directories'
+                        else (local_batch, snapshot))
+            with self.subTest(route=route):
+                result = self.review(route, *operands, expected_code=3)
+                self.assertEqual(result['object_field_change_counts'],
+                                 {'url': 0, 'sha256': 1, 'bytes': 0, 'max_bytes': 0})
+
     def test_added_removed_and_unchanged_have_zero_field_counts(self):
         result = self.review('--compare-files', self.old, self.new)
         self.assertEqual(result['object_field_change_counts'], FIELD_COUNTS)
@@ -93,6 +114,8 @@ class FieldDeltaSummaryTests(unittest.TestCase):
                 self.assertIsNone(result['object_field_change_counts'])
 
     def test_single_input_and_legacy_output_not_changed(self):
+        self.old.write_bytes(document([self.original]))
+        self.new.write_bytes(document([self.original]))
         code, output, err = run(['--stdin', '--summary-json'],
                                 document([self.original]))
         self.assertEqual((code, err), (0, ''))

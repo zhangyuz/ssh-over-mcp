@@ -2439,3 +2439,18 @@ Operators can compare one already-local bounded JSON manifest with a piped untru
 ### 2026-10-21 Compare local NDJSON batch snapshot with a single piped manifest, symmetrically
 
 The C0 structural-only offline reviewer supports `--compare-batch-file-to-stdin BEFORE.ndjson` (local batch baseline, stdin single JSON successor) and `--compare-stdin-to-batch-file AFTER.ndjson` (stdin single JSON baseline, local batch successor). This is a direct bounded comparison without staging the piped single manifest. The local NDJSON file remains a **regular-only, nonblocking, `O_NOFOLLOW`, same-FD identity/race checked** untrusted snapshot of **1–16 UTF-8 records**, each ≤**16,384 bytes**, total at most **262,160 bytes**. The separately audited single stdin manifest is limited to **16,384 bytes** and the same fail-closed schema and object checks; duplicate object IDs and conflicting cross-manifest URL/hash/size metadata refuse. Both sources are inspected even when one side refuses. Either-side refusal returns exit 2 with semantic `UNAVAILABLE` and private `object_change_counts:null`, never a misleading zero delta; valid unchanged exits 0, valid changed exits 0/3 under `--fail-on-change`. BEFORE→AFTER object additions/removals are preserved. Mixed route flags, input-free `--capabilities-json` and directory-only `--require-json-only` reject before file/stdin reads. Existing legacy JSON, human summary/guidance and versioned private `--summary-json` remain; two fixed allowlisted review-mode labels `LOCAL_BATCH_TO_STDIN` and `STDIN_TO_LOCAL_BATCH` are also advertised through static discovery without accessing any input. Private output excludes names, paths, source URLs, digests and object IDs. No new network, material collection, admission, signer trust or privileged authority; `NO_AUTHORIZATION`, `NO_NETWORK`, `C0_COLLECT_HOLD`, five independent UNVERIFIED gaps and all C0/T5B/Mac UID502/APFS/Linux C HOLDs remain.
+
+### 2026-10-22 C0 privacy-safe per-field comparison triage
+
+The non-authorizing offline C0 `--summary-json` comparison report adds a fixed
+`object_field_change_counts` histogram for `url`, `sha256`, `bytes`, and
+`max_bytes`. It counts *matching IDs with changed field metadata* across all
+existing comparison routes without exposing the IDs or values. Newly added
+or removed IDs are handled by the existing `object_change_counts` only.
+Successful unchanged comparisons return four zero counters, and either-side
+refusal yields `null`, never a false no-change. Single-input review omits the
+field entirely, and legacy detailed JSON/text output is unchanged. The fixed
+versioned schema remains v1 (additive private fields); input byte budgets,
+no-follow/race checks, cross-record validation, fixed capability discovery,
+exit 0/2/3 behavior, network/collection/authorization prohibitions, all five
+UNVERIFIED evidence gaps and T5B/Mac UID502/APFS/Linux C HOLDs remain intact.
