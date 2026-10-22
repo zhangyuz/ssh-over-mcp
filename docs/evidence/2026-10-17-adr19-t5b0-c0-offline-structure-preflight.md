@@ -752,3 +752,37 @@ This is an additive optional field under `som-t5b0-c0-summary-json-v1`;
 `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, `NO_NETWORK`, five independently
 UNVERIFIED provenance/trust/time/environment/operator gaps, and all T5B,
 Mac UID502/APFS and Linux C HOLDs remain in force.
+
+
+## Opt-in cross-file consistency for individually named local manifests (2026-10-22)
+
+Use `python3 ops/t5b0/c0_manifest_preflight.py --batch one.json two.json
+--batch-consistency --summary-json` to audit 1–16 **individually named** local
+manifest JSON files as one consistency set, without staging them in a directory
+or copying to NDJSON. The opt-in flag runs existing strictly bounded (≤16,384
+bytes each), nonblocking/no-follow/regular-only/same-FD metadata race-aware reads,
+then reuses directory/NDJSON cross-manifest duplicate-ID, conflicting URL and
+SHA256/declared-size checks **on the same already parsed objects**. No extra
+file opens, network or write operations. An invalid input or any conflicting
+metadata yields `REFUSED`/exit 2, never a structural PASS, and all inspected
+items are included in the aggregate report. Over 16 paths refuse before any
+file access. There are at most four distinct allowed object IDs; successful
+strict batches cannot repeat IDs across files.
+
+The default `--batch` continues its historical independent per-file inspection,
+so repeating an individually valid file still passes absent the opt-in flag.
+`--batch-consistency` requires `--batch` and rejects positional source,
+other input modes, discovery, directory-only `--require-json-only`, or comparison
+change gate before opening files or stdin. Private versioned `--summary-json`
+uses the fixed, no-input-derived `FILE_BATCH_CONSISTENT` review mode advertised
+by input-free `--capabilities-json` and fixed next-action codes. Legacy detailed
+aggregate output retains its existing per-file path fields, while private JSON
+and human summary exclude paths, proposal IDs, source URLs, SHA256 values,
+metadata conflicts and arbitrary raw diagnostics. No semantic diff is claimed
+for this inspection-only operation; `--fail-on-change` remains comparison-only.
+
+This is offline **structural** and cross-file consistency only; it grants no
+source authenticity, cryptographic trust, material collection, privileged host
+execution, T5B admission or approval. `NO_NETWORK`, `NO_AUTHORIZATION`,
+`C0_COLLECT_HOLD`, all five independently `UNVERIFIED` evidence gaps and
+Mac UID502/APFS, T5B and Linux C HOLDs remain unchanged.

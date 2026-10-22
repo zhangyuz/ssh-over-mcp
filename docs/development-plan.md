@@ -2454,3 +2454,19 @@ versioned schema remains v1 (additive private fields); input byte budgets,
 no-follow/race checks, cross-record validation, fixed capability discovery,
 exit 0/2/3 behavior, network/collection/authorization prohibitions, all five
 UNVERIFIED evidence gaps and T5B/Mac UID502/APFS/Linux C HOLDs remain intact.
+
+
+### 2026-10-22 Explicit individual-file batch cross-consistency (non-authorizing)
+
+An opt-in `--batch-consistency` modifier for `--batch FILE1.json [FILE2.json ...]`
+validates cross-manifest unique IDs and URL/digest-size conflicts after the
+existing independently bounded 1–16 safe local file reads. It enables operators
+to validate separately named proposal files as one set without creating a
+directory or NDJSON batch. All records are audited in order and refusals remain
+aggregate `REFUSED`/exit 2 with fixed privacy-safe triage; the legacy default
+`--batch` continues independent per-file checks. Mixed modes and no-input
+capability discovery reject pre-read; static capabilities and versioned
+`--summary-json` expose a fixed `FILE_BATCH_CONSISTENT` label, no filenames,
+object IDs, URLs or hashes. Actual file bounds, legacy interfaces, no network
+or collection, five UNVERIFIED trust/evidence gaps and T5B/Mac UID502/APFS/
+Linux C holds are unchanged. No authorization, source acceptance or release.
