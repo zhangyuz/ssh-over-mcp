@@ -795,7 +795,7 @@ REVIEW_MODES = frozenset({
     'FILE_TO_DIRECTORY', 'DIRECTORY_TO_FILE', 'FILE_TO_BATCH', 'BATCH_TO_FILE',
     'LOCAL_BATCH_COMPARISON', 'BATCH_FILE_TO_DIRECTORY',
     'DIRECTORY_TO_BATCH_FILE', 'LOCAL_BATCH_TO_STDIN_BATCH',
-    'STDIN_BATCH_TO_LOCAL_BATCH', 'FILE_TO_STDIN_BATCH',
+    'STDIN_BATCH_TO_LOCAL_BATCH', 'FILE_BATCH_CONSISTENT', 'FILE_TO_STDIN_BATCH',
     'STDIN_BATCH_TO_FILE', 'LOCAL_BATCH_TO_STDIN', 'STDIN_TO_LOCAL_BATCH',
 })
 
@@ -984,7 +984,32 @@ def main():
                    help='with directory audit or compare, refuse non-JSON immediate entries')
     p.add_argument('--batch', type=Path, nargs='+', metavar='MANIFEST',
                    help='inspect up to 16 manifests and emit one aggregate JSON report')
+    p.add_argument('--batch-consistency', action='store_true',
+                   help='with --batch, also reject cross-file IDs and conflicting metadata offline')
     args = p.parse_args()
+    # Check the opt-in family before any source opening or stdin read.
+    # Legacy --batch remains independent per-file unless explicitly requested.
+    other_inputs = (
+        'compare_batch_file_to_stdin', 'compare_stdin_to_batch_file',
+        'compare_file_to_stdin_batch', 'compare_stdin_batch_to_file',
+        'compare_batch_file_to_stdin_batch', 'compare_stdin_batch_to_batch_file',
+        'compare_batch_file_to_directory', 'compare_directory_to_batch_file',
+        'compare_batch_files', 'compare_file_to_batch', 'compare_batch_to_file',
+        'compare_file_to_directory', 'compare_directory_to_file',
+        'compare_file_to_stdin', 'compare_stdin_to_file', 'compare_files',
+        'compare_directories', 'compare_stdin_to_directory',
+        'compare_stdin_before_directory', 'compare_stdin_batches',
+    )
+    if args.batch_consistency and args.capabilities_json:
+        p.error('--capabilities-json cannot be combined with input or report options')
+    if args.batch_consistency and (
+            args.batch is None or args.manifest is not None or args.stdin
+            or args.stdin_batch or args.directory is not None
+            or args.capabilities_json or args.require_json_only or args.fail_on_change
+            or any(getattr(args, attr) is not None and getattr(args, attr) is not False
+                   for attr in other_inputs)):
+        p.error('--batch-consistency requires --batch alone as input mode; '
+                'incompatible with discovery, directory-only or compare options')
     if ((args.compare_batch_file_to_stdin is not None
             or args.compare_stdin_to_batch_file is not None)
             and not args.capabilities_json
@@ -1270,6 +1295,7 @@ def main():
         'STDIN_BATCH' if args.stdin_batch else
         'STDIN_MANIFEST' if args.stdin else
         'DIRECTORY' if args.directory is not None else
+        'FILE_BATCH_CONSISTENT' if args.batch_consistency else
         'FILE_BATCH' if args.batch is not None else
         'MANIFEST_FILE'
     )
@@ -1450,6 +1476,15 @@ def main():
         if len(args.batch) > 16:
             results = []
             errors = ['batch must contain at most 16 manifests']
+        elif args.batch_consistency:
+            results, objects_by_file = [], []
+            for path in args.batch:
+                item = inspect_manifest(path, capture_objects=True)
+                objects_by_file.append(item.pop('_objects'))
+                results.append({'path': str(path), **item})
+            cross_file_consistency(results, objects_by_file)
+            redact_cross_manifest_diagnostics(results)
+            errors = []
         else:
             results = [{'path': str(path), **inspect_manifest(path)} for path in args.batch]
             errors = []

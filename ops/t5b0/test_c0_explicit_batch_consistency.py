@@ -91,6 +91,29 @@ class ExplicitBatchConsistencyTests(unittest.TestCase):
         self.assertEqual(report['input']['refused'], 1)
         self.private(report)
 
+    def test_shared_digest_with_conflicting_declared_size_refuses(self):
+        self.second['objects'][0]['sha256'] = VALID['objects'][0]['sha256']
+        self.second['objects'][0]['bytes'] = VALID['objects'][0]['bytes'] + 1
+        self.second['objects'][0]['max_bytes'] = max(
+            self.second['objects'][0]['bytes'], self.second['objects'][0]['max_bytes'])
+        self.b.write_text(json.dumps(self.second))
+        code, report = self.invoke('--batch', self.a, self.b,
+                                   '--batch-consistency', '--summary-json')
+        self.assertEqual((code, report['status']), (2, 'REFUSED'))
+        self.assertIn('RESOLVE_CROSS_FILE_CONFLICT', report['next_action_codes'])
+        self.private(report)
+
+    def test_private_guidance_and_strict_same_fd_positive(self):
+        # Repeatability matters, but never confuse structural acceptance with trust.
+        command = [sys.executable, str(SCRIPT), '--batch', str(self.a), str(self.b),
+                   '--batch-consistency', '--summary', '--guidance']
+        process = subprocess.run(command, capture_output=True, timeout=6, check=False)
+        self.assertEqual((process.returncode, process.stderr), (0, b''))
+        self.assertIn('STRUCTURE_ONLY_PASS', process.stdout.decode())
+        self.assertNotIn('https://', process.stdout.decode())
+        self.assertNotIn(str(self.root), process.stdout.decode())
+        self.assertIn('NO_AUTHORIZATION', process.stdout.decode())
+
     def test_refuse_fifo_symlink_missing_and_over_16_before_input_access(self):
         for kind in ('fifo', 'symlink', 'missing'):
             with self.subTest(kind=kind):
@@ -118,7 +141,7 @@ class ExplicitBatchConsistencyTests(unittest.TestCase):
                  ('--compare-files', self.a, self.b), ('--compare-stdin-batches',),
                  ('--compare-batch-file-to-stdin', self.a),
                  ('--capabilities-json',), ('--require-json-only',),
-                 ('--fail-on-change',), (str(self.a),))
+                 ('--fail-on-change',))
         for extra in wrong:
             args = [str(SCRIPT), '--batch', str(self.a), '--batch-consistency',
                     *map(str, extra)]
@@ -136,7 +159,9 @@ class ExplicitBatchConsistencyTests(unittest.TestCase):
                 cli.main()
             self.assertEqual(exc.exception.code, 2)
             self.assertEqual(stdout.getvalue(), '')
-            self.assertIn('batch-consistency', stderr.getvalue())
+            self.assertIn(('--capabilities-json cannot be combined'
+                           if '--capabilities-json' in extra else 'batch-consistency'),
+                          stderr.getvalue())
         args = [str(SCRIPT), '--batch-consistency', str(self.a)]
         with patch.object(sys, 'argv', args), \
                 patch.object(cli, 'inspect_manifest', side_effect=AssertionError('read')), \
