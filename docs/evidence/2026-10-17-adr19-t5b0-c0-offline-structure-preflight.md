@@ -1003,3 +1003,23 @@ The resource plan does not verify provenance, sources, signatures or operator
 approval and authorizes no collection, network, privileged action or release.
 `NO_NETWORK`, `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, five independently
 `UNVERIFIED` evidence gaps and T5B/Mac UID502/APFS/Linux C HOLDs persist.
+
+## Complete static recipe-contract catalog in one read-free response (2026-10-22)
+
+`python3 ops/t5b0/c0_manifest_preflight.py --recipe-contracts-json` provides
+one bounded versioned `som-t5b0-c0-recipe-contracts-json-v1` object containing
+all **ten** fixed, curated recipe source and budget contracts in sorted-ID
+order, for CI and operator tools that previously needed ten separate
+`--recipe-contract-json ID` calls. Each nested record is exactly the existing
+single-recipe contract (same JSON object and fixed non-authorizing semantics).
+The response reports its nested `recipe_contract_schema` and the unchanged
+private review schema, explicit `CURATED_NOT_EXHAUSTIVE` catalog scope,
+`NO_NETWORK`, `NO_AUTHORIZATION`, `C0_COLLECT_HOLD` and the five independently
+`UNVERIFIED` evidence gaps. It is tested to remain below 20 KiB, byte-wise
+deterministic, with no arbitrary inputs, source paths, identifiers, hashes,
+URLs or unknown diagnostic values. All input modes, output flags and other
+discovery modes are refused in combination **before file, directory or stdin
+reads**. This is static metadata only, not execution, acquisition,
+authentication, authorization or release. Existing one-item contract,
+recipe lookup, recipe catalog, capability and report schemas remain identical;
+T5B/Mac UID502/APFS/Linux C HOLDs persist.
