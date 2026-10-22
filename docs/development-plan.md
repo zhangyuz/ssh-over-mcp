@@ -2489,3 +2489,20 @@ structure-only capability confers no evidence authenticity, source or signer
 trust, material collection, network access, host execution or authorization.
 All five independently UNVERIFIED evidence gaps and T5B/Mac UID502/APFS/
 Linux C HOLDs persist.
+
+### 2026-10-22 Symmetric local named-file set / streamed NDJSON comparison
+
+Offline C0 reviewer supports directly comparing 1–16 separately named local
+JSON manifests and a bounded streamed 1–16-line NDJSON snapshot without
+persisting the stream or staging a directory. `--compare-files-to-stdin-batch`
+sets the local set as BEFORE; `--compare-stdin-batch-to-files` sets stdin as
+BEFORE. Local files keep per-file ≤16KiB no-follow/nonblocking same-FD
+regular-only validated reads and cross-file ID/URL/hash-size checks; stdin
+keeps 262,160-byte total and ≤16KiB per-record bounds. Either refused source
+yields exit2 with semantic UNAVAILABLE and null private counts, never
+synthetic no-change; valid same exits0, changed exits0/3. >16 local sources
+refuses **before any file or stdin read**. Modes are exclusive pre-read and
+advertised by fixed privacy-safe summary/discovery labels. Legacy outputs,
+all five UNVERIFIED gaps, NO_AUTHORIZATION/C0_COLLECT_HOLD/NO_NETWORK and
+T5B/Mac UID502/APFS/Linux C HOLDs remain. No network, material collection,
+source/signer trust, privileged execution or release authority is granted.

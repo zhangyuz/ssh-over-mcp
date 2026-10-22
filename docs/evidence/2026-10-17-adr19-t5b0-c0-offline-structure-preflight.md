@@ -824,3 +824,44 @@ This is an observation only. `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`,
 `NO_NETWORK`, five independently `UNVERIFIED` evidence gaps and all T5B,
 Mac UID502/APFS and Linux C HOLDs remain; no file download, material
 collection, signature verification or privileged host action is enabled.
+
+## Symmetric comparison of named local JSON files and streamed NDJSON (2026-10-22)
+
+CI operators can compare 1–16 **existing individually named** local C0 manifest
+files to an unpersisted piped NDJSON batch, without assembling a directory or
+writing a temporary NDJSON snapshot. Both directions are explicit:
+
+```sh
+cat successor.ndjson | python3 ops/t5b0/c0_manifest_preflight.py \
+  --compare-files-to-stdin-batch before-a.json before-b.json \
+  --summary-json --fail-on-change
+cat baseline.ndjson | python3 ops/t5b0/c0_manifest_preflight.py \
+  --compare-stdin-batch-to-files after-a.json after-b.json \
+  --summary-json --fail-on-change
+```
+
+The file side reuses the strict, existing **1–16 local regular files** mode,
+with 16,384-byte per-file ceiling, `O_NOFOLLOW`, nonblocking same-FD
+identity/race verification, strict schema, duplicate-ID/URL/digest-size
+cross-file checks and fixed diagnostic redaction. The piped NDJSON side uses
+existing bounded, never-persisted `stdin.buffer.read(262161)` with max
+**262,160 total bytes**, 1–16 records each ≤16,384 bytes, and matching
+structural/conflict checks. Either side can refuse independently, and any
+refusal sets semantic `UNAVAILABLE`, `object_change_counts:null` and
+`object_field_change_counts:null`, exits 2, and cannot masquerade as zero
+changes. More than 16 local files refuses without opening **any** file or
+reading stdin. Valid unchanged returns 0; valid changed returns 0 or 3 with
+`--fail-on-change`, preserving baseline/successor orientation. Input modes,
+source arguments, discovery and directory-only strict policy are mutually
+exclusive before reads. A valid piped batch is still untrusted and has no
+provenance.
+
+The existing opt-in private machine JSON schema reports fixed
+`NAMED_FILES_TO_STDIN_BATCH` / `STDIN_BATCH_TO_NAMED_FILES` mode tags (also
+advertised by read-free static `--capabilities-json`) and allowlisted
+status/counts/field names, **no paths, proposal IDs, URLs, SHA values or
+raw errors**. All legacy detailed/human modes, prior input budgets and
+network-denial constraints remain unchanged. No collection, trust-root import,
+source admission, signature verification, Mac UID502/APFS privilege or Linux C
+release. `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, `NO_NETWORK`, five independently
+`UNVERIFIED` evidence gaps, T5B/Mac/Linux HOLDs persist.
