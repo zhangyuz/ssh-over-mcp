@@ -91,6 +91,26 @@ class FieldDeltaSummaryTests(unittest.TestCase):
                 self.assertEqual(result['object_field_change_counts'],
                                  {'url': 0, 'sha256': 1, 'bytes': 0, 'max_bytes': 0})
 
+    def test_merged_local_batch_single_stdin_routes_and_refusal(self):
+        changed = copy.deepcopy(self.original)
+        changed['max_bytes'] += 1
+        incoming = document([changed])
+        saved_old = self.root / 'secret-old.ndjson'
+        saved_new = self.root / 'secret-new.ndjson'
+        saved_old.write_bytes(self.old.read_bytes() + b'\n')
+        saved_new.write_bytes(incoming + b'\n')
+        cases = (('--compare-batch-file-to-stdin', saved_old, incoming),
+                 ('--compare-stdin-to-batch-file', saved_new, self.old.read_bytes()))
+        for mode, path, piped in cases:
+            with self.subTest(mode=mode):
+                result = self.review(mode, path, input_bytes=piped, expected_code=3)
+                self.assertEqual(result['object_field_change_counts'],
+                                 {'url': 0, 'sha256': 0, 'bytes': 0, 'max_bytes': 1})
+                refused = self.review(mode, path, input_bytes=b'{', expected_code=2)
+                self.assertIsNone(refused['object_field_change_counts'])
+                self.assertIsNone(refused['object_change_counts'])
+                self.assertEqual(refused['object_changes'], 'UNAVAILABLE')
+
     def test_added_removed_and_unchanged_have_zero_field_counts(self):
         result = self.review('--compare-files', self.old, self.new)
         self.assertEqual(result['object_field_change_counts'], FIELD_COUNTS)
