@@ -624,6 +624,23 @@ def compare_named_manifest_sets(before_files, after_files):
     return compare_stream_directory_reports(before, before_inv, after, after_inv)
 
 
+
+def compare_named_files_and_local_batch(files, batch_path, *, batch_before=False):
+    """Compare independent bounded local sources without staging or trust."""
+    if len(files) > 16:
+        refused = {'status': 'REFUSED', 'errors': ['too many named files'],
+                   'results': [], 'authorization': 'NO_AUTHORIZATION',
+                   'collection': 'C0_COLLECT_HOLD', 'network': 'NO_NETWORK'}
+        return compare_stream_directory_reports(refused, {}, dict(refused), {})
+    named, named_inventory = inspect_named_manifest_set(files)
+    batch, batch_inventory = inspect_local_ndjson_batch(batch_path)
+    if batch_before:
+        return compare_stream_directory_reports(batch, batch_inventory,
+                                                named, named_inventory)
+    return compare_stream_directory_reports(named, named_inventory,
+                                            batch, batch_inventory)
+
+
 def inspect_local_ndjson_batch(path):
     """Reuse the bounded NDJSON validator on a safe, no-follow local file."""
     try:
@@ -856,7 +873,8 @@ REVIEW_MODES = frozenset({
     'DIRECTORY_TO_BATCH_FILE', 'LOCAL_BATCH_TO_STDIN_BATCH',
     'STDIN_BATCH_TO_LOCAL_BATCH', 'FILE_BATCH_CONSISTENT',
     'NAMED_FILES_COMPARISON', 'NAMED_FILES_TO_STDIN_BATCH',
-    'STDIN_BATCH_TO_NAMED_FILES', 'FILE_TO_STDIN_BATCH',
+    'STDIN_BATCH_TO_NAMED_FILES', 'NAMED_FILES_TO_LOCAL_BATCH',
+    'LOCAL_BATCH_TO_NAMED_FILES', 'FILE_TO_STDIN_BATCH',
     'STDIN_BATCH_TO_FILE', 'LOCAL_BATCH_TO_STDIN', 'STDIN_TO_LOCAL_BATCH',
 })
 
@@ -1042,7 +1060,8 @@ def main():
                         '--compare-file-to-stdin-batch, --compare-stdin-batch-to-file, '
                         '--compare-batch-file-to-stdin and --compare-stdin-to-batch-file, '
                         '--compare-before-files and --compare-after-files, '
-                        '--compare-files-to-stdin-batch and --compare-stdin-batch-to-files')
+                        '--compare-files-to-stdin-batch and --compare-stdin-batch-to-files, '
+                        '--compare-files-to-batch-file and --compare-batch-file-to-files')
     p.add_argument('--require-json-only', action='store_true',
                    help='with directory audit or compare, refuse non-JSON immediate entries')
     p.add_argument('--batch', type=Path, nargs='+', metavar='MANIFEST',
@@ -1059,7 +1078,31 @@ def main():
     p.add_argument('--compare-stdin-batch-to-files', type=Path, nargs='+',
                    metavar='AFTER_JSON',
                    help='compare piped NDJSON baseline to 1–16 named local manifests')
+    p.add_argument('--compare-files-to-batch-file', type=Path, nargs='+',
+                   metavar='BEFORE_JSON',
+                   help='compare 1–16 named local JSON manifests with a local NDJSON successor')
+    p.add_argument('--compare-batch-file-to-files', type=Path, nargs='+',
+                   metavar='AFTER_JSON',
+                   help='compare one bounded local NDJSON baseline to named local JSON files')
+    p.add_argument('--against-batch-file', type=Path, metavar='NDJSON',
+                   help='required independent local NDJSON file in named-files/batch comparison')
     args = p.parse_args()
+    # The pair is one exclusive mode; reject all ambiguous combinations pre-read.
+    named_batch_flags = ('compare_files_to_batch_file', 'compare_batch_file_to_files')
+    named_batch_mode = any(getattr(args, key) is not None for key in named_batch_flags)
+    if named_batch_mode or args.against_batch_file is not None:
+        if args.capabilities_json:
+            p.error('--capabilities-json cannot be combined with input or report options')
+        if (not named_batch_mode or args.against_batch_file is None
+                or all(getattr(args, key) is not None for key in named_batch_flags)
+                or args.manifest is not None or args.batch is not None
+                or args.batch_consistency or args.stdin or args.stdin_batch
+                or args.directory is not None or args.require_json_only
+                or any(value is not None and value is not False
+                       for key, value in vars(args).items()
+                       if key.startswith('compare_') and key not in named_batch_flags)):
+            p.error('--compare-files-to-batch-file/--compare-batch-file-to-files '
+                    'requires --against-batch-file and no other input mode')
     # Strict new input family: refuse combinations before file/stdin access.
     new_list_flags = ('compare_files_to_stdin_batch', 'compare_stdin_batch_to_files')
     if any(getattr(args, key) is not None for key in new_list_flags):
@@ -1334,7 +1377,9 @@ def main():
     if args.stdin and (args.manifest is not None or args.batch is not None
                        or args.directory is not None or args.compare_directories is not None):
         p.error('--stdin cannot be combined with other input modes')
-    if (args.fail_on_change and args.compare_files_to_stdin_batch is None
+    if (args.fail_on_change and args.compare_files_to_batch_file is None
+            and args.compare_batch_file_to_files is None
+            and args.compare_files_to_stdin_batch is None
             and args.compare_stdin_batch_to_files is None
             and args.compare_before_files is None
             and args.compare_batch_file_to_stdin is None
@@ -1379,6 +1424,8 @@ def main():
                 'or --compare-batch-file-to-directory or --compare-directory-to-batch-file')
     # Fixed labels reflect the selected local input route, never an input value.
     review_mode = (
+        'NAMED_FILES_TO_LOCAL_BATCH' if args.compare_files_to_batch_file is not None else
+        'LOCAL_BATCH_TO_NAMED_FILES' if args.compare_batch_file_to_files is not None else
         'NAMED_FILES_TO_STDIN_BATCH' if args.compare_files_to_stdin_batch is not None else
         'STDIN_BATCH_TO_NAMED_FILES' if args.compare_stdin_batch_to_files is not None else
         'NAMED_FILES_COMPARISON' if args.compare_before_files is not None else
@@ -1409,6 +1456,20 @@ def main():
         'FILE_BATCH' if args.batch is not None else
         'MANIFEST_FILE'
     )
+    if (args.compare_files_to_batch_file is not None
+            or args.compare_batch_file_to_files is not None):
+        batch_before = args.compare_batch_file_to_files is not None
+        names = (args.compare_batch_file_to_files if batch_before
+                 else args.compare_files_to_batch_file)
+        report = compare_named_files_and_local_batch(
+            names, args.against_batch_file, batch_before=batch_before)
+        emit_report(report, summary=args.summary, guidance=args.guidance,
+                    summary_json=args.summary_json, review_mode=review_mode)
+        if report['status'] == 'REFUSED':
+            return 2
+        if args.fail_on_change and report['status'] == 'CHANGED':
+            return 3
+        return 0
     if (args.compare_files_to_stdin_batch is not None
             or args.compare_stdin_batch_to_files is not None):
         stdin_before = args.compare_stdin_batch_to_files is not None

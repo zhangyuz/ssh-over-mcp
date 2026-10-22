@@ -2506,3 +2506,22 @@ advertised by fixed privacy-safe summary/discovery labels. Legacy outputs,
 all five UNVERIFIED gaps, NO_AUTHORIZATION/C0_COLLECT_HOLD/NO_NETWORK and
 T5B/Mac UID502/APFS/Linux C HOLDs remain. No network, material collection,
 source/signer trust, privileged execution or release authority is granted.
+
+### 2026-10-22 Compare named local manifest set and saved bounded NDJSON bidirectionally
+
+C0 adds explicit file-list-to-saved-NDJSON and inverse direct comparisons:
+`--compare-files-to-batch-file FILE1.json [..] --against-batch-file saved.ndjson`
+and `--compare-batch-file-to-files FILE1.json [..] --against-batch-file saved.ndjson`.
+Operators can compare 1–16 individually named local JSON manifests with one
+existing local NDJSON snapshot without directory/stream staging. Reuses
+strict no-follow/nonblocking regular-only same-FD ≤16KiB local reads;
+existing NDJSON ≤262,160-byte/≤16-line and per-line ≤16KiB budgets;
+per-side cross-ID/URL/digest-size conflict checks; refusal-first null counts;
+valid 0/3 semantics with `--fail-on-change`. An over-16 list refuses before
+any file is read, mixed modes and unpaired batch path reject pre-read.
+Fixed privacy-safe `NAMED_FILES_TO_LOCAL_BATCH` / `LOCAL_BATCH_TO_NAMED_FILES`
+in static capability and versioned private summaries; no source value/path
+leak or change to default routes. Existing NO_NETWORK/NO_AUTHORIZATION/
+C0_COLLECT_HOLD, all five UNVERIFIED evidence gaps, T5B/Mac UID502/APFS/
+Linux C HOLDs remain. No signer/source trust, material collection,
+privileged host action or release authority is conveyed.

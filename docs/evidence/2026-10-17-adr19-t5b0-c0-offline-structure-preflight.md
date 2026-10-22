@@ -865,3 +865,43 @@ network-denial constraints remain unchanged. No collection, trust-root import,
 source admission, signature verification, Mac UID502/APFS privilege or Linux C
 release. `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, `NO_NETWORK`, five independently
 `UNVERIFIED` evidence gaps, T5B/Mac/Linux HOLDs persist.
+
+## Named local JSON manifest set ↔ bounded saved NDJSON batch (2026-10-22)
+
+Directly compare two independent already-local evidence proposal snapshots
+without writing a temporary directory, joining files into NDJSON or piping
+a stream. The direction of BEFORE and AFTER is explicit:
+
+```sh
+python3 ops/t5b0/c0_manifest_preflight.py \
+  --compare-files-to-batch-file before-a.json before-b.json \
+  --against-batch-file successor.ndjson --summary-json --fail-on-change
+python3 ops/t5b0/c0_manifest_preflight.py \
+  --compare-batch-file-to-files after-a.json after-b.json \
+  --against-batch-file baseline.ndjson --summary-json --fail-on-change
+```
+
+Each list contains **1–16** separately named local manifest JSON files, each
+read once as a regular file with `O_NOFOLLOW`, `O_NONBLOCK`, same-FD metadata
+race checks and a 16,384-byte maximum, validated structurally and for
+cross-file duplicate ID/URL/digest-size conflicts. The independently bounded
+local NDJSON regular file uses the existing safe no-follow reader with a
+262,160-byte total budget and existing 1–16 line / 16,384-byte per-record
+strict structure/cross-record checks; no local file or stdin side effect.
+Either-side refusal gives `REFUSED`/exit2 and semantic change counts `null`
+with `UNAVAILABLE`, never partial success or misleading zero counts. An
+**over-16 named file list refuses before opening either input source**. Valid
+unchanged returns 0; valid `CHANGED` exits 0 or 3 under `--fail-on-change`.
+The mode pair requires a separate `--against-batch-file` path and rejects
+missing/orphan paths, mixed modes, discovery, and directory-specific strict
+policy **before any source read**. Default legacy modes are unmodified.
+
+Fixed, input-independent `NAMED_FILES_TO_LOCAL_BATCH` and
+`LOCAL_BATCH_TO_NAMED_FILES` tags appear only in allowlisted versioned
+`--summary-json` and the read-free `--capabilities-json`. Private result
+includes counts and field *names*, never source paths, proposal IDs, URLs,
+SHA values or raw diagnostics. It remains a **structure-only comparison**
+without authenticity, provenance, trusted signer, time/environment binding,
+material collection, host privilege or release authority. `NO_NETWORK`,
+`NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, five independently `UNVERIFIED`
+evidence gaps, Mac UID502/APFS, T5B and Linux C HOLD remain unchanged.
