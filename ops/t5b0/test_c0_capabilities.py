@@ -22,6 +22,7 @@ EXPECTED_MODES = {
     'STDIN_BATCH_TO_FILE', 'LOCAL_BATCH_TO_STDIN', 'STDIN_TO_LOCAL_BATCH',
     'FILE_BATCH_CONSISTENT', 'NAMED_FILES_COMPARISON',
     'NAMED_FILES_TO_STDIN_BATCH', 'STDIN_BATCH_TO_NAMED_FILES',
+    'NAMED_FILES_TO_LOCAL_BATCH', 'LOCAL_BATCH_TO_NAMED_FILES',
 }
 
 
@@ -60,6 +61,9 @@ class CapabilityDiscoveryTests(unittest.TestCase):
             ['--compare-after-files', 'after.json'],
             ['--compare-files-to-stdin-batch', 'before.json'],
             ['--compare-stdin-batch-to-files', 'after.json'],
+            ['--compare-files-to-batch-file', 'before.json'],
+            ['--compare-batch-file-to-files', 'after.json'],
+            ['--against-batch-file', 'batch.ndjson'],
             ['--stdin'], ['--stdin-batch'], ['--compare-files', 'one', 'two'],
             ['--compare-directories', 'one', 'two'],
             ['--compare-batch-files', 'one', 'two'],
