@@ -56,9 +56,11 @@ class RecipeContractTests(unittest.TestCase):
                     if source['format'] in (J, S):
                         self.assertEqual(source['max_bytes_per_source'], 16384)
                         self.assertEqual(source['max_records_per_source'], 1)
+                        self.assertIsNone(source['max_bytes_per_record'])
                     else:
                         self.assertEqual(source['max_bytes_per_source'], 262160)
                         self.assertEqual(source['max_records_per_source'], 16)
+                        self.assertEqual(source['max_bytes_per_record'], 16384)
                 self.assertLess(len(result.stdout), 3500)
                 self.assertEqual(result.stdout,
                                  self.invoke('--recipe-contract-json', item['id']).stdout)

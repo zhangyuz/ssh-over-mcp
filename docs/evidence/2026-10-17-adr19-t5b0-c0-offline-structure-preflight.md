@@ -980,3 +980,26 @@ private summary v1 are **unchanged**. Returning an example never executes
 it, downloads a verifier, collects material, admits source/signature trust,
 changes host privileges or authorizes a release. C0/T5B/Mac UID502/APFS/
 Linux C HOLDs and privacy/resource ceilings persist.
+
+## Curated recipe resource contract (2026-10-22)
+
+`python3 ops/t5b0/c0_manifest_preflight.py --recipe-contract-json compare-named-files-to-saved-batch`
+returns one deterministic, non-authorizing `som-t5b0-c0-recipe-contract-json-v1`
+object. Its `recipe` matches the established catalog entry exactly. `sources`
+explains source order (`input` or `before`/`after`), source format (`LOCAL_JSON`,
+`STDIN_JSON`, `LOCAL_NDJSON`, `STDIN_NDJSON`), minimum and maximum source count,
+source byte ceiling and records per source. All 10 curated entries have tested
+contracts. Local/streamed JSON remains capped at 16,384 bytes; NDJSON remains
+capped at 262,160 bytes per source, up to 16 records of at most 16,384 bytes
+each. Named local JSON sets remain capped at 16 sources per side. The fixed
+exit codes are 0 (non-authorizing result), 2 (refusal), and 3 (opt-in changed
+comparison); 3 is unavailable on inspection-only recipes.
+
+Discovery never reads a file, directory or stdin; unknown IDs and all mixed
+input/report/discovery options are refused before source access, with no
+reflection of untrusted IDs. Existing recipes-v1, single-recipe-v1,
+capabilities-v1 and private-summary-v1 output contracts remain unchanged.
+The resource plan does not verify provenance, sources, signatures or operator
+approval and authorizes no collection, network, privileged action or release.
+`NO_NETWORK`, `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, five independently
+`UNVERIFIED` evidence gaps and T5B/Mac UID502/APFS/Linux C HOLDs persist.

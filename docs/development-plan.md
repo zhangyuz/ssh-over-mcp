@@ -2557,3 +2557,15 @@ No changes to the original recipes-v1/capabilities-v1/summary-v1 contracts,
 network, material collection, provenance/signer trust or privileged release.
 The fixed `NO_NETWORK`, `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, all five
 independently UNVERIFIED gaps and T5B/Mac UID502/APFS/Linux C HOLDs remain.
+
+### 2026-10-22 Static per-recipe budget and source-role discovery
+
+An opt-in `--recipe-contract-json RECIPE_ID` publishes the exact existing
+curated recipe plus fixed machine-readable source roles, formats, 1–16 local
+JSON file counts, 16KiB JSON/NDJSON record budgets and bounded 262160-byte
+NDJSON source ceiling. Automation can plan offline preflight input budgets
+without executing or reading source data. Unknown IDs and mixed modes reject
+before I/O without reflecting user input. Prior recipe, catalog, capability
+and summary schemas are unchanged; no additional source trust, network,
+material collection, host privilege or C0/T5B/Mac/Linux authorization.
+All five independent evidence gaps remain UNVERIFIED.
