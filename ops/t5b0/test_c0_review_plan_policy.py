@@ -201,9 +201,12 @@ class PlanPolicyTests(unittest.TestCase):
                     os.mkfifo(file)
                 elif mode == 'oversize':
                     file.write_bytes(b'x' * 4097)
-                p = self.invoke()
-                self.assertEqual((p.returncode, p.stderr), (2, b''))
-                self.assertEqual(self.check_private(p.stdout)['status'], 'REFUSED')
+                try:
+                    p = self.invoke()
+                    self.assertEqual((p.returncode, p.stderr), (2, b''))
+                    self.assertEqual(self.check_private(p.stdout)['status'], 'REFUSED')
+                finally:
+                    file.unlink(missing_ok=True)
         for unsafe in ('../private.json', '/tmp/secret', 'https://secret.example', 'x/y'):
             with self.subTest(unsafe=unsafe):
                 p = subprocess.run([sys.executable, str(SCRIPT), str(self.root / 'plan.json'),
