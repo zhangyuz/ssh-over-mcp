@@ -2569,3 +2569,16 @@ before I/O without reflecting user input. Prior recipe, catalog, capability
 and summary schemas are unchanged; no additional source trust, network,
 material collection, host privilege or C0/T5B/Mac/Linux authorization.
 All five independent evidence gaps remain UNVERIFIED.
+
+### 2026-10-22 One-call static catalog of all curated recipe budgets
+
+For CI clients using all ten C0 offline recipe templates, adds
+`--recipe-contracts-json` to return a deterministic bounded v1 machine JSON
+catalog containing exact individual static source-role and resource budget
+contracts in one call. Every nested record is tested for equality with the
+existing per-ID `--recipe-contract-json` output; no changes to older schemas,
+source ceilings, processing, or user-controlled inputs. All combinations with
+real input, reports and other discovery flags reject before any I/O. This is
+non-authorizing metadata only: no new collection, network, signer/source
+trust or privilege, and all five UNVERIFIED gaps and T5B/Mac UID502/APFS/
+Linux C holds remain.

@@ -1037,6 +1037,27 @@ def render_recipe_contract_json(recipe_id):
         'evidence_gaps': selected['evidence_gaps'],
     }, sort_keys=True)
 
+
+RECIPE_CONTRACTS_SCHEMA = 'som-t5b0-c0-recipe-contracts-json-v1'
+
+
+def render_recipe_contracts_json():
+    """All reviewed static source budgets in one input-free snapshot."""
+    catalog = json.loads(render_recipes_json())
+    contracts = [json.loads(render_recipe_contract_json(entry['id']))
+                 for entry in catalog['recipes']]
+    return json.dumps({
+        'schema': RECIPE_CONTRACTS_SCHEMA,
+        'recipe_contract_schema': RECIPE_CONTRACT_SCHEMA,
+        'review_schema': catalog['review_schema'],
+        'catalog_scope': catalog['catalog_scope'],
+        'contracts': contracts,
+        'authorization': 'NO_AUTHORIZATION',
+        'collection': 'C0_COLLECT_HOLD',
+        'network': 'NO_NETWORK',
+        'evidence_gaps': catalog['evidence_gaps'],
+    }, sort_keys=True)
+
 def render_summary_json(report, *, review_mode=None):
     """Machine-readable allowlisted observations; never serialize source values."""
     def audit_counts(audit):
@@ -1131,6 +1152,8 @@ def main():
                    help='show exactly one curated static argv-array example, by ID, with no input I/O')
     p.add_argument('--recipe-contract-json', metavar='RECIPE_ID',
                    help='show one fixed non-authorizing source/limit contract without input I/O')
+    p.add_argument('--recipe-contracts-json', action='store_true',
+                   help='show all reviewed static per-recipe budgets, without input I/O')
     p.add_argument('--guidance', action='store_true',
                    help='with --summary, append fixed privacy-safe remediation guidance')
     p.add_argument('--directory', type=Path, help='audit 1–16 .json entries in a directory, offline')
@@ -1227,6 +1250,12 @@ def main():
     p.add_argument('--against-batch-file', type=Path, metavar='NDJSON',
                    help='required independent local NDJSON file in named-files/batch comparison')
     args = p.parse_args()
+    if args.recipe_contracts_json:
+        if any(value is not None and value is not False
+               for key, value in vars(args).items() if key != 'recipe_contracts_json'):
+            p.error('--recipe-contracts-json cannot be combined with input or report options')
+        print(render_recipe_contracts_json())
+        return 0
     if args.recipe_contract_json is not None:
         if any(value is not None and value is not False
                for key, value in vars(args).items() if key != 'recipe_contract_json'):
