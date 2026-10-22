@@ -956,6 +956,28 @@ def render_recipes_json():
         'evidence_gaps': [key for key, _ in EVIDENCE_GAPS],
     }, sort_keys=True)
 
+
+RECIPE_LOOKUP_SCHEMA = 'som-t5b0-c0-recipe-json-v1'
+
+
+def render_recipe_json(recipe_id):
+    """One exact existing static catalog recipe; unknown IDs never echoed."""
+    catalog = json.loads(render_recipes_json())
+    selected = next((entry for entry in catalog['recipes']
+                     if entry['id'] == recipe_id), None)
+    if selected is None:
+        return None
+    return json.dumps({
+        'schema': RECIPE_LOOKUP_SCHEMA,
+        'review_schema': catalog['review_schema'],
+        'catalog_scope': catalog['catalog_scope'],
+        'recipe': selected,
+        'authorization': 'NO_AUTHORIZATION',
+        'collection': 'C0_COLLECT_HOLD',
+        'network': 'NO_NETWORK',
+        'evidence_gaps': catalog['evidence_gaps'],
+    }, sort_keys=True)
+
 def render_summary_json(report, *, review_mode=None):
     """Machine-readable allowlisted observations; never serialize source values."""
     def audit_counts(audit):
@@ -1046,6 +1068,8 @@ def main():
                    help='print a static, non-authorizing JSON catalog without reading inputs')
     p.add_argument('--recipes-json', action='store_true',
                    help='show curated fixed argv-array offline review examples without reading inputs')
+    p.add_argument('--recipe-json', metavar='RECIPE_ID',
+                   help='show exactly one curated static argv-array example, by ID, with no input I/O')
     p.add_argument('--guidance', action='store_true',
                    help='with --summary, append fixed privacy-safe remediation guidance')
     p.add_argument('--directory', type=Path, help='audit 1–16 .json entries in a directory, offline')
@@ -1142,6 +1166,17 @@ def main():
     p.add_argument('--against-batch-file', type=Path, metavar='NDJSON',
                    help='required independent local NDJSON file in named-files/batch comparison')
     args = p.parse_args()
+    if args.recipe_json is not None:
+        # Recipe lookup is input-free, mutually exclusive with every other
+        # parsed selector and report flag. Refuse before touching sources.
+        if any(value is not None and value is not False
+               for key, value in vars(args).items() if key != 'recipe_json'):
+            p.error('--recipe-json cannot be combined with input or report options')
+        selected_recipe = render_recipe_json(args.recipe_json)
+        if selected_recipe is None:
+            p.error('--recipe-json requires a known static recipe ID')
+        print(selected_recipe)
+        return 0
     if args.recipes_json:
         # A no-input discovery request must never be mixed with any report or
         # source option; check the entire parsed namespace before all I/O.

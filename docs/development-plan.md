@@ -2543,3 +2543,17 @@ capabilities-v1 or summary-v1 schemas, default behavior, resource ceilings,
 0/2/3 change gates, evidence trust, material collection, privileged host,
 T5B/Mac UID502/APFS/Linux C HOLDs. Five independently UNVERIFIED gaps and
 NO_NETWORK/NO_AUTHORIZATION/C0_COLLECT_HOLD remain.
+
+### 2026-10-22 Read-free exact-ID lookup of curated offline review recipe
+
+To support simple offline automation that already knows a stable curated
+recipe ID, C0 adds `--recipe-json RECIPE_ID`: returns only the selected
+allowlisted `argv` array and fixed mode/stdin metadata under an additive
+`som-t5b0-c0-recipe-json-v1` schema, exactly matching the established
+`--recipes-json` catalog record. All ten known IDs work; arbitrary/unknown
+IDs are refused without echoing their input and without reading any file,
+directory or stdin. Every mixed input/discovery/report flag refuses pre-read.
+No changes to the original recipes-v1/capabilities-v1/summary-v1 contracts,
+network, material collection, provenance/signer trust or privileged release.
+The fixed `NO_NETWORK`, `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, all five
+independently UNVERIFIED gaps and T5B/Mac UID502/APFS/Linux C HOLDs remain.

@@ -947,3 +947,36 @@ approval or proof of evidence origin. No material collection, signer trust,
 network access or privileged host operation is enabled; `NO_AUTHORIZATION`,
 `NO_NETWORK`, `C0_COLLECT_HOLD`, all five independently `UNVERIFIED`
 evidence gaps and T5B/Mac UID502/APFS/Linux C HOLDs persist.
+
+## Exact-ID lookup for one curated offline C0 review recipe (2026-10-22)
+
+Automation authors can select a single previously published, static curated
+recipe without loading or filtering the complete catalog:
+
+```sh
+python3 ops/t5b0/c0_manifest_preflight.py \
+  --recipe-json compare-named-files-to-saved-batch
+```
+
+The response is stable `som-t5b0-c0-recipe-json-v1` machine JSON containing
+exactly **one** `recipe` object, whose fixed `id`, allowlisted `review_mode`,
+`stdin_format` and literal `argv` array equal the matching entry from the
+unchanged `--recipes-json` ten-recipe catalog. The stable response also
+repeats `CURATED_NOT_EXHAUSTIVE`, existing review schema identifier,
+`NO_NETWORK` / `NO_AUTHORIZATION` / `C0_COLLECT_HOLD`, and all five
+independently `UNVERIFIED` evidence gaps. The input ID is not a file path,
+source ID, command, authorization, or permission to execute any example.
+Unknown IDs (including path-like, URL-like or arbitrarily long strings) are
+rejected with exit 2, **no machine JSON and no reflection of submitted ID**.
+The flag takes exactly one argument. An orphan flag is an argument error;
+combining it with any other input mode, discovery flag, report flag, or
+`--fail-on-change` is refused **before opening a file, reading stdin,
+scanning directories or performing network I/O**.
+
+All ten known IDs are checked against the exact existing catalog, not an
+independently maintained divergent list. The catalog/schema of
+`--recipes-json` (`som-t5b0-c0-recipes-v1`), static capabilities v1 and
+private summary v1 are **unchanged**. Returning an example never executes
+it, downloads a verifier, collects material, admits source/signature trust,
+changes host privileges or authorizes a release. C0/T5B/Mac UID502/APFS/
+Linux C HOLDs and privacy/resource ceilings persist.
