@@ -2640,3 +2640,22 @@ output/CLI behavior unchanged. No source-derived IDs, paths, URLs, SHA values,
 network, material collection, signature/trust-root or host/release privilege;
 all five evidence gaps independently UNVERIFIED and C0/T5B/Mac UID502/APFS/
 Linux C HOLDs persist.
+
+### 2026-10-23 Offline C0 many-to-many semantic review matrix
+
+An independently executable bounded offline matrix compares **1–8 baseline
+source groups against 1–8 candidate source groups** (≤64 semantic comparisons)
+without manually constructing repeated review-plan cases or reopening the
+same source for each pairing. Each group is a named 1–16 JSON manifest file
+set or one bounded NDJSON snapshot; total ≤32 unique input names under one
+opened no-follow directory descriptor. The ≤16KiB matrix config, format
+consistency, safe ASCII basename validation and global budgets are enforced
+**before any referenced source read**; only the existing race-aware,
+nonblocking regular-only readers, cross-file consistency and semantic diff
+engines are used. Fixed indexed matrix-v1 machine output contains just
+numeric observed deltas, never source identities, URLs/hashes or parser error
+contents. Optional `--fail-on-change`: valid changes exit3, valid unchanged
+exit0; any invalid config/source/collision leads to global REFUSED/exit2
+with null totals and empty cells, not partial approval. Legacy modes/schemas,
+network denial, NO_AUTHORIZATION/C0_COLLECT_HOLD, all five independently
+UNVERIFIED gaps and T5B/Mac UID502/APFS/Linux C trust/privilege HOLDs persist.

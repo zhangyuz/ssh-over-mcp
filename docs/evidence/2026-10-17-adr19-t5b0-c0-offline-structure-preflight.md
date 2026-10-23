@@ -1219,3 +1219,65 @@ structural policy simulation**, not source/signer trust, acquisition, material
 collection, host privilege, or release authorization. `NO_NETWORK`,
 `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, five independently `UNVERIFIED` evidence
 gaps and all T5B/Mac UID502/APFS/Linux C security HOLDs remain unchanged.
+
+## Read-once cross-product review matrix (2026-10-23)
+
+For offline CI review of multiple candidate sets against several baseline sets,
+use the standalone **many-to-many semantic comparison matrix**:
+
+```sh
+python3 ops/t5b0/c0_review_matrix.py ./matrix.json --fail-on-change
+```
+
+`matrix.json` must be a ≤16,384-byte regular JSON file with the exact shape:
+
+```json
+{
+  "schema": "som-t5b0-c0-review-matrix-v1",
+  "before": [
+    {"json_files": ["baseline-a.json", "baseline-b.json"]},
+    {"ndjson_file": "baseline-snapshot.ndjson"}
+  ],
+  "after": [
+    {"json_files": ["candidate-a.json", "candidate-b.json"]},
+    {"ndjson_file": "candidate-snapshot.ndjson"}
+  ]
+}
+```
+
+Each side contains **1–8 groups**, each group describing one existing saved
+NDJSON file or a named set of **1–16** individual JSON manifest files. The
+cross product contains at most **64** comparisons and across the entire matrix
+there are at most **32 unique filenames**. Each filename must be a short
+ASCII basename (no path separators, absolute paths, traversal, URLs, globbing
+or environment expansion) in the matrix file's parent directory. No source
+may be named the same as the matrix config or used inconsistently with
+conflicting JSON/NDJSON format assignments.
+
+**All group shapes, names, source roles and total budgets are validated before
+any referenced source file is opened.** The config and all sources use the
+existing same-FD, no-follow/nonblocking regular-file-only, size and read-race
+checks against a single anchored no-follow parent directory handle. Manifest
+JSON is at most 16KiB/file, and saved NDJSON uses the existing 16-record,
+16KiB/record and 262160-byte/source ceilings. One in-memory source inventory
+is cached per exact filename and reused across all 64 possible comparisons.
+The original C0 structural validator, cross-file ID/URL/digest-size collision
+checks and semantic field-change counter remain unchanged.
+
+Successful review returns a deterministic fixed
+`som-t5b0-c0-review-matrix-summary-v1` JSON envelope, 1-based before/after
+cell indexes and only private numeric counts (observed object added/removed/
+changed and fixed field-change histogram), with no filenames, object IDs, URLs,
+raw digests or source error messages. All valid unchanged => exit `0`; valid
+changed => exit `0`, or `3` when explicitly gated by `--fail-on-change`. An
+unsafe config, malformed group, duplicate/conflicting source, symlink, FIFO,
+oversized input, or refused comparison means the **entire matrix** is
+`REFUSED`/exit `2`, with `null` total/change counters and **no partial cell
+results**. No source file is modified and stdin/network are never read.
+
+This is strictly local offline structural change evidence, not authenticity,
+source/signer trust, material collection, privilege or release authorization.
+`NO_NETWORK`, `NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, all five independently
+`UNVERIFIED` evidence gaps and T5B/Mac UID502/APFS/Linux C HOLDs remain.
+Original C0 preflight, plan/policy/suite, recipe and capability schemas are
+unchanged.
