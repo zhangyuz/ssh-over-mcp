@@ -170,7 +170,9 @@ def _hardening(role: str, service: object, defined: dict) -> set[str]:
         ):
             raise Refused("UNSAFE_MOUNT")
         if kind == "bind" and any(
-            source == path or source.startswith(path + "/")
+            source == path
+            or source.startswith(path + "/")
+            or path.startswith(source.rstrip("/") + "/")
             for path in (
                 "/var/run/docker.sock",
                 "/run/docker.sock",
@@ -179,7 +181,8 @@ def _hardening(role: str, service: object, defined: dict) -> set[str]:
                 "/sys",
             )
         ):
-            # Host secrets may be RO elsewhere, but those roots are never needed.
+            # Read-only access to an enclosing directory still exposes UNIX
+            # domain sockets (e.g. /var/run -> docker.sock).
             raise Refused("UNSAFE_MOUNT")
     return networks
 

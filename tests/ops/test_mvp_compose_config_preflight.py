@@ -328,3 +328,14 @@ def test_known_compose_name_alias_and_hardening_bypasses_refused(tmp_path, defec
     response = invoke(tmp_path, control_doc=doc)
     assert response.returncode != 0
     assert response.stdout == ""
+
+
+@pytest.mark.parametrize("source", ["/var", "/var/run", "/run", "/sys"])
+def test_read_only_bind_ancestor_of_docker_socket_is_denied(tmp_path, source):
+    doc = control("dev-e2e")
+    doc["services"]["mcp"]["volumes"] = [
+        {"type": "bind", "source": source, "target": "/host-view", "read_only": True}
+    ]
+    response = invoke(tmp_path, control_doc=doc)
+    assert response.returncode != 0
+    assert response.stdout == ""
