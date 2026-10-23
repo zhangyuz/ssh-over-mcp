@@ -33,3 +33,5 @@ Current ADRs:
 - [0019 — Protected native E2E staging namespace](0019-protected-native-e2e-staging.md) — first dormant shared inspection implemented (PR #243); owned workspace lifetime and actual protected-placement activation remain unimplemented and separately gated.
 
 - [0020 — Trusted PR native E2E admission (proposed; not activated)](0020-trusted-pr-native-e2e-admission.md) — staged default-branch identity gate, no present workflow changes.
+
+- [0021 — Private multi-SSH Compose read/write MVP release track (proposed)](0021-private-compose-rw-mvp-release-track.md) — two mandatory deployment topologies confirmed by operator (single-engine development/E2E; separate control-plane plus two remote SSH Compose Engines for actual deployment); remaining safety/release-track decision Proposed, no security-gate waiver or implementation authorization.

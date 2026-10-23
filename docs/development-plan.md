@@ -1,5 +1,19 @@
 # Development roadmap
 
+## Current multi-SSH Compose read/write MVP delivery proposal — 2026-10-23 UTC
+
+See [MVP current status](mvp-status.md), the
+[multi-SSH Compose read/write design](superpowers/specs/2026-10-23-private-compose-rw-mvp-design.md),
+and the [agent implementation plan](superpowers/plans/2026-10-23-private-compose-rw-mvp.md). The plan distinguishes **M1a single-Engine Compose/E2E** from **M1b three independent Engines with operator-owned private routing and per-host Compose**, with mandatory separate acceptance IDs A01–A03 and A15–A18.
+[ADR0021](decisions/0021-private-compose-rw-mvp-release-track.md) is **Proposed**:
+operator has confirmed **both mandatory topologies** (one Docker Engine with MCP + two SSH containers for developer/E2E; distinct control-plane and two SSH Linux Engines each running their own Compose projects for actual private deployment). Formal approval of the full ADR/spec/plan and any host/private-network operations remains outstanding, including the decision to separate this product trial
+from the new macOS orchestrator-readiness milestone. No implementation,
+Mac acceptance, release or broader v1 completion is claimed. Existing security
+and exact-SHA gates remain; Issue #259 and #256 HOLDs are unchanged.
+Before any new list/search or mutation implementation, **M2 protocol-first HOLDs** require separately reviewed/frozen SMCP v2 central signed subtree policy snapshot + epoch revocation, Host Policy v5 deny-subtrees/migration, durable per-host Operation ID/commit receipt/UNKNOWN reconciliation, and deterministic typed search/write schema with concurrency conditions. Current SMCP v1, host policy v3/v4 and approval-only Ledger do not satisfy these contracts; no new feature is enabled. See [spec §2a](superpowers/specs/2026-10-23-private-compose-rw-mvp-design.md) and [plan §2d](superpowers/plans/2026-10-23-private-compose-rw-mvp.md).
+The historical phase record and full v1 definition below remain authoritative
+for their original scope.
+
 ## Phase 0 — specification baseline
 
 Status: **complete**

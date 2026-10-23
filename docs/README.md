@@ -17,6 +17,7 @@ This directory is the canonical behavioral and security specification for `ssh-o
 11. **CI execution topology** — [`ci-hosted-primary.md`](ci-hosted-primary.md); manual hardened Docker validation — [`self-hosted-runner.md`](self-hosted-runner.md)
 12. **Normative design changes** — [`decisions/`](decisions/README.md)
 13. **Worktree-local agent handoff template** — [`templates/progress.md`](templates/progress.md)
+14. **Current MVP delivery entrypoint** — [`mvp-status.md`](mvp-status.md) (two mandatory deployment modes confirmed: single-engine E2E and per-host multi-engine Compose; remaining ADR approval pending)
 
 ## Three-layer agent collaboration
 
