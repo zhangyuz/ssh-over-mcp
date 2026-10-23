@@ -339,3 +339,44 @@ def test_read_only_bind_ancestor_of_docker_socket_is_denied(tmp_path, source):
     response = invoke(tmp_path, control_doc=doc)
     assert response.returncode != 0
     assert response.stdout == ""
+
+
+@pytest.mark.parametrize("mode", ["dev-e2e", "multi-host"])
+def test_accepts_rendered_compose_null_network_attachments(tmp_path, mode):
+    doc = control(mode)
+    doc["services"]["mcp"]["networks"] = {name: None for name in doc["services"]["mcp"]["networks"]}
+    if mode == "dev-e2e":
+        for alias in ("node01", "node02"):
+            doc["services"][alias]["networks"] = {alias + "_ssh": None}
+        result = invoke(tmp_path, mode, control_doc=doc)
+    else:
+        h = host()
+        h["services"]["ssh-target"]["networks"] = {"ssh_private": None}
+        result = invoke(tmp_path, mode, control_doc=doc, node01_doc=h, node02_doc=h)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["deployment_ready"] is False
+
+
+@pytest.mark.parametrize("source", ["/var//run/docker.sock", "/var/run//docker.sock"])
+def test_duplicate_separator_bind_source_cannot_hide_socket(tmp_path, source):
+    doc = control("dev-e2e")
+    doc["services"]["mcp"]["volumes"] = [
+        {"type": "bind", "source": source, "target": "/host-view", "read_only": True}
+    ]
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode != 0
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize("mode", ["dev-e2e", "multi-host"])
+def test_resolved_target_volume_cannot_alias_ledger_admin(tmp_path, mode):
+    if mode == "dev-e2e":
+        doc = control(mode)
+        doc["volumes"] = {"node01-data": {"name": "other_ledger-admin"}}
+        result = invoke(tmp_path, mode, control_doc=doc)
+    else:
+        target = host()
+        target["volumes"] = {"ssh-data": {"name": "other_ledger-admin"}}
+        result = invoke(tmp_path, mode, node01_doc=target)
+    assert result.returncode != 0
+    assert result.stdout == ""

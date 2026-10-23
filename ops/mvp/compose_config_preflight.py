@@ -58,7 +58,7 @@ def _dict(value: object) -> dict:
     return value
 
 
-def _project(document: object) -> tuple[dict, dict]:
+def _project(document: object) -> tuple[dict, dict, dict[str, str]]:
     root = _dict(document)
     if not set(root) <= _SUPPORTED_PROJECT:
         raise Refused("UNSUPPORTED_COMPOSE_FIELD")
@@ -68,6 +68,7 @@ def _project(document: object) -> tuple[dict, dict]:
     if len(services) > 8 or len(networks) > 8 or len(volumes) > 16:
         raise Refused("TOO_MANY_ENTRIES")
     resolved_volumes: set[str] = set()
+    volume_identities: dict[str, str] = {}
     for name, config in volumes.items():
         if type(name) is not str or type(config) is not dict:
             raise Refused("INVALID_VOLUME")
@@ -77,6 +78,7 @@ def _project(document: object) -> tuple[dict, dict]:
         if type(resolved) is not str or not resolved or resolved in resolved_volumes:
             raise Refused("SHARED_TARGET_VOLUME")
         resolved_volumes.add(resolved)
+        volume_identities[name] = resolved
     resolved_networks: set[str] = set()
     for name, config in networks.items():
         if type(name) is not str or type(config) is not dict:
@@ -88,7 +90,7 @@ def _project(document: object) -> tuple[dict, dict]:
         if type(resolved) is not str or not resolved or resolved in resolved_networks:
             raise Refused("SHARED_NETWORK_NAME")
         resolved_networks.add(resolved)
-    return services, networks
+    return services, networks, volume_identities
 
 
 def _networks(service: dict, defined: dict) -> set[str]:
@@ -97,7 +99,7 @@ def _networks(service: dict, defined: dict) -> set[str]:
         names = value
     elif type(value) is dict:
         names = list(value)
-        if any(type(x) is not dict for x in value.values()):
+        if any(x is not None and type(x) is not dict for x in value.values()):
             raise Refused("INVALID_NETWORK")
     else:
         raise Refused("INVALID_NETWORK")
@@ -148,6 +150,8 @@ def _hardening(role: str, service: object, defined: dict) -> set[str]:
             raise Refused("INVALID_VOLUME")
         if kind not in ("bind", "volume"):
             raise Refused("INVALID_VOLUME")
+        if "//" in target or (kind == "bind" and "//" in source):
+            raise Refused("INVALID_VOLUME")
         if kind == "bind" and item.get("read_only") is not True:
             raise Refused("WRITABLE_HOST_BIND")
         if not Path(target).is_absolute() or any(part in {".", ".."} for part in target.split("/")):
@@ -187,8 +191,8 @@ def _hardening(role: str, service: object, defined: dict) -> set[str]:
     return networks
 
 
-def _control(document: object, mode: str) -> tuple[dict, dict]:
-    services, networks = _project(document)
+def _control(document: object, mode: str) -> tuple[dict, dict, dict[str, str]]:
+    services, networks, volume_identities = _project(document)
     mandatory = _CONTROL | (_TARGET_ROOT if mode == "dev-e2e" else frozenset())
     if not mandatory <= set(services) or not set(services) <= mandatory | _OPTIONAL:
         raise Refused("INVALID_SERVICE_SET")
@@ -211,10 +215,12 @@ def _control(document: object, mode: str) -> tuple[dict, dict]:
         expected = {"origin_internal", "private_ssh_egress"}
         if _networks(services["mcp"], networks) != expected:
             raise Refused("INVALID_MCP_NETWORKS")
-    return services, networks
+    return services, networks, volume_identities
 
 
-def _target_volumes(service: dict, alias: str | None) -> set[str]:
+def _target_volumes(
+    service: dict, alias: str | None, volume_identities: dict[str, str]
+) -> set[str]:
     mounts = service.get("volumes", [])
     if type(mounts) is not list or len(mounts) != 2:
         raise Refused("TARGET_VOLUMES_REQUIRED")
@@ -226,11 +232,14 @@ def _target_volumes(service: dict, alias: str | None) -> set[str]:
         target = item.get("target")
         if item.get("type") != "volume" or type(source) is not str or type(target) is not str:
             raise Refused("TARGET_NAMED_VOLUMES_ONLY")
+        resolved = volume_identities.get(source, source)
         if (
             not source
             or source in _ADMIN_VOLUMES
+            or resolved in _ADMIN_VOLUMES
+            or any(resolved.endswith("_" + admin) for admin in _ADMIN_VOLUMES)
             or any(source.endswith("_" + admin) for admin in _ADMIN_VOLUMES)
-            or source in sources
+            or resolved in sources
             or target in targets
         ):
             raise Refused("SHARED_TARGET_VOLUME")
@@ -240,7 +249,7 @@ def _target_volumes(service: dict, alias: str | None) -> set[str]:
             raise Refused("SHARED_TARGET_VOLUME")
         if target not in {"/srv/data", "/etc/ssh/hostkeys"}:
             raise Refused("TARGET_VOLUME_LAYOUT")
-        sources.add(source)
+        sources.add(resolved)
         targets.add(target)
     if targets != {"/srv/data", "/etc/ssh/hostkeys"}:
         raise Refused("TARGET_VOLUME_LAYOUT")
@@ -248,7 +257,7 @@ def _target_volumes(service: dict, alias: str | None) -> set[str]:
 
 
 def check_mode_a(document: object) -> None:
-    services, networks = _control(document, "dev-e2e")
+    services, networks, volume_identities = _control(document, "dev-e2e")
     all_sources: set[str] = set()
     for alias in ("node01", "node02"):
         allowed = alias + "_ssh"
@@ -256,7 +265,7 @@ def check_mode_a(document: object) -> None:
             raise Refused("UNSAFE_TARGET_NETWORK")
         if _networks(services[alias], networks) != {allowed}:
             raise Refused("TARGET_LATERAL_NETWORK")
-        sources = _target_volumes(_dict(services[alias]), alias)
+        sources = _target_volumes(_dict(services[alias]), alias, volume_identities)
         if sources & all_sources:
             raise Refused("SHARED_TARGET_VOLUME")
         all_sources.update(sources)
@@ -265,7 +274,7 @@ def check_mode_a(document: object) -> None:
             # Existing control stack has its own admin/ledger volumes, and
             # no node-specific volume may be shared with any such service.
             sources = {
-                item.get("source")
+                volume_identities.get(item.get("source"), item.get("source"))
                 for item in _dict(services[name]).get("volumes", [])
                 if type(item) is dict
             }
@@ -276,7 +285,7 @@ def check_mode_a(document: object) -> None:
 def check_mode_b(control: object, node01: object, node02: object) -> None:
     _control(control, "multi-host")
     for target in (node01, node02):
-        services, networks = _project(target)
+        services, networks, volume_identities = _project(target)
         if set(services) != {"ssh-target"} or set(networks) != {"ssh_private"}:
             raise Refused("INVALID_TARGET_PROJECT")
         if networks["ssh_private"].get("internal") is not True:
@@ -284,7 +293,7 @@ def check_mode_b(control: object, node01: object, node02: object) -> None:
         target_service = _dict(services["ssh-target"])
         if _hardening("ssh-target", target_service, networks) != {"ssh_private"}:
             raise Refused("INVALID_TARGET_NETWORK")
-        _target_volumes(target_service, None)
+        _target_volumes(target_service, None, volume_identities)
     # Only checks three operator-supplied descriptions, NOT three Engines.
 
 
