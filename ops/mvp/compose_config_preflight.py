@@ -152,6 +152,18 @@ def _hardening(role: str, service: object, defined: dict) -> set[str]:
             raise Refused("INVALID_VOLUME")
         if kind not in ("bind", "volume"):
             raise Refused("INVALID_VOLUME")
+        if kind == "bind":
+            if set(item) - {"type", "source", "target", "read_only", "bind"}:
+                raise Refused("UNREVIEWED_BIND_OPTION")
+            if "bind" in item and item["bind"] != {"create_host_path": False}:
+                # Reject SELinux z/Z relabels, rshared propagation and implicit
+                # host-path creation even when the mount is read-only.
+                raise Refused("UNREVIEWED_BIND_OPTION")
+        else:
+            if set(item) - {"type", "source", "target", "read_only", "volume"}:
+                raise Refused("UNREVIEWED_VOLUME_OPTION")
+            if "volume" in item and item["volume"] != {}:
+                raise Refused("UNREVIEWED_VOLUME_OPTION")
         if "//" in target or (kind == "bind" and "//" in source):
             raise Refused("INVALID_VOLUME")
         if kind == "bind" and item.get("read_only") is not True:
@@ -171,6 +183,19 @@ def _hardening(role: str, service: object, defined: dict) -> set[str]:
                 "/run/docker.sock",
                 "/var/run/user",
                 "/run/user",
+                "/run/containerd",
+                "/var/run/containerd",
+                "/run/podman",
+                "/var/run/podman",
+                "/run/crio",
+                "/var/run/crio",
+                "/run/buildkit",
+                "/var/run/buildkit",
+                "/var/lib/docker",
+                "/var/lib/containers",
+                "/var/lib/containerd",
+                "/var/lib/podman",
+                "/var/lib/kubelet",
                 "/sys/fs/cgroup",
                 "/proc",
                 "/sys",
@@ -186,6 +211,19 @@ def _hardening(role: str, service: object, defined: dict) -> set[str]:
                 "/run/docker.sock",
                 "/var/run/user",
                 "/run/user",
+                "/run/containerd",
+                "/var/run/containerd",
+                "/run/podman",
+                "/var/run/podman",
+                "/run/crio",
+                "/var/run/crio",
+                "/run/buildkit",
+                "/var/run/buildkit",
+                "/var/lib/docker",
+                "/var/lib/containers",
+                "/var/lib/containerd",
+                "/var/lib/podman",
+                "/var/lib/kubelet",
                 "/sys/fs/cgroup",
                 "/proc",
                 "/sys",
@@ -208,6 +246,17 @@ _CONTROL_ROLE_VOLUMES = {
     "mcp": frozenset({"ledger-exec"}),
     "approvalctl": frozenset({"ledger-admin"}),
     "cloudflared": frozenset(),
+}
+_CONTROL_ROLE_BIND_TARGETS = {
+    "mcp": frozenset(
+        {
+            "/etc/ssh-over-mcp/config.yaml",
+            "/etc/ssh-over-mcp/credentials.yaml",
+            "/run/secrets/ssh",
+            "/run/secrets/origin-bearer",
+        }
+    ),
+    "cloudflared": frozenset({"/run/secrets/cloudflare-tunnel-token"}),
 }
 
 
@@ -238,6 +287,8 @@ def _validate_control_mounts(services: dict, volume_identities: dict[str, str]) 
                     for target in _CONTROL_VOLUME_TARGETS.values()
                 ):
                     raise Refused("CONTROL_VOLUME_BOUNDARY")
+                if item.get("target") not in _CONTROL_ROLE_BIND_TARGETS.get(role, frozenset()):
+                    raise Refused("UNREVIEWED_CONTROL_BIND_TARGET")
                 continue
             source = item.get("source")
             if type(source) is not str:

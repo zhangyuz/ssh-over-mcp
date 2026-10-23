@@ -227,7 +227,7 @@ def test_mode_a_allows_read_only_control_config_bind_and_project_named_volumes(t
         {
             "type": "bind",
             "source": "/operator-owned/config.yaml",
-            "target": "/etc/som/config.yaml",
+            "target": "/etc/ssh-over-mcp/config.yaml",
             "read_only": True,
         },
     ]
@@ -282,7 +282,12 @@ def test_cloudflared_cannot_join_an_ssh_target_network(tmp_path):
 def test_control_ro_bind_rejects_unsafe_or_noncanonical_host_source(tmp_path, source):
     doc = control("dev-e2e")
     doc["services"]["mcp"]["volumes"] = [
-        {"type": "bind", "source": source, "target": "/etc/som/config.yaml", "read_only": True}
+        {
+            "type": "bind",
+            "source": source,
+            "target": "/etc/ssh-over-mcp/config.yaml",
+            "read_only": True,
+        }
     ]
     response = invoke(tmp_path, control_doc=doc)
     assert response.returncode != 0
@@ -334,7 +339,12 @@ def test_known_compose_name_alias_and_hardening_bypasses_refused(tmp_path, defec
 def test_read_only_bind_ancestor_of_docker_socket_is_denied(tmp_path, source):
     doc = control("dev-e2e")
     doc["services"]["mcp"]["volumes"] = [
-        {"type": "bind", "source": source, "target": "/host-view", "read_only": True}
+        {
+            "type": "bind",
+            "source": source,
+            "target": "/etc/ssh-over-mcp/config.yaml",
+            "read_only": True,
+        }
     ]
     response = invoke(tmp_path, control_doc=doc)
     assert response.returncode != 0
@@ -361,7 +371,12 @@ def test_accepts_rendered_compose_null_network_attachments(tmp_path, mode):
 def test_duplicate_separator_bind_source_cannot_hide_socket(tmp_path, source):
     doc = control("dev-e2e")
     doc["services"]["mcp"]["volumes"] = [
-        {"type": "bind", "source": source, "target": "/host-view", "read_only": True}
+        {
+            "type": "bind",
+            "source": source,
+            "target": "/etc/ssh-over-mcp/config.yaml",
+            "read_only": True,
+        }
     ]
     result = invoke(tmp_path, control_doc=doc)
     assert result.returncode != 0
@@ -485,3 +500,126 @@ def test_mcp_readonly_bind_cannot_cover_ledger_runtime_targets(tmp_path, target)
     ]
     result = invoke(tmp_path, control_doc=doc)
     assert result.returncode != 0 and result.stdout == ""
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "/run/containerd/containerd.sock",
+        "/run/containerd",
+        "/run/podman/podman.sock",
+        "/var/run/podman",
+        "/var/run/crio/crio.sock",
+        "/var/lib/docker/volumes/som_ledger-admin/_data",
+        "/var/lib/docker",
+        "/var/lib/containers/storage/volumes/som_ledger-data/_data",
+        "/var/lib/containerd",
+    ],
+)
+def test_management_runtime_and_volume_backend_bind_sources_refused(tmp_path, source):
+    doc = control("dev-e2e")
+    doc["services"]["mcp"]["volumes"] = [
+        {
+            "type": "bind",
+            "source": source,
+            "target": "/etc/ssh-over-mcp/config.yaml",
+            "read_only": True,
+        }
+    ]
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode != 0
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"selinux": "Z"},
+        {"selinux": "z"},
+        {"propagation": "rshared"},
+        {"create_host_path": True},
+        {"create_host_path": False, "selinux": "Z"},
+    ],
+)
+def test_read_only_bind_host_metadata_changes_refused(tmp_path, options):
+    doc = control("dev-e2e")
+    doc["services"]["mcp"]["volumes"] = [
+        {
+            "type": "bind",
+            "source": "/operator-owned/config.yaml",
+            "target": "/etc/ssh-over-mcp/config.yaml",
+            "read_only": True,
+            "bind": options,
+        }
+    ]
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode != 0
+    assert result.stdout == ""
+
+
+def test_allowed_read_only_bind_option_has_no_host_mutation(tmp_path):
+    doc = control("dev-e2e")
+    doc["services"]["mcp"]["volumes"] = [
+        {
+            "type": "bind",
+            "source": "/operator-owned/config.yaml",
+            "target": "/etc/ssh-over-mcp/config.yaml",
+            "read_only": True,
+            "bind": {"create_host_path": False},
+        }
+    ]
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["deployment_ready"] is False
+
+
+@pytest.mark.parametrize("target", ["/host-admin", "/etc", "/run/secrets/cloudflare-tunnel-token"])
+def test_mcp_bind_requires_known_control_input_target(tmp_path, target):
+    doc = control("dev-e2e")
+    doc["services"]["mcp"]["volumes"] = [
+        {
+            "type": "bind",
+            "source": "/operator-owned/config.yaml",
+            "target": target,
+            "read_only": True,
+        }
+    ]
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode != 0
+    assert result.stdout == ""
+
+
+def test_expected_read_only_secret_mounts_are_not_refusal_only(tmp_path):
+    doc = control("dev-e2e")
+    doc["networks"]["cloudflare_egress"] = {}
+    doc["services"]["mcp"]["volumes"] = [
+        {
+            "type": "bind",
+            "source": "/operator-owned/secrets/ssh",
+            "target": "/run/secrets/ssh",
+            "read_only": True,
+            "bind": {"create_host_path": False},
+        },
+        {
+            "type": "bind",
+            "source": "/operator-owned/secrets/origin",
+            "target": "/run/secrets/origin-bearer",
+            "read_only": True,
+            "bind": {"create_host_path": False},
+        },
+    ]
+    doc["services"]["cloudflared"] = service(
+        networks=["origin_internal", "cloudflare_egress"],
+        volumes=[
+            {
+                "type": "bind",
+                "source": "/operator-owned/secrets/cloudflare",
+                "target": "/run/secrets/cloudflare-tunnel-token",
+                "read_only": True,
+                "bind": {"create_host_path": False},
+            }
+        ],
+    )
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["deployment_ready"] is False
