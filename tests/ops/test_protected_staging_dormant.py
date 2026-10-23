@@ -17,7 +17,8 @@ FROZEN = {
     'ops/live-e2e/staging_preflight.py': 'ad48c5483f42cfcc09d49f4f48f79315a298e1df735649ba4b172369fc8ae342',
     'ops/live-e2e/staging_diagnostics.py': '79d1c8bbc54503d3a3ae6d6b14e821d18fc2a498534cb9ae5e5ce83431116a6a',
     'ops/live-e2e/dispose_historical_residuals.py': 'b95f9eb41803c8b0c7c8c14d64ac421285dcd3829b6be5630886e455c6088365',
-    '.github/workflows/ci.yml': '6404f2669e8cc7aa7d590aef800f9326e5c59d30e51162d90eb7f5d92ab3353b',
+    # PR339: only CI Ruff/compile tool path lists gain ops/mvp; all native jobs and gates unchanged.
+    '.github/workflows/ci.yml': 'a54042ead5c11dd84b608745a5efb20053792456289cbb733c71f46bd12f8e36',
     '.github/workflows/live-local-e2e.yml': 'ce35810c277f83272b230ae3c54b84dbe9edd2f3da8931e70e1be8a7eb57f643',
     '.github/workflows/live-local-e2e-recovery.yml': 'be9bd60aa89a3f02072fc9ed67626bdb7bc08249496de1d00873aae940cd78a3',
 }

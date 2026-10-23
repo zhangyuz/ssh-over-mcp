@@ -220,6 +220,12 @@ def test_valid_oci_registry_references_with_digest_accepted(tmp_path, image_name
     assert json.loads(result.stdout)["deployment_ready"] is False
 
 
+def test_operator_cli_is_in_ci_lint_and_compile_gates():
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    assert "run: python -m ruff check src tests ops/systemd ops/live-e2e ops/mvp" in workflow
+    assert "run: python -m compileall -q src tests ops/systemd ops/live-e2e ops/mvp" in workflow
+
+
 @pytest.mark.parametrize("mutation", ["same_length", "append", "truncate"])
 def test_manifest_mutation_after_open_stat_refused_on_same_fd(tmp_path, monkeypatch, mutation):
     """A write after the first fstat must not yield a static-only success."""
