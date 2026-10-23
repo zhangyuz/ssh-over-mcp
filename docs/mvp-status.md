@@ -1,7 +1,7 @@
 # MVP 当前交付入口：Compose 多 SSH 读写试点
 
 **状态：双部署形态已由用户明确确认；ADR0021 其他安全设计/实施计划仍为 PROPOSED / DRAFT，待评审确认。**
-**基线：** `0123346040eedae0fa4a92f50e556ba925fffd36`。本页只是工作计划状态，不是部署/验收证据。
+**当前代码基线：** `6c3a2aee2a55baed86e7a871268c8eb9b0d194af`（PR #339 合并后的 main；[push-main CI #40007266579](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/40007266579) 为 11/11 PASS，含 Native Level-3）。本页仍是 MVP 工作计划状态，不是 Compose 实际部署/验收证据。
 
 用户已确定的 MVP 目标：**MCP Server 和每一个 SSH Server 均使用 Docker Compose 部署**，至少两个独立 SSH 目标；支持 **全部八种 typed 文件读写操作**，在受控数据根内执行并保留现有审批/审计/SSH 隔离。**必须同时交付两种模式：Mode A 单 Linux Engine 多 Compose 容器供开发/E2E；Mode B 不同 Linux Engine 上分别启动独立 Compose 项目（control01 MCP/ledger/approval + ssh-host01 + ssh-host02）供实际部署。** 多宿主机模式需要 operator-approved 私有路由、SSH host-key pins、firewall/ACL 和真实网络故障验收，不得用单机测试代替。禁止以“支持所有读写”推出裸 shell、任意 host root 或 Docker 管理能力。
 
@@ -13,7 +13,8 @@
 
 ## 当前 MVP 实现迭代（独立 feature PR，非部署验收）
 
-- **离线 Compose 拓扑形态预检（候选功能）：** `python3 ops/mvp/topology_preflight.py --topology-json manifest.json`。支持声明式 Mode A 单 Engine + `node01`/`node02` 和 Mode B 三个不同 Engine 标签、OCI image digest 格式、SSH host-key fingerprint 格式、无秘密回显的拒绝与有界读入。参见 [离线部署拓扑预检手册](runbooks/mvp-topology-preflight.md)。**它只校验未认证的静态结构**，所有通过报告都明确 `deployment_ready=false`，runtime/network/trust/live E2E 均未验证；不能替代 M1a/M1b 真正的 Docker Compose 安装、host-agent/cgroup 隔离、host key 可信验证或主机部署许可。正式合并之前的候选功能不在本页声明为 main 已实现。
+- **离线 Compose 拓扑形态预检（已合入 main，PR #339）：** `python3 ops/mvp/topology_preflight.py --topology-json manifest.json`。支持声明式 Mode A 单 Engine + `node01`/`node02` 和 Mode B 三个不同 Engine 标签、OCI image digest 格式、SSH host-key fingerprint 格式、无秘密回显的拒绝与有界读入。参见 [离线部署拓扑预检手册](runbooks/mvp-topology-preflight.md)。**它只校验未认证的静态结构**，所有通过报告都明确 `deployment_ready=false`，runtime/network/trust/live E2E 均未验证；不能替代 M1a/M1b 真正的 Docker Compose 安装、host-agent/cgroup 隔离、host key 可信验证或主机部署许可。该检查仅为已合并的独立静态操作功能，绝非 M1a/M1b 的部署完成证明。
+- **离线 Compose 配置结构预检（当前 feature 候选）：** `python3 ops/mvp/compose_config_preflight.py --mode dev-e2e|multi-host --control-json FILE ...` 可在不调用 Docker/SSH 的情况下，检查预先渲染的 Mode A 单 Compose 项目或 Mode B 三份独立 Compose 描述，并拒绝可识别的 mutable image、危险 host ports/caps/volume sharing/target lateral networks。详细输入/拒绝契约参见 [Compose 配置预检操作手册](runbooks/mvp-compose-config-preflight.md)。**所有通过报告均为静态形态、deployment_ready=false**；Mode A/B 真 Docker Engine、host keys、隔离及 network ACL 未测试，M1a/M1b A01–A03/A15–A18 继续 NOT_RUN。此候选在本 PR 合并前不得称为 main 已实现。
 
 ## 当前工具实现差距
 
