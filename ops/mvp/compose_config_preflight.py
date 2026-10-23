@@ -86,6 +86,8 @@ def _project(document: object) -> tuple[dict, dict, dict[str, str]]:
         # External/custom driver networks are not an implied ACL/identity proof.
         if config.get("external") or set(config) - {"internal", "name", "driver"}:
             raise Refused("UNSUPPORTED_NETWORK")
+        if config.get("driver") not in (None, "bridge"):
+            raise Refused("UNSUPPORTED_NETWORK_DRIVER")
         resolved = config.get("name", name)
         if type(resolved) is not str or not resolved or resolved in resolved_networks:
             raise Refused("SHARED_NETWORK_NAME")
@@ -167,6 +169,8 @@ def _hardening(role: str, service: object, defined: dict) -> set[str]:
             for path in (
                 "/var/run/docker.sock",
                 "/run/docker.sock",
+                "/var/run/user",
+                "/run/user",
                 "/sys/fs/cgroup",
                 "/proc",
                 "/sys",
@@ -180,6 +184,8 @@ def _hardening(role: str, service: object, defined: dict) -> set[str]:
             for path in (
                 "/var/run/docker.sock",
                 "/run/docker.sock",
+                "/var/run/user",
+                "/run/user",
                 "/sys/fs/cgroup",
                 "/proc",
                 "/sys",
@@ -191,6 +197,65 @@ def _hardening(role: str, service: object, defined: dict) -> set[str]:
     return networks
 
 
+_CONTROL_VOLUME_TARGETS = {
+    "ledger-data": "/var/lib/ssh-over-mcp",
+    "ledger-exec": "/run/ssh-over-mcp-exec",
+    "ledger-admin": "/run/ssh-over-mcp-admin",
+}
+_CONTROL_ROLE_VOLUMES = {
+    "ledger-init": frozenset(_CONTROL_VOLUME_TARGETS),
+    "ledger": frozenset(_CONTROL_VOLUME_TARGETS),
+    "mcp": frozenset({"ledger-exec"}),
+    "approvalctl": frozenset({"ledger-admin"}),
+    "cloudflared": frozenset(),
+}
+
+
+def _control_volume_kind(name: str) -> str | None:
+    for reserved in _CONTROL_VOLUME_TARGETS:
+        if name == reserved or name.endswith("_" + reserved):
+            return reserved
+    return None
+
+
+def _validate_control_mounts(services: dict, volume_identities: dict[str, str]) -> None:
+    """Keep admin/ledger socket and database volumes separate by service role."""
+    for role, permitted in _CONTROL_ROLE_VOLUMES.items():
+        if role not in services:
+            continue
+        mounts = _dict(services[role]).get("volumes", [])
+        if type(mounts) is not list:
+            raise Refused("INVALID_VOLUME")
+        for mount in mounts:
+            item = _dict(mount)
+            if item.get("type") != "volume":
+                # Lexically validated read-only binds are allowed only to
+                # operator inputs, never to the protected Ledger mount targets.
+                if any(
+                    item.get("target") == target
+                    or str(item.get("target", "")).startswith(target + "/")
+                    or target.startswith(str(item.get("target", "")).rstrip("/") + "/")
+                    for target in _CONTROL_VOLUME_TARGETS.values()
+                ):
+                    raise Refused("CONTROL_VOLUME_BOUNDARY")
+                continue
+            source = item.get("source")
+            if type(source) is not str:
+                raise Refused("INVALID_VOLUME")
+            resolved = volume_identities.get(source, source)
+            source_role = _control_volume_kind(source)
+            resolved_role = _control_volume_kind(resolved)
+            if (
+                source_role is None
+                or source_role != resolved_role
+                or source_role not in permitted
+                or item.get("target") != _CONTROL_VOLUME_TARGETS[source_role]
+            ):
+                raise Refused("CONTROL_VOLUME_BOUNDARY")
+            if role in {"mcp", "approvalctl"} and item.get("read_only") is not True:
+                raise Refused("CONTROL_VOLUME_READ_ONLY_REQUIRED")
+
+
 def _control(document: object, mode: str) -> tuple[dict, dict, dict[str, str]]:
     services, networks, volume_identities = _project(document)
     mandatory = _CONTROL | (_TARGET_ROOT if mode == "dev-e2e" else frozenset())
@@ -198,6 +263,7 @@ def _control(document: object, mode: str) -> tuple[dict, dict, dict[str, str]]:
         raise Refused("INVALID_SERVICE_SET")
     for name, service in services.items():
         _hardening(name, service, networks)
+    _validate_control_mounts(services, volume_identities)
     if "cloudflared" in services:
         cloudflared_networks = _networks(_dict(services["cloudflared"]), networks)
         if not cloudflared_networks or not cloudflared_networks <= {

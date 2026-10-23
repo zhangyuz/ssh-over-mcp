@@ -380,3 +380,108 @@ def test_resolved_target_volume_cannot_alias_ledger_admin(tmp_path, mode):
         result = invoke(tmp_path, mode, node01_doc=target)
     assert result.returncode != 0
     assert result.stdout == ""
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "/run/user",
+        "/run/user/1000",
+        "/run/user/1000/docker.sock",
+    ],
+)
+def test_rootless_docker_runtime_mount_refused(tmp_path, source):
+    doc = control("dev-e2e")
+    doc["services"]["mcp"]["volumes"] = [
+        {"type": "bind", "source": source, "target": "/daemon-api", "read_only": True}
+    ]
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode != 0 and result.stdout == ""
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "mcp_ledger_admin",
+        "mcp_ledger_data",
+        "mcp_resolved_ledger_admin",
+        "approvalctl_ledger_exec",
+        "cloudflared_ledger_data",
+        "mcp_exec_not_readonly",
+    ],
+)
+def test_control_volume_role_boundaries_refuse_conflicts(tmp_path, defect):
+    doc = control("dev-e2e")
+    role = "mcp"
+    source = "ledger-admin"
+    ro = True
+    if defect == "mcp_ledger_data":
+        source = "ledger-data"
+    elif defect == "mcp_resolved_ledger_admin":
+        source = "custom-data"
+        doc["volumes"] = {source: {"name": "external_ledger-admin"}}
+    elif defect == "approvalctl_ledger_exec":
+        role = "approvalctl"
+        doc["services"][role] = service(network_mode="none")
+        source = "ledger-exec"
+    elif defect == "cloudflared_ledger_data":
+        role = "cloudflared"
+        doc["services"][role] = service(networks=["origin_internal"])
+        source = "ledger-data"
+    elif defect == "mcp_exec_not_readonly":
+        source = "ledger-exec"
+        ro = False
+    doc["services"][role]["volumes"] = [
+        {"type": "volume", "source": source, "target": "/run/ssh-over-mcp-exec", "read_only": ro}
+    ]
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode != 0 and result.stdout == ""
+
+
+def test_control_volume_role_allows_legitimate_mcp_ledger_approvalctl_mounts(tmp_path):
+    doc = control("dev-e2e")
+    mapping = {
+        "ledger-init": [
+            ("ledger-data", "/var/lib/ssh-over-mcp", False),
+            ("ledger-exec", "/run/ssh-over-mcp-exec", False),
+            ("ledger-admin", "/run/ssh-over-mcp-admin", False),
+        ],
+        "ledger": [
+            ("ledger-data", "/var/lib/ssh-over-mcp", False),
+            ("ledger-exec", "/run/ssh-over-mcp-exec", False),
+            ("ledger-admin", "/run/ssh-over-mcp-admin", False),
+        ],
+        "mcp": [("ledger-exec", "/run/ssh-over-mcp-exec", True)],
+        "approvalctl": [("ledger-admin", "/run/ssh-over-mcp-admin", True)],
+    }
+    doc["services"]["approvalctl"] = service(network_mode="none")
+    doc["volumes"] = {
+        name: {"name": "som_" + name} for name in ("ledger-data", "ledger-exec", "ledger-admin")
+    }
+    for role, mounts in mapping.items():
+        doc["services"][role]["volumes"] = [
+            {"type": "volume", "source": source, "target": target, "read_only": read_only}
+            for source, target, read_only in mounts
+        ]
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["deployment_ready"] is False
+
+
+@pytest.mark.parametrize("driver", ["host", "none", "overlay", "plugin.example/magic"])
+def test_non_bridge_network_drivers_refused(tmp_path, driver):
+    doc = control("dev-e2e")
+    doc["networks"]["node01_ssh"]["driver"] = driver
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode != 0
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize("target", ["/", "/run", "/run/ssh-over-mcp-admin"])
+def test_mcp_readonly_bind_cannot_cover_ledger_runtime_targets(tmp_path, target):
+    doc = control("dev-e2e")
+    doc["services"]["mcp"]["volumes"] = [
+        {"type": "bind", "source": "/operator-owned/notes", "target": target, "read_only": True}
+    ]
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode != 0 and result.stdout == ""
