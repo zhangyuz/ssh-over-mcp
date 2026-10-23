@@ -300,3 +300,31 @@ def test_mode_b_refuses_project_prefixed_admin_volume(tmp_path):
     h["services"]["ssh-target"]["volumes"][0]["source"] = "other_ledger-admin"
     response = invoke(tmp_path, "multi-host", node01_doc=h)
     assert response.returncode != 0
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "seccomp_unconfined",
+        "duplicate_resolved_network_name",
+        "duplicate_resolved_volume_name",
+        "external_target_volume",
+    ],
+)
+def test_known_compose_name_alias_and_hardening_bypasses_refused(tmp_path, defect):
+    doc = control("dev-e2e")
+    if defect == "seccomp_unconfined":
+        doc["services"]["node01"]["security_opt"].append("seccomp:unconfined")
+    elif defect == "duplicate_resolved_network_name":
+        doc["networks"]["node01_ssh"]["name"] = "same-shared-bridge"
+        doc["networks"]["node02_ssh"]["name"] = "same-shared-bridge"
+    elif defect == "duplicate_resolved_volume_name":
+        doc["volumes"] = {
+            "node01-data": {"name": "som-shared-target-data"},
+            "node02-data": {"name": "som-shared-target-data"},
+        }
+    elif defect == "external_target_volume":
+        doc["volumes"] = {"node01-data": {"external": True}}
+    response = invoke(tmp_path, control_doc=doc)
+    assert response.returncode != 0
+    assert response.stdout == ""

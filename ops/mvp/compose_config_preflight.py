@@ -64,14 +64,30 @@ def _project(document: object) -> tuple[dict, dict]:
         raise Refused("UNSUPPORTED_COMPOSE_FIELD")
     services = _dict(root.get("services"))
     networks = _dict(root.get("networks", {}))
-    if len(services) > 8 or len(networks) > 8:
+    volumes = _dict(root.get("volumes", {}))
+    if len(services) > 8 or len(networks) > 8 or len(volumes) > 16:
         raise Refused("TOO_MANY_ENTRIES")
+    resolved_volumes: set[str] = set()
+    for name, config in volumes.items():
+        if type(name) is not str or type(config) is not dict:
+            raise Refused("INVALID_VOLUME")
+        if set(config) - {"name", "external"} or config.get("external") not in (None, False):
+            raise Refused("UNSUPPORTED_VOLUME")
+        resolved = config.get("name", name)
+        if type(resolved) is not str or not resolved or resolved in resolved_volumes:
+            raise Refused("SHARED_TARGET_VOLUME")
+        resolved_volumes.add(resolved)
+    resolved_networks: set[str] = set()
     for name, config in networks.items():
         if type(name) is not str or type(config) is not dict:
             raise Refused("INVALID_NETWORK")
         # External/custom driver networks are not an implied ACL/identity proof.
         if config.get("external") or set(config) - {"internal", "name", "driver"}:
             raise Refused("UNSUPPORTED_NETWORK")
+        resolved = config.get("name", name)
+        if type(resolved) is not str or not resolved or resolved in resolved_networks:
+            raise Refused("SHARED_NETWORK_NAME")
+        resolved_networks.add(resolved)
     return services, networks
 
 
@@ -101,7 +117,7 @@ def _hardening(role: str, service: object, defined: dict) -> set[str]:
     if config.get("cap_drop") != ["ALL"]:
         raise Refused("CAP_DROP_REQUIRED")
     opts = config.get("security_opt")
-    if type(opts) is not list or "no-new-privileges:true" not in opts:
+    if opts != ["no-new-privileges:true"]:
         raise Refused("NO_NEW_PRIVILEGES_REQUIRED")
     if role == "ledger-init":
         if set(config.get("cap_add", [])) - {"CHOWN", "DAC_OVERRIDE"}:
