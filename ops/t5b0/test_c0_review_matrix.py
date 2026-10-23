@@ -250,6 +250,23 @@ class OfflineMatrixTests(unittest.TestCase):
         self.assertEqual(out['cells'], [])
         self.assertIsNone(out['total_cells'])
 
+    def test_parent_directory_symlink_refuses_without_source_access(self):
+        link = self.root.parent / (self.root.name + '-matrix-link')
+        link.symlink_to(self.root, target_is_directory=True)
+        self.addCleanup(link.unlink)
+        result = self.invoke(config=link / 'matrix.json')
+        self.assertEqual((result.returncode, result.stderr), (2, b''))
+        self.assertEqual(self.check_private(result)['status'], 'REFUSED')
+
+    def test_duplicate_manifest_ids_across_named_set_refuses_entire_matrix(self):
+        self.matrix([files('old.json', 'old-copy.json'), files('old.json')],
+                    [files('new.json')])
+        result = self.invoke()
+        self.assertEqual((result.returncode, result.stderr), (2, b''))
+        out = self.check_private(result)
+        self.assertEqual((out['status'], out['cells']), ('REFUSED', []))
+        self.assertIsNone(out['changed_cells'])
+
     def test_source_and_configuration_are_unchanged_after_execution(self):
         before={p.name:p.read_bytes() for p in self.root.iterdir()}
         self.invoke('--fail-on-change')
