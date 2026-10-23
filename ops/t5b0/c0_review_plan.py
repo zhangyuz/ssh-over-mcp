@@ -23,6 +23,64 @@ SAFE_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,79}')
 
 POLICY_SCHEMA = 'som-t5b0-c0-review-policy-v1'
 POLICY_SUMMARY_SCHEMA = 'som-t5b0-c0-review-policy-summary-v1'
+POLICY_SUITE_SCHEMA = 'som-t5b0-c0-review-policy-suite-v1'
+POLICY_SUITE_SUMMARY_SCHEMA = 'som-t5b0-c0-review-policy-suite-summary-v1'
+MAX_POLICY_PROFILES = 8
+
+
+def _suite_refusal():
+    output = _refusal()
+    output.update(schema=POLICY_SUITE_SUMMARY_SCHEMA, review_status=None,
+                  profiles=[], passed_profiles=None, violated_profiles=None)
+    return output
+
+
+def _validate_policy_suite(data, count):
+    'Validate all profiles as existing policies, before source inspection.'
+    catalog = c0.parse_manifest(data.decode('utf-8-sig'))
+    if (not isinstance(catalog, dict) or set(catalog) != {'schema', 'profiles'}
+            or catalog['schema'] != POLICY_SUITE_SCHEMA
+            or not isinstance(catalog['profiles'], list)
+            or not 1 <= len(catalog['profiles']) <= MAX_POLICY_PROFILES):
+        raise ValueError('invalid policy suite schema or count')
+    policies = []
+    for profile in catalog['profiles']:
+        if (not isinstance(profile, dict)
+                or set(profile) != {'case_limits', 'aggregate_limits'}):
+            raise ValueError('invalid policy suite profile')
+        item = dict(profile, schema=POLICY_SCHEMA)
+        policies.append(_validate_policy(json.dumps(item).encode('utf-8'), count))
+    return policies
+
+
+def _apply_policy_suite(summary, suite):
+    'Evaluate all policy profiles against the same observed case report.'
+    profile_results = []
+    violated = 0
+    for number, policy in enumerate(suite, start=1):
+        _, evaluated = _apply_policy(summary, policy)
+        if evaluated['status'] == 'POLICY_VIOLATION':
+            violated += 1
+        profile_results.append({
+            'index': number,
+            'status': evaluated['status'],
+            'policy_violation_cases': evaluated['policy_violation_cases'],
+            'aggregate_violation_codes': evaluated['aggregate_violation_codes'],
+            'case_results': [
+                {'index': case['index'], 'status': case['policy_status'],
+                 'violation_codes': case['violation_codes']}
+                for case in evaluated['cases']
+            ],
+        })
+    result = dict(summary, schema=POLICY_SUITE_SUMMARY_SCHEMA,
+                  status='POLICY_SUITE_VIOLATION' if violated else 'POLICY_SUITE_PASS',
+                  review_status=summary['status'], profiles=profile_results,
+                  passed_profiles=len(suite) - violated, violated_profiles=violated,
+                  next_action_codes=([
+                      'REVIEW_POLICY_VIOLATIONS', 'VERIFY_INDEPENDENT_EVIDENCE'
+                  ] if violated else ['VERIFY_INDEPENDENT_EVIDENCE']))
+    return (3 if violated else 0), result
+
 FIELDS = ('url', 'sha256', 'bytes', 'max_bytes')
 BUDGET_KEYS = ('max_added', 'max_removed', 'max_changed')
 CASE_KEYS = frozenset((*BUDGET_KEYS, 'deny_changed_fields'))
@@ -203,7 +261,7 @@ def _side_report(spec, dir_fd, cache):
     return result, inventory
 
 
-def review_plan(path, *, policy_name=None):
+def review_plan(path, *, policy_name=None, suite_name=None):
     """Review an offline plan; opt-in policy is checked before source reads."""
     try:
         path = Path(path)
@@ -212,6 +270,11 @@ def review_plan(path, *, policy_name=None):
         if policy_name is not None and (not _safe_name(policy_name)
                                         or policy_name == path.name):
             raise ValueError('invalid policy file name')
+        if suite_name is not None and (not _safe_name(suite_name)
+                                       or suite_name == path.name):
+            raise ValueError('invalid policy suite filename')
+        if suite_name is not None and policy_name is not None:
+            raise ValueError('policy and suite are exclusive')
         flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_DIRECTORY
         if hasattr(os, 'O_CLOEXEC'):
             flags |= os.O_CLOEXEC
@@ -229,6 +292,12 @@ def review_plan(path, *, policy_name=None):
                     raise ValueError('policy cannot be a reviewed source')
                 policy = _validate_policy(c0.read_regular_manifest(
                     policy_name, dir_fd=dir_fd, max_bytes=4096), len(cases))
+            suite = None
+            if suite_name is not None:
+                if any(suite_name in names for case in cases for _, names in case):
+                    raise ValueError('suite cannot be a reviewed source')
+                suite = _validate_policy_suite(c0.read_regular_manifest(
+                    suite_name, dir_fd=dir_fd, max_bytes=32768), len(cases))
             cache, results = {}, []
             for idx, (before_spec, after_spec) in enumerate(cases, start=1):
                 before, old = _side_report(before_spec, dir_fd, cache)
@@ -259,8 +328,12 @@ def review_plan(path, *, policy_name=None):
             'collection': 'C0_COLLECT_HOLD',
             'evidence_gaps': [key for key, _ in c0.EVIDENCE_GAPS],
         }
+        if suite is not None:
+            return _apply_policy_suite(result, suite)
         return _apply_policy(result, policy) if policy is not None else (0, result)
     except (OSError, ValueError, TypeError, UnicodeError, RecursionError):
+        if suite_name is not None:
+            return 2, _suite_refusal()
         return 2, _policy_refusal() if policy_name is not None else _refusal()
 
 
@@ -270,15 +343,21 @@ def main(argv=None):
     parser.add_argument('--fail-on-change', action='store_true', help='exit 3 if any valid case changes')
     parser.add_argument('--policy-file', metavar='POLICY_JSON',
                         help='enforce a bounded local case/aggregate offline change-budget policy')
+    parser.add_argument('--policy-suite-file', metavar='SUITE_JSON',
+                        help='evaluate up to eight bounded CI policy profiles on one source snapshot')
     if argv is None:
         import sys
         argv = sys.argv[1:]
     if argv.count('--fail-on-change') > 1:
         parser.error('--fail-on-change may occur once')
     args = parser.parse_args(argv)
+    if args.policy_suite_file is not None and (args.policy_file is not None
+                                               or args.fail_on_change):
+        parser.error('--policy-suite-file cannot be combined with --policy-file or --fail-on-change')
     if args.policy_file is not None and args.fail_on_change:
         parser.error('--policy-file and --fail-on-change are mutually exclusive')
-    exit_code, result = review_plan(args.plan, policy_name=args.policy_file)
+    exit_code, result = review_plan(args.plan, policy_name=args.policy_file,
+                                    suite_name=args.policy_suite_file)
     print(json.dumps(result, sort_keys=True))
     if exit_code != 0:
         return exit_code

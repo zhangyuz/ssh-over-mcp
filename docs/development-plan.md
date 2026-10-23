@@ -2619,3 +2619,24 @@ unsafe files or unreviewable sources. Legacy no-policy CLI and summary v1
 behavior are untouched, and --policy-file conflicts with --fail-on-change
 pre-read. All existing five UNVERIFIED gaps and C0/T5B/Mac UID502/APFS/
 Linux C authority HOLDs persist.
+
+### 2026-10-22/23 Multi-profile offline plan review policy suite (larger CI feature)
+
+Extend the multi-case offline review-plan executor with an integrated
+`--policy-suite-file SUITE.json`: 1–8 independently evaluated C0 change-budget
+profiles in one local JSON (≤32768 bytes) against the *same* immutable
+once-read/cached observations of all referenced source files. This lets CI
+operators compare strict and proposed policy guardrails without test-source
+re-reads, premature trust admission or privileged action. Reuse the existing
+single-policy exact case-count, numeric, and forbidden-field validators; parse
+and validate all profiles before opening any manifest or NDJSON source. Return
+one bounded versioned privacy-safe report containing common observed case
+change counts and indexed per-profile pass/violation/fixed-code decisions.
+All policies pass -> exit0; any profile violation -> exit3; any malformed
+plan/suite/profile/source -> whole-run REFUSED/2 with null totals and empty
+case/profile results, never a false or partial pass. Reject mixing with
+--policy-file and --fail-on-change pre-read. Existing no-policy and one-policy
+output/CLI behavior unchanged. No source-derived IDs, paths, URLs, SHA values,
+network, material collection, signature/trust-root or host/release privilege;
+all five evidence gaps independently UNVERIFIED and C0/T5B/Mac UID502/APFS/
+Linux C HOLDs persist.
