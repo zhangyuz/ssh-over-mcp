@@ -1082,3 +1082,66 @@ execute downloaded code, change privileges or release a component.
 `UNVERIFIED` evidence gaps, T5B/Mac UID502/APFS/Linux C HOLDs remain intact.
 The existing C0 input-mode CLI and catalog, recipe, capability and private
 summary schemas are unchanged.
+
+## Offline multi-case CI change-policy gates (2026-10-22)
+
+After generating a bounded `som-t5b0-c0-review-plan-v1` local plan, an
+operator may specify a **separate local non-authorizing CI change-budget
+policy** and perform the complete set of comparisons with one command:
+
+```sh
+python3 ops/t5b0/c0_review_plan.py ./plan.json --policy-file policy.json
+```
+
+The policy is a ≤4096-byte regular JSON file in the **same directory as the
+plan**, with the exact v1 schema below. Its one-entry-per-case list must match
+the plan's 1–8 comparison cases exactly, in order. For each before/after pair,
+`max_added`, `max_removed`, and `max_changed` are strict nonnegative integers
+(no booleans or floats); `deny_changed_fields` is a canonical ordered subset
+of `url`, `sha256`, `bytes`, and `max_bytes`. Aggregate limits separately cap
+total changed cases and summed added/removed/changed objects.
+
+```json
+{
+  "schema": "som-t5b0-c0-review-policy-v1",
+  "case_limits": [
+    {"max_added": 0, "max_removed": 0, "max_changed": 1,
+     "deny_changed_fields": ["url", "sha256"]},
+    {"max_added": 0, "max_removed": 0, "max_changed": 0,
+     "deny_changed_fields": []}
+  ],
+  "aggregate_limits": {
+    "max_changed_cases": 1,
+    "max_added": 0, "max_removed": 0, "max_changed": 1
+  }
+}
+```
+
+**Policy validation happens after plan grammar validation but before opening
+any referenced source.** The policy filename must be one safe ASCII basename,
+not the plan filename nor a referenced source, with no traversal or absolute
+path. Both plan and policy are observed as same-FD, nonblocking, no-follow,
+regular-only files under one anchored parent directory descriptor. Policy
+unknown keys, duplicates, bad types, over-budget integers, missing or extra
+case rules, missing or unsorted field names, invalid sources, symlinks and FIFOs
+fail closed. An invalid plan, policy or observed input causes global
+`REFUSED`/exit `2`, `null` aggregate counts, empty case results and no partial
+policy pass—even if other cases looked valid.
+
+A fully observed plan produces a bounded fixed
+`som-t5b0-c0-review-policy-summary-v1` JSON report. It separates the
+structural `review_status` (`UNCHANGED`/`CHANGED`) from `status`
+(`POLICY_PASS`/`POLICY_VIOLATION`), exposing each case's private numeric
+change/field histogram plus **fixed violation codes** (e.g.
+`CASE_MAX_CHANGED`, `CASE_DENY_SHA256`, `TOTAL_MAX_CHANGED_CASES`). No source,
+plan or policy paths, object IDs, URLs, hashes or untrusted error values appear
+in the output. Policy pass exits `0` even when allowed changes exist; any case
+or aggregate rule violation exits `3`. `--policy-file` and
+`--fail-on-change` are mutually exclusive, rejecting combinations before I/O.
+An invocation without `--policy-file` retains exactly the previous plan-v1
+result schema and 0/2/3 behavior.
+
+These are **local structural change gates, not permission to collect, attest,
+trust or execute** any input. `NO_NETWORK`, `NO_AUTHORIZATION`,
+`C0_COLLECT_HOLD`, all five independently `UNVERIFIED` evidence gaps, and
+T5B/Mac UID502/APFS/Linux C security/release HOLDs remain intact.
