@@ -218,3 +218,44 @@ def test_valid_oci_registry_references_with_digest_accepted(tmp_path, image_name
     result = invoke(tmp_path, data)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["deployment_ready"] is False
+
+
+@pytest.mark.parametrize("mutation", ["same_length", "append", "truncate"])
+def test_manifest_mutation_after_open_stat_refused_on_same_fd(tmp_path, monkeypatch, mutation):
+    """A write after the first fstat must not yield a static-only success."""
+    import runpy
+
+    entry = runpy.run_path(str(CLI))
+    path = tmp_path / "racing-topology.json"
+    original = json.dumps(topology("multi-host")).encode()
+    path.write_bytes(original)
+    modified = original.replace(b'"engine": "control01"', b'"engine": "control02"')
+    assert len(modified) == len(original) and modified != original
+    # A same-length rewrite still parses and has an acceptable topology.
+    assert entry["check_topology"](json.loads(modified))["static_structure_valid"] is True
+
+    real_fstat = os.fstat
+    fds: list[int] = []
+
+    def modify_once_after_stat(fd):
+        info = real_fstat(fd)
+        fds.append(fd)
+        if len(fds) == 1:
+            if mutation == "same_length":
+                path.write_bytes(modified)
+            elif mutation == "append":
+                path.write_bytes(original + b" ")
+            else:
+                path.write_bytes(original[:-1])
+            # Independent of timestamp granularity: make the mtime different.
+            os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns + 2_000_000_000))
+        return info
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "fstat", modify_once_after_stat)
+        with pytest.raises(entry["Refused"], match="INPUT_CHANGED"):
+            entry["check_topology"](entry["_read_one_regular_file"](path))
+    # Size mismatch rejects before a second fstat; same-size rewrite needs it.
+    assert len(fds) == (2 if mutation == "same_length" else 1)
+    if mutation == "same_length":
+        assert fds[0] == fds[1]

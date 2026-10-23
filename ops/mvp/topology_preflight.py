@@ -72,6 +72,15 @@ def _read_one_regular_file(path: Path) -> object:
             data = stream.read(_INPUT_LIMIT + 1)
         if len(data) > _INPUT_LIMIT:
             raise Refused("INPUT_TOO_LARGE")
+        # A concurrent same-length rewrite must not pass static validation.
+        # Check the same opened FD (the path could have been replaced).
+        if len(data) != info.st_size:
+            raise Refused("INPUT_CHANGED")
+        after = os.fstat(fd)
+        fields = ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns")
+        # Do not compare atime: reading may legitimately update it.
+        if any(getattr(info, field) != getattr(after, field) for field in fields):
+            raise Refused("INPUT_CHANGED")
     except OSError as exc:
         raise Refused("INPUT_UNAVAILABLE") from exc
     finally:
