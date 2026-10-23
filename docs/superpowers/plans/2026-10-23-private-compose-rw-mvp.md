@@ -73,6 +73,12 @@ M5 `A13` 精确 RC 全量回归及 **Mode A + Mode B 两套独立真实 Compose 
 - [ ] 记录 Portal/client 能力及 owner、Docker/host-root 权限、批准的 SSH 凭据/host keys、业务数据卷可写范围、备份/撤销 owner 和可处置目标环境。
 - [ ] 记录 M0 **PARTIAL_CONFIRMED**（只涵盖已确认的双部署模式）；ADR 状态仍 `Proposed`、整体设计/计划仍 `DRAFT`、其余安全/环境/发布授权仍 `WAITING_FOR_CONFIRMATION`。不要因范围已确认就标记可执行或发布。
 
+### M0a — 无 Docker 权限时的可交付离线拓扑形态预检
+
+- [ ] 提供安全、可重复的 **operator CLI**：仅读取 16 KiB 以内的正规 JSON 文件，判断声明的 Mode A 是同 Engine 双 SSH target、Mode B 是三个独立 Engine 标签（不证明其真实身份），校验固定 `node01/node02`、语法固定的 image SHA256 digest 和不同 SSH host-key fingerprint，未知字段/秘密/特殊文件/超限与错误模式必须拒绝且不回显输入。
+- [ ] 同一用户命令可以得到有界单行 machine JSON 正向结果，**始终**声明 `deployment_ready=false`、网络/运行时/真实信任/真实 E2E 未验证；反向必须退出非零、不输出任何机器成功结果。纯离线运行，不启动 Docker/SSH、不授权新 trust 或 host root。独立测试双 Python + 手册，并在 feature PR 内独立 review。
+- [ ] 完成后仍然不能把 M1a/M1b 或 A01–A18 标记 PASS；它只是缩短实际部署前的可发现配置错误，而不是完成 SSH Compose 产品。见 [操作员预检手册](../../runbooks/mvp-topology-preflight.md)。
+
 ## 2. M1a — 单机开发/E2E Compose 控制面与两个 SSH containers
 
 **Files:**

@@ -11,6 +11,10 @@
 - [开发与安全验收方法](development-methodology.md)
 - [完整 v1 历史路线图](development-plan.md)
 
+## 当前 MVP 实现迭代（独立 feature PR，非部署验收）
+
+- **离线 Compose 拓扑形态预检（候选功能）：** `python3 ops/mvp/topology_preflight.py --topology-json manifest.json`。支持声明式 Mode A 单 Engine + `node01`/`node02` 和 Mode B 三个不同 Engine 标签、OCI image digest 格式、SSH host-key fingerprint 格式、无秘密回显的拒绝与有界读入。参见 [离线部署拓扑预检手册](runbooks/mvp-topology-preflight.md)。**它只校验未认证的静态结构**，所有通过报告都明确 `deployment_ready=false`，runtime/network/trust/live E2E 均未验证；不能替代 M1a/M1b 真正的 Docker Compose 安装、host-agent/cgroup 隔离、host key 可信验证或主机部署许可。正式合并之前的候选功能不在本页声明为 main 已实现。
+
 ## 当前工具实现差距
 
 已存在 typed MCP `fs_stat`、`fs_read`、`fs_mkdir`（仅 create-only）、`fs_write`（仅 create-only）。**尚不能声称全功能：** `fs_list`、`fs_search`、`fs_move`、`fs_delete`，`fs_write` 覆盖/追加均需实现与真实验证；`fs_move` 首发只在同一 SSH host 获准根内生效，非跨主机文件转移。现有 host-agent 的 typed FS dispatch 在 manager/子进程降权前执行，现有中央 approval binding 缺少 move destination/write mode 两字段；**安全实现任务必须补齐，不得沿用旧 `ssh_exec` 隔离证据/旧 grant 假设。** **M2c 发布阻断：** `fs_move`/`fs_delete` 在 M2d 双路径中央/host 授权、一次性审批绑定、Ledger/audit 迁移、对抗验收和**合并前精确 HEAD Native Level-3** 全部 PASS 前必须保持 UNAVAILABLE/DENY。`fs_move` 首发仅可考虑普通文件；**空目录移动须单独证明检查→提交期间的并发安全，否则所有目录移动保持禁用**，非空目录始终拒绝。现有 Compose 已涵盖 MCP/ledger/admin/可选 Tunnel，但**尚无可验证的生产 Compose sshd 多目标栈**；其 `mcp` 的 `ssh_egress` 尚未限制出站目的地，默认 `ssh-over-mcp:phase6b` 也不是不可变生产 image digest，属于 M1a/M1b 安全阻断项。

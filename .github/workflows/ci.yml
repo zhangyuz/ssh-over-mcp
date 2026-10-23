@@ -51,10 +51,10 @@ jobs:
         run: python -m pip install -e '.[dev]'
 
       - name: Lint source, tests, and operator tools
-        run: python -m ruff check src tests ops/systemd ops/live-e2e
+        run: python -m ruff check src tests ops/systemd ops/live-e2e ops/mvp
 
       - name: Compile all source and operator tools
-        run: python -m compileall -q src tests ops/systemd ops/live-e2e
+        run: python -m compileall -q src tests ops/systemd ops/live-e2e ops/mvp
 
       - name: Verify hosted-only minimal non-root Linux groups
         shell: bash
