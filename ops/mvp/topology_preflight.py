@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import ipaddress
 import json
 import os
 import re
@@ -20,7 +21,14 @@ _INPUT_LIMIT = 16 * 1024
 _SCHEMA = "som-mvp-compose-topology-v1"
 _REPORT = "som-mvp-compose-topology-preflight-v1"
 _ENGINE = re.compile(r"[a-z][a-z0-9-]{0,31}\Z", re.ASCII)
-_IMAGE = re.compile(r"[a-z0-9][a-z0-9._/-]{0,127}@sha256:[0-9a-f]{64}\Z", re.ASCII)
+# Canonical digest-only refs: bounded image name + OCI distribution path components.
+_IMAGE = re.compile(r"(?P<name>[^@]+)@sha256:[0-9a-f]{64}\Z", re.ASCII)
+_IMAGE_COMPONENT = re.compile(r"[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*\Z", re.ASCII)
+_DOMAIN_LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+_REGISTRY = re.compile(
+    rf"(?:{_DOMAIN_LABEL})(?:\.{_DOMAIN_LABEL})*(?::(?P<port>[0-9]+))?\Z", re.ASCII
+)
+_IPV6_REGISTRY = re.compile(r"\[(?P<host>[^\]]+)\](?::(?P<port>[0-9]+))?\Z", re.ASCII)
 _ALIAS = frozenset({"node01", "node02"})
 
 
@@ -93,7 +101,39 @@ def _engine(value: object) -> str:
 
 
 def _image(value: object) -> None:
-    if type(value) is not str or _IMAGE.fullmatch(value) is None:
+    if type(value) is not str:
+        raise Refused("IMAGE_DIGEST_REQUIRED")
+    reference = _IMAGE.fullmatch(value)
+    if reference is None:
+        raise Refused("IMAGE_DIGEST_REQUIRED")
+    name = reference.group("name")
+    # Match OCI distribution repository components, not arbitrary slash/dot sequences.
+    if len(name) > 255:
+        raise Refused("IMAGE_DIGEST_REQUIRED")
+    components = name.split("/")
+    if len(components) > 1 and (
+        "." in components[0]
+        or ":" in components[0]
+        or components[0].startswith("[")
+        or components[0] == "localhost"
+    ):
+        registry = components.pop(0)
+        if registry.startswith("["):
+            match = _IPV6_REGISTRY.fullmatch(registry)
+            if match is None:
+                raise Refused("IMAGE_DIGEST_REQUIRED")
+            try:
+                ipaddress.IPv6Address(match.group("host"))
+            except ValueError as exc:
+                raise Refused("IMAGE_DIGEST_REQUIRED") from exc
+        else:
+            match = _REGISTRY.fullmatch(registry)
+            if match is None:
+                raise Refused("IMAGE_DIGEST_REQUIRED")
+        port = match.group("port")
+        if port is not None and not (1 <= int(port) <= 65535):
+            raise Refused("IMAGE_DIGEST_REQUIRED")
+    if not components or any(_IMAGE_COMPONENT.fullmatch(item) is None for item in components):
         raise Refused("IMAGE_DIGEST_REQUIRED")
 
 

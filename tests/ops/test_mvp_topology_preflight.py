@@ -175,3 +175,46 @@ def test_fake_engine_labels_are_not_treated_as_identity_or_network_attestation(t
     assert report["deployment_ready"] is False
     assert report["runtime_verified"] is False
     assert report["network_verified"] is False
+
+
+@pytest.mark.parametrize(
+    "image_name",
+    [
+        "repo///sub",
+        "repo/../target",
+        "repo/.",
+        "repo/-test",
+        "registry.-bad.test/target",
+        "repo/a___b",
+        "repo:a",
+        "repo/target:latest",
+        "localhost:0/target",
+        "localhost:65536/target",
+        "[2001:db8:::1]:5000/target",
+        "repo/" + "x" * 255,
+    ],
+)
+def test_malformed_oci_repository_name_refused(tmp_path, image_name):
+    data = topology("multi-host")
+    data["control"]["image"] = image_name + "@sha256:" + "a" * 64
+    result = invoke(tmp_path, data)
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "IMAGE_DIGEST_REQUIRED" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "image_name",
+    [
+        "registry.example.test:5000/team/app",
+        "localhost:5000/my_image",
+        "[2001:db8::1]:5000/team/app",
+        "ghcr.io/org/my__image",
+    ],
+)
+def test_valid_oci_registry_references_with_digest_accepted(tmp_path, image_name):
+    data = topology("multi-host")
+    data["control"]["image"] = image_name + "@sha256:" + "a" * 64
+    result = invoke(tmp_path, data)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["deployment_ready"] is False
