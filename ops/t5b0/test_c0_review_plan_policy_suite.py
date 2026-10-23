@@ -206,6 +206,45 @@ class SuiteTests(unittest.TestCase):
                 self.assertEqual((p.returncode, p.stdout), (2, b''))
                 self.assertIn(b'--policy-suite-file', p.stderr)
 
+    def test_numeric_type_and_forbidden_field_validation_precedes_source_read(self):
+        original = limits(2, max_changed=1)
+        variants = []
+        for candidate in (True, 1.5, -1, 4097, '1'):
+            profile = copy.deepcopy(original)
+            profile['case_limits'][0]['max_changed'] = candidate
+            variants.append(profile)
+        for invalid_fields in (['sha256', 'url'], ['url', 'url'], ['unknown'], [3]):
+            profile = copy.deepcopy(original)
+            profile['case_limits'][0]['deny_changed_fields'] = invalid_fields
+            variants.append(profile)
+        for profile in variants:
+            with self.subTest(profile=profile):
+                self.suite([original, profile])
+                with patch.object(c0, 'inspect_manifest',
+                                  side_effect=AssertionError('must not inspect inputs')):
+                    code, result = runner.review_plan(
+                        self.root / 'plan.json', suite_name='suite.json')
+                self.assertEqual(code, 2)
+                self.assertEqual((result['status'], result['profiles']), ('REFUSED', []))
+
+    def test_suite_file_cannot_be_a_reviewed_source_and_does_not_leak(self):
+        self.save('plan.json', {'schema': 'som-t5b0-c0-review-plan-v1', 'cases': [
+            {'before': {'json_files': ['base.json']},
+             'after': {'json_files': ['suite.json']}}]})
+        self.suite([limits(1)])
+        with patch.object(c0, 'inspect_manifest',
+                          side_effect=AssertionError('must refuse before reads')):
+            code, result = runner.review_plan(
+                self.root / 'plan.json', suite_name='suite.json')
+        self.assertEqual(code, 2)
+        self.assertEqual((result['cases'], result['profiles']), ([], []))
+
+    def test_no_path_or_source_writes_in_suite_run(self):
+        before = {p.name: p.read_bytes() for p in self.root.iterdir()}
+        self.invoke()
+        after = {p.name: p.read_bytes() for p in self.root.iterdir()}
+        self.assertEqual(before, after)
+
     def test_shared_sources_are_read_once_for_all_profile_decisions(self):
         opened = []
         original = c0.inspect_manifest
@@ -221,7 +260,7 @@ class SuiteTests(unittest.TestCase):
     def test_legacy_policy_and_plan_output_modes_unchanged(self):
         original = subprocess.run([sys.executable, str(SCRIPT),
                                    str(self.root / 'plan.json'), '--fail-on-change'],
-                                  capture_output=True, timeout=6)
+                                  capture_output=True, timeout=6, check=False)
         self.assertEqual(original.returncode, 3)
         self.assertEqual(json.loads(original.stdout)['schema'],
                          'som-t5b0-c0-review-plan-summary-v1')
@@ -229,7 +268,7 @@ class SuiteTests(unittest.TestCase):
         selected = subprocess.run([sys.executable, str(SCRIPT),
                                    str(self.root / 'plan.json'),
                                    '--policy-file', 'policy.json'],
-                                  capture_output=True, timeout=6)
+                                  capture_output=True, timeout=6, check=False)
         self.assertEqual(selected.returncode, 0)
         self.assertEqual(json.loads(selected.stdout)['schema'],
                          'som-t5b0-c0-review-policy-summary-v1')

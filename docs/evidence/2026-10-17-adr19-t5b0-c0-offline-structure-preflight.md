@@ -1145,3 +1145,77 @@ These are **local structural change gates, not permission to collect, attest,
 trust or execute** any input. `NO_NETWORK`, `NO_AUTHORIZATION`,
 `C0_COLLECT_HOLD`, all five independently `UNVERIFIED` evidence gaps, and
 T5B/Mac UID502/APFS/Linux C security/release HOLDs remain intact.
+
+## Multi-policy offline plan evaluation, one immutable observed input set (2026-10-22/23)
+
+A single offline command can evaluate **multiple prospective CI change policies
+against exactly the same already-local evidence proposal snapshots**, e.g.
+current strict budgets alongside a more permissive candidate, without
+opening and comparing the sources anew for each profile:
+
+```sh
+python3 ops/t5b0/c0_review_plan.py ./plan.json --policy-suite-file suite.json
+```
+
+The local `suite.json` is a separate regular JSON file (≤32,768 bytes) in the
+same parent directory as `plan.json`, with fixed `schema` and **1–8 policy
+profiles**, each using the already reviewed single-policy `case_limits` and
+`aggregate_limits` types with exactly one case rule per plan comparison:
+
+```json
+{
+  "schema": "som-t5b0-c0-review-policy-suite-v1",
+  "profiles": [
+    {
+      "case_limits": [
+        {"max_added":0,"max_removed":0,"max_changed":0,
+         "deny_changed_fields":["url","sha256"]}
+      ],
+      "aggregate_limits": {
+        "max_changed_cases":0,"max_added":0,"max_removed":0,"max_changed":0
+      }
+    },
+    {
+      "case_limits": [
+        {"max_added":0,"max_removed":0,"max_changed":1,
+         "deny_changed_fields":[]}
+      ],
+      "aggregate_limits": {
+        "max_changed_cases":1,"max_added":0,"max_removed":0,"max_changed":1
+      }
+    }
+  ]
+}
+```
+
+This example is for a **one-case** plan; policy profiles with a different
+case count are refused. All profiles use exact key sets, strict integer budget
+0–4096 (not floats or booleans), and a canonical ordered subset of the four
+allowed field names `url`, `sha256`, `bytes`, `max_bytes`. The suite JSON and
+all its profiles must validate completely **before opening any referenced
+manifest/NDJSON source**. The file is opened beneath one anchored no-follow
+parent directory FD using regular-only/nonblocking/same-FD metadata and bounded
+read guarantees, and cannot name the plan itself or a referenced source.
+All previous local source ceilings, 1–8 plan cases, ≤32 unique basenames,
+per-side cross-record consistency checks and once-per-file cached observations
+are unchanged.
+
+Successful source observation produces fixed private
+`som-t5b0-c0-review-policy-suite-summary-v1` machine JSON: one common case
+change summary and a **1-based list of profile decisions**, each containing
+`POLICY_PASS`/`POLICY_VIOLATION`, per-case fixed violation-code lists,
+aggregate codes and numeric profile counts. This avoids duplicated sensitive
+source values, IDs, paths, URLs, hashes or diagnostic text. A suite passes
+(exit `0`) only when every candidate policy passes; any violation is exit `3`
+with `POLICY_SUITE_VIOLATION`. Any invalid profile, unsafe suite/plan/source,
+symlink/FIFO, oversized file or structural refusal causes a **global**
+`REFUSED`/exit `2` with empty case/profile arrays and null aggregate counts.
+No individual policy result is disclosed when the run is refused.
+
+`--policy-suite-file` is mutually exclusive with `--policy-file` and
+`--fail-on-change`, before input reads. The earlier single-policy and no-policy
+CLI output schemas and 0/2/3 behavior are unchanged. This is **offline
+structural policy simulation**, not source/signer trust, acquisition, material
+collection, host privilege, or release authorization. `NO_NETWORK`,
+`NO_AUTHORIZATION`, `C0_COLLECT_HOLD`, five independently `UNVERIFIED` evidence
+gaps and all T5B/Mac UID502/APFS/Linux C security HOLDs remain unchanged.
