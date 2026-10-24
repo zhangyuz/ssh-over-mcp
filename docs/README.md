@@ -19,6 +19,8 @@ This directory is the canonical behavioral and security specification for `ssh-o
 13. **Worktree-local agent handoff template** — [`templates/progress.md`](templates/progress.md)
 14. **Current MVP delivery entrypoint** — [`mvp-status.md`](mvp-status.md) (two mandatory deployment modes confirmed: single-engine E2E and per-host multi-engine Compose; remaining ADR approval pending)
 
+**MVP offline artifact consistency operator CLI** — [topology + rendered Compose bundle preflight](runbooks/mvp-compose-bundle-preflight.md) (static only; no deployment authorization).
+
 ## Three-layer agent collaboration
 
 - [`../AGENTS.md`](../AGENTS.md) is the concise operational contract for agents and approval boundaries.
