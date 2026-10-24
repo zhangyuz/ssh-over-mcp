@@ -23,6 +23,8 @@ This directory is the canonical behavioral and security specification for `ssh-o
 
 **MVP offline artifact consistency operator CLI** — [topology + rendered Compose bundle preflight](runbooks/mvp-compose-bundle-preflight.md) (static only; no deployment authorization).
 
+**M1a static Mode A multi-SSH Compose overlay** — [offline render-only runbook](runbooks/mvp-mode-a-compose-render.md) (no Docker deployment/startup authorization).
+
 ## Three-layer agent collaboration
 
 - [`../AGENTS.md`](../AGENTS.md) is the concise operational contract for agents and approval boundaries.
