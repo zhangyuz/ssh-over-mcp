@@ -6,10 +6,12 @@
 
 The operator must supply digest-pinned image *references* out of band for the control stack and two future SSH image assets. The included [`reference.mode-a.env.example`](../../deploy/compose/reference.mode-a.env.example) is intentionally **not runnable**: image digest fields contain invalid `DO_NOT_DEPLOY` markers, and file paths are placeholders, not real credentials. Do not populate this checked-in file with secrets. Use only synthetic, non-sensitive test paths and reviewed OCI reference strings when testing offline.
 
-A purely offline render command (do not append `up`, `pull` or `build`):
+A purely offline render command (do not append `up`, `pull` or `build`): **use a cleared process environment**. An inherited `COMPOSE_ENV_FILES`, `COMPOSE_PROFILES`, `COMPOSE_FILE`, exported image variable or local `.env` can silently change what Compose renders; an explicit `--env-file` is not sufficient proof of input provenance. In the example, only PATH/HOME are retained for CLI plugin discovery, and the Docker host points to a nonexistent socket:
 
 ```sh
-docker compose \
+env -i PATH="$PATH" HOME="$HOME" COMPOSE_DISABLE_ENV_FILE=1 \
+  DOCKER_HOST=unix:///nonexistent-som-mode-a.sock \
+  docker compose \
   -f deploy/compose/compose.yaml \
   -f deploy/compose/compose.dev-ssh.yaml \
   --project-name som-mode-a-synthetic \
@@ -25,7 +27,7 @@ python3 ops/mvp/bundle_preflight.py \
   --control-json /operator-owned/private/rendered-mode-a.json
 ```
 
-The command requires Docker Compose **2.24.4+ supporting `!override`** (tested with v5.5.1), but **does not require or contact a Docker Engine** for `config` output. Never paste rendered Compose output containing interpolated paths/config/secret references into tickets or logs. The topology JSON is independently provided, including both distinct node aliases and *synthetic* SSH host-key fingerprint syntax; syntax/consistency checks do not establish trust. All image variables — `SSH_OVER_MCP_IMAGE`, `SSH_OVER_MCP_NODE01_IMAGE`, `SSH_OVER_MCP_NODE02_IMAGE` — must be explicitly set; the overlay rejects missing values rather than falling back to the control project's mutable historic `phase6b` image tag. A syntactically well-formed digest string still **does not prove image contents, signature or provenance**.
+The command requires Docker Compose **2.33.1+** (both `!override` and the base file's `gw_priority`; tested with v5.5.1), but **does not require or contact a Docker Engine** for `config` output. Never paste rendered Compose output containing interpolated paths/config/secret references into tickets or logs. The topology JSON is independently provided, including both distinct node aliases and *synthetic* SSH host-key fingerprint syntax; syntax/consistency checks do not establish trust. All image variables — `SSH_OVER_MCP_IMAGE`, `SSH_OVER_MCP_NODE01_IMAGE`, `SSH_OVER_MCP_NODE02_IMAGE` — must be explicitly set; the overlay rejects missing values rather than falling back to the control project's mutable historic `phase6b` image tag. A syntactically well-formed digest string still **does not prove image contents, signature or provenance**.
 
 ## Isolation represented by the YAML (not yet proven in running containers)
 

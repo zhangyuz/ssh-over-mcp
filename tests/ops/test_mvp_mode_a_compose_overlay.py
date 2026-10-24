@@ -42,10 +42,18 @@ def overlay() -> dict:
 
 
 def synthetic_env() -> dict[str, str]:
+    # Never inherit operator/project Compose settings. COMPOSE_ENV_FILES and
+    # COMPOSE_PROFILES could silently replace missing digests or start a profile.
+    # HOME/PATH are kept only so user-installed Docker CLI plugins can be found.
+    env = {
+        key: os.environ[key]
+        for key in ("PATH", "HOME", "TMPDIR", "SYSTEMROOT")
+        if key in os.environ
+    }
     return {
-        **os.environ,
+        **env,
+        "COMPOSE_DISABLE_ENV_FILE": "1",
         "DOCKER_HOST": "unix:///nonexistent-som-mvp-mode-a-docker.sock",
-        "DOCKER_CONFIG": "/nonexistent-som-mvp-docker-config",
         "SSH_OVER_MCP_IMAGE": CONTROL_IMAGE,
         "SSH_OVER_MCP_PROFILE": "rw-operator",
         "SSH_OVER_MCP_CONFIG_FILE": "/srv/som-operator/synthetic/config.yaml",
@@ -57,12 +65,35 @@ def synthetic_env() -> dict[str, str]:
     }
 
 
+def _compose_command() -> list[str] | None:
+    if shutil.which("docker"):
+        try:
+            # `docker compose version` is a local plugin-discovery command;
+            # does not connect to any Docker Engine or require host privileges.
+            result = subprocess.run(
+                ["docker", "compose", "version"],
+                env=synthetic_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                return ["docker", "compose"]
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+    if shutil.which("docker-compose"):
+        return ["docker-compose"]
+    return None
+
+
 def render(*, env=None, require_success=True):
-    if not shutil.which("docker-compose"):
-        pytest.skip("Docker Compose CLI not installed; static YAML tests still apply")
+    command = _compose_command()
+    if command is None:
+        pytest.skip("No Compose plugin or standalone CLI; static YAML tests still apply")
     proc = subprocess.run(
         [
-            "docker-compose",
+            *command,
             "-f",
             str(BASE),
             "-f",
@@ -318,11 +349,12 @@ def test_baseline_wide_ssh_egress_remains_outside_the_overlay_contract():
 
 @pytest.mark.parametrize("profile", ["admin", "cloudflare"])
 def test_opt_in_control_services_remain_isolated_after_overlay(profile, tmp_path):
-    if not shutil.which("docker-compose"):
-        pytest.skip("Compose CLI unavailable; static YAML test unaffected")
+    command = _compose_command()
+    if command is None:
+        pytest.skip("No Compose plugin or standalone CLI; static YAML test unaffected")
     result = subprocess.run(
         [
-            "docker-compose",
+            *command,
             "-f",
             str(BASE),
             "-f",
@@ -366,3 +398,60 @@ def test_opt_in_control_services_remain_isolated_after_overlay(profile, tmp_path
     )
     assert check.returncode == 0, check.stderr
     assert json.loads(check.stdout)["deployment_ready"] is False
+
+
+def test_compose_cli_falls_back_to_plugin_on_plugin_only_system(monkeypatch):
+    """CI may have `docker compose` but no `docker-compose` standalone."""
+    import types
+    from unittest.mock import patch
+
+    def which(name):
+        return "/usr/bin/docker" if name == "docker" else None
+
+    monkeypatch.setattr(shutil, "which", which)
+    with patch.object(subprocess, "run", return_value=types.SimpleNamespace(returncode=0)) as cmd:
+        assert _compose_command() == ["docker", "compose"]
+        assert cmd.call_args.args[0] == ["docker", "compose", "version"]
+
+
+def test_compose_standalone_used_only_if_plugin_not_available(monkeypatch):
+    import types
+    from unittest.mock import patch
+
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/" + name)
+    with patch.object(subprocess, "run", return_value=types.SimpleNamespace(returncode=1)):
+        assert _compose_command() == ["docker-compose"]
+
+
+def test_missing_ssh_digest_still_fails_under_poisoned_ambient_compose_env(
+    tmp_path,
+    monkeypatch,
+):
+    env_file = tmp_path / "spoofed-ambient.env"
+    env_file.write_text("SSH_OVER_MCP_NODE01_IMAGE=" + NODE01_IMAGE + "\n")
+    monkeypatch.setenv("COMPOSE_ENV_FILES", str(env_file))
+    monkeypatch.setenv("COMPOSE_PROFILES", "cloudflare,admin")
+    env = synthetic_env()
+    assert "COMPOSE_ENV_FILES" not in env
+    assert "COMPOSE_PROFILES" not in env
+    assert env["COMPOSE_DISABLE_ENV_FILE"] == "1"
+    env.pop("SSH_OVER_MCP_NODE01_IMAGE")
+    proc = render(env=env, require_success=False)
+    assert proc.returncode != 0
+    assert not proc.stdout
+
+
+def test_documented_compose_floor_matches_base_gateway_priority_requirement():
+    runbook = (ROOT / "docs/runbooks/mvp-mode-a-compose-render.md").read_text()
+    assert "2.33.1+" in runbook
+    assert "Compose 2.24.4+" not in runbook
+
+
+def test_render_stays_in_default_profile_even_with_ambient_profile_set(monkeypatch):
+    monkeypatch.setenv("COMPOSE_PROFILES", "admin,cloudflare")
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "ambient-poison")
+    assert "COMPOSE_PROFILES" not in synthetic_env()
+    assert "COMPOSE_PROJECT_NAME" not in synthetic_env()
+    doc = render()
+    assert set(doc["services"]) == {"ledger-init", "ledger", "mcp", "node01", "node02"}
+    assert doc["name"] == "som-mode-a-synthetic"

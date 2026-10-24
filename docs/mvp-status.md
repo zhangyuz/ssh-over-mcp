@@ -22,7 +22,7 @@
 
 - **离线拓扑⇄Compose 交叉一致性预检（已合入 main，PR #341）：** `python3 ops/mvp/bundle_preflight.py --topology-json ... --control-json ... [--node01-json ... --node02-json ...]`。把 manifest 的 Mode A/B、控制面与两个 SSH 目标的 OCI **digest 声明字符串**与已渲染 Compose 配置进行有界一致性拒绝检查，避免两份独立有效的静态文件相互矛盾。它不会认证镜像来源、真实三台 Engine、SSH host-key、网络或运行时权限；通过时 `deployment_ready=false`。见 [离线跨文档一致性预检手册](runbooks/mvp-compose-bundle-preflight.md)。该静态交叉预检已合入 main，但绝不构成部署、镜像来源或真实多宿主机验收。
 
-- **M1a 单机双 SSH Compose overlay（当前 Draft PR，非部署验收）：** `deploy/compose/compose.dev-ssh.yaml` 与现有控制面 Compose 组合，可在不启动任何容器的情况下用 Compose 2.24.4+ `config --format json` 生成一个 `mcp` + 两个独立 SSH 网络和节点数据/host-key 卷的 Mode A 声明，须显式输入 digest 引用并覆盖遗留宽泛 `ssh_egress`。适用离线预检只说明静态结构，`deployment_ready=false`。**尚无经批准/验证的 sshd/ForceCommand/manager/cgroup/image 来源，也没有真实 Linux Docker Engine 的安全正反验收**；该 overlay 绝非可执行部署授权，M1a A01–A03 / M1b A15–A18 均保持 NOT_RUN/HOLD。见 [Mode A render-only 手册](runbooks/mvp-mode-a-compose-render.md)。
+- **M1a 单机双 SSH Compose overlay（当前 Draft PR，非部署验收）：** `deploy/compose/compose.dev-ssh.yaml` 与现有控制面 Compose 组合，可在不启动任何容器的情况下用 Compose 2.33.1+ `config --format json` 生成一个 `mcp` + 两个独立 SSH 网络和节点数据/host-key 卷的 Mode A 声明，须显式输入 digest 引用并覆盖遗留宽泛 `ssh_egress`。适用离线预检只说明静态结构，`deployment_ready=false`。**尚无经批准/验证的 sshd/ForceCommand/manager/cgroup/image 来源，也没有真实 Linux Docker Engine 的安全正反验收**；该 overlay 绝非可执行部署授权，M1a A01–A03 / M1b A15–A18 均保持 NOT_RUN/HOLD。见 [Mode A render-only 手册](runbooks/mvp-mode-a-compose-render.md)。
 
 ## 当前工具实现差距
 
