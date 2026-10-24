@@ -196,11 +196,23 @@ def test_mode_a_refuses_unsafe_config_without_source_reflection(tmp_path, defect
         services["node01"]["ports"] = [{"target": 22, "published": "22"}]
     elif defect == "docker_socket":
         services["node01"]["volumes"].append(
-            {"type": "bind", "source": "/var/run/docker.sock", "target": "/var/run/docker.sock"}
+            {
+                "type": "bind",
+                "source": "/var/run/docker.sock",
+                "target": "/var/run/docker.sock",
+                "read_only": True,
+                "bind": {"create_host_path": False},
+            }
         )
     elif defect == "cgroup_bind":
         services["node01"]["volumes"].append(
-            {"type": "bind", "source": "/sys/fs/cgroup", "target": "/sys/fs/cgroup"}
+            {
+                "type": "bind",
+                "source": "/sys/fs/cgroup",
+                "target": "/sys/fs/cgroup",
+                "read_only": True,
+                "bind": {"create_host_path": False},
+            }
         )
     elif defect == "shared_target_volume":
         services["node02"]["volumes"][0]["source"] = "node01-data"
@@ -295,6 +307,7 @@ def test_mode_a_allows_read_only_control_config_bind_and_project_named_volumes(t
             "source": "/operator-owned/config.yaml",
             "target": "/etc/ssh-over-mcp/config.yaml",
             "read_only": True,
+            "bind": {"create_host_path": False},
         },
     ]
     for alias in ("node01", "node02"):
@@ -355,6 +368,7 @@ def test_control_ro_bind_rejects_unsafe_or_noncanonical_host_source(tmp_path, so
             "source": source,
             "target": "/etc/ssh-over-mcp/config.yaml",
             "read_only": True,
+            "bind": {"create_host_path": False},
         }
     ]
     response = invoke(tmp_path, control_doc=doc)
@@ -412,6 +426,7 @@ def test_read_only_bind_ancestor_of_docker_socket_is_denied(tmp_path, source):
             "source": source,
             "target": "/etc/ssh-over-mcp/config.yaml",
             "read_only": True,
+            "bind": {"create_host_path": False},
         }
     ]
     response = invoke(tmp_path, control_doc=doc)
@@ -444,6 +459,7 @@ def test_duplicate_separator_bind_source_cannot_hide_socket(tmp_path, source):
             "source": source,
             "target": "/etc/ssh-over-mcp/config.yaml",
             "read_only": True,
+            "bind": {"create_host_path": False},
         }
     ]
     result = invoke(tmp_path, control_doc=doc)
@@ -476,7 +492,13 @@ def test_resolved_target_volume_cannot_alias_ledger_admin(tmp_path, mode):
 def test_rootless_docker_runtime_mount_refused(tmp_path, source):
     doc = control("dev-e2e")
     doc["services"]["mcp"]["volumes"] = [
-        {"type": "bind", "source": source, "target": "/daemon-api", "read_only": True}
+        {
+            "type": "bind",
+            "source": source,
+            "target": "/daemon-api",
+            "read_only": True,
+            "bind": {"create_host_path": False},
+        }
     ]
     result = invoke(tmp_path, control_doc=doc)
     assert result.returncode != 0 and result.stdout == ""
@@ -564,7 +586,13 @@ def test_non_bridge_network_drivers_refused(tmp_path, driver):
 def test_mcp_readonly_bind_cannot_cover_ledger_runtime_targets(tmp_path, target):
     doc = control("dev-e2e")
     doc["services"]["mcp"]["volumes"] = [
-        {"type": "bind", "source": "/operator-owned/notes", "target": target, "read_only": True}
+        {
+            "type": "bind",
+            "source": "/operator-owned/notes",
+            "target": target,
+            "read_only": True,
+            "bind": {"create_host_path": False},
+        }
     ]
     result = invoke(tmp_path, control_doc=doc)
     assert result.returncode != 0 and result.stdout == ""
@@ -592,6 +620,7 @@ def test_management_runtime_and_volume_backend_bind_sources_refused(tmp_path, so
             "source": source,
             "target": "/etc/ssh-over-mcp/config.yaml",
             "read_only": True,
+            "bind": {"create_host_path": False},
         }
     ]
     result = invoke(tmp_path, control_doc=doc)
@@ -650,6 +679,7 @@ def test_mcp_bind_requires_known_control_input_target(tmp_path, target):
             "source": "/operator-owned/config.yaml",
             "target": target,
             "read_only": True,
+            "bind": {"create_host_path": False},
         }
     ]
     result = invoke(tmp_path, control_doc=doc)
@@ -990,3 +1020,43 @@ def test_reviewed_control_uid_entrypoint_and_socket_pins_match_repo_compose_sour
                     assert actual[role]["environment"][key].startswith("${SSH_OVER_MCP_PROFILE:")
                     continue
                 assert actual[role]["environment"][key] == value
+
+
+@pytest.mark.parametrize("mode", ["dev-e2e", "multi-host"])
+@pytest.mark.parametrize("bind_option", [None, {}, {"create_host_path": True}])
+def test_readonly_operator_bind_requires_explicit_no_host_creation(
+    tmp_path,
+    mode,
+    bind_option,
+):
+    doc = control(mode)
+    mount = {
+        "type": "bind",
+        "source": "/operator-owned/missing-config.yaml",
+        "target": "/etc/ssh-over-mcp/config.yaml",
+        "read_only": True,
+    }
+    if bind_option is not None:
+        mount["bind"] = bind_option
+    doc["services"]["mcp"]["volumes"] = [mount]
+    result = invoke(tmp_path, mode, control_doc=doc)
+    assert result.returncode != 0 and result.stdout == ""
+
+
+def test_cloudflared_bind_requires_explicit_no_host_creation(tmp_path):
+    doc = control("dev-e2e")
+    doc["networks"]["cloudflare_egress"] = {}
+    doc["services"]["cloudflared"] = reviewed_control_service(
+        "cloudflared",
+        networks=["origin_internal", "cloudflare_egress"],
+        volumes=[
+            {
+                "type": "bind",
+                "source": "/operator-owned/cloudflare-token",
+                "target": "/run/secrets/cloudflare-tunnel-token",
+                "read_only": True,
+            }
+        ],
+    )
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode != 0 and result.stdout == ""

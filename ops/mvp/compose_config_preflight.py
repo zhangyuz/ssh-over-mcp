@@ -307,9 +307,10 @@ def _hardening(role: str, service: object, defined: dict) -> set[str]:
         if kind == "bind":
             if set(item) - {"type", "source", "target", "read_only", "bind"}:
                 raise Refused("UNREVIEWED_BIND_OPTION")
-            if "bind" in item and item["bind"] != {"create_host_path": False}:
-                # Reject SELinux z/Z relabels, rshared propagation and implicit
-                # host-path creation even when the mount is read-only.
+            if item.get("bind") != {"create_host_path": False}:
+                # Even an absent bind mapping can have Compose's legacy
+                # create_host_path=true default; RO does not prevent creation.
+                # Reject SELinux relabels and unreviewed mount propagation too.
                 raise Refused("UNREVIEWED_BIND_OPTION")
         else:
             if set(item) - {"type", "source", "target", "read_only", "volume"}:
