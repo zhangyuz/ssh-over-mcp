@@ -6,10 +6,10 @@
 
 > **2026-10-26 独立可合并核心修复（源码及 CI 待审查）：** `fs_mkdir(create-only)` 增加对已 pin 父目录的创建前后持久化 `fsync`，创建后 fsync/close 异常必须保留“已提交但持久化不确定”状态（SSH exit 74），绝不回滚或盲目重试。这个修改不启用 Compose/SSH OCI/manager/cgroup；Mode A/B 实际双节点运行与 #342 Release/Native Level-3 门禁仍 HOLD。
 
-> Candidate offline operator capability (unmerged, 2026-10-24): [`ops/mvp/subtree_visibility_preview.py`](../ops/mvp/subtree_visibility_preview.py) previews synthetic `fs_list`/`fs_search` path allow/deny subtree decisions only. It does not enable any MCP/host-agent tools, central snapshot or Host Policy v5, and does not change A01–A18 NOT_RUN or #342 Docker deployment HOLD. See [runbook](runbooks/mvp-subtree-visibility-preview.md).
+> Merged offline operator capability (PR #343, 2026-10-24): [`ops/mvp/subtree_visibility_preview.py`](../ops/mvp/subtree_visibility_preview.py) previews synthetic `fs_list`/`fs_search` path allow/deny subtree decisions only. It does not enable any MCP/host-agent tools, central snapshot or Host Policy v5, and does not change A01–A18 NOT_RUN or #342 Docker deployment HOLD. See [runbook](runbooks/mvp-subtree-visibility-preview.md).
 
 **状态：双部署形态已由用户明确确认；ADR0021 其他安全设计/实施计划仍为 PROPOSED / DRAFT，待评审确认。**
-**当前已验证主线基线：** `111ff16aeda4b9e0c13f07f64ab4075539cddb59`（PR #341 合并后的 main；[push-main CI #40116060743](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/40116060743) 为 11/11 PASS，含 Native Level-3）。本页仍是 MVP 工作计划状态，不是 Compose 实际部署/验收证据。
+**当前已验证主线基线：** `6eca40dcd204c3ab37d82352f4f69b267fb5ff73`（PR #343 合并后的 main；[push-main CI #40131085842](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/40131085842) 为 11/11 PASS，含 Native Level-3）。本页仍是 MVP 工作计划状态，不是 Compose 实际部署/验收证据。
 
 用户已确定的 MVP 目标：**MCP Server 和每一个 SSH Server 均使用 Docker Compose 部署**，至少两个独立 SSH 目标；支持 **全部八种 typed 文件读写操作**，在受控数据根内执行并保留现有审批/审计/SSH 隔离。**必须同时交付两种模式：Mode A 单 Linux Engine 多 Compose 容器供开发/E2E；Mode B 不同 Linux Engine 上分别启动独立 Compose 项目（control01 MCP/ledger/approval + ssh-host01 + ssh-host02）供实际部署。** 多宿主机模式需要 operator-approved 私有路由、SSH host-key pins、firewall/ACL 和真实网络故障验收，不得用单机测试代替。禁止以“支持所有读写”推出裸 shell、任意 host root 或 Docker 管理能力。
 
@@ -27,6 +27,8 @@
 - **离线拓扑⇄Compose 交叉一致性预检（已合入 main，PR #341）：** `python3 ops/mvp/bundle_preflight.py --topology-json ... --control-json ... [--node01-json ... --node02-json ...]`。把 manifest 的 Mode A/B、控制面与两个 SSH 目标的 OCI **digest 声明字符串**与已渲染 Compose 配置进行有界一致性拒绝检查，避免两份独立有效的静态文件相互矛盾。它不会认证镜像来源、真实三台 Engine、SSH host-key、网络或运行时权限；通过时 `deployment_ready=false`。见 [离线跨文档一致性预检手册](runbooks/mvp-compose-bundle-preflight.md)。该静态交叉预检已合入 main，但绝不构成部署、镜像来源或真实多宿主机验收。
 
 - **M1a 单机双 SSH Compose overlay（当前 Draft PR，非部署验收）：** `deploy/compose/compose.dev-ssh.yaml` 与现有控制面 Compose 组合，可在不启动任何容器的情况下用 Compose 2.33.1+ `config --format json` 生成一个 `mcp` + 两个独立 SSH 网络和节点数据/host-key 卷的 Mode A 声明，须显式输入 digest 引用并覆盖遗留宽泛 `ssh_egress`。适用离线预检只说明静态结构，`deployment_ready=false`。**尚无经批准/验证的 sshd/ForceCommand/manager/cgroup/image 来源，也没有真实 Linux Docker Engine 的安全正反验收**；该 overlay 绝非可执行部署授权，M1a A01–A03 / M1b A15–A18 均保持 NOT_RUN/HOLD。见 [Mode A render-only 手册](runbooks/mvp-mode-a-compose-render.md)。
+
+- **离线目录可见性预览工具（PR #343 已合并）：** `python3 ops/mvp/subtree_visibility_preview.py --rules-json ... --queries-json ...` 对合成 `fs_list/fs_search` 规则给出非权威 allow/deny 子树预览，拒绝子树根和所有后代，不连接 SSH 或授权新工具；永远报告 `authoritative=false`/`deployment_ready=false`。真实逐节点策略快照、epoch、Host Policy v5 与 live 列举/搜索仍 NOT_IMPLEMENTED。见 [操作手册](runbooks/mvp-subtree-visibility-preview.md)。
 
 ## 当前工具实现差距
 
