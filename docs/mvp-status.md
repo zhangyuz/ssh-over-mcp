@@ -1,5 +1,7 @@
 # MVP 当前交付入口：Compose 多 SSH 读写试点
 
+> Candidate offline operator capability (unmerged, 2026-10-24): [`ops/mvp/subtree_visibility_preview.py`](../ops/mvp/subtree_visibility_preview.py) previews synthetic `fs_list`/`fs_search` path allow/deny subtree decisions only. It does not enable any MCP/host-agent tools, central snapshot or Host Policy v5, and does not change A01–A18 NOT_RUN or #342 Docker deployment HOLD. See [runbook](runbooks/mvp-subtree-visibility-preview.md).
+
 **状态：双部署形态已由用户明确确认；ADR0021 其他安全设计/实施计划仍为 PROPOSED / DRAFT，待评审确认。**
 **当前代码基线：** `6c3a2aee2a55baed86e7a871268c8eb9b0d194af`（PR #339 合并后的 main；[push-main CI #40007266579](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/40007266579) 为 11/11 PASS，含 Native Level-3）。本页仍是 MVP 工作计划状态，不是 Compose 实际部署/验收证据。
 
