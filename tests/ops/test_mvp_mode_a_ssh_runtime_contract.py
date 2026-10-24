@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -46,6 +47,8 @@ def _check_contract(text: str) -> None:
         "strictmodes": "yes",
         "permittty": "no",
         "allowtcpforwarding": "no",
+        "disableforwarding": "yes",
+        "allowstreamlocalforwarding": "no",
         "allowagentforwarding": "no",
         "x11forwarding": "no",
         "permittunnel": "no",
@@ -70,6 +73,8 @@ def test_proposed_sshd_config_matches_existing_guest_forcecommand_contract():
         ("PasswordAuthentication no", "PasswordAuthentication yes"),
         ("PermitTTY no", "PermitTTY yes"),
         ("AllowTcpForwarding no", "AllowTcpForwarding yes"),
+        ("DisableForwarding yes", "DisableForwarding no"),
+        ("AllowStreamLocalForwarding no", "AllowStreamLocalForwarding yes"),
         ("PermitUserEnvironment no", "PermitUserEnvironment yes"),
         ("PermitUserRC no", "PermitUserRC yes"),
         ("PermitRootLogin no", "PermitRootLogin yes"),
@@ -93,6 +98,28 @@ def test_insecure_proposed_sshd_mutations_are_rejected(original, replacement):
     assert original in source
     with pytest.raises(AssertionError):
         _check_contract(source.replace(original, replacement))
+
+
+@pytest.mark.skipif(
+    not Path("/usr/sbin/sshd").is_file(),
+    reason="sshd binary not present: static contract tests still execute",
+)
+def test_real_installed_sshd_effective_config_has_no_forwarding():
+    # Parses config but does NOT start sshd, open a socket or read a host key.
+    result = subprocess.run(
+        ["/usr/sbin/sshd", "-G", "-f", str(SSHD_CONFIG)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr[:180]
+    effective = _sshd_options(result.stdout)
+    assert effective["disableforwarding"] == "yes"
+    assert effective["allowstreamlocalforwarding"] == "no"
+    assert effective["allowtcpforwarding"] == "no"
+    assert effective["permittty"] == "no"
+    assert effective["passwordauthentication"] == "no"
 
 
 def test_duplicate_option_and_unreviewed_match_block_refused():

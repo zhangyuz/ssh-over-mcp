@@ -17,6 +17,8 @@ UsePAM no
 StrictModes yes
 PermitTTY no
 AllowTcpForwarding no
+DisableForwarding yes
+AllowStreamLocalForwarding no
 AllowAgentForwarding no
 X11Forwarding no
 PermitTunnel no
