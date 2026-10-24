@@ -1143,3 +1143,52 @@ def test_rootless_storage_enclosing_paths_and_custom_home_refused(tmp_path, sour
     result = invoke(tmp_path, "multi-host", control_doc=doc)
     assert result.returncode != 0
     assert result.stdout == ""
+
+
+@pytest.mark.parametrize("mode", ["dev-e2e", "multi-host"])
+def test_rendered_compose_empty_ipam_defaults_accepted_in_both_modes(tmp_path, mode):
+    """Compose 5.5 emits ipam: {} for regular bridge networks after config render."""
+    doc = control(mode)
+    for config in doc["networks"].values():
+        config["ipam"] = {}
+    if mode == "dev-e2e":
+        result = invoke(tmp_path, mode, control_doc=doc)
+    else:
+        node = host()
+        for config in node["networks"].values():
+            config["ipam"] = {}
+        result = invoke(tmp_path, mode, control_doc=doc, node01_doc=node, node02_doc=node)
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["static_compose_shape_valid"] is True
+    assert report["deployment_ready"] is False
+    assert report["network_acl_verified"] is False
+
+
+@pytest.mark.parametrize("mode", ["dev-e2e", "multi-host"])
+@pytest.mark.parametrize(
+    "ipam",
+    [
+        None,
+        [],
+        {"config": [{"subnet": "10.0.0.0/8"}]},
+        {"driver": "default"},
+        {"options": {"unsafe": "value"}},
+        {"config": []},
+    ],
+)
+def test_rendered_compose_nonempty_or_malformed_ipam_is_refused(tmp_path, mode, ipam):
+    doc = control(mode)
+    doc["networks"]["origin_internal"]["ipam"] = ipam
+    result = invoke(tmp_path, mode, control_doc=doc)
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "preflight refused:" in result.stderr
+
+
+def test_mode_b_target_rendered_custom_ipam_refused(tmp_path):
+    node = host()
+    node["networks"]["ssh_private"]["ipam"] = {"config": [{"subnet": "10.12.0.0/16"}]}
+    result = invoke(tmp_path, "multi-host", node02_doc=node)
+    assert result.returncode != 0
+    assert result.stdout == ""

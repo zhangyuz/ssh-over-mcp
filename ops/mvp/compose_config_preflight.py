@@ -179,8 +179,13 @@ def _project(document: object) -> tuple[dict, dict, dict[str, str]]:
         if type(name) is not str or type(config) is not dict:
             raise Refused("INVALID_NETWORK")
         # External/custom driver networks are not an implied ACL/identity proof.
-        if config.get("external") or set(config) - {"internal", "name", "driver"}:
+        if config.get("external") or set(config) - {"internal", "name", "driver", "ipam"}:
             raise Refused("UNSUPPORTED_NETWORK")
+        # Compose 5.5 renders a harmless `ipam: {}` on ordinary bridge
+        # networks. Custom subnets, gateways, options or malformed IPAM are
+        # NOT in this static-only review contract.
+        if "ipam" in config and (type(config["ipam"]) is not dict or config["ipam"]):
+            raise Refused("UNSUPPORTED_NETWORK_IPAM")
         if config.get("driver") not in (None, "bridge"):
             raise Refused("UNSUPPORTED_NETWORK_DRIVER")
         resolved = config.get("name", name)
