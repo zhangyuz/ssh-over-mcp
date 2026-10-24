@@ -455,3 +455,16 @@ def test_render_stays_in_default_profile_even_with_ambient_profile_set(monkeypat
     doc = render()
     assert set(doc["services"]) == {"ledger-init", "ledger", "mcp", "node01", "node02"}
     assert doc["name"] == "som-mode-a-synthetic"
+
+
+def test_operator_docs_expose_reverse_node_to_mcp_bridge_reachability():
+    # A shared Docker bridge is not a directional ACL. This is a live HOLD.
+    doc = overlay()
+    assert doc["services"]["mcp"]["networks"]["node01_ssh"] == {}
+    assert doc["services"]["node01"]["networks"] == ["node01_ssh"]
+    baseline = yaml.safe_load(BASE.read_text())
+    assert baseline["services"]["mcp"]["environment"]["SSH_OVER_MCP_BIND_HOST"] == "0.0.0.0"
+    runbook = (ROOT / "docs/runbooks/mvp-mode-a-compose-render.md").read_text()
+    assert "node-initiated" in runbook
+    assert "bidirectional" in runbook
+    assert "real negative" in runbook

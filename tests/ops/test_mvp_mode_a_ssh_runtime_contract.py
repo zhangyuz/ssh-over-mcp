@@ -154,3 +154,11 @@ def test_current_mode_a_overlay_still_cannot_start_reviewed_sudo_handoff():
         assert "cap_add" not in container
         assert "entrypoint" not in container
         assert "command" not in container
+
+
+def test_adr_recognizes_setuid_is_root_identity_impersonation_authority():
+    # Linux CAP_SETUID permits changing to UID 0 in the same user namespace.
+    # A non-root host-agent with this capability is trusted, not unprivileged.
+    adr = (ROOT / "docs/decisions/0022-proposed-compose-ssh-privilege-domains.md").read_text()
+    assert "UID 0" in adr
+    assert "No root-equivalent rights" not in adr
