@@ -26,6 +26,36 @@ def service(**updates):
     return value
 
 
+def reviewed_control_service(role, **updates):
+    """Fixture mirrors the existing control-plane Compose UID/entrypoint pins."""
+    props = {
+        "ledger-init": {
+            "user": "0:0",
+            "entrypoint": ["ssh-over-mcp-ledger-init"],
+        },
+        "ledger": {
+            "user": "10002:10002",
+            "entrypoint": ["ssh-over-mcp-ledger"],
+            "group_add": ["10003", "10005"],
+        },
+        "mcp": {
+            "user": "10001:10003",
+            "entrypoint": ["ssh-over-mcp-server"],
+        },
+        "approvalctl": {
+            "user": "10004:10005",
+            "entrypoint": ["ssh-over-mcp-approvalctl"],
+        },
+        "cloudflared": {
+            "user": "65532:65532",
+            "command": ["tunnel", "run", "--token-file", "/run/secrets/cloudflare-tunnel-token"],
+        },
+    }
+    value = service(**props[role])
+    value.update(updates)
+    return value
+
+
 def control(mode):
     networks = {"origin_internal": {"internal": True}}
     if mode == "dev-e2e":
@@ -35,9 +65,11 @@ def control(mode):
         networks["private_ssh_egress"] = {}
         mcp_nets = ["origin_internal", "private_ssh_egress"]
     services = {
-        "ledger-init": service(network_mode="none", cap_add=["CHOWN", "DAC_OVERRIDE"]),
-        "ledger": service(network_mode="none"),
-        "mcp": service(networks=mcp_nets),
+        "ledger-init": reviewed_control_service(
+            network_mode="none", cap_add=["CHOWN", "DAC_OVERRIDE"], role="ledger-init"
+        ),
+        "ledger": reviewed_control_service(role="ledger", network_mode="none"),
+        "mcp": reviewed_control_service(role="mcp", networks=mcp_nets),
     }
     if mode == "dev-e2e":
         for alias in ("node01", "node02"):
@@ -265,7 +297,9 @@ def test_adversarial_nested_types_do_not_echo_or_traceback(tmp_path, field, valu
 
 def test_cloudflared_cannot_join_an_ssh_target_network(tmp_path):
     doc = control("dev-e2e")
-    doc["services"]["cloudflared"] = service(networks=["origin_internal", "node01_ssh"])
+    doc["services"]["cloudflared"] = reviewed_control_service(
+        "cloudflared", networks=["origin_internal", "node01_ssh"]
+    )
     result = invoke(tmp_path, control_doc=doc)
     assert result.returncode != 0
 
@@ -437,11 +471,11 @@ def test_control_volume_role_boundaries_refuse_conflicts(tmp_path, defect):
         doc["volumes"] = {source: {"name": "external_ledger-admin"}}
     elif defect == "approvalctl_ledger_exec":
         role = "approvalctl"
-        doc["services"][role] = service(network_mode="none")
+        doc["services"][role] = reviewed_control_service(role, network_mode="none")
         source = "ledger-exec"
     elif defect == "cloudflared_ledger_data":
         role = "cloudflared"
-        doc["services"][role] = service(networks=["origin_internal"])
+        doc["services"][role] = reviewed_control_service(role, networks=["origin_internal"])
         source = "ledger-data"
     elif defect == "mcp_exec_not_readonly":
         source = "ledger-exec"
@@ -469,7 +503,7 @@ def test_control_volume_role_allows_legitimate_mcp_ledger_approvalctl_mounts(tmp
         "mcp": [("ledger-exec", "/run/ssh-over-mcp-exec", True)],
         "approvalctl": [("ledger-admin", "/run/ssh-over-mcp-admin", True)],
     }
-    doc["services"]["approvalctl"] = service(network_mode="none")
+    doc["services"]["approvalctl"] = reviewed_control_service("approvalctl", network_mode="none")
     doc["volumes"] = {
         name: {"name": "som_" + name} for name in ("ledger-data", "ledger-exec", "ledger-admin")
     }
@@ -608,7 +642,8 @@ def test_expected_read_only_secret_mounts_are_not_refusal_only(tmp_path):
             "bind": {"create_host_path": False},
         },
     ]
-    doc["services"]["cloudflared"] = service(
+    doc["services"]["cloudflared"] = reviewed_control_service(
+        "cloudflared",
         networks=["origin_internal", "cloudflare_egress"],
         volumes=[
             {
@@ -620,6 +655,174 @@ def test_expected_read_only_secret_mounts_are_not_refusal_only(tmp_path):
             }
         ],
     )
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["deployment_ready"] is False
+
+
+@pytest.mark.parametrize(
+    "mode,role",
+    [
+        ("dev-e2e", "ledger-init"),
+        ("dev-e2e", "ledger"),
+        ("dev-e2e", "mcp"),
+        ("dev-e2e", "node01"),
+        ("dev-e2e", "node02"),
+        ("multi-host", "ledger-init"),
+        ("multi-host", "ledger"),
+        ("multi-host", "mcp"),
+        ("multi-host", "ssh-target"),
+    ],
+)
+def test_required_service_cannot_hide_behind_compose_profile(tmp_path, mode, role):
+    doc = control(mode)
+    if role == "ssh-target":
+        target = host()
+        target["services"]["ssh-target"]["profiles"] = ["disabled"]
+        result = invoke(tmp_path, "multi-host", control_doc=doc, node01_doc=target)
+    else:
+        doc["services"][role]["profiles"] = ["disabled"]
+        result = invoke(tmp_path, mode, control_doc=doc)
+    assert result.returncode != 0 and result.stdout == ""
+    assert "preflight refused:" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "mode,role,field,value",
+    [
+        ("dev-e2e", "mcp", "user", "0:0"),
+        ("dev-e2e", "ledger", "user", "0:0"),
+        ("dev-e2e", "ledger-init", "user", "10001:10001"),
+        ("multi-host", "mcp", "user", "0:0"),
+        ("multi-host", "ssh-target", "user", "0:0"),
+        ("dev-e2e", "node01", "user", "0:0"),
+        ("dev-e2e", "node02", "group_add", ["0"]),
+        ("dev-e2e", "mcp", "group_add", ["0"]),
+        ("dev-e2e", "ledger", "group_add", ["0"]),
+        ("multi-host", "ssh-target", "group_add", ["0"]),
+        ("dev-e2e", "node01", "entrypoint", ["/bin/sh", "-c", "sleep infinity"]),
+        ("multi-host", "ssh-target", "entrypoint", ["/bin/sh", "-c", "sleep infinity"]),
+        ("dev-e2e", "mcp", "entrypoint", ["/bin/sh"]),
+        ("dev-e2e", "mcp", "command", ["sh", "-c", "id"]),
+        ("dev-e2e", "node01", "command", ["sh", "-c", "true"]),
+        ("multi-host", "ssh-target", "command", ["/usr/sbin/sshd", "-D"]),
+        ("dev-e2e", "mcp", "working_dir", "/tmp"),
+    ],
+)
+def test_executable_and_identity_overrides_are_not_unchecked(
+    tmp_path,
+    mode,
+    role,
+    field,
+    value,
+):
+    doc = control(mode)
+    if role == "ssh-target":
+        target = host()
+        target["services"]["ssh-target"][field] = value
+        result = invoke(tmp_path, mode, control_doc=doc, node02_doc=target)
+    else:
+        doc["services"][role][field] = value
+        result = invoke(tmp_path, mode, control_doc=doc)
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize("profiles", ["disabled", [1], [""], None, {"disabled": True}])
+def test_invalid_optional_service_profile_syntax_is_refused(tmp_path, profiles):
+    doc = control("dev-e2e")
+    doc["services"]["approvalctl"] = reviewed_control_service(
+        "approvalctl",
+        network_mode="none",
+        profiles=profiles,
+    )
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode != 0
+    assert result.stdout == ""
+
+
+def test_optional_reviewed_profiles_are_accepted_but_not_deployment_proof(tmp_path):
+    doc = control("dev-e2e")
+    doc["services"]["approvalctl"] = reviewed_control_service(
+        "approvalctl",
+        network_mode="none",
+        profiles=["admin"],
+    )
+    doc["networks"]["cloudflare_egress"] = {}
+    doc["services"]["cloudflared"] = reviewed_control_service(
+        "cloudflared",
+        networks=["origin_internal", "cloudflare_egress"],
+        profiles=["cloudflare"],
+    )
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["deployment_ready"] is False
+
+
+@pytest.mark.parametrize(
+    "role,field,value",
+    [
+        ("ledger-init", "user", None),
+        ("ledger-init", "entrypoint", ["ssh-over-mcp-server"]),
+        ("ledger-init", "cap_add", ["SYS_ADMIN"]),
+        ("ledger", "user", None),
+        ("ledger", "entrypoint", None),
+        ("ledger", "group_add", ["10003"]),
+        ("mcp", "user", None),
+        ("mcp", "entrypoint", None),
+        ("mcp", "entrypoint", ["ssh-over-mcp-ledger"]),
+    ],
+)
+def test_control_requires_exact_reviewed_uid_and_start_contract(tmp_path, role, field, value):
+    doc = control("dev-e2e")
+    doc["services"][role][field] = value
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode != 0
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize(
+    "role,profiles",
+    [
+        ("mcp", ["debug"]),
+        ("node01", ["node01"]),
+        ("node02", [123]),
+        ("ledger-init", "admin"),
+        ("ledger", {"admin": True}),
+        ("mcp", None),
+    ],
+)
+def test_mode_a_mandatory_profiles_refuse_invalid_values(tmp_path, role, profiles):
+    doc = control("dev-e2e")
+    doc["services"][role]["profiles"] = profiles
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode != 0
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("entrypoint", ["/bin/sh"]),
+        ("command", ["sleep", "infinity"]),
+        ("user", "10001:10001"),
+        ("group_add", ["10001"]),
+        ("profiles", ["disabled"]),
+    ],
+)
+def test_mode_b_ssh_target_bootstrap_needs_separate_approval(tmp_path, field, value):
+    h = host()
+    h["services"]["ssh-target"][field] = value
+    result = invoke(tmp_path, "multi-host", node01_doc=h)
+    assert result.returncode != 0
+    assert result.stdout == ""
+
+
+def test_required_services_may_have_explicit_empty_profiles(tmp_path):
+    doc = control("dev-e2e")
+    for role in ("ledger-init", "ledger", "mcp", "node01", "node02"):
+        doc["services"][role]["profiles"] = []
     result = invoke(tmp_path, control_doc=doc)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["deployment_ready"] is False

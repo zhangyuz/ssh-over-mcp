@@ -51,6 +51,29 @@ _SUPPORTED_SERVICE = frozenset(
 _TARGET_ROOT = frozenset({"node01", "node02"})
 _ADMIN_VOLUMES = frozenset({"ledger-data", "ledger-exec", "ledger-admin"})
 
+# Reviewed against deploy/compose/compose.yaml for control-plane service roles.
+# These are DECLARATION checks, not runtime UID or executable provenance proof.
+_ROLE_USER = {
+    "ledger-init": "0:0",  # narrowly scoped bootstrap ONLY, never an SSH target
+    "ledger": "10002:10002",
+    "mcp": "10001:10003",
+    "approvalctl": "10004:10005",
+    "cloudflared": "65532:65532",
+}
+_ROLE_ENTRYPOINT = {
+    "ledger-init": ["ssh-over-mcp-ledger-init"],
+    "ledger": ["ssh-over-mcp-ledger"],
+    "mcp": ["ssh-over-mcp-server"],
+    "approvalctl": ["ssh-over-mcp-approvalctl"],
+}
+_CLOUDFLARED_COMMAND = [
+    "tunnel",
+    "run",
+    "--token-file",
+    "/run/secrets/cloudflare-tunnel-token",
+]
+_OPTIONAL_PROFILES = {"approvalctl": ["admin"], "cloudflared": ["cloudflare"]}
+
 
 def _dict(value: object) -> dict:
     if type(value) is not dict:
@@ -112,10 +135,57 @@ def _networks(service: dict, defined: dict) -> set[str]:
     return set(names)
 
 
+def _reviewed_service_identity(role: str, config: dict) -> None:
+    """Refuse unreviewed deployment participation, UID/GID and launch overrides.
+
+    Only the existing control stack has reviewed static UID/entrypoint pins.
+    SSH target bootstrap/sshd identity is NOT reviewed or shipped here: while
+    awaiting its own design gate, refuse *all* caller-controlled overrides
+    rather than allowing root/alternate shells; image defaults remain untrusted.
+    """
+    profiles = config.get("profiles", [])
+    if type(profiles) is not list:
+        raise Refused("INVALID_PROFILE")
+    if role in _OPTIONAL_PROFILES:
+        if profiles not in ([], _OPTIONAL_PROFILES[role]):
+            raise Refused("UNREVIEWED_OPTIONAL_PROFILE")
+    elif profiles:
+        raise Refused("REQUIRED_SERVICE_PROFILE")
+
+    if "working_dir" in config or "init" in config:
+        raise Refused("UNREVIEWED_EXECUTION_OVERRIDE")
+    if role in _ROLE_USER:
+        if config.get("user") != _ROLE_USER[role]:
+            raise Refused("UNREVIEWED_SERVICE_IDENTITY")
+        if role == "ledger":
+            if config.get("group_add") != ["10003", "10005"]:
+                raise Refused("UNREVIEWED_SERVICE_GROUPS")
+        elif config.get("group_add") not in (None, []):
+            raise Refused("UNREVIEWED_SERVICE_GROUPS")
+        if role == "cloudflared":
+            if config.get("entrypoint") not in (None,):
+                raise Refused("UNREVIEWED_ENTRYPOINT")
+            if config.get("command") != _CLOUDFLARED_COMMAND:
+                raise Refused("UNREVIEWED_COMMAND")
+        else:
+            if config.get("entrypoint") != _ROLE_ENTRYPOINT[role]:
+                raise Refused("UNREVIEWED_ENTRYPOINT")
+            if config.get("command") is not None:
+                raise Refused("UNREVIEWED_COMMAND")
+    else:
+        # Mode A/B SSH targets do not yet have an approved bootstrap image
+        # contract. No explicit UID, group or executable overrides are accepted.
+        if config.get("user") is not None or config.get("group_add") not in (None, []):
+            raise Refused("UNREVIEWED_SSH_TARGET_IDENTITY")
+        if config.get("entrypoint") is not None or config.get("command") is not None:
+            raise Refused("UNREVIEWED_SSH_TARGET_BOOTSTRAP")
+
+
 def _hardening(role: str, service: object, defined: dict) -> set[str]:
     config = _dict(service)
     if set(config) - _SUPPORTED_SERVICE:
         raise Refused("UNSUPPORTED_SERVICE_FIELD")
+    _reviewed_service_identity(role, config)
     if config.get("read_only") is not True:
         raise Refused("READ_ONLY_REQUIRED")
     if config.get("cap_drop") != ["ALL"]:
@@ -124,8 +194,8 @@ def _hardening(role: str, service: object, defined: dict) -> set[str]:
     if opts != ["no-new-privileges:true"]:
         raise Refused("NO_NEW_PRIVILEGES_REQUIRED")
     if role == "ledger-init":
-        if set(config.get("cap_add", [])) - {"CHOWN", "DAC_OVERRIDE"}:
-            raise Refused("UNSUPPORTED_CAPABILITY")
+        if config.get("cap_add") != ["CHOWN", "DAC_OVERRIDE"]:
+            raise Refused("UNREVIEWED_BOOTSTRAP_CAPABILITY")
     elif config.get("cap_add"):
         raise Refused("UNSUPPORTED_CAPABILITY")
     _image(config.get("image"))
