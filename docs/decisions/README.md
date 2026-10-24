@@ -35,3 +35,5 @@ Current ADRs:
 - [0020 — Trusted PR native E2E admission (proposed; not activated)](0020-trusted-pr-native-e2e-admission.md) — staged default-branch identity gate, no present workflow changes.
 
 - [0021 — Private multi-SSH Compose read/write MVP release track (proposed)](0021-private-compose-rw-mvp-release-track.md) — two mandatory deployment topologies confirmed by operator (single-engine development/E2E; separate control-plane plus two remote SSH Compose Engines for actual deployment); remaining safety/release-track decision Proposed, no security-gate waiver or implementation authorization.
+
+- [0022 — Proposed Compose SSH runtime privilege domains (NOT accepted)](0022-proposed-compose-ssh-privilege-domains.md) — mode A sshd/launcher/manager split and exact authority/evidence gates.

@@ -1,5 +1,7 @@
 # MVP 当前交付入口：Compose 多 SSH 读写试点
 
+> **PR #342 next architectural gate:** [proposed ADR0022](decisions/0022-proposed-compose-ssh-privilege-domains.md) identifies the minimum SSH vs containment-manager trust split, NNP/sudo conflict, operator-authorized Linux Engine and runtime evidence. Still PROPOSED/HOLD.
+
 > **PR #342 runtime gate update (PROPOSED, not deployed):** [SSH target privilege/sshd handoff security review candidate](superpowers/specs/2026-10-24-mode-a-ssh-runtime-handoff-review.md) documents why render-only `cap_drop: ALL` + `no-new-privileges:true` cannot yet support the ADR0007 sudo/ForceCommand identity handoff and delegated cgroup manager. A proposed sshd config and negative tests were added **without** enabling any container, privilege, image, SSH endpoint or live feature; Mode A A01-A03 / Mode B A15-A18 remain NOT_RUN.
 
 > **2026-10-26 独立可合并核心修复（源码及 CI 待审查）：** `fs_mkdir(create-only)` 增加对已 pin 父目录的创建前后持久化 `fsync`，创建后 fsync/close 异常必须保留“已提交但持久化不确定”状态（SSH exit 74），绝不回滚或盲目重试。这个修改不启用 Compose/SSH OCI/manager/cgroup；Mode A/B 实际双节点运行与 #342 Release/Native Level-3 门禁仍 HOLD。

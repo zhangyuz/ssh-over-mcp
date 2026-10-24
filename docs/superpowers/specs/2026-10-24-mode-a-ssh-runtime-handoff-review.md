@@ -25,6 +25,8 @@ The checked-in **`deploy/ssh-target/sshd_config.proposed`** is an intermediate *
 
 **Actual Mode A acceptance A01–A03:** on one approved disposable Linux Engine use *two* host-key-distinct sshd/host-agent/manager nodes under exact candidate image digest. From the origin MCP exercise two genuine pinned host-key SSH sessions and positive typed read/read-only probes; negatives must include wrong/rotated host key, unauthorized SSH command, PTY/X11/port forwarding, no manager, cgroup delegation failure, data/host-key isolation, cross-node network connections, startup/restart/cleanup, Ledger audit-before-effect failure, and workload UID/capability/cgroup assertions. M2 full RW remains separately blocked on P1/P2 protocol freeze. Collect immutable image/source/config hashes, shell-free test commands, exact-head native Level-3 and independent adversarial review. Mode B uses **three distinct Engines** and has its own A15–A18 real private-network/cgroup/firewall/host trust evidence. No static or mocked evidence is a live PASS.
 
+For a specific process/authority and evidence decision, see [proposed ADR 0022](../../decisions/0022-proposed-compose-ssh-privilege-domains.md). ADR0022 is **not accepted**; this proposal grants no container privileges or host access.
+
 ## Review questions for the next decision
 
 1. Is a constrained single-container `sshd`/manager/bootstrap compatible with ADR0007, including an independently delegated per-node cgroup and exact sudo launcher? If not, is a two-domain per-node architecture the narrowest safe alternative? Neither option is currently approved.
