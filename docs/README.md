@@ -21,6 +21,8 @@ This directory is the canonical behavioral and security specification for `ssh-o
 
 **MVP offline subtree-visibility operator preview** — [synthetic per-path allow/deny dry-run](runbooks/mvp-subtree-visibility-preview.md) (not an authorization or deployed FS capability).
 
+**Mode A SSH image/ForceCommand feasibility (review candidate)** — [proposed runtime handoff contract](superpowers/specs/2026-10-24-mode-a-ssh-runtime-handoff-review.md); no approved image/bootstrap, Linux Engine, or release authority.
+
 **MVP offline artifact consistency operator CLI** — [topology + rendered Compose bundle preflight](runbooks/mvp-compose-bundle-preflight.md) (static only; no deployment authorization).
 
 **M1a static Mode A multi-SSH Compose overlay** — [offline render-only runbook](runbooks/mvp-mode-a-compose-render.md) (no Docker deployment/startup authorization).
