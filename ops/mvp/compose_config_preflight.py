@@ -74,6 +74,53 @@ _CLOUDFLARED_COMMAND = [
 ]
 _OPTIONAL_PROFILES = {"approvalctl": ["admin"], "cloudflared": ["cloudflare"]}
 
+# Match the existing operator-approved local control-plane socket identity
+# boundaries; name/volume checks alone cannot bind a listening endpoint.
+_LEDGER_ENV = {
+    "SSH_OVER_MCP_LEDGER_DB_PATH": "/var/lib/ssh-over-mcp/ledger/ledger.db",
+    "SSH_OVER_MCP_LEDGER_HMAC_KEY_PATH": "/var/lib/ssh-over-mcp/ledger/ledger.key",
+    "SSH_OVER_MCP_LEDGER_SERVICE_UID": "10002",
+    "SSH_OVER_MCP_LEDGER_SERVICE_GID": "10002",
+    "SSH_OVER_MCP_LEDGER_EXEC_SOCKET_PATH": "/run/ssh-over-mcp-exec/ledger/ledger.sock",
+    "SSH_OVER_MCP_LEDGER_EXEC_SOCKET_GID": "10003",
+    "SSH_OVER_MCP_LEDGER_EXEC_SOCKET_MODE": "0660",
+    "SSH_OVER_MCP_LEDGER_EXEC_PEER_UID": "10001",
+    "SSH_OVER_MCP_LEDGER_EXEC_PEER_GID": "10003",
+    "SSH_OVER_MCP_LEDGER_ADMIN_SOCKET_PATH": "/run/ssh-over-mcp-admin/ledger/ledger.sock",
+    "SSH_OVER_MCP_LEDGER_ADMIN_SOCKET_GID": "10005",
+    "SSH_OVER_MCP_LEDGER_ADMIN_SOCKET_MODE": "0660",
+    "SSH_OVER_MCP_LEDGER_ADMIN_PEER_UID": "10004",
+    "SSH_OVER_MCP_LEDGER_ADMIN_PEER_GID": "10005",
+}
+_MCP_ENV = {
+    "SSH_OVER_MCP_CONFIG": "/etc/ssh-over-mcp/config.yaml",
+    "SSH_OVER_MCP_CREDENTIAL_MAP": "/etc/ssh-over-mcp/credentials.yaml",
+    "SSH_OVER_MCP_PROFILE": "rw-operator",
+    "SSH_OVER_MCP_LEDGER_EXEC_SOCKET_PATH": _LEDGER_ENV["SSH_OVER_MCP_LEDGER_EXEC_SOCKET_PATH"],
+    "SSH_OVER_MCP_LEDGER_SERVICE_UID": "10002",
+    "SSH_OVER_MCP_LEDGER_SERVICE_GID": "10002",
+    "SSH_OVER_MCP_BIND_HOST": "0.0.0.0",
+    "SSH_OVER_MCP_ORIGIN_BEARER_TOKEN_FILE": "/run/secrets/origin-bearer",
+}
+_APPROVAL_ENV = {
+    "SSH_OVER_MCP_LEDGER_ADMIN_SOCKET_PATH": _LEDGER_ENV["SSH_OVER_MCP_LEDGER_ADMIN_SOCKET_PATH"],
+    "SSH_OVER_MCP_LEDGER_SERVICE_UID": "10002",
+    "SSH_OVER_MCP_LEDGER_SERVICE_GID": "10002",
+}
+_ROLE_ENV = {
+    "ledger-init": _LEDGER_ENV,
+    "ledger": _LEDGER_ENV,
+    "mcp": _MCP_ENV,
+    "approvalctl": _APPROVAL_ENV,
+    "cloudflared": {},
+}
+_MCP_READINESS_TEST = [
+    "CMD",
+    "python",
+    "-c",
+    "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/readyz',timeout=2).read()",
+]
+
 
 def _dict(value: object) -> dict:
     if type(value) is not dict:
@@ -135,6 +182,40 @@ def _networks(service: dict, defined: dict) -> set[str]:
     return set(names)
 
 
+def _reviewed_runtime_configuration(role: str, config: dict) -> None:
+    """Pin identity-bearing environment and refuse alternate executable routes."""
+    expected_env = _ROLE_ENV.get(role, {})
+    environment = config.get("environment", {})
+    if type(environment) is not dict or environment != expected_env:
+        raise Refused("UNREVIEWED_ENVIRONMENT")
+
+    healthcheck = config.get("healthcheck")
+    if healthcheck is not None:
+        if role != "mcp" or type(healthcheck) is not dict:
+            raise Refused("UNREVIEWED_HEALTHCHECK")
+        if set(healthcheck) - {
+            "test",
+            "interval",
+            "timeout",
+            "retries",
+            "start_period",
+            "start_interval",
+            "disable",
+        }:
+            raise Refused("UNREVIEWED_HEALTHCHECK")
+        if healthcheck.get("test") != _MCP_READINESS_TEST or healthcheck.get("disable") not in (
+            None,
+            False,
+        ):
+            raise Refused("UNREVIEWED_HEALTHCHECK")
+
+    # These otherwise-accepted Compose fields can replace protected paths,
+    # execute extra commands or exfiltrate logs independently of entrypoint.
+    for field in ("tmpfs", "logging", "hostname", "ulimits"):
+        if field in config:
+            raise Refused("UNREVIEWED_RUNTIME_FIELD")
+
+
 def _reviewed_service_identity(role: str, config: dict) -> None:
     """Refuse unreviewed deployment participation, UID/GID and launch overrides.
 
@@ -186,6 +267,7 @@ def _hardening(role: str, service: object, defined: dict) -> set[str]:
     if set(config) - _SUPPORTED_SERVICE:
         raise Refused("UNSUPPORTED_SERVICE_FIELD")
     _reviewed_service_identity(role, config)
+    _reviewed_runtime_configuration(role, config)
     if config.get("read_only") is not True:
         raise Refused("READ_ONLY_REQUIRED")
     if config.get("cap_drop") != ["ALL"]:

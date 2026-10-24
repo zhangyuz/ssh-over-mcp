@@ -34,6 +34,12 @@ The control stack's declared UID:GID and exact entrypoints are checked against t
 
 The future SSH target image has **no reviewed bootstrap/UID/ForceCommand execution contract yet**. Accordingly, neither Mode A nor Mode B accepts caller-supplied SSH target `user`, `group_add`, `entrypoint`, `command`, or other executable overrides. The absence of overrides **does not prove** an image's default UID, non-rootness, command, sshd or ForceCommand behavior. Any necessary SSH privileged startup/bootstrap exception requires a separate explicitly approved design and real two-mode validation, not a silent preflight waiver. Successful CLI output still means static structure only, **never deployment readiness**.
 
+### Ledger endpoint and secondary execution boundaries
+
+For `ledger-init` and `ledger`, the checker now requires the **complete reviewed control-plane environment contract**: database/HMAC-key paths, Ledger service UID/GID and **distinct exec/admin socket paths, GIDs, modes and peer UID/GID mappings**. The MCP `ledger-exec` socket path and matching Ledger service identity are fixed; optional `approvalctl` uses only the reviewed admin endpoint. A swapped exec/admin endpoint is refused even if the declared named volumes remain separate. The MVP `rw-operator` profile and known config/credential/token-file paths are pinned as static declarations; any additional environment/loader override is refused rather than silently widening authority. None of these checks proves that an image processes environment variables as expected or that the live socket peers have those identities.
+
+The optional MCP healthcheck, if declared, must use exactly the existing `CMD python -c` loopback `/readyz` probe; all arbitrary shell or other healthcheck commands are refused, as are healthchecks on other unreviewed services. Unreviewed `tmpfs` replacement, logging driver/export, hostnames and process ulimit overrides are refused as secondary execution/authority pathways. This is a **conservative partial Compose contract**, not a full deployment attestation; any change to these reviewed pins needs an independent security review.
+
 The existing `deploy/compose/compose.yaml` is **not** an accepted hardened MVP description: its default control-plane image is still mutable `ssh-over-mcp:phase6b`, its SSH egress is not destination-allowlisted, and it does not provide either actual SSH target Compose deployment. This CLI does not change that source file or silently upgrade it.
 
 ## Verification

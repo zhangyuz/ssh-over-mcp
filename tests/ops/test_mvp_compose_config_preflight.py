@@ -51,6 +51,40 @@ def reviewed_control_service(role, **updates):
             "command": ["tunnel", "run", "--token-file", "/run/secrets/cloudflare-tunnel-token"],
         },
     }
+    if role in ("ledger", "ledger-init"):
+        props[role]["environment"] = {
+            "SSH_OVER_MCP_LEDGER_DB_PATH": "/var/lib/ssh-over-mcp/ledger/ledger.db",
+            "SSH_OVER_MCP_LEDGER_HMAC_KEY_PATH": "/var/lib/ssh-over-mcp/ledger/ledger.key",
+            "SSH_OVER_MCP_LEDGER_SERVICE_UID": "10002",
+            "SSH_OVER_MCP_LEDGER_SERVICE_GID": "10002",
+            "SSH_OVER_MCP_LEDGER_EXEC_SOCKET_PATH": "/run/ssh-over-mcp-exec/ledger/ledger.sock",
+            "SSH_OVER_MCP_LEDGER_EXEC_SOCKET_GID": "10003",
+            "SSH_OVER_MCP_LEDGER_EXEC_SOCKET_MODE": "0660",
+            "SSH_OVER_MCP_LEDGER_EXEC_PEER_UID": "10001",
+            "SSH_OVER_MCP_LEDGER_EXEC_PEER_GID": "10003",
+            "SSH_OVER_MCP_LEDGER_ADMIN_SOCKET_PATH": "/run/ssh-over-mcp-admin/ledger/ledger.sock",
+            "SSH_OVER_MCP_LEDGER_ADMIN_SOCKET_GID": "10005",
+            "SSH_OVER_MCP_LEDGER_ADMIN_SOCKET_MODE": "0660",
+            "SSH_OVER_MCP_LEDGER_ADMIN_PEER_UID": "10004",
+            "SSH_OVER_MCP_LEDGER_ADMIN_PEER_GID": "10005",
+        }
+    elif role == "mcp":
+        props[role]["environment"] = {
+            "SSH_OVER_MCP_CONFIG": "/etc/ssh-over-mcp/config.yaml",
+            "SSH_OVER_MCP_CREDENTIAL_MAP": "/etc/ssh-over-mcp/credentials.yaml",
+            "SSH_OVER_MCP_PROFILE": "rw-operator",
+            "SSH_OVER_MCP_LEDGER_EXEC_SOCKET_PATH": "/run/ssh-over-mcp-exec/ledger/ledger.sock",
+            "SSH_OVER_MCP_LEDGER_SERVICE_UID": "10002",
+            "SSH_OVER_MCP_LEDGER_SERVICE_GID": "10002",
+            "SSH_OVER_MCP_BIND_HOST": "0.0.0.0",
+            "SSH_OVER_MCP_ORIGIN_BEARER_TOKEN_FILE": "/run/secrets/origin-bearer",
+        }
+    elif role == "approvalctl":
+        props[role]["environment"] = {
+            "SSH_OVER_MCP_LEDGER_ADMIN_SOCKET_PATH": "/run/ssh-over-mcp-admin/ledger/ledger.sock",
+            "SSH_OVER_MCP_LEDGER_SERVICE_UID": "10002",
+            "SSH_OVER_MCP_LEDGER_SERVICE_GID": "10002",
+        }
     value = service(**props[role])
     value.update(updates)
     return value
@@ -826,3 +860,133 @@ def test_required_services_may_have_explicit_empty_profiles(tmp_path):
     result = invoke(tmp_path, control_doc=doc)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["deployment_ready"] is False
+
+
+@pytest.mark.parametrize("mode", ["dev-e2e", "multi-host"])
+def test_swapped_ledger_socket_environment_identity_is_refused(tmp_path, mode):
+    doc = control(mode)
+    for role in ("ledger-init", "ledger"):
+        doc["services"][role]["environment"] = {
+            "SSH_OVER_MCP_LEDGER_EXEC_SOCKET_PATH": "/run/ssh-over-mcp-admin/ledger/ledger.sock",
+            "SSH_OVER_MCP_LEDGER_ADMIN_SOCKET_PATH": "/run/ssh-over-mcp-exec/ledger/ledger.sock",
+            "SSH_OVER_MCP_LEDGER_EXEC_PEER_UID": "10004",
+            "SSH_OVER_MCP_LEDGER_EXEC_PEER_GID": "10005",
+            "SSH_OVER_MCP_LEDGER_ADMIN_PEER_UID": "10001",
+            "SSH_OVER_MCP_LEDGER_ADMIN_PEER_GID": "10003",
+        }
+    result = invoke(tmp_path, mode, control_doc=doc)
+    assert result.returncode != 0 and result.stdout == ""
+
+
+@pytest.mark.parametrize("mode", ["dev-e2e", "multi-host"])
+def test_arbitrary_mcp_healthcheck_shell_refused(tmp_path, mode):
+    doc = control(mode)
+    doc["services"]["mcp"]["healthcheck"] = {
+        "test": ["CMD-SHELL", "id"],
+        "interval": "1s",
+    }
+    result = invoke(tmp_path, mode, control_doc=doc)
+    assert result.returncode != 0 and result.stdout == ""
+
+
+@pytest.mark.parametrize("role", ["mcp", "ledger", "ledger-init"])
+def test_loader_override_environment_cannot_execute_unreviewed_code(tmp_path, role):
+    doc = control("dev-e2e")
+    doc["services"][role]["environment"] = {"LD_PRELOAD": "/tmp/custom.so"}
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode != 0 and result.stdout == ""
+
+
+@pytest.mark.parametrize(
+    "role,field,value",
+    [
+        ("mcp", "tmpfs", ["/proc:rw,exec,mode=1777"]),
+        ("node01", "tmpfs", ["/etc/ssh/hostkeys:mode=0777"]),
+        (
+            "mcp",
+            "logging",
+            {"driver": "syslog", "options": {"syslog-address": "tcp://outside.invalid:514"}},
+        ),
+    ],
+)
+def test_unreviewed_auxiliary_exec_mount_and_log_controls_refused(
+    tmp_path,
+    role,
+    field,
+    value,
+):
+    doc = control("dev-e2e")
+    doc["services"][role][field] = value
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode != 0 and result.stdout == ""
+
+
+@pytest.mark.parametrize("mode", ["dev-e2e", "multi-host"])
+def test_reviewed_mcp_readiness_healthcheck_stays_accepted(tmp_path, mode):
+    doc = control(mode)
+    doc["services"]["mcp"]["healthcheck"] = {
+        "test": [
+            "CMD",
+            "python",
+            "-c",
+            "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/readyz',timeout=2).read()",
+        ],
+        "interval": "5s",
+        "timeout": "3s",
+        "retries": 12,
+        "start_period": "2s",
+    }
+    result = invoke(tmp_path, mode, control_doc=doc)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["deployment_ready"] is False
+
+
+@pytest.mark.parametrize(
+    "mode,role,key,wrong_value",
+    [
+        ("dev-e2e", "ledger", "SSH_OVER_MCP_LEDGER_ADMIN_PEER_UID", "10001"),
+        ("multi-host", "ledger-init", "SSH_OVER_MCP_LEDGER_EXEC_SOCKET_GID", "10005"),
+        (
+            "dev-e2e",
+            "mcp",
+            "SSH_OVER_MCP_LEDGER_EXEC_SOCKET_PATH",
+            "/run/ssh-over-mcp-admin/ledger/ledger.sock",
+        ),
+        ("multi-host", "mcp", "SSH_OVER_MCP_PROFILE", "unreviewed-shell-profile"),
+    ],
+)
+def test_security_relevant_environment_bindings_are_immutable(
+    tmp_path,
+    mode,
+    role,
+    key,
+    wrong_value,
+):
+    doc = control(mode)
+    doc["services"][role]["environment"][key] = wrong_value
+    result = invoke(tmp_path, mode, control_doc=doc)
+    assert result.returncode != 0
+    assert result.stdout == ""
+
+
+def test_reviewed_control_uid_entrypoint_and_socket_pins_match_repo_compose_source():
+    """Prevent our static contract drifting from the actual current control stack."""
+    import yaml
+
+    actual = yaml.safe_load((ROOT / "deploy/compose/compose.yaml").read_text())["services"]
+    for role in ("ledger-init", "ledger", "mcp", "approvalctl", "cloudflared"):
+        expected = reviewed_control_service(role)
+        assert actual[role]["user"] == expected["user"]
+        if "entrypoint" in expected:
+            assert actual[role]["entrypoint"] == expected["entrypoint"]
+        if "command" in expected:
+            assert actual[role]["command"] == expected["command"]
+        if "group_add" in expected:
+            assert actual[role]["group_add"] == expected["group_add"]
+        if "environment" in expected:
+            for key, value in expected["environment"].items():
+                if key == "SSH_OVER_MCP_PROFILE":
+                    # The real operator supplies the MVP profile at render time.
+                    assert actual[role]["environment"][key].startswith("${SSH_OVER_MCP_PROFILE:")
+                    continue
+                assert actual[role]["environment"][key] == value
