@@ -24,7 +24,7 @@ python3 ops/mvp/bundle_preflight.py \
   --node02-json /private/operator/ssh-host02-rendered.json
 ```
 
-The manifest's validated `mode` alone determines the accepted file layout, so an operator cannot accidentally ask the CLI to check a different mode. In Mode B, the `node01`/`node02` flags associate files with **declared** aliases; they are not verified bindings to actual host identities. The tool rejects missing/extra per-node files and repeated lexical input paths, but even multiple distinct files do **not** prove independent Engines or immutable, coherent cross-file snapshots.
+The manifest's validated `mode` alone determines the accepted file layout, so an operator cannot accidentally ask the CLI to check a different mode. Argument presence is checked independently of document contents: a supplied `null` node JSON file is **not** silently treated as an omitted flag. In Mode B, the `node01`/`node02` flags associate files with **declared** aliases; they are not verified bindings to actual host identities. The tool rejects missing/extra per-node files and repeated lexical input paths, but even multiple distinct files do **not** prove independent Engines or immutable, coherent cross-file snapshots.
 
 The unified static checker invokes the existing, independently tested **topology** and **Compose-rendered config** shape validators, using their 16 KiB per-input race-guarded regular-file reader (no leaf symlinks, FIFOs or duplicate JSON keys). It then requires these **literal OCI digest reference strings** to agree:
 

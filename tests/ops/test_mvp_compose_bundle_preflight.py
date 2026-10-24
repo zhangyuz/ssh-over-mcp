@@ -229,3 +229,21 @@ def test_mode_b_same_digest_for_both_targets_is_not_proof_of_distinct_engines(tm
     res = invoke(tmp_path, "multi-host", manifest=manifest, control=control, hosts=hosts)
     assert res.returncode == 0, res.stderr
     assert json.loads(res.stdout)["host_identity_verified"] is False
+
+
+@pytest.mark.parametrize("alias", ["node01", "node02"])
+def test_mode_a_supplied_null_extra_document_is_not_missing_input(tmp_path, alias):
+    path = tmp_path / "explicit-null.json"
+    path.write_text("null")
+    res = invoke(tmp_path, "dev-e2e", files={alias: path})
+    assert res.returncode == 2 and res.stdout == ""
+    assert "INVALID_MODE_FILES" in res.stderr
+
+
+@pytest.mark.parametrize("alias", ["node01", "node02"])
+def test_mode_b_null_target_document_is_invalid_shape_not_missing(tmp_path, alias):
+    path = tmp_path / "explicit-null.json"
+    path.write_text("null")
+    res = invoke(tmp_path, "multi-host", files={alias: path})
+    assert res.returncode == 2 and res.stdout == ""
+    assert "preflight refused:" in res.stderr

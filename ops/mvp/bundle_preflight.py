@@ -18,10 +18,11 @@ from topology_preflight import Refused, _read_one_regular_file, check_topology
 _REPORT = "som-mvp-compose-bundle-preflight-v1"
 _CONTROL_IMAGE_ROLES = ("ledger-init", "ledger", "mcp", "approvalctl")
 _ALIASES = ("node01", "node02")
+_MISSING = object()  # argument not supplied; JSON null is a supplied but invalid input
 
 
 def check_bundle(
-    topology: object, control: object, node01: object | None = None, node02: object | None = None
+    topology: object, control: object, node01: object = _MISSING, node02: object = _MISSING
 ) -> dict[str, Any]:
     """Validate each static schema first, then enforce literal image consistency.
 
@@ -31,11 +32,11 @@ def check_bundle(
     manifest_report = check_topology(topology)
     mode = manifest_report["mode"]
     if mode == "dev-e2e":
-        if node01 is not None or node02 is not None:
+        if node01 is not _MISSING or node02 is not _MISSING:
             raise Refused("INVALID_MODE_FILES")
         check_mode_a(control)
     else:
-        if node01 is None or node02 is None:
+        if node01 is _MISSING or node02 is _MISSING:
             raise Refused("MISSING_TARGET_PROJECT")
         check_mode_b(control, node01, node02)
 
@@ -96,9 +97,12 @@ def main() -> int:
             raise Refused("DUPLICATE_INPUT_PATH")
         topology = _read_one_regular_file(args.topology_json)
         control = _read_one_regular_file(args.control_json)
-        node01 = _read_one_regular_file(args.node01_json) if args.node01_json else None
-        node02 = _read_one_regular_file(args.node02_json) if args.node02_json else None
-        report = check_bundle(topology, control, node01, node02)
+        nodes = {}
+        if args.node01_json is not None:
+            nodes["node01"] = _read_one_regular_file(args.node01_json)
+        if args.node02_json is not None:
+            nodes["node02"] = _read_one_regular_file(args.node02_json)
+        report = check_bundle(topology, control, **nodes)
     except (Refused, OSError, TypeError, ValueError, KeyError, RecursionError) as exc:
         # Only fixed reason codes are safe for operator logs: never reflect the
         # input path, document bytes, SSH pins or token-like user data.
