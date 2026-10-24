@@ -1192,3 +1192,37 @@ def test_mode_b_target_rendered_custom_ipam_refused(tmp_path):
     result = invoke(tmp_path, "multi-host", node02_doc=node)
     assert result.returncode != 0
     assert result.stdout == ""
+
+
+@pytest.mark.parametrize("mode", ["dev-e2e", "multi-host"])
+@pytest.mark.parametrize(
+    "source",
+    [
+        "/home",
+        "/home/",
+        "/root",
+        "/root/",
+        "/home/operator/",
+        "/home/operator/.local/",
+        "/root/.local/",
+        "/home/operator/.local/share/",
+    ],
+)
+def test_rootless_storage_ancestor_with_trailing_slash_cannot_escape_refusal(
+    tmp_path,
+    mode,
+    source,
+):
+    doc = control(mode)
+    doc["services"]["mcp"]["volumes"] = [
+        {
+            "type": "bind",
+            "source": source,
+            "target": "/run/secrets/ssh",
+            "read_only": True,
+            "bind": {"create_host_path": False},
+        }
+    ]
+    result = invoke(tmp_path, mode, control_doc=doc)
+    assert result.returncode != 0
+    assert result.stdout == ""

@@ -129,7 +129,9 @@ def _unsafe_rootless_storage_source(source: str) -> bool:
     mounts or the actual Docker Engine's storage location.
     """
     parts = Path(source).parts
-    if source in ("/home", "/root"):
+    # Use the same normalized representation for ancestor equality and for
+    # all subsequent path-component checks: /home and /home/ are equivalent.
+    if parts in (("/", "home"), ("/", "root")):
         return True
     if len(parts) >= 3 and parts[1] == "home":
         # Binding a whole user home exposes ~/.local/share/docker storage.
