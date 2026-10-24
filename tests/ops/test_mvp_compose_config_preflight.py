@@ -1060,3 +1060,86 @@ def test_cloudflared_bind_requires_explicit_no_host_creation(tmp_path):
     )
     result = invoke(tmp_path, control_doc=doc)
     assert result.returncode != 0 and result.stdout == ""
+
+
+@pytest.mark.parametrize("mode", ["dev-e2e", "multi-host"])
+@pytest.mark.parametrize(
+    "source",
+    [
+        "/run/docker/containerd",
+        "/run/docker/containerd/containerd.sock",
+        "/var/run/docker/containerd/containerd.sock",
+        "/run/docker",
+        "/var/run/docker",
+        "/home/operator/.local/share/docker/volumes/som_ledger-data/_data",
+        "/home/operator/.local/share/docker",
+        "/home/operator/.local/share/containers/storage",
+        "/home/operator/.local/share/containerd",
+        "/home/operator/.local/share/podman",
+        "/root/.local/share/docker/volumes/ledger-data/_data",
+        "/home/operator",
+    ],
+)
+def test_managed_runtime_paths_and_rootless_storage_refused(tmp_path, mode, source):
+    doc = control(mode)
+    doc["services"]["mcp"]["volumes"] = [
+        {
+            "type": "bind",
+            "source": source,
+            "target": "/run/secrets/ssh",
+            "read_only": True,
+            "bind": {"create_host_path": False},
+        }
+    ]
+    result = invoke(tmp_path, mode, control_doc=doc)
+    assert result.returncode != 0
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "/home/operator/config.yaml",
+        "/home/operator/app/credentials.yaml",
+        "/srv/som/operator-owned/config.yaml",
+    ],
+)
+def test_regular_non_sensitive_home_config_bind_not_blanket_denied(tmp_path, source):
+    doc = control("dev-e2e")
+    doc["services"]["mcp"]["volumes"] = [
+        {
+            "type": "bind",
+            "source": source,
+            "target": "/etc/ssh-over-mcp/config.yaml",
+            "read_only": True,
+            "bind": {"create_host_path": False},
+        }
+    ]
+    result = invoke(tmp_path, control_doc=doc)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["deployment_ready"] is False
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "/home/operator/.local",
+        "/home/operator/.local/share",
+        "/root/.local",
+        "/srv/users/custom/.local/share/docker/volumes/admin/_data",
+    ],
+)
+def test_rootless_storage_enclosing_paths_and_custom_home_refused(tmp_path, source):
+    doc = control("multi-host")
+    doc["services"]["mcp"]["volumes"] = [
+        {
+            "type": "bind",
+            "source": source,
+            "target": "/etc/ssh-over-mcp/config.yaml",
+            "read_only": True,
+            "bind": {"create_host_path": False},
+        }
+    ]
+    result = invoke(tmp_path, "multi-host", control_doc=doc)
+    assert result.returncode != 0
+    assert result.stdout == ""

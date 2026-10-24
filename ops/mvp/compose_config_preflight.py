@@ -122,6 +122,31 @@ _MCP_READINESS_TEST = [
 ]
 
 
+def _unsafe_rootless_storage_source(source: str) -> bool:
+    """Recognize conventional rootless Engine data roots without host I/O.
+
+    The check is lexical only. It cannot prove custom XDG_DATA_HOME, symlinks,
+    mounts or the actual Docker Engine's storage location.
+    """
+    parts = Path(source).parts
+    if source in ("/home", "/root"):
+        return True
+    if len(parts) >= 3 and parts[1] == "home":
+        # Binding a whole user home exposes ~/.local/share/docker storage.
+        if len(parts) == 3:
+            return True
+        if len(parts) >= 4 and parts[3] == ".local":
+            # .local is itself the enclosing directory of rootless storage.
+            return True
+    if len(parts) >= 3 and parts[1] == "root" and parts[2] == ".local":
+        return True
+    return any(
+        parts[i : i + 3] == (".local", "share", runtime)
+        for runtime in ("docker", "containers", "containerd", "podman")
+        for i in range(len(parts) - 2)
+    )
+
+
 def _dict(value: object) -> dict:
     if type(value) is not dict:
         raise Refused("INVALID_SHAPE")
@@ -338,6 +363,8 @@ def _hardening(role: str, service: object, defined: dict) -> set[str]:
                 "/run/user",
                 "/run/containerd",
                 "/var/run/containerd",
+                "/run/docker",
+                "/var/run/docker",
                 "/run/podman",
                 "/var/run/podman",
                 "/run/crio",
@@ -355,6 +382,8 @@ def _hardening(role: str, service: object, defined: dict) -> set[str]:
             )
         ):
             raise Refused("UNSAFE_MOUNT")
+        if kind == "bind" and _unsafe_rootless_storage_source(source):
+            raise Refused("UNSAFE_MOUNT")
         if kind == "bind" and any(
             source == path
             or source.startswith(path + "/")
@@ -366,6 +395,8 @@ def _hardening(role: str, service: object, defined: dict) -> set[str]:
                 "/run/user",
                 "/run/containerd",
                 "/var/run/containerd",
+                "/run/docker",
+                "/var/run/docker",
                 "/run/podman",
                 "/var/run/podman",
                 "/run/crio",
