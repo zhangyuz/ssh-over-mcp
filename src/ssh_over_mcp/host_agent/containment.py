@@ -118,6 +118,22 @@ class ContainmentHandle(ABC):
         self.close()
 
 
+class PidfdContainmentHandle(ContainmentHandle, ABC):
+    """Explicit OCI-only handle: integer-only attach is forbidden.
+
+    The backend must retain and verify the pinned direct child during its
+    manager-owned attach transaction; no numeric-PID protocol fallback.
+    This interface does not supply a cgroup writer or runtime authority.
+    """
+
+    def attach(self, pid: int) -> None:
+        raise ContainmentUnavailableError("OCI containment requires a pinned child pidfd")
+
+    @abstractmethod
+    def attach_pinned(self, pidfd: int) -> None:
+        """Attach the direct child referenced by this live pidfd, before release."""
+
+
 class ContainmentBackend(ABC):
     """Factory for fail-closed per-request containment scopes."""
 
