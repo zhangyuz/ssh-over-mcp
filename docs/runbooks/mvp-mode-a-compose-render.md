@@ -46,6 +46,9 @@ Proposed [ADR0022](../decisions/0022-proposed-compose-ssh-privilege-domains.md) 
 
 ## Required distinct next approvals / acceptance
 
+The dedicated disposable Ubuntu VM selection and its **read-only, fail-closed** configuration checker are documented in [the Mode A VM offline gate](mvp-mode-a-vm-offline-gate.md). A current Lima 2.2 user-mode network declaration does not prove host/LAN egress denial; a syntactic VM match is not startup permission.
+
+
 Before any live test on a disposable **authorized Linux Engine**, independently review and approve: immutable digest **source**, exact SSH image Dockerfile/build provenance, OpenSSH `sshd_config`/ForceCommand/authorized keys, SSH host-key generation and pin trust source, manager/host-agent identity and **minimal CAP_SETUID/CAP_SETGID/UID bootstrap** compatibility, safe cgroup v2 delegation, per-request typed FS containment and resource limits, explicitly treating `CAP_SETUID` as UID 0 impersonation authority in the trusted host-agent, and actual network ingress/egress deny evidence including node-initiated TCP/8000 to MCP. If `no-new-privileges` or `cap_drop: ALL` makes secure sshd startup impossible, do **not** weaken confinement ad hoc; revise ADR0021/plan with a separately authorized privilege model and independent security review first.
 
 M1a `A01`–`A03` are reserved for actual live Mode A positive plus hostile lateral network/data/host-key/restart/manager-outage tests on the same accepted image/source SHA. The existing Native Level-3 and hosted CI runs do not substitute for these. Mode B requires separate **three distinct Linux Engines** and `A15`–`A18`; this overlay is intentionally **not** a Mode B deployment template. The static preflight and bundle check always report `deployment_ready=false`, all host/image/ACL/runtime/live-E2E flags false.

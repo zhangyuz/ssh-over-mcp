@@ -1,5 +1,7 @@
 # MVP 当前交付入口：Compose 多 SSH 读写试点
 
+> **Mode A B environment checkpoint (offline only):** operator selected a dedicated stopped Ubuntu 26.04 x86_64 VM on `yuz.local`; the read-only [VM plan preflight](runbooks/mvp-mode-a-vm-offline-gate.md) reports static shape valid but `host_lan_isolation_verified=false` and `vm_execution_authorized=false`. Lima 2.2 default outbound/host reachability is not a proven isolation boundary. No VM boot, Docker, SSH, host networking or privilege work is accepted; C image/key provenance and A01–A03 remain HOLD.
+
 > **PR #342 next architectural gate:** [proposed ADR0022](decisions/0022-proposed-compose-ssh-privilege-domains.md) identifies the minimum SSH vs containment-manager trust split, NNP/sudo conflict, operator-authorized Linux Engine and runtime evidence. Still PROPOSED/HOLD.
 
 > **PR #342 runtime gate update (PROPOSED, not deployed):** [SSH target privilege/sshd handoff security review candidate](superpowers/specs/2026-10-24-mode-a-ssh-runtime-handoff-review.md) documents why render-only `cap_drop: ALL` + `no-new-privileges:true` cannot yet support the ADR0007 sudo/ForceCommand identity handoff and delegated cgroup manager. A proposed sshd config and negative tests were added **without** enabling any container, privilege, image, SSH endpoint or live feature; Mode A A01-A03 / Mode B A15-A18 remain NOT_RUN.

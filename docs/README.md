@@ -29,6 +29,8 @@ This directory is the canonical behavioral and security specification for `ssh-o
 
 **M1a static Mode A multi-SSH Compose overlay** — [offline render-only runbook](runbooks/mvp-mode-a-compose-render.md) (no Docker deployment/startup authorization).
 
+**Mode A disposable VM definition preflight** — [read-only VM gate](runbooks/mvp-mode-a-vm-offline-gate.md) (does not authorize boot; host/LAN egress remains unverified).
+
 ## Three-layer agent collaboration
 
 - [`../AGENTS.md`](../AGENTS.md) is the concise operational contract for agents and approval boundaries.
