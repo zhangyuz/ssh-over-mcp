@@ -223,9 +223,21 @@ def test_gpgv_non_utf8_release_refuses_before_subprocess(monkeypatch):
 
 
 def test_gpgv_undecodable_child_output_refuses_without_traceback(monkeypatch):
+    # Exercise the decoding boundary even on systems without gpgv installed.
+    monkeypatch.setattr(
+        "ops.mvp.ubuntu_package_index_offline._trusted_gpgv_binary",
+        lambda: "/nonexistent/trusted-only-stub",
+    )
+
     def undecodable_run(*_args, **_kwargs):
         raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
 
     monkeypatch.setattr("ops.mvp.ubuntu_package_index_offline.subprocess.run", undecodable_run)
     with pytest.raises(Refused, match="SIGNATURE_VERIFICATION_UNAVAILABLE"):
+        _verify_gpgv(b"-----BEGIN PGP SIGNED MESSAGE-----\nHash: SHA512\n\n", b"not-secret")
+
+
+def test_missing_system_gpgv_is_a_safe_refusal(monkeypatch):
+    monkeypatch.setattr("ops.mvp.ubuntu_package_index_offline.os.access", lambda *_: False)
+    with pytest.raises(Refused, match="GPGV_UNAVAILABLE"):
         _verify_gpgv(b"-----BEGIN PGP SIGNED MESSAGE-----\nHash: SHA512\n\n", b"not-secret")

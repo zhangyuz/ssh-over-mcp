@@ -84,23 +84,25 @@ def _fingerprint_verified(status: str) -> str:
     return FINGERPRINT
 
 
-def _verify_gpgv(inrelease: bytes, keyring: bytes) -> str:
-    """Verify captured bytes using a system-location verifier, never PATH."""
-    try:
-        inrelease.decode("utf-8")
-    except UnicodeError as exc:
-        raise Refused("INVALID_RELEASE") from exc
-    binary = None
+def _trusted_gpgv_binary() -> str:
+    """Find a system-installed verifier without consulting ambient PATH."""
     for location in ("/usr/bin/gpgv", "/usr/local/bin/gpgv", "/opt/homebrew/bin/gpgv"):
         try:
             mode = Path(location).resolve(strict=True).stat().st_mode
         except (OSError, RuntimeError):
             continue
         if stat.S_ISREG(mode) and not mode & 0o022 and os.access(location, os.X_OK):
-            binary = location
-            break
-    if binary is None:
-        raise Refused("GPGV_UNAVAILABLE")
+            return location
+    raise Refused("GPGV_UNAVAILABLE")
+
+
+def _verify_gpgv(inrelease: bytes, keyring: bytes) -> str:
+    """Verify captured bytes using a system-location verifier, never PATH."""
+    try:
+        inrelease.decode("utf-8")
+    except UnicodeError as exc:
+        raise Refused("INVALID_RELEASE") from exc
+    binary = _trusted_gpgv_binary()
     try:
         with tempfile.TemporaryDirectory(prefix="som-c5-verify-") as directory:
             area = Path(directory)
