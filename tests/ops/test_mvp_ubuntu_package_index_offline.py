@@ -211,3 +211,21 @@ def test_ambient_path_cannot_inject_fake_gpgv(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))
     with pytest.raises(Refused):
         _verify_gpgv(b"not-signed-release", b"untrusted-keyring")
+
+
+def test_gpgv_non_utf8_release_refuses_before_subprocess(monkeypatch):
+    def unexpected_run(*_args, **_kwargs):
+        raise AssertionError("invalid UTF-8 must not reach gpgv")
+
+    monkeypatch.setattr("ops.mvp.ubuntu_package_index_offline.subprocess.run", unexpected_run)
+    with pytest.raises(Refused, match="INVALID_RELEASE"):
+        _verify_gpgv(b"-----BEGIN PGP SIGNED MESSAGE-----\n\xff\n", b"not-secret")
+
+
+def test_gpgv_undecodable_child_output_refuses_without_traceback(monkeypatch):
+    def undecodable_run(*_args, **_kwargs):
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+    monkeypatch.setattr("ops.mvp.ubuntu_package_index_offline.subprocess.run", undecodable_run)
+    with pytest.raises(Refused, match="SIGNATURE_VERIFICATION_UNAVAILABLE"):
+        _verify_gpgv(b"-----BEGIN PGP SIGNED MESSAGE-----\nHash: SHA512\n\n", b"not-secret")

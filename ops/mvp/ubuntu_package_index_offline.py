@@ -86,6 +86,10 @@ def _fingerprint_verified(status: str) -> str:
 
 def _verify_gpgv(inrelease: bytes, keyring: bytes) -> str:
     """Verify captured bytes using a system-location verifier, never PATH."""
+    try:
+        inrelease.decode("utf-8")
+    except UnicodeError as exc:
+        raise Refused("INVALID_RELEASE") from exc
     binary = None
     for location in ("/usr/bin/gpgv", "/usr/local/bin/gpgv", "/opt/homebrew/bin/gpgv"):
         try:
@@ -111,7 +115,7 @@ def _verify_gpgv(inrelease: bytes, keyring: bytes) -> str:
                 timeout=15,
                 env={"HOME": directory, "GNUPGHOME": directory, "LC_ALL": "C"},
             )
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
         raise Refused("SIGNATURE_VERIFICATION_UNAVAILABLE") from exc
     if result.returncode != 0:
         raise Refused("BAD_RELEASE_SIGNATURE")
