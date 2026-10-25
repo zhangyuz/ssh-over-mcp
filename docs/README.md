@@ -31,7 +31,7 @@ This directory is the canonical behavioral and security specification for `ssh-o
 
 **Mode A disposable VM definition preflight** — [read-only VM gate](runbooks/mvp-mode-a-vm-offline-gate.md) (does not authorize boot; host/LAN egress remains unverified).
 
-**Mode A OCI/SSH trust proposal** — [per-role and directional network proof matrix](superpowers/specs/2026-10-24-mode-a-oci-privilege-and-network-proof-matrix.md) (offline review only, no runtime privilege exception).
+**Mode A OCI/SSH trust proposal** — [per-role and directional network proof matrix](superpowers/specs/2026-10-24-mode-a-oci-privilege-and-network-proof-matrix.md) and [concrete same-node PID, separate-manager OCI execution/no-NIC QEMU Level-2 design](superpowers/specs/2026-10-25-mode-a-runtime-execution-contract.md) (offline review only, P1 executable runtime authority HOLD).
 
 **Mode A C1–C4 trusted source proposal** — [Canonical Ubuntu OCI manifest pins, fail-closed SSH image candidate, disconnected import and test-only key lifecycle](superpowers/specs/2026-10-24-mode-a-ssh-source-and-offline-transfer.md) (public metadata/offline design only).
 
