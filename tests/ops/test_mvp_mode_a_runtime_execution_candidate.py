@@ -29,7 +29,14 @@ def test_separate_per_node_manager_not_reachable_through_agent_uid_impersonation
     assert c["manager"]["capabilities"] == []
     assert c["manager"]["host_cgroup_mount"] is False
     assert c["manager"]["peer_auth"] == "SO_PEERCRED_PLUS_SOCKET_ACL"
-    assert c["manager"]["typed_operations"] == ["create", "attach", "kill_all", "stats", "close"]
+    assert c["manager"]["typed_operations"] == [
+        "move_source_self",
+        "create",
+        "attach",
+        "kill_all",
+        "stats",
+        "close",
+    ]
     assert c["manager"]["pid_namespace_translation"] == "UNPROVEN_STOP"
     assert c["manager"]["cgroup_delegation"] == "UNPROVEN_STOP"
     assert c["manager"]["writable_cgroup_root_exposed_to_sshd"] is False
@@ -129,3 +136,82 @@ def test_read_only_proposal_cannot_satisfy_runtime_or_ready_gates():
         "approval",
     ):
         assert word.lower() in s.lower()
+
+
+def test_launcher_migration_is_manager_owned_and_bound_to_self():
+    c = _contract()
+    m = c["manager"]
+    a = c["admission"]
+    assert m["source_cgroup_migration"] == "MOVE_SOURCE_SELF_ONLY"
+    assert m["source_migration_request"] == "manager_moves_socket_peer_after_pidfd_check"
+    assert m["source_migration_credential_phase"] == "ROOT_LAUNCHER_ONLY_NNP0"
+    assert m["source_migration_target"] == "host-agent-source"
+    assert m["root_phase_fd_retained_after_drop"] is False
+    assert m["source_migration_ack_before_uid_drop"] is True
+    assert m["source_migration_cgroup_readback_required"] is True
+    assert m["writable_cgroup_root_exposed_to_sshd"] is False
+    assert a["launcher_writes_cgroup_procs"] is False
+    assert a["launcher_trusted_cgroup_path"] == "MANAGER_MOVE_SOURCE_SELF"
+    assert a["source_move_ack_before_application_import"] is True
+    assert m["typed_operations"] == [
+        "move_source_self",
+        "create",
+        "attach",
+        "kill_all",
+        "stats",
+        "close",
+    ]
+    assert c["runtime_execution_authorized"] is False
+
+
+def test_cross_namespace_pid_attach_requires_kernel_bound_identity():
+    c = _contract()
+    m = c["manager"]
+    assert m["attach_identity_mode"] == "SCM_RIGHTS_PIDFD_REQUIRED"
+    assert m["integer_pid_sufficient"] is False
+    assert m["current_attach_request_only_pid"] is True
+    assert m["existing_protocol_compatible_without_extension"] is False
+    assert m["pidfd_transport"] == "SCM_RIGHTS_AF_UNIX"
+    assert m["attach_peer_validation"] == "SO_PEERCRED_AT_FRESH_POST_DROP_CONNECT"
+    assert m["source_peer_validation"] == "SO_PEERCRED_AT_FRESH_ROOT_CONNECT"
+    assert m["pidfd_source"] == "FORK_PARENT_PINNED_BEFORE_RELEASE"
+    assert m["attach_target_ancestry"] == "DIRECT_CHILD_OF_AUTHENTICATED_AGENT"
+    assert m["target_pre_attach_cgroup"] == "host-agent-source"
+    assert m["pidfd_id_starttime_cgroup_checks_required"] is True
+    assert m["userns_uid_gid_maps_runtime_proved"] is False
+    assert m["pidfd_to_cgroup_procs_kernel_atomic"] is False
+    assert m["post_attach_process_identity_recheck_required"] is True
+    assert m["abort_on_exit_pid_reuse_or_unmapped_uid"] is True
+    assert m["sibling_node_attach_allowed"] is False
+    assert m["untrusted_integer_pid_attach_allowed"] is False
+    assert m["pid_namespace_translation"] == "UNPROVEN_STOP"
+    assert m["cgroup_delegation"] == "UNPROVEN_STOP"
+
+
+def test_two_new_p1_handoff_hard_stops_remain_unapproved():
+    c = _contract()
+    for gate in (
+        "manager_owned_source_cgroup_migration_protocol",
+        "SCM_RIGHTS_pidfd_attach_transport_and_identity_verification",
+        "cross_userns_SO_PEERCRED_UID_GID_mapping_and_kernel_validation",
+        "PID_lifecycle_during_cgroup_procs_write",
+    ):
+        assert gate in c["open_p1_gates"]
+    assert c["runtime_execution_authorized"] is False
+    assert c["guest"]["boot_authorized"] is False
+    assert c["manager"]["source_to_request_attach_ack_verified"] is False
+    spec = SPEC.read_text().lower()
+    for term in (
+        "move_source_self",
+        "scm_rights",
+        "pidfd",
+        "uid_map",
+        "gid_map",
+        "so_peercred",
+        "attach-before-release",
+        "pid reuse",
+        "unreaped",
+        "separate",
+        "fail closed",
+    ):
+        assert term in spec
