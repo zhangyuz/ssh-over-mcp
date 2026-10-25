@@ -41,10 +41,12 @@ def test_offline_source_evidence_does_not_claim_any_signature_or_blob():
         "no blob/config/layer content",
         "InRelease",
         "SHA256",
-        "SPDX/CycloneDX",
+        "standard signed APT",
+        "exact candidate source HEAD",
+        "immutable image digest",
         "offline",
         "revocation",
-        "separate B/C/runtime authorization",
+        "separately approved isolated build host",
     ):
         assert phrase.lower() in spec.lower()
 
