@@ -104,6 +104,8 @@ def handle_fixed_child_attach(
         child.recheck_identity()
         trusted_attach(child)
         _check_child(child, policy, dest=True)
+        if inspect_pinned_namespace_identity(child.fd) != target:
+            raise OciPidfdHandoffRefused("child namespace changed during attach")
         sock.settimeout(_TIMEOUT)
         sock.sendall(b"A")
     except (OciPidfdHandoffRefused, OSError, ValueError) as exc:

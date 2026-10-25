@@ -73,7 +73,7 @@ def _mock_child(monkeypatch, *, uid_map=None, pidns=None):
     read, write = os.pipe()
     fd = os.dup(read)
     child = PinnedOciChild(fd=fd, pid=441, parent_pid=77, starttime=800)
-    group = {"membership": _policy().domain.agent_source_cgroup, "birth": 800}
+    group = {"membership": _policy().domain.agent_source_cgroup, "birth": 800, "changed_ns": False}
     monkeypatch.setattr(attach, "receive_direct_child_pidfd", lambda *_a, **_k: child)
     monkeypatch.setattr(attach, "_self_pidfd", _ManagerPin)
     monkeypatch.setattr("ssh_over_mcp.host_agent.oci_pidfd_handoff._pidfd_pid", lambda _fd: 441)
@@ -91,6 +91,8 @@ def _mock_child(monkeypatch, *, uid_map=None, pidns=None):
             child_identity = replace(child_identity, uid_map=uid_map)
         if pidns is not None:
             child_identity = replace(child_identity, pidns=pidns)
+        if group["changed_ns"]:
+            child_identity = replace(child_identity, userns=(4, 999))
         return child_identity
 
     monkeypatch.setattr(attach, "inspect_pinned_namespace_identity", inspect)
@@ -157,6 +159,7 @@ def test_attach_ack_only_after_identity_scope_and_target_readback(monkeypatch):
         "wrong_uidmap",
         "wrong_pidns",
         "changed_birth",
+        "changed_ns_after_attach",
         "write_refused",
     ],
 )
@@ -174,6 +177,9 @@ def test_attach_denies_unproven_identity_or_mutation(monkeypatch, failure):
             group["membership"] = "/som/node2/workload/req-a"
         elif failure == "changed_birth":
             group["birth"] += 1
+            group["membership"] = _policy().target_cgroup
+        elif failure == "changed_ns_after_attach":
+            group["changed_ns"] = True
             group["membership"] = _policy().target_cgroup
         elif failure == "write_refused":
             raise OSError("guest kernel denied delegated move")
