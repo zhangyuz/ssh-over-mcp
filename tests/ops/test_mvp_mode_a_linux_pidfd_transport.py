@@ -396,3 +396,24 @@ def test_oci_manager_rejects_child_exited_before_receipt():
         if child.poll() is None:
             child.kill()
         child.wait(timeout=4)
+
+
+def test_oci_source_manager_reads_real_linux_unified_cgroup_fail_closed():
+    """Host CI may have '/', which must refuse instead of authorizing a move."""
+    from ssh_over_mcp.host_agent import oci_source_migration
+    from ssh_over_mcp.host_agent.oci_pidfd_handoff import OciPidfdHandoffRefused
+
+    with open("/proc/self/cgroup", encoding="ascii") as report:
+        lines = report.read(4097).splitlines()
+    if len(lines) != 1 or not lines[0].startswith("0::") or lines[0] == "0::/":
+        with pytest.raises(OciPidfdHandoffRefused, match="unified"):
+            oci_source_migration._current_cgroup(os.getpid())
+    else:
+        expected = lines[0][3:]
+        try:
+            observed = oci_source_migration._current_cgroup(os.getpid())
+        except OciPidfdHandoffRefused:
+            # A noncanonical, ambiguous kernel mount path must be refused.
+            assert "//" in expected or "/.." in expected or " " in expected
+        else:
+            assert observed == expected
