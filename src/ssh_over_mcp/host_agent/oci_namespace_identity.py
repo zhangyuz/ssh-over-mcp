@@ -143,3 +143,158 @@ def require_separate_userns_shared_pidns(
         raise OciPidfdHandoffRefused("manager and target share user namespace")
     if manager.pid == target.pid:
         raise OciPidfdHandoffRefused("manager cannot be its own OCI target")
+
+
+def require_exact_namespace_maps(
+    observed: PinnedNamespaceIdentity,
+    *,
+    expected_uid_map: tuple[IdMapEntry, ...],
+    expected_gid_map: tuple[IdMapEntry, ...],
+) -> None:
+    """Compare to independently configured manager maps, never SSH-provided IDs.
+
+    /proc/<pid>/uid_map's outside column is relative to the parent user
+    namespace; this comparison does NOT claim global/host UID translation.
+    """
+    if not isinstance(observed, PinnedNamespaceIdentity):
+        raise OciPidfdHandoffRefused("pinned identity required")
+    if (
+        not isinstance(expected_uid_map, tuple)
+        or not expected_uid_map
+        or any(not isinstance(entry, IdMapEntry) for entry in expected_uid_map)
+    ):
+        raise OciPidfdHandoffRefused("trusted UID mapping required")
+    if (
+        not isinstance(expected_gid_map, tuple)
+        or not expected_gid_map
+        or any(not isinstance(entry, IdMapEntry) for entry in expected_gid_map)
+    ):
+        raise OciPidfdHandoffRefused("trusted GID mapping required")
+    if observed.uid_map != expected_uid_map:
+        raise OciPidfdHandoffRefused("OCI UID mapping differs from trusted configuration")
+    if observed.gid_map != expected_gid_map:
+        raise OciPidfdHandoffRefused("OCI GID mapping differs from trusted configuration")
+
+
+_CAPABILITY_FIELDS = ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb")
+_REQUIRED_STATUS_FIELDS = ("Uid", "Gid", "NoNewPrivs", *_CAPABILITY_FIELDS)
+
+
+@dataclass(frozen=True, slots=True)
+class LinuxSecurityStatus:
+    """Credentials as seen by the *reading manager's* procfs credentials view."""
+
+    uid: tuple[int, int, int, int]
+    gid: tuple[int, int, int, int]
+    no_new_privs: int
+    caps: tuple[int, int, int, int, int]
+
+
+def parse_security_status(raw: bytes) -> LinuxSecurityStatus:
+    """Parse only required, unique numeric Linux /proc/<pid>/status fields."""
+    if not isinstance(raw, bytes) or not raw.endswith(b"\n") or len(raw) > 16384:
+        raise OciPidfdHandoffRefused("incomplete or oversized process status")
+    found: dict[str, bytes] = {}
+    for line in raw[:-1].split(b"\n"):
+        key, separator, value = line.partition(b":")
+        if not separator or key not in {field.encode() for field in _REQUIRED_STATUS_FIELDS}:
+            continue
+        name = key.decode("ascii")
+        if name in found:
+            raise OciPidfdHandoffRefused("duplicate process security field")
+        if b"\r" in value or b"\x00" in value:
+            raise OciPidfdHandoffRefused("ambiguous process security field")
+        found[name] = value.strip()
+    if set(found) != set(_REQUIRED_STATUS_FIELDS):
+        raise OciPidfdHandoffRefused("missing required process security field")
+    try:
+        ids: list[tuple[int, int, int, int]] = []
+        for name in ("Uid", "Gid"):
+            parts = found[name].split()
+            if len(parts) != 4 or any(not part.isascii() or not part.isdigit() for part in parts):
+                raise ValueError("invalid process ID quartet")
+            values = tuple(int(part) for part in parts)
+            if any(value >= _UINT32_MAX for value in values):
+                raise ValueError("unmapped or overflow process identity")
+            ids.append(values)
+        if found["NoNewPrivs"] not in (b"0", b"1"):
+            raise ValueError("invalid NoNewPrivs status")
+        caps: list[int] = []
+        for name in _CAPABILITY_FIELDS:
+            value = found[name]
+            if len(value) != 16 or any(byte not in b"0123456789abcdefABCDEF" for byte in value):
+                raise ValueError("noncanonical capability mask")
+            caps.append(int(value, 16))
+        return LinuxSecurityStatus(
+            uid=ids[0],
+            gid=ids[1],
+            no_new_privs=int(found["NoNewPrivs"]),
+            caps=tuple(caps),
+        )
+    except (ValueError, TypeError) as exc:
+        raise OciPidfdHandoffRefused("unverifiable process security status") from exc
+
+
+def _read_security_status(pid: int) -> LinuxSecurityStatus:
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        raise OciPidfdHandoffRefused("invalid status process PID")
+    try:
+        with open(f"/proc/{pid}/status", "rb") as stream:
+            return parse_security_status(stream.read(16385))
+    except OSError as exc:
+        raise OciPidfdHandoffRefused("process security status unavailable") from exc
+
+
+@dataclass(frozen=True, slots=True)
+class PinnedExecutionSecurity:
+    namespace: PinnedNamespaceIdentity
+    status: LinuxSecurityStatus
+
+
+def inspect_pinned_execution_security(fd: int) -> PinnedExecutionSecurity:
+    """Take before/after pinned snapshots; return no privilege authority."""
+    first = inspect_pinned_namespace_identity(fd)
+    if _pidfd_pid(fd) != first.pid or _proc_identity(first.pid) != (
+        first.parent_pid,
+        first.starttime,
+    ):
+        raise OciPidfdHandoffRefused("pinned process changed before status read")
+    initial_status = _read_security_status(first.pid)
+    second = inspect_pinned_namespace_identity(fd)
+    final_status = _read_security_status(first.pid)
+    if first != second or initial_status != final_status:
+        raise OciPidfdHandoffRefused("process namespace or credentials changed")
+    if _pidfd_pid(fd) != first.pid or _proc_identity(first.pid) != (
+        first.parent_pid,
+        first.starttime,
+    ):
+        raise OciPidfdHandoffRefused("pinned process changed after status read")
+    return PinnedExecutionSecurity(namespace=first, status=initial_status)
+
+
+def require_workload_security_status(
+    status: LinuxSecurityStatus,
+    *,
+    expected_observed_uid: int,
+    expected_observed_gid: int,
+) -> None:
+    """Proof-check postdrop workload NNP=1 and **all** capability sets zero.
+
+    Expected IDs must be separately determined in the manager's procfs
+    namespace; never assume a container-internal UID equals a host UID.
+    """
+    if not isinstance(status, LinuxSecurityStatus):
+        raise OciPidfdHandoffRefused("kernel status snapshot required")
+    for name, expected in (("uid", expected_observed_uid), ("gid", expected_observed_gid)):
+        if (
+            isinstance(expected, bool)
+            or not isinstance(expected, int)
+            or not 0 < expected < _UINT32_MAX
+        ):
+            raise OciPidfdHandoffRefused(f"trusted observed {name} required")
+        if getattr(status, name) != (expected,) * 4:
+            raise OciPidfdHandoffRefused(f"workload {name} credentials differ")
+    if status.no_new_privs != 1:
+        raise OciPidfdHandoffRefused("workload NoNewPrivs not enabled")
+    if any(status.caps):
+        raise OciPidfdHandoffRefused("workload retains capabilities")

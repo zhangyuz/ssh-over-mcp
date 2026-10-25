@@ -527,3 +527,36 @@ def test_oci_namespace_inspection_uses_live_pinned_linux_procfs():
             namespace.require_separate_userns_shared_pidns(snapshot, snapshot)
     finally:
         os.close(pidfd)
+
+
+def test_oci_pinned_security_status_matches_actual_linux_procfs():
+    """Real unprivileged pinned procfs read; no capability or UID changes."""
+    from ssh_over_mcp.host_agent import oci_namespace_identity as ns
+    from ssh_over_mcp.host_agent.oci_pidfd_handoff import OciPidfdHandoffRefused
+
+    pinned = os.pidfd_open(os.getpid(), 0)
+    try:
+        observed = ns.inspect_pinned_execution_security(pinned)
+        assert observed.namespace.pid == os.getpid()
+        assert observed.status.uid == (os.getuid(),) * 4
+        assert observed.status.gid == (os.getgid(),) * 4
+        assert observed.status.no_new_privs in (0, 1)
+        with open("/proc/self/status", "rb") as status_file:
+            assert ns.parse_security_status(status_file.read(16385)) == observed.status
+        # CI is *not* a zero-cap workload fixture. Accept if it happens to
+        # meet the contract, else prove the policy rejects its actual state.
+        if observed.status.no_new_privs == 1 and not any(observed.status.caps):
+            ns.require_workload_security_status(
+                observed.status,
+                expected_observed_uid=os.getuid(),
+                expected_observed_gid=os.getgid(),
+            )
+        else:
+            with pytest.raises(OciPidfdHandoffRefused):
+                ns.require_workload_security_status(
+                    observed.status,
+                    expected_observed_uid=os.getuid(),
+                    expected_observed_gid=os.getgid(),
+                )
+    finally:
+        os.close(pinned)

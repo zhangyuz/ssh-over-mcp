@@ -137,3 +137,84 @@ def test_namespace_inode_rejects_nonpositive_kernel_identifier(monkeypatch):
     monkeypatch.setattr(m.os, "stat", lambda _path: SimpleNamespace(st_dev=0, st_ino=12))
     with pytest.raises(OciPidfdHandoffRefused, match="invalid"):
         m._namespace_inode(441, "user")
+
+
+def test_exact_guest_maps_must_match_trusted_manager_expectations():
+    good = _identity(51)
+    m.require_exact_namespace_maps(
+        good,
+        expected_uid_map=(m.IdMapEntry(0, 100000, 65536),),
+        expected_gid_map=(m.IdMapEntry(0, 100000, 65536),),
+    )
+    with pytest.raises(OciPidfdHandoffRefused, match="UID"):
+        m.require_exact_namespace_maps(
+            good,
+            expected_uid_map=(m.IdMapEntry(0, 200000, 65536),),
+            expected_gid_map=good.gid_map,
+        )
+    with pytest.raises(OciPidfdHandoffRefused, match="GID"):
+        m.require_exact_namespace_maps(
+            good,
+            expected_uid_map=good.uid_map,
+            expected_gid_map=(m.IdMapEntry(0, 200000, 65536),),
+        )
+
+
+def test_strict_linux_status_observation_rejects_extra_or_malformed_fields():
+    good = (
+        b"Name:\tpython3\nUid:\t2203\t2203\t2203\t2203\n"
+        b"Gid:\t3203\t3203\t3203\t3203\nNoNewPrivs:\t1\n"
+        b"CapInh:\t0000000000000000\nCapPrm:\t0000000000000000\n"
+        b"CapEff:\t0000000000000000\nCapBnd:\t0000000000000000\n"
+        b"CapAmb:\t0000000000000000\n"
+    )
+    observation = m.parse_security_status(good)
+    m.require_workload_security_status(
+        observation, expected_observed_uid=2203, expected_observed_gid=3203
+    )
+    for bad in (
+        good.replace(b"NoNewPrivs:\t1\n", b"NoNewPrivs:\t0\n"),
+        good.replace(b"CapEff:\t0000000000000000\n", b"CapEff:\t0000000000000001\n"),
+        good.replace(b"Uid:\t2203\t2203\t2203\t2203\n", b"Uid:\t2203\t2203\t2203\t0\n"),
+        good.replace(b"Gid:\t3203\t3203\t3203\t3203\n", b"Gid:\t3203\t3203\t3203\t0\n"),
+    ):
+        with pytest.raises(OciPidfdHandoffRefused):
+            m.require_workload_security_status(
+                m.parse_security_status(bad),
+                expected_observed_uid=2203,
+                expected_observed_gid=3203,
+            )
+    for malformed in (
+        good + b"CapEff:\t0000000000000000\n",
+        good.replace(b"CapAmb:\t0000000000000000\n", b""),
+        good.replace(b"NoNewPrivs:\t1\n", b"NoNewPrivs:\t1\r\n"),
+        good.replace(b"Uid:\t2203\t2203\t2203\t2203\n", b"Uid:\t2203 2203 2203\n"),
+        good.replace(b"CapEff:\t0000000000000000\n", b"CapEff:\txyz\n"),
+    ):
+        with pytest.raises(OciPidfdHandoffRefused):
+            m.parse_security_status(malformed)
+
+
+def test_kernel_status_observer_rechecks_pidfd_and_process_birth(monkeypatch):
+    state = {"birth": 881, "call": 0}
+    proof = _identity(441)
+    status = m.parse_security_status(
+        b"Uid:\t2203\t2203\t2203\t2203\n"
+        b"Gid:\t3203\t3203\t3203\t3203\nNoNewPrivs:\t1\n"
+        b"CapInh:\t0000000000000000\nCapPrm:\t0000000000000000\n"
+        b"CapEff:\t0000000000000000\nCapBnd:\t0000000000000000\n"
+        b"CapAmb:\t0000000000000000\n"
+    )
+    proof = replace(proof, starttime=881)
+    monkeypatch.setattr(m, "inspect_pinned_namespace_identity", lambda _fd: proof)
+    monkeypatch.setattr(m, "_pidfd_pid", lambda _fd: 441)
+    monkeypatch.setattr(m, "_proc_identity", lambda _pid: (77, state["birth"]))
+    monkeypatch.setattr(m, "_read_security_status", lambda _pid: status)
+    got = m.inspect_pinned_execution_security(5)
+    assert got.namespace == proof and got.status == status
+    m.require_workload_security_status(
+        got.status, expected_observed_uid=2203, expected_observed_gid=3203
+    )
+    state["birth"] += 1
+    with pytest.raises(OciPidfdHandoffRefused, match="changed"):
+        m.inspect_pinned_execution_security(5)
