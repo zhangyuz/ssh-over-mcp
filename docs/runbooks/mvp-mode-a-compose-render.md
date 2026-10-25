@@ -44,6 +44,8 @@ The [SSH bootstrap/privilege proposal](../superpowers/specs/2026-10-24-mode-a-ss
 
 Proposed [ADR0022](../decisions/0022-proposed-compose-ssh-privilege-domains.md) records the competing SSH/manager privilege constraints and explicit real-runtime gates. It is not approval to replace `cap_drop: ALL`, remove `no-new-privileges`, or run Docker.
 
+For the non-executable SSH boundary decision, review the [OCI privilege and network proof matrix](../superpowers/specs/2026-10-24-mode-a-oci-privilege-and-network-proof-matrix.md): it explicitly distinguishes stateful node→MCP TCP/8000 **NEW** denial from permitted **ESTABLISHED** SSH replies, and tracks per-role UID/cap/FD/NNP/cgroup requirements without relaxing current Compose.
+
 ## Required distinct next approvals / acceptance
 
 The dedicated disposable Ubuntu VM selection and its **read-only, fail-closed** configuration checker are documented in [the Mode A VM offline gate](mvp-mode-a-vm-offline-gate.md). A current Lima 2.2 user-mode network declaration does not prove host/LAN egress denial; a syntactic VM match is not startup permission.

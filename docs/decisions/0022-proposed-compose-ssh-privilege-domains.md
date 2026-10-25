@@ -11,6 +11,8 @@ Both current SSH nodes explicitly declare `cap_drop: [ALL]` and `no-new-privileg
 
 The current host-agent also handles typed `fs_stat/read/mkdir/write` before reaching its `ssh_exec` containment-manager path, so full typed filesystem safety needs a distinct audited, restricted execution plan. **A non-root UID does not make the host-agent unprivileged:** `CAP_SETUID` can impersonate UID 0 (within the same user namespace), and `CAP_SETGID` permits group impersonation. Per accepted methodology/ADR0005 this is trusted, security-critical code. Any container bootstrap must explicitly account for its effective file/identity authority, not infer an absence of root-equivalent risk from a non-root `id -u`.
 
+The process-by-process **UID/GID, OCI capabilities/NNP, FD inheritance, per-node cgroup-v2, bidirectional bridge/ACL and negative test review matrix** is in the [proposed offline proof specification](../superpowers/specs/2026-10-24-mode-a-oci-privilege-and-network-proof-matrix.md). This is a review candidate, not acceptance of any runtime exception.
+
 ## Proposed privilege separation (subject to independent security approval)
 
 **SSH admission domain:** minimal, source-attested sshd master and a server-owned fixed non-root SSH identity; no password, PTY, user RC, environment, TCP, Unix-socket forwarding or arbitrary shell; only the exact ADR 0007 sudo launcher target, never a generic sudo rule. A container-specific launcher must match a separately reviewed SSH account, UID/GID and strict startup integrity manifest. The present `sshd_config.proposed` uses an *E2E-only* identity and must not be treated as production configuration.
