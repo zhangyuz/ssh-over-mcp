@@ -541,11 +541,17 @@ def test_oci_pinned_security_status_matches_actual_linux_procfs():
         assert observed.status.uid == (os.getuid(),) * 4
         assert observed.status.gid == (os.getgid(),) * 4
         assert observed.status.no_new_privs in (0, 1)
+        assert sorted(observed.status.supplementary_groups) == sorted(os.getgroups())
         with open("/proc/self/status", "rb") as status_file:
             assert ns.parse_security_status(status_file.read(16385)) == observed.status
-        # CI is *not* a zero-cap workload fixture. Accept if it happens to
-        # meet the contract, else prove the policy rejects its actual state.
-        if observed.status.no_new_privs == 1 and not any(observed.status.caps):
+        # CI is not a zero-active-cap, zero-group workload fixture. The
+        # capability bounding set may remain nonzero under accepted ADR0005.
+        inh, prm, eff, _bnd, amb = observed.status.caps
+        if (
+            observed.status.no_new_privs == 1
+            and not observed.status.supplementary_groups
+            and not any((inh, prm, eff, amb))
+        ):
             ns.require_workload_security_status(
                 observed.status,
                 expected_observed_uid=os.getuid(),

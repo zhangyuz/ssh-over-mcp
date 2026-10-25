@@ -163,9 +163,9 @@ def test_exact_guest_maps_must_match_trusted_manager_expectations():
 def test_strict_linux_status_observation_rejects_extra_or_malformed_fields():
     good = (
         b"Name:\tpython3\nUid:\t2203\t2203\t2203\t2203\n"
-        b"Gid:\t3203\t3203\t3203\t3203\nNoNewPrivs:\t1\n"
+        b"Gid:\t3203\t3203\t3203\t3203\nGroups:\t\nNoNewPrivs:\t1\n"
         b"CapInh:\t0000000000000000\nCapPrm:\t0000000000000000\n"
-        b"CapEff:\t0000000000000000\nCapBnd:\t0000000000000000\n"
+        b"CapEff:\t0000000000000000\nCapBnd:\t00000000000000c0\n"
         b"CapAmb:\t0000000000000000\n"
     )
     observation = m.parse_security_status(good)
@@ -177,6 +177,7 @@ def test_strict_linux_status_observation_rejects_extra_or_malformed_fields():
         good.replace(b"CapEff:\t0000000000000000\n", b"CapEff:\t0000000000000001\n"),
         good.replace(b"Uid:\t2203\t2203\t2203\t2203\n", b"Uid:\t2203\t2203\t2203\t0\n"),
         good.replace(b"Gid:\t3203\t3203\t3203\t3203\n", b"Gid:\t3203\t3203\t3203\t0\n"),
+        good.replace(b"Groups:\t\n", b"Groups:\t3299\n"),
     ):
         with pytest.raises(OciPidfdHandoffRefused):
             m.require_workload_security_status(
@@ -187,6 +188,9 @@ def test_strict_linux_status_observation_rejects_extra_or_malformed_fields():
     for malformed in (
         good + b"CapEff:\t0000000000000000\n",
         good.replace(b"CapAmb:\t0000000000000000\n", b""),
+        good.replace(b"Groups:\t\n", b""),
+        good.replace(b"Groups:\t\n", b"Groups:\t3299\nGroups:\t\n"),
+        good.replace(b"Groups:\t\n", b"Groups:\tabc\n"),
         good.replace(b"NoNewPrivs:\t1\n", b"NoNewPrivs:\t1\r\n"),
         good.replace(b"Uid:\t2203\t2203\t2203\t2203\n", b"Uid:\t2203 2203 2203\n"),
         good.replace(b"CapEff:\t0000000000000000\n", b"CapEff:\txyz\n"),
@@ -200,9 +204,9 @@ def test_kernel_status_observer_rechecks_pidfd_and_process_birth(monkeypatch):
     proof = _identity(441)
     status = m.parse_security_status(
         b"Uid:\t2203\t2203\t2203\t2203\n"
-        b"Gid:\t3203\t3203\t3203\t3203\nNoNewPrivs:\t1\n"
+        b"Gid:\t3203\t3203\t3203\t3203\nGroups:\t\nNoNewPrivs:\t1\n"
         b"CapInh:\t0000000000000000\nCapPrm:\t0000000000000000\n"
-        b"CapEff:\t0000000000000000\nCapBnd:\t0000000000000000\n"
+        b"CapEff:\t0000000000000000\nCapBnd:\t00000000000000c0\n"
         b"CapAmb:\t0000000000000000\n"
     )
     proof = replace(proof, starttime=881)

@@ -177,7 +177,7 @@ def require_exact_namespace_maps(
 
 
 _CAPABILITY_FIELDS = ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb")
-_REQUIRED_STATUS_FIELDS = ("Uid", "Gid", "NoNewPrivs", *_CAPABILITY_FIELDS)
+_REQUIRED_STATUS_FIELDS = ("Uid", "Gid", "Groups", "NoNewPrivs", *_CAPABILITY_FIELDS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +186,7 @@ class LinuxSecurityStatus:
 
     uid: tuple[int, int, int, int]
     gid: tuple[int, int, int, int]
+    supplementary_groups: tuple[int, ...]
     no_new_privs: int
     caps: tuple[int, int, int, int, int]
 
@@ -217,6 +218,14 @@ def parse_security_status(raw: bytes) -> LinuxSecurityStatus:
             if any(value >= _UINT32_MAX for value in values):
                 raise ValueError("unmapped or overflow process identity")
             ids.append(values)
+        group_tokens = found["Groups"].split()
+        if len(group_tokens) > 256 or any(
+            not part.isascii() or not part.isdigit() for part in group_tokens
+        ):
+            raise ValueError("invalid supplementary groups")
+        groups = tuple(int(part) for part in group_tokens)
+        if any(group >= _UINT32_MAX for group in groups) or len(set(groups)) != len(groups):
+            raise ValueError("unmapped or duplicate supplementary group")
         if found["NoNewPrivs"] not in (b"0", b"1"):
             raise ValueError("invalid NoNewPrivs status")
         caps: list[int] = []
@@ -228,6 +237,7 @@ def parse_security_status(raw: bytes) -> LinuxSecurityStatus:
         return LinuxSecurityStatus(
             uid=ids[0],
             gid=ids[1],
+            supplementary_groups=groups,
             no_new_privs=int(found["NoNewPrivs"]),
             caps=tuple(caps),
         )
@@ -278,7 +288,7 @@ def require_workload_security_status(
     expected_observed_uid: int,
     expected_observed_gid: int,
 ) -> None:
-    """Proof-check postdrop workload NNP=1 and **all** capability sets zero.
+    """Proof-check postdrop workload NNP=1 and *active* capability sets zero.
 
     Expected IDs must be separately determined in the manager's procfs
     namespace; never assume a container-internal UID equals a host UID.
@@ -294,7 +304,12 @@ def require_workload_security_status(
             raise OciPidfdHandoffRefused(f"trusted observed {name} required")
         if getattr(status, name) != (expected,) * 4:
             raise OciPidfdHandoffRefused(f"workload {name} credentials differ")
+    if status.supplementary_groups:
+        raise OciPidfdHandoffRefused("workload retains supplementary groups")
     if status.no_new_privs != 1:
         raise OciPidfdHandoffRefused("workload NoNewPrivs not enabled")
-    if any(status.caps):
+    # ADR0005 explicitly permits a nonempty bounding set, which cannot be
+    # cleared without CAP_SETPCAP. Only Inh/Prm/Eff/Amb must be zero.
+    inherited, permitted, effective, _bounding, ambient = status.caps
+    if any((inherited, permitted, effective, ambient)):
         raise OciPidfdHandoffRefused("workload retains capabilities")
