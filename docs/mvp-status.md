@@ -1,6 +1,8 @@
 # MVP 当前交付入口：Compose 多 SSH 读写试点
 
-> **PR #342 C1–C4 public metadata/offline design:** [Canonical Ubuntu 26.04 `linux/amd64` pinned manifest and proposed SSH image/key/air-gapped transfer review](superpowers/specs/2026-10-24-mode-a-ssh-source-and-offline-transfer.md) checks registry manifest digest consistency only. A `Dockerfile.proposed` deliberately fails and is not wired into Compose; package locks, publisher signature, final project SSH image, key generation and B guest/OCI privileges still HOLD.
+> **PR #342 C5 signed metadata read-only:** [Ubuntu resolute / resolute-updates / resolute-security signatures and Packages index hash chain](runbooks/mvp-mode-a-ubuntu-package-index-offline.md) checked with independently pinned 2018 Ubuntu Archive signer; 10 direct package metadata candidates only, `.deb` bytes and dependency closure not verified. C6 binary transfer/build approval and B/ADR runtime remain HOLD.
+
+> **PR #342 C1–C4 public metadata/offline design:** [Canonical Ubuntu 26.04 `linux/amd64` pinned manifest and proposed SSH image/key/air-gapped transfer review](superpowers/specs/2026-10-24-mode-a-ssh-source-and-offline-transfer.md) checks registry manifest digest consistency only. A `Dockerfile.proposed` deliberately fails and is not wired into Compose; complete transitive package/wheel locks, final project SSH image provenance/signature, key generation and B guest/OCI privileges still HOLD.
 
 > **Mode A B environment checkpoint (offline only):** operator selected a dedicated stopped Ubuntu 26.04 x86_64 VM on `yuz.local`; the read-only [VM plan preflight](runbooks/mvp-mode-a-vm-offline-gate.md) reports static shape valid but `host_lan_isolation_verified=false` and `vm_execution_authorized=false`. Lima 2.2 default outbound/host reachability is not a proven isolation boundary. No VM boot, Docker, SSH, host networking or privilege work is accepted; C image/key provenance and A01–A03 remain HOLD.
 

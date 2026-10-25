@@ -35,6 +35,8 @@ This directory is the canonical behavioral and security specification for `ssh-o
 
 **Mode A C1–C4 trusted source proposal** — [Canonical Ubuntu OCI manifest pins, fail-closed SSH image candidate, disconnected import and test-only key lifecycle](superpowers/specs/2026-10-24-mode-a-ssh-source-and-offline-transfer.md) (public metadata/offline design only).
 
+**Mode A C5 signed distro metadata** — [Ubuntu 26.04 GPG signature and Packages.xz hash-chain offline verification](runbooks/mvp-mode-a-ubuntu-package-index-offline.md), 10 candidate packages only; no `.deb` bytes or complete install lock.
+
 ## Three-layer agent collaboration
 
 - [`../AGENTS.md`](../AGENTS.md) is the concise operational contract for agents and approval boundaries.

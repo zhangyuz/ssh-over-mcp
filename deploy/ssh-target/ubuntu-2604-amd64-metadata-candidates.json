@@ -1,0 +1,340 @@
+{
+  "build_or_install_authorized": false,
+  "candidate_selection": {
+    "ca-certificates": {
+      "architecture": "all",
+      "deb_sha256": "5b6326f1932cfd7be57130561dc78192f09ed9f58bfbe6606ed0c50510c3b6cd",
+      "deb_size": 137978,
+      "filename": "pool/main/c/ca-certificates/ca-certificates_20260816ubuntu0.26.04.1_all.deb",
+      "pocket": "resolute-security",
+      "version": "20260816ubuntu0.26.04.1"
+    },
+    "libc6": {
+      "architecture": "amd64",
+      "deb_sha256": "a613b457f3ff9c84ebd28af8a05afdec22605ad9aed87c71e3a6ae5170aeb9ca",
+      "deb_size": 2104056,
+      "filename": "pool/main/g/glibc/libc6_2.43-2ubuntu2.4_amd64.deb",
+      "pocket": "resolute-security",
+      "version": "2.43-2ubuntu2.4"
+    },
+    "libpam0g": {
+      "architecture": "amd64",
+      "deb_sha256": "f79cfd956cf20e76dceef2297413a8bab38025a51c99aaf49f3a15365e8c4cc6",
+      "deb_size": 65002,
+      "filename": "pool/main/p/pam/libpam0g_1.7.0-5ubuntu3.2_amd64.deb",
+      "pocket": "resolute-security",
+      "version": "1.7.0-5ubuntu3.2"
+    },
+    "libssl3t64": {
+      "architecture": "amd64",
+      "deb_sha256": "3ff73e121f6cd4f19e80ab4329dfd914108b3936c9db3708200203a9b245b34d",
+      "deb_size": 2368026,
+      "filename": "pool/main/o/openssl/libssl3t64_3.5.5-1ubuntu3.7_amd64.deb",
+      "pocket": "resolute-security",
+      "version": "3.5.5-1ubuntu3.7"
+    },
+    "openssh-client": {
+      "architecture": "amd64",
+      "deb_sha256": "81770282e1e007b399aca7de4e4e9f72e39a10ad65abaf83ef727c28cadfb22f",
+      "deb_size": 935840,
+      "filename": "pool/main/o/openssh/openssh-client_10.2p1-2ubuntu3.8_amd64.deb",
+      "pocket": "resolute-security",
+      "version": "1:10.2p1-2ubuntu3.8"
+    },
+    "openssh-server": {
+      "architecture": "amd64",
+      "deb_sha256": "d14910ed045bd4a2a4c9a4eeb6b3edf08d527fb4cdee5cf527fe66b8bb364c31",
+      "deb_size": 622420,
+      "filename": "pool/main/o/openssh/openssh-server_10.2p1-2ubuntu3.8_amd64.deb",
+      "pocket": "resolute-security",
+      "version": "1:10.2p1-2ubuntu3.8"
+    },
+    "openssl": {
+      "architecture": "amd64",
+      "deb_sha256": "6965aafe69e0a49ef34d2e26f8e83d09d1c6037b7e9ee37f19b292a3c6851621",
+      "deb_size": 1242886,
+      "filename": "pool/main/o/openssl/openssl_3.5.5-1ubuntu3.7_amd64.deb",
+      "pocket": "resolute-security",
+      "version": "3.5.5-1ubuntu3.7"
+    },
+    "python3": {
+      "architecture": "amd64",
+      "deb_sha256": "1ff88ad587f9e52e9f333ab00ae0babea93ac5222fc6909039c4190affe1d574",
+      "deb_size": 22938,
+      "filename": "pool/main/p/python3-defaults/python3_3.14.3-0ubuntu2_amd64.deb",
+      "pocket": "resolute",
+      "version": "3.14.3-0ubuntu2"
+    },
+    "python3-minimal": {
+      "architecture": "amd64",
+      "deb_sha256": "d5f37616b30209d8c10c4a705d7bf9558ca21e058fc2b2bd2ffcf37a74a42861",
+      "deb_size": 25808,
+      "filename": "pool/main/p/python3-defaults/python3-minimal_3.14.3-0ubuntu2_amd64.deb",
+      "pocket": "resolute",
+      "version": "3.14.3-0ubuntu2"
+    },
+    "sudo": {
+      "architecture": "amd64",
+      "deb_sha256": "6c05f7816ba1a74acaf08e124321caa47efff271265d4d4342e033cf8bdb6560",
+      "deb_size": 955094,
+      "filename": "pool/main/s/sudo/sudo_1.9.17p2-1ubuntu3.2_amd64.deb",
+      "pocket": "resolute-security",
+      "version": "1.9.17p2-1ubuntu3.2"
+    }
+  },
+  "created_at_utc": "2026-10-25T02:37:26+00:00",
+  "dependency_closure_verified": false,
+  "deployment_ready": false,
+  "guest_execution_authorized": false,
+  "keyring_file_sha256": "80a36b0a6de2f69f49d2df75ef473ccde121e9e190b9ea01d20a4f63778d5c31",
+  "origin_inrelease_urls": {
+    "resolute": "https://archive.ubuntu.com/ubuntu/dists/resolute/InRelease",
+    "resolute-security": "https://security.ubuntu.com/ubuntu/dists/resolute-security/InRelease",
+    "resolute-updates": "https://archive.ubuntu.com/ubuntu/dists/resolute-updates/InRelease"
+  },
+  "package_archive_bytes_verified": false,
+  "pinned_archive_fingerprint": "F6ECB3762474EDA9D21B7022871920D1991BC93C",
+  "platform": "linux/amd64",
+  "pockets": {
+    "resolute": {
+      "dependency_closure_verified": false,
+      "deployment_ready": false,
+      "guest_execution_authorized": false,
+      "image_build_authorized": false,
+      "index_hash_verified": true,
+      "inrelease_sha256": "45f95ce276cdba3e41870516a130e03c58b8b7a79e9546b0efe9e526d255740c",
+      "package_archive_bytes_verified": false,
+      "packages": {
+        "ca-certificates": {
+          "architecture": "all",
+          "deb_sha256": "f7025ab9b24cd73215510931037b02d6960d89584d0d00afba81851abdbe6ef1",
+          "deb_size": 157874,
+          "filename": "pool/main/c/ca-certificates/ca-certificates_20260223_all.deb",
+          "version": "20260223"
+        },
+        "libc6": {
+          "architecture": "amd64",
+          "deb_sha256": "c13775dc0c984403f3fcad229d14507a9f387763bd07ace1e5f93897ee6b8434",
+          "deb_size": 2103270,
+          "filename": "pool/main/g/glibc/libc6_2.43-2ubuntu2_amd64.deb",
+          "version": "2.43-2ubuntu2"
+        },
+        "libpam0g": {
+          "architecture": "amd64",
+          "deb_sha256": "acf0babd7e2da02a1f03981398624f7ad4660eb1ff188b4c9e93a350f98d02cd",
+          "deb_size": 69908,
+          "filename": "pool/main/p/pam/libpam0g_1.7.0-5ubuntu3_amd64.deb",
+          "version": "1.7.0-5ubuntu3"
+        },
+        "libssl3t64": {
+          "architecture": "amd64",
+          "deb_sha256": "fe78b8124fb6c8c0d7efc8f2bd8d5e0d3f217351f520a3b4652ee0afe24143c2",
+          "deb_size": 2359122,
+          "filename": "pool/main/o/openssl/libssl3t64_3.5.5-1ubuntu3_amd64.deb",
+          "version": "3.5.5-1ubuntu3"
+        },
+        "openssh-client": {
+          "architecture": "amd64",
+          "deb_sha256": "e3e7760afcc666748363cc914e791cadf2dcb0d8ab0dd01a62e23d3c92471195",
+          "deb_size": 933104,
+          "filename": "pool/main/o/openssh/openssh-client_10.2p1-2ubuntu3_amd64.deb",
+          "version": "1:10.2p1-2ubuntu3"
+        },
+        "openssh-server": {
+          "architecture": "amd64",
+          "deb_sha256": "c988827ee8b18421f16b59f37454a3a08f8b73cde7babd1097b46c4b27ea9888",
+          "deb_size": 621858,
+          "filename": "pool/main/o/openssh/openssh-server_10.2p1-2ubuntu3_amd64.deb",
+          "version": "1:10.2p1-2ubuntu3"
+        },
+        "openssl": {
+          "architecture": "amd64",
+          "deb_sha256": "5fe36591ab13d2bd63197cfe6b06e3a9b1fb2bf97b3be67883bb3807fcc8fc32",
+          "deb_size": 1242868,
+          "filename": "pool/main/o/openssl/openssl_3.5.5-1ubuntu3_amd64.deb",
+          "version": "3.5.5-1ubuntu3"
+        },
+        "python3": {
+          "architecture": "amd64",
+          "deb_sha256": "1ff88ad587f9e52e9f333ab00ae0babea93ac5222fc6909039c4190affe1d574",
+          "deb_size": 22938,
+          "filename": "pool/main/p/python3-defaults/python3_3.14.3-0ubuntu2_amd64.deb",
+          "version": "3.14.3-0ubuntu2"
+        },
+        "python3-minimal": {
+          "architecture": "amd64",
+          "deb_sha256": "d5f37616b30209d8c10c4a705d7bf9558ca21e058fc2b2bd2ffcf37a74a42861",
+          "deb_size": 25808,
+          "filename": "pool/main/p/python3-defaults/python3-minimal_3.14.3-0ubuntu2_amd64.deb",
+          "version": "3.14.3-0ubuntu2"
+        },
+        "sudo": {
+          "architecture": "amd64",
+          "deb_sha256": "339903f6d5695eb6e161724e304edb280506f3ccb83730f78ed3540766be9e1b",
+          "deb_size": 954078,
+          "filename": "pool/main/s/sudo/sudo_1.9.17p2-1ubuntu3_amd64.deb",
+          "version": "1.9.17p2-1ubuntu3"
+        }
+      },
+      "packages_xz_sha256": "ed9ac41cb263efaecc5a06a0742dc56570e2fb5ff94c4f2e4b2fbdcddd73cf24",
+      "packages_xz_size": 1480032,
+      "platform": "linux/amd64",
+      "pocket": "resolute",
+      "schema": "som-ubuntu-2604-offline-index-preview-v1",
+      "signed_release_verified": true,
+      "trusted_key_fingerprint": "F6ECB3762474EDA9D21B7022871920D1991BC93C"
+    },
+    "resolute-security": {
+      "dependency_closure_verified": false,
+      "deployment_ready": false,
+      "guest_execution_authorized": false,
+      "image_build_authorized": false,
+      "index_hash_verified": true,
+      "inrelease_sha256": "66bf17a6b779051e7fb05ef23d886aa7e0274f642e2a7f0cfd8cfc9aa2361515",
+      "package_archive_bytes_verified": false,
+      "packages": {
+        "ca-certificates": {
+          "architecture": "all",
+          "deb_sha256": "5b6326f1932cfd7be57130561dc78192f09ed9f58bfbe6606ed0c50510c3b6cd",
+          "deb_size": 137978,
+          "filename": "pool/main/c/ca-certificates/ca-certificates_20260816ubuntu0.26.04.1_all.deb",
+          "version": "20260816ubuntu0.26.04.1"
+        },
+        "libc6": {
+          "architecture": "amd64",
+          "deb_sha256": "a613b457f3ff9c84ebd28af8a05afdec22605ad9aed87c71e3a6ae5170aeb9ca",
+          "deb_size": 2104056,
+          "filename": "pool/main/g/glibc/libc6_2.43-2ubuntu2.4_amd64.deb",
+          "version": "2.43-2ubuntu2.4"
+        },
+        "libpam0g": {
+          "architecture": "amd64",
+          "deb_sha256": "f79cfd956cf20e76dceef2297413a8bab38025a51c99aaf49f3a15365e8c4cc6",
+          "deb_size": 65002,
+          "filename": "pool/main/p/pam/libpam0g_1.7.0-5ubuntu3.2_amd64.deb",
+          "version": "1.7.0-5ubuntu3.2"
+        },
+        "libssl3t64": {
+          "architecture": "amd64",
+          "deb_sha256": "3ff73e121f6cd4f19e80ab4329dfd914108b3936c9db3708200203a9b245b34d",
+          "deb_size": 2368026,
+          "filename": "pool/main/o/openssl/libssl3t64_3.5.5-1ubuntu3.7_amd64.deb",
+          "version": "3.5.5-1ubuntu3.7"
+        },
+        "openssh-client": {
+          "architecture": "amd64",
+          "deb_sha256": "81770282e1e007b399aca7de4e4e9f72e39a10ad65abaf83ef727c28cadfb22f",
+          "deb_size": 935840,
+          "filename": "pool/main/o/openssh/openssh-client_10.2p1-2ubuntu3.8_amd64.deb",
+          "version": "1:10.2p1-2ubuntu3.8"
+        },
+        "openssh-server": {
+          "architecture": "amd64",
+          "deb_sha256": "d14910ed045bd4a2a4c9a4eeb6b3edf08d527fb4cdee5cf527fe66b8bb364c31",
+          "deb_size": 622420,
+          "filename": "pool/main/o/openssh/openssh-server_10.2p1-2ubuntu3.8_amd64.deb",
+          "version": "1:10.2p1-2ubuntu3.8"
+        },
+        "openssl": {
+          "architecture": "amd64",
+          "deb_sha256": "6965aafe69e0a49ef34d2e26f8e83d09d1c6037b7e9ee37f19b292a3c6851621",
+          "deb_size": 1242886,
+          "filename": "pool/main/o/openssl/openssl_3.5.5-1ubuntu3.7_amd64.deb",
+          "version": "3.5.5-1ubuntu3.7"
+        },
+        "sudo": {
+          "architecture": "amd64",
+          "deb_sha256": "6c05f7816ba1a74acaf08e124321caa47efff271265d4d4342e033cf8bdb6560",
+          "deb_size": 955094,
+          "filename": "pool/main/s/sudo/sudo_1.9.17p2-1ubuntu3.2_amd64.deb",
+          "version": "1.9.17p2-1ubuntu3.2"
+        }
+      },
+      "packages_xz_sha256": "c9f4f90adfc5fcb1228e0aea6369c868ffa227b005782a1738ecdbb47fc46d56",
+      "packages_xz_size": 606180,
+      "platform": "linux/amd64",
+      "pocket": "resolute-security",
+      "schema": "som-ubuntu-2604-offline-index-preview-v1",
+      "signed_release_verified": true,
+      "trusted_key_fingerprint": "F6ECB3762474EDA9D21B7022871920D1991BC93C"
+    },
+    "resolute-updates": {
+      "dependency_closure_verified": false,
+      "deployment_ready": false,
+      "guest_execution_authorized": false,
+      "image_build_authorized": false,
+      "index_hash_verified": true,
+      "inrelease_sha256": "aee81345dd6906d8474a25a6a24e11e8a4e77284e59c5acf83d568778f57590f",
+      "package_archive_bytes_verified": false,
+      "packages": {
+        "ca-certificates": {
+          "architecture": "all",
+          "deb_sha256": "5b6326f1932cfd7be57130561dc78192f09ed9f58bfbe6606ed0c50510c3b6cd",
+          "deb_size": 137978,
+          "filename": "pool/main/c/ca-certificates/ca-certificates_20260816ubuntu0.26.04.1_all.deb",
+          "version": "20260816ubuntu0.26.04.1"
+        },
+        "libc6": {
+          "architecture": "amd64",
+          "deb_sha256": "a613b457f3ff9c84ebd28af8a05afdec22605ad9aed87c71e3a6ae5170aeb9ca",
+          "deb_size": 2104056,
+          "filename": "pool/main/g/glibc/libc6_2.43-2ubuntu2.4_amd64.deb",
+          "version": "2.43-2ubuntu2.4"
+        },
+        "libpam0g": {
+          "architecture": "amd64",
+          "deb_sha256": "f79cfd956cf20e76dceef2297413a8bab38025a51c99aaf49f3a15365e8c4cc6",
+          "deb_size": 65002,
+          "filename": "pool/main/p/pam/libpam0g_1.7.0-5ubuntu3.2_amd64.deb",
+          "version": "1.7.0-5ubuntu3.2"
+        },
+        "libssl3t64": {
+          "architecture": "amd64",
+          "deb_sha256": "3ff73e121f6cd4f19e80ab4329dfd914108b3936c9db3708200203a9b245b34d",
+          "deb_size": 2368026,
+          "filename": "pool/main/o/openssl/libssl3t64_3.5.5-1ubuntu3.7_amd64.deb",
+          "version": "3.5.5-1ubuntu3.7"
+        },
+        "openssh-client": {
+          "architecture": "amd64",
+          "deb_sha256": "81770282e1e007b399aca7de4e4e9f72e39a10ad65abaf83ef727c28cadfb22f",
+          "deb_size": 935840,
+          "filename": "pool/main/o/openssh/openssh-client_10.2p1-2ubuntu3.8_amd64.deb",
+          "version": "1:10.2p1-2ubuntu3.8"
+        },
+        "openssh-server": {
+          "architecture": "amd64",
+          "deb_sha256": "d14910ed045bd4a2a4c9a4eeb6b3edf08d527fb4cdee5cf527fe66b8bb364c31",
+          "deb_size": 622420,
+          "filename": "pool/main/o/openssh/openssh-server_10.2p1-2ubuntu3.8_amd64.deb",
+          "version": "1:10.2p1-2ubuntu3.8"
+        },
+        "openssl": {
+          "architecture": "amd64",
+          "deb_sha256": "6965aafe69e0a49ef34d2e26f8e83d09d1c6037b7e9ee37f19b292a3c6851621",
+          "deb_size": 1242886,
+          "filename": "pool/main/o/openssl/openssl_3.5.5-1ubuntu3.7_amd64.deb",
+          "version": "3.5.5-1ubuntu3.7"
+        },
+        "sudo": {
+          "architecture": "amd64",
+          "deb_sha256": "6c05f7816ba1a74acaf08e124321caa47efff271265d4d4342e033cf8bdb6560",
+          "deb_size": 955094,
+          "filename": "pool/main/s/sudo/sudo_1.9.17p2-1ubuntu3.2_amd64.deb",
+          "version": "1.9.17p2-1ubuntu3.2"
+        }
+      },
+      "packages_xz_sha256": "1cf958eef1b87a29f06430c01fb19b6a10c131b1c9dad806be7d515d90a1a683",
+      "packages_xz_size": 744484,
+      "platform": "linux/amd64",
+      "pocket": "resolute-updates",
+      "schema": "som-ubuntu-2604-offline-index-preview-v1",
+      "signed_release_verified": true,
+      "trusted_key_fingerprint": "F6ECB3762474EDA9D21B7022871920D1991BC93C"
+    }
+  },
+  "publisher_package_upload_identity_verified": false,
+  "schema": "som-ubuntu-2604-c5-candidate-v1",
+  "selection_is_a_proposal_not_apt_dependency_resolution": true,
+  "trusted_key_source": "https://archive.ubuntu.com/ubuntu/project/ubuntu-archive-keyring.gpg"
+}

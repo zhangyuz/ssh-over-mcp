@@ -17,7 +17,10 @@ RUN printf '%s\n' 'STOP: SSH target OCI runtime is not approved' >&2; exit 78
 # POST-GATE DESIGN ONLY (non-executable notes; DO NOT implement by unpinned APT):
 # - COPY preverified offline .deb and Python wheel artifacts with exact SHA256s
 #   from a signed and bounded canonical source manifest; no public network use.
-# - Verify signed ubuntu InRelease+Packages metadata and each .deb SHA256.
+# - Candidate signed Ubuntu C5 metadata is review-only; see
+#   ubuntu-2604-amd64-metadata-candidates.json and C5 runbook.
+# - Verify signed Ubuntu InRelease+Packages AND each actual .deb SHA256
+#   only after a separate payload-fetch/import/build approval.
 # - Install exact locked openssh-server, sudo, python3 and transitive runtime.
 # - COPY hashed trusted launcher from ops/live-e2e/ and proposed sshd config.
 # - Verify launcher no-argv/sanitized env and signed root-owned sudoers rule.
