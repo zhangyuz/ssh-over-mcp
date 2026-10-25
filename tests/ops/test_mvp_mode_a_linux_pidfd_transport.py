@@ -507,3 +507,23 @@ def test_oci_source_manager_refuses_ack_without_target_membership(monkeypatch):
         thread.join(timeout=3)
         assert not thread.is_alive()
         assert len(errors) == 1
+
+
+def test_oci_namespace_inspection_uses_live_pinned_linux_procfs():
+    """Linux CI proves read-only uid/gid maps + pid/user namespace identity."""
+    from ssh_over_mcp.host_agent import oci_namespace_identity as namespace
+    from ssh_over_mcp.host_agent.oci_pidfd_handoff import OciPidfdHandoffRefused
+
+    pidfd = os.pidfd_open(os.getpid(), 0)
+    try:
+        snapshot = namespace.inspect_pinned_namespace_identity(pidfd)
+        assert snapshot.pid == os.getpid()
+        assert snapshot.pidns[0] > 0 and snapshot.pidns[1] > 0
+        assert snapshot.userns[0] > 0 and snapshot.userns[1] > 0
+        assert snapshot.uid_map and snapshot.gid_map
+        # The same user namespace is forbidden for OCI split even when PID
+        # namespace and kernel maps are valid.
+        with pytest.raises(OciPidfdHandoffRefused, match="share user"):
+            namespace.require_separate_userns_shared_pidns(snapshot, snapshot)
+    finally:
+        os.close(pidfd)
