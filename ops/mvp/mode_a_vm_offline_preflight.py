@@ -79,9 +79,12 @@ def read_yaml(path: Path) -> object:
         os.close(fd)
     try:
         return yaml.load(data.decode("utf-8"), Loader=_UniqueKeysLoader)
-    except (yaml.YAMLError, UnicodeError, ValueError, RecursionError) as exc:
-        if isinstance(exc, Refused):
-            raise
+    except Refused:
+        raise
+    except Exception as exc:
+        # PyYAML safe scalar constructors may raise KeyError, IndexError or
+        # AttributeError on malformed explicit tags, not only YAMLError.
+        # The public CLI must refuse untrusted YAML without a traceback.
         raise Refused("INVALID_YAML") from exc
 
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -126,3 +128,46 @@ def test_containerd_boolean_fields_must_not_accept_integer_zero():
     item["containerd"] = {"user": 0, "system": 0}
     with pytest.raises(Refused):
         check_document(item)
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        "cpus: !!bool review_synthetic_marker\n",
+        "cpus: !!timestamp review_synthetic_marker\n",
+        'cpus: !!int ""\n',
+        'cpus: !!float ""\n',
+    ],
+)
+def test_malformed_yaml_scalar_constructor_refuses_without_traceback(tmp_path, capsys, malformed):
+    p = tmp_path / "untrusted-secret-path.yaml"
+    p.write_text(malformed)
+    assert main(["--config", str(p)]) == 2
+    result = capsys.readouterr()
+    assert result.out == ""
+    assert result.err.strip() == "REFUSED:INVALID_YAML"
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        "plain: !!bool review_synthetic_marker\n",
+        "cpus: !!timestamp invalid-date-token\n",
+        'cpus: !!int ""\n',
+        'cpus: !!float ""\n',
+    ],
+)
+def test_cli_malformed_yaml_tags_are_sanitized_across_process_boundary(tmp_path, malformed):
+    path = tmp_path / "sensitive-input-name.yaml"
+    path.write_text(malformed)
+    tool = Path(__file__).resolve().parents[2] / "ops/mvp/mode_a_vm_offline_preflight.py"
+    result = subprocess.run(
+        [sys.executable, str(tool), "--config", str(path)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr == "REFUSED:INVALID_YAML\n"
