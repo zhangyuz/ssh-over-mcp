@@ -417,3 +417,93 @@ def test_oci_source_manager_reads_real_linux_unified_cgroup_fail_closed():
             assert "//" in expected or "/.." in expected or " " in expected
         else:
             assert observed == expected
+
+
+def test_oci_root_and_manager_fixed_source_protocol_over_real_unix_socket(monkeypatch):
+    """Real SO_PEERCRED+SCM_RIGHTS+ACK; only the cgroup writer is a stub."""
+    import threading
+
+    from ssh_over_mcp.host_agent import oci_source_migration as source
+    from ssh_over_mcp.host_agent.containment_manager_peer import LinuxPeerCredentialPolicy
+
+    domain = source.OciSourceDomain(
+        "/som-mode-a/node01",
+        "/som-mode-a/node01/admission",
+        "/som-mode-a/node01/host-agent-source",
+    )
+    observed = {"membership": domain.admission_cgroup}
+    monkeypatch.setattr(source, "_current_cgroup", lambda pid: observed["membership"])
+    errors: list[Exception] = []
+    client, server = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+
+    def manager():
+        try:
+            source.handle_fixed_source_move(
+                server,
+                peer_policy=LinuxPeerCredentialPolicy(expected_uid=os.getuid()),
+                domain=domain,
+                trusted_move=lambda _receipt: observed.update(
+                    membership=domain.agent_source_cgroup
+                ),
+            )
+        except (OSError, RuntimeError) as exc:
+            errors.append(exc)
+        finally:
+            server.close()
+
+    with client:
+        thread = threading.Thread(target=manager, daemon=True)
+        thread.start()
+        source.request_fixed_source_move(
+            client,
+            manager_peer_policy=LinuxPeerCredentialPolicy(expected_uid=os.getuid()),
+            expected_source_cgroup=domain.agent_source_cgroup,
+        )
+        client.close()
+        thread.join(timeout=3)
+        assert not thread.is_alive()
+        assert not errors
+
+
+def test_oci_source_manager_refuses_ack_without_target_membership(monkeypatch):
+    """Manager must fail closed if a purported migration did not take effect."""
+    import threading
+
+    from ssh_over_mcp.host_agent import oci_source_migration as source
+    from ssh_over_mcp.host_agent.containment_manager_peer import LinuxPeerCredentialPolicy
+    from ssh_over_mcp.host_agent.oci_pidfd_handoff import OciPidfdHandoffRefused
+
+    domain = source.OciSourceDomain(
+        "/som-mode-a/node01",
+        "/som-mode-a/node01/admission",
+        "/som-mode-a/node01/host-agent-source",
+    )
+    monkeypatch.setattr(source, "_current_cgroup", lambda pid: domain.admission_cgroup)
+    client, server = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    errors: list[Exception] = []
+
+    def manager():
+        try:
+            source.handle_fixed_source_move(
+                server,
+                peer_policy=LinuxPeerCredentialPolicy(expected_uid=os.getuid()),
+                domain=domain,
+                trusted_move=lambda _receipt: None,
+            )
+        except OciPidfdHandoffRefused as exc:
+            errors.append(exc)
+        finally:
+            server.close()
+
+    with client:
+        thread = threading.Thread(target=manager, daemon=True)
+        thread.start()
+        with pytest.raises(OciPidfdHandoffRefused, match="denied"):
+            source.request_fixed_source_move(
+                client,
+                manager_peer_policy=LinuxPeerCredentialPolicy(expected_uid=os.getuid()),
+                expected_source_cgroup=domain.agent_source_cgroup,
+            )
+        thread.join(timeout=3)
+        assert not thread.is_alive()
+        assert len(errors) == 1

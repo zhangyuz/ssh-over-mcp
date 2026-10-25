@@ -127,3 +127,68 @@ def inspect_manager_source_self(
     except BaseException:
         os.close(fd)
         raise
+
+
+def handle_fixed_source_move(
+    sock,
+    *,
+    peer_policy: LinuxPeerCredentialPolicy,
+    domain: OciSourceDomain,
+    trusted_move,
+) -> None:
+    """One OCI manager request, never a caller-selected PID or cgroup.
+
+    trusted_move is injected **only by manager startup**, not sent by an SSH
+    peer. It must implement the guest-reviewed cgroup-v2 writer and refuse on
+    any delegation/namespace/lifetime doubt. This handler is not wired into
+    the existing managed-host protocol or a Docker deployment.
+    """
+    source = None
+    try:
+        source = inspect_manager_source_self(sock, peer_policy=peer_policy, domain=domain)
+        source.recheck_source()
+        trusted_move(source)
+        # ACK only after proving *the same* pinned process is in exactly the
+        # node's fixed source destination. On unknown effects refuse.
+        source.check_target_membership()
+        sock.settimeout(2.0)
+        sock.sendall(b"A")
+    except (OciPidfdHandoffRefused, OSError, ValueError) as exc:
+        # A failed or uncertain cgroup write is never reported as success.
+        try:
+            sock.sendall(b"N")
+        except OSError:
+            pass
+        raise OciPidfdHandoffRefused("fixed source migration refused") from exc
+    finally:
+        if source is not None:
+            os.close(source.fd)
+
+
+def request_fixed_source_move(
+    sock,
+    *,
+    manager_peer_policy: LinuxPeerCredentialPolicy,
+    expected_source_cgroup: str,
+) -> None:
+    """Root-phase launcher request: self-only pidfd; no arbitrary path or PID.
+
+    The launcher MUST close its socket before setresuid/setresgid and open a
+    separate authenticated post-drop connection. No workload import here.
+    """
+    from .containment_manager_peer import authenticate_linux_unix_peer
+    from .oci_pidfd_handoff import _require_connected_unix_stream, send_self_pidfd
+
+    _require_connected_unix_stream(sock)
+    authenticate_linux_unix_peer(sock, manager_peer_policy)
+    fixed_target = _cgroup_path(expected_source_cgroup)
+    sock.settimeout(2.0)
+    try:
+        send_self_pidfd(sock)
+        reply = sock.recv(1)
+    except OSError as exc:
+        raise OciPidfdHandoffRefused("source manager unresponsive") from exc
+    if reply != b"A":
+        raise OciPidfdHandoffRefused("source manager denied move")
+    if _current_cgroup(os.getpid()) != fixed_target:
+        raise OciPidfdHandoffRefused("launcher source cgroup readback failed")
