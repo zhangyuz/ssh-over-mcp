@@ -34,6 +34,7 @@ def test_offline_source_evidence_does_not_claim_any_signature_or_blob():
     assert PLATFORM_DIGEST in spec
     assert "d5b48b3b44d98cf4a7f5fcf570c5a2acfdf7b723" in spec
     for phrase in (
+        "repository_provenance_verified=false",
         "publisher_signature_verified=false",
         "image_use_authorized=false",
         "deployment_ready=false",

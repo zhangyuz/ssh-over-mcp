@@ -214,3 +214,13 @@ def test_unhashable_untrusted_media_types_are_refused_not_tracebacks(where):
     index_bytes = _encoded(index)
     with pytest.raises(Refused):
         inspect(index_bytes, child_bytes, _pin(index_bytes), _pin(child_bytes))
+
+
+def test_self_generated_metadata_must_not_claim_ubuntu_registry_origin():
+    # Even perfectly self-consistent bytes can have been invented by an attacker.
+    # Local hashes alone do not bind bytes to a remote repository or signer.
+    index, child = _fixture()
+    result = inspect(index, child, _pin(index), _pin(child))
+    assert "repository" not in result
+    assert result["repository_provenance_verified"] is False
+    assert result["publisher_signature_verified"] is False

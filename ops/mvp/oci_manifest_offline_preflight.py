@@ -179,7 +179,8 @@ def inspect(
         _size(layer.get("size"), 1024 * 1024 * 1024)
     return {
         "schema": "som-offline-oci-manifest-preflight-v1",
-        "repository": "docker.io/library/ubuntu",
+        # Local bytes/digests cannot establish which registry supplied them.
+        "repository_provenance_verified": False,
         "platform": "linux/amd64",
         "index_digest": expected_index,
         "amd64_manifest_digest": expected_platform,

@@ -21,7 +21,7 @@ python3 ops/mvp/oci_manifest_offline_preflight.py \
   --expected-platform sha256:42527649dbc4f9197a6073f426f488cbff0e9cc9f2afce32d91c383e4875634a
 ```
 
-The CLI checks bytes, references, unique architecture and strict finite metadata only. It always reports `publisher_signature_verified=false`, `image_use_authorized=false`, `deployment_ready=false`, and `image_layers_downloaded=false`. Even a valid hash from untrusted file data is **not signature verification** or container runtime authorization.
+The CLI checks bytes, references, unique architecture and strict finite metadata only. It **does not claim any repository source** for caller-supplied bytes: `repository_provenance_verified=false` is mandatory even for self-consistent synthetic manifests. It also always reports `publisher_signature_verified=false`, `image_use_authorized=false`, `deployment_ready=false`, and `image_layers_downloaded=false`. The separate live HTTPS registry response and official-images listing are externally observed contextual provenance and must never be inferred from the offline CLI's hash consistency. Even a valid hash from untrusted file data is **not signature verification** or container runtime authorization.
 
 ## Proposed locked package/build graph (C2 HOLD before any execution)
 
