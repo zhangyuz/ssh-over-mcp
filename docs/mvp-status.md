@@ -1,5 +1,7 @@
 # MVP 当前交付入口：Compose 多 SSH 读写试点
 
+> **PR #342 lean-MVP priority (2026-10-25):** C5 signed APT metadata is enough to proceed to a separately approved **standard signed APT image build**; manual C6 download of ten `.deb` files is **no longer a standalone Ready gate**. Focus on ADR0022 sshd/sudo/NNP/cgroup privilege transition, B isolated guest with proven no host/LAN egress, a minimal pinned SSH image and real A01–A03. **No new VM/Docker/keys/build authority follows from this scope reduction.** [Lean package runbook](runbooks/mvp-mode-a-ubuntu-package-index-offline.md).
+
 > **PR #342 C5 signed metadata read-only:** [Ubuntu resolute / resolute-updates / resolute-security signatures and Packages index hash chain](runbooks/mvp-mode-a-ubuntu-package-index-offline.md) checked with independently pinned 2018 Ubuntu Archive signer; 10 direct package metadata candidates only, `.deb` bytes and dependency closure not verified. C6 binary transfer/build approval and B/ADR runtime remain HOLD.
 
 > **PR #342 C1–C4 public metadata/offline design:** [Canonical Ubuntu 26.04 `linux/amd64` pinned manifest and proposed SSH image/key/air-gapped transfer review](superpowers/specs/2026-10-24-mode-a-ssh-source-and-offline-transfer.md) checks registry manifest digest consistency only. A `Dockerfile.proposed` deliberately fails and is not wired into Compose; complete transitive package/wheel locks, final project SSH image provenance/signature, key generation and B guest/OCI privileges still HOLD.
