@@ -265,3 +265,37 @@ def test_oci_manager_refuses_an_exited_peer_pidfd():
         if child.poll() is None:
             child.kill()
         child.wait(timeout=4)
+
+
+def test_oci_manager_closes_delivered_fds_when_ancillary_is_truncated():
+    from ssh_over_mcp.host_agent.containment_manager_peer import (
+        LinuxPeerCredentialPolicy,
+    )
+    from ssh_over_mcp.host_agent.oci_pidfd_handoff import (
+        OciPidfdHandoffRefused,
+        receive_peer_self_pidfd,
+    )
+
+    before = set(os.listdir("/proc/self/fd"))
+    descriptor = os.pidfd_open(os.getpid())
+    try:
+        source, target = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+        with source, target:
+            source.sendmsg(
+                [b"P"],
+                [
+                    (
+                        socket.SOL_SOCKET,
+                        socket.SCM_RIGHTS,
+                        array.array("i", [descriptor] * 16),
+                    )
+                ],
+            )
+            with pytest.raises(OciPidfdHandoffRefused, match="truncated"):
+                receive_peer_self_pidfd(
+                    target,
+                    peer_policy=LinuxPeerCredentialPolicy(expected_uid=os.getuid()),
+                )
+    finally:
+        os.close(descriptor)
+    assert set(os.listdir("/proc/self/fd")) == before

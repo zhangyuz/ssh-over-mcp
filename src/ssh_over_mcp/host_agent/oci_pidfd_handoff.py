@@ -118,16 +118,24 @@ def receive_peer_self_pidfd(sock: socket.socket, *, peer_policy: LinuxPeerCreden
             )
         except OSError as exc:
             raise OciPidfdHandoffRefused("cannot receive pinned pidfd") from exc
-        if flags & (socket.MSG_CTRUNC | socket.MSG_TRUNC):
-            raise OciPidfdHandoffRefused("truncated descriptor control message")
+        # Even when MSG_CTRUNC is set, the kernel may have *already*
+        # installed several received descriptors. Collect every complete
+        # SCM_RIGHTS integer before rejecting, so finally closes them all.
+        invalid_control = False
         for level, kind, data in ancillaries:
             if level != socket.SOL_SOCKET or kind != socket.SCM_RIGHTS:
-                raise OciPidfdHandoffRefused("unexpected Unix control message")
-            if len(data) % array.array("i").itemsize:
-                raise OciPidfdHandoffRefused("invalid descriptor control size")
+                invalid_control = True
+                continue
+            itemsize = array.array("i").itemsize
             fds = array.array("i")
-            fds.frombytes(data)
+            fds.frombytes(data[: len(data) // itemsize * itemsize])
             received.extend(fds)
+            if len(data) % itemsize:
+                invalid_control = True
+        if flags & (socket.MSG_CTRUNC | socket.MSG_TRUNC):
+            raise OciPidfdHandoffRefused("truncated descriptor control message")
+        if invalid_control:
+            raise OciPidfdHandoffRefused("unexpected or malformed Unix control message")
         if payload != _HANDOFF_BYTE or len(received) != 1:
             raise OciPidfdHandoffRefused("expected exactly one peer pidfd")
         pinned_fd = received[0]
