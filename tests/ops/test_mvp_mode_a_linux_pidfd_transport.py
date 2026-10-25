@@ -299,3 +299,100 @@ def test_oci_manager_closes_delivered_fds_when_ancillary_is_truncated():
     finally:
         os.close(descriptor)
     assert set(os.listdir("/proc/self/fd")) == before
+
+
+def test_oci_manager_accepts_only_direct_child_pinned_by_authenticated_parent():
+    from ssh_over_mcp.host_agent.containment_manager_peer import LinuxPeerCredentialPolicy
+    from ssh_over_mcp.host_agent.oci_pidfd_handoff import (
+        receive_direct_child_pidfd,
+        send_pinned_child_pidfd,
+    )
+
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(12)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+    )
+    try:
+        pinned = os.pidfd_open(child.pid)
+        try:
+            source, target = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+            with source, target:
+                send_pinned_child_pidfd(source, pinned)
+                received = receive_direct_child_pidfd(
+                    target, peer_policy=LinuxPeerCredentialPolicy(expected_uid=os.getuid())
+                )
+                try:
+                    assert received.pid == child.pid
+                    assert received.parent_pid == os.getpid()
+                    received.recheck_identity()
+                    assert not os.get_inheritable(received.fd)
+                finally:
+                    os.close(received.fd)
+        finally:
+            os.close(pinned)
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=4)
+
+
+def test_oci_manager_rejects_own_pid_as_child_and_closes_fd():
+    from ssh_over_mcp.host_agent.containment_manager_peer import LinuxPeerCredentialPolicy
+    from ssh_over_mcp.host_agent.oci_pidfd_handoff import (
+        OciPidfdHandoffRefused,
+        receive_direct_child_pidfd,
+    )
+
+    before = set(os.listdir("/proc/self/fd"))
+    pinned = os.pidfd_open(os.getpid())
+    try:
+        source, target = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+        with source, target:
+            source.sendmsg(
+                [b"C"],
+                [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array("i", [pinned]))],
+            )
+            with pytest.raises(OciPidfdHandoffRefused, match="direct child"):
+                receive_direct_child_pidfd(
+                    target, peer_policy=LinuxPeerCredentialPolicy(expected_uid=os.getuid())
+                )
+    finally:
+        os.close(pinned)
+    assert set(os.listdir("/proc/self/fd")) == before
+
+
+def test_oci_manager_rejects_child_exited_before_receipt():
+    from ssh_over_mcp.host_agent.containment_manager_peer import LinuxPeerCredentialPolicy
+    from ssh_over_mcp.host_agent.oci_pidfd_handoff import (
+        OciPidfdHandoffRefused,
+        receive_direct_child_pidfd,
+        send_pinned_child_pidfd,
+    )
+
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(12)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        pinned = os.pidfd_open(child.pid)
+        try:
+            source, target = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+            with source, target:
+                send_pinned_child_pidfd(source, pinned)
+                child.terminate()
+                child.wait(timeout=4)
+                with pytest.raises(OciPidfdHandoffRefused, match="already exited"):
+                    receive_direct_child_pidfd(
+                        target, peer_policy=LinuxPeerCredentialPolicy(expected_uid=os.getuid())
+                    )
+        finally:
+            os.close(pinned)
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=4)
