@@ -17,12 +17,11 @@ import sys
 
 import pytest
 
+# A Linux runner lacking any required interface MUST fail this gate, not
+# quietly mark its real-kernel proof as skipped while ordinary CI stays green.
 pytestmark = pytest.mark.skipif(
-    sys.platform != "linux"
-    or not hasattr(os, "pidfd_open")
-    or not hasattr(signal, "pidfd_send_signal")
-    or not hasattr(socket, "SCM_RIGHTS"),
-    reason="requires unprivileged Linux pidfd/SCM_RIGHTS kernel APIs",
+    sys.platform != "linux",
+    reason="Linux-only kernel proof; never skipped for missing Linux pidfd APIs",
 )
 
 
