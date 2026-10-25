@@ -1,5 +1,7 @@
 # MVP 当前交付入口：Compose 多 SSH 读写试点
 
+> **PR #342 C1–C4 public metadata/offline design:** [Canonical Ubuntu 26.04 `linux/amd64` pinned manifest and proposed SSH image/key/air-gapped transfer review](superpowers/specs/2026-10-24-mode-a-ssh-source-and-offline-transfer.md) checks registry manifest digest consistency only. A `Dockerfile.proposed` deliberately fails and is not wired into Compose; package locks, publisher signature, final project SSH image, key generation and B guest/OCI privileges still HOLD.
+
 > **Mode A B environment checkpoint (offline only):** operator selected a dedicated stopped Ubuntu 26.04 x86_64 VM on `yuz.local`; the read-only [VM plan preflight](runbooks/mvp-mode-a-vm-offline-gate.md) reports static shape valid but `host_lan_isolation_verified=false` and `vm_execution_authorized=false`. Lima 2.2 default outbound/host reachability is not a proven isolation boundary. No VM boot, Docker, SSH, host networking or privilege work is accepted; C image/key provenance and A01–A03 remain HOLD.
 
 > **PR #342 next architectural gate:** [proposed ADR0022](decisions/0022-proposed-compose-ssh-privilege-domains.md) identifies the minimum SSH vs containment-manager trust split, NNP/sudo conflict, operator-authorized Linux Engine and runtime evidence. Still PROPOSED/HOLD.

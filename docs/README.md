@@ -33,6 +33,8 @@ This directory is the canonical behavioral and security specification for `ssh-o
 
 **Mode A OCI/SSH trust proposal** — [per-role and directional network proof matrix](superpowers/specs/2026-10-24-mode-a-oci-privilege-and-network-proof-matrix.md) (offline review only, no runtime privilege exception).
 
+**Mode A C1–C4 trusted source proposal** — [Canonical Ubuntu OCI manifest pins, fail-closed SSH image candidate, disconnected import and test-only key lifecycle](superpowers/specs/2026-10-24-mode-a-ssh-source-and-offline-transfer.md) (public metadata/offline design only).
+
 ## Three-layer agent collaboration
 
 - [`../AGENTS.md`](../AGENTS.md) is the concise operational contract for agents and approval boundaries.

@@ -35,6 +35,8 @@ The current fixed sudo approach would require a narrowly scoped exception to **c
 
 This is a proof checklist, **not** a claim that these processes exist in either current Compose target. **Network blind spot:** each node and MCP share a Docker bridge, and MCP listens on `0.0.0.0`. A node-initiated connection to the MCP listener is therefore not excluded by the YAML; `internal: true` does not create a directional firewall rule. The live negative plan must attempt node→MCP TCP/8000 (including origin authentication bypass and resource-exhaustion probes), plus cross-node and external-egress attempts. A separately authorized network ACL/proxy must enforce the intended directionality if that is a required guarantee. Existing `network_acl_verified=false` stays correct.
 
+**C supply-chain candidate update (source/metadata only):** Canonical Docker Official Ubuntu 26.04 `linux/amd64` index/platform digests and future SSH image, package/SBOM/signature, disconnected import and independent ephemeral key design are tracked in [the offline source and trust specification](../superpowers/specs/2026-10-24-mode-a-ssh-source-and-offline-transfer.md). C operator decision [#6392167263](https://github.com/zhangyuz/ssh-over-mcp/pull/342#issuecomment-6392167263) explicitly forbids image pull/build/use, key creation, VM boot and OCI privilege changes. No digest string alone authorizes runtime.
+
 ## Trust and acceptance sequence
 
 1. Independently review this ADR, the exact trust split, OCI startup/identity table, and cgroup-v2 delegation evidence plan; obtain explicit operator design approval.
