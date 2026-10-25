@@ -61,14 +61,18 @@ def _current_cgroup(pid: int) -> str:
     if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
         raise OciPidfdHandoffRefused("invalid process identity")
     try:
-        with open(f"/proc/{pid}/cgroup", encoding="ascii") as stream:
+        # Binary read is critical: universal-newline decoding would silently
+        # turn a real cgroup name ending in CR into our expected path.
+        with open(f"/proc/{pid}/cgroup", "rb") as stream:
             raw = stream.read(4097)
-        if len(raw) > 4096:
-            raise ValueError("oversized cgroup membership")
-        lines = raw.splitlines()
-        if len(lines) != 1 or not lines[0].startswith("0::"):
-            raise ValueError("expected one unified cgroup-v2 hierarchy")
-        return _cgroup_path(lines[0][3:])
+        if (
+            len(raw) > 4096
+            or not raw.startswith(b"0::/")
+            or not raw.endswith(b"\n")
+            or raw.count(b"\n") != 1
+        ):
+            raise ValueError("expected one canonical unified cgroup-v2 record")
+        return _cgroup_path(raw[3:-1].decode("ascii"))
     except (OSError, UnicodeError, ValueError) as exc:
         raise OciPidfdHandoffRefused("unverifiable unified cgroup membership") from exc
 

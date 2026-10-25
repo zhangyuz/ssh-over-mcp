@@ -111,18 +111,22 @@ def test_proc_cgroup_refuses_nonunified_or_untrusted_path(monkeypatch):
     import io
 
     real_open = builtins.open
-    raw = {"text": "0::/som-mode-a/node01/admission\n1:cpu:/other\n"}
+    raw = {"bytes": b"0::/som-mode-a/node01/admission\n1:cpu:/other\n"}
 
     def fake_open(path, *args, **kwargs):
         if path == "/proc/441/cgroup":
-            return io.StringIO(raw["text"])
+            assert args == ("rb",)
+            return io.BytesIO(raw["bytes"])
         return real_open(path, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "open", fake_open)
     with pytest.raises(OciPidfdHandoffRefused, match="unified"):
         m._current_cgroup(441)
-    raw["text"] = "0::/som-mode-a/node01/../node02\n"
+    raw["bytes"] = b"0::/som-mode-a/node01/../node02\n"
     with pytest.raises(OciPidfdHandoffRefused, match="unified"):
         m._current_cgroup(441)
-    raw["text"] = "0::/som-mode-a/node01/admission\n"
+    raw["bytes"] = b"0::/som-mode-a/node01/admission\r\n"
+    with pytest.raises(OciPidfdHandoffRefused, match="unified"):
+        m._current_cgroup(441)
+    raw["bytes"] = b"0::/som-mode-a/node01/admission\n"
     assert m._current_cgroup(441) == "/som-mode-a/node01/admission"
