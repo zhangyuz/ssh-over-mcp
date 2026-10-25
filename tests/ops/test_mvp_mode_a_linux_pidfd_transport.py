@@ -566,3 +566,125 @@ def test_oci_pinned_security_status_matches_actual_linux_procfs():
                 )
     finally:
         os.close(pinned)
+
+
+def test_oci_pinned_child_attach_ack_preserves_existing_start_barrier(monkeypatch):
+    """Actual pidfd+AF_UNIX from fork parent; fake kernel cgroup write only."""
+    import select
+    import threading
+
+    from ssh_over_mcp.host_agent import oci_child_attach as attach
+    from ssh_over_mcp.host_agent.containment_manager_peer import LinuxPeerCredentialPolicy
+    from ssh_over_mcp.host_agent.oci_namespace_identity import (
+        IdMapEntry,
+        PinnedNamespaceIdentity,
+    )
+    from ssh_over_mcp.host_agent.oci_pidfd_handoff import OciPidfdHandoffRefused
+    from ssh_over_mcp.host_agent.oci_source_migration import OciSourceDomain
+    from ssh_over_mcp.host_agent.supervisor import (
+        ChildSupervisorError,
+        _release_start_barrier,
+        _wait_start_barrier,
+    )
+
+    root = OciSourceDomain(
+        "/som/node1",
+        "/som/node1/admission",
+        "/som/node1/host-agent-source",
+    )
+    policy = attach.OciChildAttachPolicy(
+        domain=root,
+        target_cgroup="/som/node1/workload/req-a",
+        expected_child_uid_map=(IdMapEntry(0, 100000, 65536),),
+        expected_child_gid_map=(IdMapEntry(0, 100000, 65536),),
+    )
+    barrier_read, barrier_write = os.pipe()
+    entered_read, entered_write = os.pipe()
+    child = os.fork()
+    if child == 0:
+        os.close(barrier_write)
+        os.close(entered_read)
+        try:
+            _wait_start_barrier(barrier_read)
+            os.write(entered_write, b"E")
+            os._exit(0)
+        except (OSError, ChildSupervisorError):
+            os._exit(125)
+
+    os.close(barrier_read)
+    os.close(entered_write)
+    pinned = -1
+    errors = []
+    state = {"membership": root.agent_source_cgroup}
+    try:
+        pinned = os.pidfd_open(child)
+        monkeypatch.setattr(attach, "_current_cgroup", lambda _pid: state["membership"])
+        idmap = (IdMapEntry(0, 100000, 65536),)
+
+        def observed(fd):
+            with open(f"/proc/self/fdinfo/{fd}", encoding="ascii") as report:
+                fields = dict(line.split(":", 1) for line in report if line.startswith("Pid:"))
+            observed_pid = int(fields["Pid"].strip())
+            manager = observed_pid == os.getpid()
+            return PinnedNamespaceIdentity(
+                pid=observed_pid,
+                parent_pid=os.getppid() if manager else os.getpid(),
+                starttime=1,
+                pidns=(4, 100),
+                userns=(4, 201 if manager else 202),
+                uid_map=idmap,
+                gid_map=idmap,
+            )
+
+        monkeypatch.setattr(attach, "inspect_pinned_namespace_identity", observed)
+        caller, server = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+
+        def manager():
+            try:
+                with server:
+                    attach.handle_fixed_child_attach(
+                        server,
+                        peer_policy=LinuxPeerCredentialPolicy(expected_uid=os.getuid()),
+                        policy=policy,
+                        trusted_attach=lambda _pinned: state.update(
+                            membership=policy.target_cgroup
+                        ),
+                    )
+            except (OciPidfdHandoffRefused, OSError) as exc:
+                errors.append(exc)
+
+        worker = threading.Thread(target=manager, daemon=True)
+        worker.start()
+        with caller:
+            attach.request_fixed_child_attach(
+                caller,
+                pinned_child_fd=pinned,
+                manager_peer_policy=LinuxPeerCredentialPolicy(expected_uid=os.getuid()),
+                expected_local_target_cgroup=policy.target_cgroup,
+            )
+            # The parent has not yet released the pre-existing supervisor
+            # one-byte barrier, and the child has not executed its payload.
+            assert select.select([entered_read], [], [], 0)[0] == []
+            _release_start_barrier(barrier_write)
+            assert select.select([entered_read], [], [], 3)[0] == [entered_read]
+            assert os.read(entered_read, 1) == b"E"
+        worker.join(timeout=4)
+        assert not worker.is_alive()
+        assert not errors
+        _, status = os.waitpid(child, 0)
+        assert os.waitstatus_to_exitcode(status) == 0
+    finally:
+        for fd in (pinned, barrier_write, entered_read):
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        try:
+            os.kill(child, 9)
+        except ProcessLookupError:
+            pass
+        try:
+            os.waitpid(child, 0)
+        except ChildProcessError:
+            pass
