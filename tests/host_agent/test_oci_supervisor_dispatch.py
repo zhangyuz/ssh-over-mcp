@@ -155,3 +155,44 @@ def test_oci_parent_dispatch_preserves_pin_and_barrier_contract(monkeypatch, cas
     finally:
         os.close(read)
         os.close(write)
+
+
+@pytest.mark.parametrize("failing_step", ["kill_all", "close"])
+def test_oci_cleanup_continues_after_unexpected_backend_failure(monkeypatch, failing_step):
+    """A broken OCI adapter cannot prevent direct child termination/reaping."""
+    events: list[str] = []
+    handle = _Handle(events)
+
+    def fail_cleanup() -> None:
+        events.append(failing_step)
+        raise RuntimeError("unexpected OCI adapter failure")
+
+    setattr(handle, failing_step, fail_cleanup)
+    monkeypatch.setattr(supervisor.os, "kill", lambda _pid, _sig: events.append("kill"))
+
+    def reap(_pid):
+        events.append("reap")
+        return True
+
+    monkeypatch.setattr(supervisor, "_reap_pid_bounded", reap)
+    barrier_read, barrier_write = os.pipe()
+    child = supervisor.SpawnedChild(777, -1, -1, -1, containment=handle)
+    try:
+        with pytest.raises(
+            supervisor.ChildSupervisorError, match="cannot clean failed contained child"
+        ):
+            supervisor._cleanup_failed_contained_spawn(
+                pid=777,
+                barrier_write=barrier_write,
+                child=child,
+                containment=handle,
+            )
+        assert events == ["kill_all", "kill", "reap", "close"]
+        with pytest.raises(OSError):
+            os.fstat(barrier_write)
+    finally:
+        os.close(barrier_read)
+        try:
+            os.close(barrier_write)
+        except OSError:
+            pass

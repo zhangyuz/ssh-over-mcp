@@ -341,8 +341,16 @@ No untrusted executable runs before containment attachment succeeds.
 If attach or barrier release fails, the parent never sends a valid release
 byte. Cleanup closes the barrier, attempts recursive containment kill, falls
 back to direct `SIGKILL` for pre-attachment failures, performs bounded reap,
-and closes the containment scope. The failed child therefore cannot continue
-into the exec path.
+and closes the containment scope. Unexpected backend cleanup exceptions do not
+skip direct child SIGKILL, bounded reap, or the scope-close attempt; any such
+exception makes cleanup fail rather than reporting success. The failed child
+therefore cannot continue into the exec path.
+
+For the proposed OCI-only `PidfdContainmentHandle`, the parent opens a live
+child pidfd while the barrier remains closed, calls `attach_pinned(pidfd)`,
+and closes its descriptor before release. Pin or adapter failure invokes the
+same cleanup path; it must never fall back to integer-PID attach. This does
+not supply an OCI cgroup writer or authorize deployment.
 
 A successfully spawned child retains its containment handle.
 

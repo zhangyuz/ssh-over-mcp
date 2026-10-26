@@ -471,7 +471,8 @@ def _cleanup_failed_contained_spawn(
 
     try:
         containment.kill_all()
-    except ContainmentError:
+    except BaseException:  # noqa: BLE001
+        # Even an unexpected backend error must not skip direct child kill/reap.
         cleanup_failed = True
 
     try:
@@ -486,7 +487,8 @@ def _cleanup_failed_contained_spawn(
 
     try:
         containment.close()
-    except ContainmentError:
+    except BaseException:  # noqa: BLE001
+        # Report failed cleanup even if an adapter violates its error contract.
         cleanup_failed = True
 
     if cleanup_failed:
