@@ -1,5 +1,7 @@
 # MVP 当前交付入口：Compose 多 SSH 读写试点
 
+> **2026-10-26 #342 Rebase / MVP 状态：** [#344](https://github.com/zhangyuz/ssh-over-mcp/pull/344) 的 create-only `fs_mkdir` durability/UNKNOWN 修复已经在主线 `107633e7fefcb47afb8b2b4b59ada5fb880e5e06` 合并；[push/main CI #40393924317](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/40393924317) 的常规 Python/Ubuntu 及 no-NIC Native Level-3/清理共 **11/11 PASS**。#342 已 rebase 到该主线，去掉重复的 `fs_mkdir` 提交并保留现有双节点 MCP read/approved mkdir/write/readback 入口。**只有源码及离线测试路径，尚无真实 SSH OCI 镜像、独立 cgroup manager 或 Mode A 双节点 Docker E2E**；运行构建/签名/密钥/guest 权限继续 HOLD，且不继承 #344 的一次性测试许可。
+
 > **2026-10-26 MVP 审批就绪功能（PR #342）：** [双节点写读 CLI](runbooks/mvp-dual-host-read-smoke.md) 新增现有 `approval_status` 的 **全部 grant 只读预检查** 和可执行的 `--preflight-only` 模式，确认每个目标的 create-only 目录/文件授权仍有效且绑定了正确 host/tool/path/content SHA-256；`--execute-create-once` 也会在**首次副作用前**检查全部授权，防止后续节点明显错误的审批导致不必要的部分提交。该检查不分发/消费审批、不扩展权限、不能锁定状态，也**不是**真正 Docker/双 SSH/Native Level-3 验收。真实运行环境/SSH image/全八工具/Mode B 仍 HOLD，APT runner 细节非阻塞 TODO。
 
 > **2026-10-26 本轮 MVP 实际功能增量：** [同一双节点验收工具](runbooks/mvp-dual-host-read-smoke.md) 支持**可选 create-only `fs_mkdir`→`fs_stat`→`fs_write`→`fs_read`**，对两个目标分别使用目录与写入的四个独立一次性审批、先创建并确认两侧目录才写文件，任何不确定结果终止且不重试。只增加既有 API 的实际使用路径，**未**扩展 SSH/Host Policy 权限、运行 Docker 或宣称真实双节点 E2E 已通过；APT 与未启用的全八工具继续作为 TODO。
@@ -24,12 +26,12 @@
 
 > **PR #342 runtime gate update (PROPOSED, not deployed):** [SSH target privilege/sshd handoff security review candidate](superpowers/specs/2026-10-24-mode-a-ssh-runtime-handoff-review.md) documents why render-only `cap_drop: ALL` + `no-new-privileges:true` cannot yet support the ADR0007 sudo/ForceCommand identity handoff and delegated cgroup manager. A proposed sshd config and negative tests were added **without** enabling any container, privilege, image, SSH endpoint or live feature; Mode A A01-A03 / Mode B A15-A18 remain NOT_RUN.
 
-> **2026-10-26 独立可合并核心修复（源码及 CI 待审查）：** `fs_mkdir(create-only)` 增加对已 pin 父目录的创建前后持久化 `fsync`，创建后 fsync/close 异常必须保留“已提交但持久化不确定”状态（SSH exit 74），绝不回滚或盲目重试。这个修改不启用 Compose/SSH OCI/manager/cgroup；Mode A/B 实际双节点运行与 #342 Release/Native Level-3 门禁仍 HOLD。
+> **2026-10-26 #344 独立核心修复（已合并、主线验收完成）：** `fs_mkdir(create-only)` 增加对已 pin 父目录的创建前后持久化 `fsync`，创建后 fsync/close 异常必须保留“已提交但持久化不确定”状态（SSH exit 74），绝不回滚或盲目重试。这个修改不启用 Compose/SSH OCI/manager/cgroup；Mode A/B 实际双节点运行与 #342 Release/Native Level-3 门禁仍 HOLD。
 
 > Merged offline operator capability (PR #343, 2026-10-24): [`ops/mvp/subtree_visibility_preview.py`](../ops/mvp/subtree_visibility_preview.py) previews synthetic `fs_list`/`fs_search` path allow/deny subtree decisions only. It does not enable any MCP/host-agent tools, central snapshot or Host Policy v5, and does not change A01–A18 NOT_RUN or #342 Docker deployment HOLD. See [runbook](runbooks/mvp-subtree-visibility-preview.md).
 
 **状态：双部署形态已由用户明确确认；ADR0021 其他安全设计/实施计划仍为 PROPOSED / DRAFT，待评审确认。**
-**当前已验证主线基线：** `6eca40dcd204c3ab37d82352f4f69b267fb5ff73`（PR #343 合并后的 main；[push-main CI #40131085842](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/40131085842) 为 11/11 PASS，含 Native Level-3）。本页仍是 MVP 工作计划状态，不是 Compose 实际部署/验收证据。
+**当前已验证主线基线：** `107633e7fefcb47afb8b2b4b59ada5fb880e5e06`（PR #344 合并后的 main；[push-main CI #40393924317](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/40393924317) 为 11/11 PASS，含 Native Level-3 与 provider 清理）。本页仍是 MVP 工作计划状态，不是 Compose 实际部署/验收证据。
 
 用户已确定的 MVP 目标：**MCP Server 和每一个 SSH Server 均使用 Docker Compose 部署**，至少两个独立 SSH 目标；支持 **全部八种 typed 文件读写操作**，在受控数据根内执行并保留现有审批/审计/SSH 隔离。**必须同时交付两种模式：Mode A 单 Linux Engine 多 Compose 容器供开发/E2E；Mode B 不同 Linux Engine 上分别启动独立 Compose 项目（control01 MCP/ledger/approval + ssh-host01 + ssh-host02）供实际部署。** 多宿主机模式需要 operator-approved 私有路由、SSH host-key pins、firewall/ACL 和真实网络故障验收，不得用单机测试代替。禁止以“支持所有读写”推出裸 shell、任意 host root 或 Docker 管理能力。
 
