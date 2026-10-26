@@ -1,8 +1,9 @@
 name: Mode A approved one-shot offline Docker Engine media
 
 # Test-only packet approved in conversation on 2026-10-26, PR #342.
-# Triggered solely by the unique approval-trailer commit, never by dispatch
-# or on a shared runner. Remove this workflow after its single trial.
+# CONSUMED: exact-head run 40350510565 failed in disposable builder when APT
+# rejected dropped CAP_SETUID/CAP_SETGID. No media uploaded; no guest boot.
+# Disabled fail-closed. Never re-enable without a separately reviewed scope.
 on:
   pull_request:
     types: [synchronize]
@@ -12,7 +13,7 @@ permissions:
 
 jobs:
   engine-media:
-    if: github.event.pull_request.number == 342 && github.event.pull_request.head.ref == 'feat/mvp-mode-a-compose-overlay-oct24'
+    if: github.event.pull_request.number == 342 && github.event.pull_request.head.ref == 'feat/mvp-mode-a-compose-overlay-oct24' && false
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:

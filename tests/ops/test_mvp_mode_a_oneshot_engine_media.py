@@ -15,6 +15,8 @@ def test_builder_job_is_specific_to_approved_packet_and_disposable_runner():
     assert job["runs-on"] == "ubuntu-26.04"
     assert "github.event.pull_request.number == 342" in job["if"]
     assert "feat/mvp-mode-a-compose-overlay-oct24" in job["if"]
+    # The one approved runner invocation was consumed; future pushes cannot re-run it.
+    assert "&& false" in job["if"]
     assert "synchronize" in WORKFLOW.read_text(encoding="utf-8")
     assert "workflow_dispatch" not in WORKFLOW.read_text(encoding="utf-8")
     assert "self-hosted" not in WORKFLOW.read_text(encoding="utf-8")
