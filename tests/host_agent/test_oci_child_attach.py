@@ -222,3 +222,112 @@ def test_child_parent_refuses_invalid_ack_and_mismatched_readback(monkeypatch):
     with pytest.raises(OciPidfdHandoffRefused, match="denied"):
         attach.request_fixed_child_attach(_Stream(b"N"), **arguments)
     assert calls == ["peer", "child", "peer", "child"]
+
+
+def _client_plan():
+    from ssh_over_mcp.host_agent.containment_manager_identity import (
+        ContainmentServiceIdentityPlan,
+        LinuxProcessIdentity,
+    )
+
+    return ContainmentServiceIdentityPlan(
+        manager=LinuxProcessIdentity(uid=2204, gid=3204),
+        host_agent=LinuxProcessIdentity(uid=2202, gid=3202),
+        workload=LinuxProcessIdentity(uid=2203, gid=3203),
+        manager_client_gid=3299,
+    )
+
+
+@pytest.mark.parametrize("case", ["ok", "connect_denied", "attach_denied"])
+def test_oci_postdrop_attach_uses_one_owned_socket_and_fails_closed(monkeypatch, case):
+    events = []
+    plan = _client_plan()
+
+    class ClientSocket:
+        def set_inheritable(self, value):
+            events.append(("cloexec", value))
+
+        def settimeout(self, value):
+            events.append(("timeout", value))
+
+        def connect(self, path):
+            events.append(("connect", path))
+            if case == "connect_denied":
+                raise OSError("untrusted socket")
+
+        def close(self):
+            events.append(("close",))
+
+    sock = ClientSocket()
+    monkeypatch.setattr(
+        attach,
+        "require_linux_process_identity",
+        lambda policy: events.append(("identity", policy.identity.uid)),
+        raising=False,
+    )
+    monkeypatch.setattr(attach.socket, "socket", lambda *args: sock)
+
+    def request(received, **kwargs):
+        assert received is sock
+        events.append(("attach", kwargs["pinned_child_fd"]))
+        assert kwargs["manager_peer_policy"] == plan.host_agent_connect_peer_policy()
+        assert kwargs["expected_local_target_cgroup"] == "/som/node1/workload/req-a"
+        if case == "attach_denied":
+            raise OciPidfdHandoffRefused("manager rejected")
+
+    monkeypatch.setattr(attach, "request_fixed_child_attach", request)
+    if case == "ok":
+        attach.request_fixed_child_attach_at_endpoint(
+            "/run/som/node1/manager.sock",
+            pinned_child_fd=47,
+            identity_plan=plan,
+            expected_local_target_cgroup="/som/node1/workload/req-a",
+        )
+        assert ("attach", 47) in events
+    else:
+        with pytest.raises(OciPidfdHandoffRefused):
+            attach.request_fixed_child_attach_at_endpoint(
+                "/run/som/node1/manager.sock",
+                pinned_child_fd=47,
+                identity_plan=plan,
+                expected_local_target_cgroup="/som/node1/workload/req-a",
+            )
+        if case == "connect_denied":
+            assert ("attach", 47) not in events
+    assert events[0] == ("identity", 2202)
+    assert events[-1] == ("close",)
+    assert ("connect", "/run/som/node1/manager.sock") in events
+
+
+def test_oci_postdrop_attach_refuses_bad_target_and_identity_before_socket(monkeypatch):
+    from ssh_over_mcp.host_agent.containment_manager_identity import LinuxProcessIdentityError
+
+    events = []
+    monkeypatch.setattr(
+        attach.socket,
+        "socket",
+        lambda *args: events.append("opened"),
+    )
+
+    with pytest.raises(ValueError):
+        attach.request_fixed_child_attach_at_endpoint(
+            "/run/som/node1/manager.sock",
+            pinned_child_fd=47,
+            identity_plan=_client_plan(),
+            expected_local_target_cgroup="/som/node1/../node2",
+        )
+    assert events == []
+
+    def deny(_policy):
+        events.append("identity-denied")
+        raise LinuxProcessIdentityError("wrong agent")
+
+    monkeypatch.setattr(attach, "require_linux_process_identity", deny, raising=False)
+    with pytest.raises(LinuxProcessIdentityError):
+        attach.request_fixed_child_attach_at_endpoint(
+            "/run/som/node1/manager.sock",
+            pinned_child_fd=47,
+            identity_plan=_client_plan(),
+            expected_local_target_cgroup="/som/node1/workload/req-a",
+        )
+    assert events == ["identity-denied"]

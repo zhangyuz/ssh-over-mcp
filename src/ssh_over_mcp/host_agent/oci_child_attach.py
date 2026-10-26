@@ -11,6 +11,10 @@ import os
 import socket
 from dataclasses import dataclass
 
+from .containment_manager_identity import (
+    ContainmentServiceIdentityPlan,
+    require_linux_process_identity,
+)
 from .containment_manager_peer import (
     LinuxPeerCredentialPolicy,
     authenticate_linux_unix_peer,
@@ -157,3 +161,41 @@ def request_fixed_child_attach(
     child_pid = _pidfd_pid(pinned_child_fd)
     if _current_cgroup(child_pid) != target:
         raise OciPidfdHandoffRefused("local pinned child cgroup readback failed")
+
+
+def request_fixed_child_attach_at_endpoint(
+    path: str | os.PathLike[str],
+    *,
+    pinned_child_fd: int,
+    identity_plan: ContainmentServiceIdentityPlan,
+    expected_local_target_cgroup: str,
+) -> None:
+    """Connect once as the verified post-drop agent and attach a pinned child.
+
+    Only trusted launch code supplies the endpoint and expected cgroup. No
+    client-selected target PID, manager write access or legacy attach fallback.
+    """
+    if not isinstance(identity_plan, ContainmentServiceIdentityPlan):
+        raise TypeError("trusted OCI identity plan required")
+    target = _cgroup_path(expected_local_target_cgroup)
+    endpoint = identity_plan.endpoint_policy(path).path
+    # Check our own post-drop identity before making any manager connection.
+    require_linux_process_identity(identity_plan.host_agent_process_policy())
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    except OSError as exc:
+        raise OciPidfdHandoffRefused("cannot open OCI manager socket") from exc
+    try:
+        sock.set_inheritable(False)
+        sock.settimeout(_TIMEOUT)
+        sock.connect(os.fspath(endpoint))
+        request_fixed_child_attach(
+            sock,
+            pinned_child_fd=pinned_child_fd,
+            manager_peer_policy=identity_plan.host_agent_connect_peer_policy(),
+            expected_local_target_cgroup=target,
+        )
+    except (OSError, ValueError) as exc:
+        raise OciPidfdHandoffRefused("OCI manager connection refused") from exc
+    finally:
+        sock.close()

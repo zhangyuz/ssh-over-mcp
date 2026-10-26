@@ -352,6 +352,13 @@ and closes its descriptor before release. Pin or adapter failure invokes the
 same cleanup path; it must never fall back to integer-PID attach. This does
 not supply an OCI cgroup writer or authorize deployment.
 
+The proposed OCI post-drop child-attach helper opens one fresh manager Unix
+stream from a trusted fixed endpoint, verifies the expected host-agent Linux
+identity before opening it, authenticates the manager with `SO_PEERCRED` before
+transferring the pinned child fd, and closes the socket on ACK or refusal.
+It is not wired into an approved OCI backend or guest cgroup writer; neither
+socket success nor synthetic ACK tests prove real kernel containment.
+
 A successfully spawned child retains its containment handle.
 
 ### Phase 3d2b2b2b3 containment-aware bounded execution
