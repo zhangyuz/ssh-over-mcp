@@ -27,6 +27,13 @@ def test_engine_media_builder_is_bounded_and_not_a_runnable_ssh_image():
     source = WORKFLOW.read_text(encoding="utf-8")
     assert "sha256:42527649dbc4f9197a6073f426f488cbff0e9cc9f2afce32d91c383e4875634a" in source
     assert "apt-get" in source
+    # APT's authenticated _apt downloader must be able to change UID/GID
+    # and own partial directories; no broader privilege is needed here.
+    assert "--cap-drop=ALL" in source
+    assert "--cap-add=SETUID --cap-add=SETGID --cap-add=CHOWN" in source
+    assert "--security-opt no-new-privileges" in source
+    for forbidden_cap in ("SYS_ADMIN", "DAC_OVERRIDE", "SYS_PTRACE", "NET_ADMIN"):
+        assert f"--cap-add={forbidden_cap}" not in source
     assert "sha256sum" in source
     assert "docker.io" in source
     assert "max_bytes" in source

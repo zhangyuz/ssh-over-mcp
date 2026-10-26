@@ -51,7 +51,10 @@ jobs:
           # descriptor, not a mutable tag or a claim of publisher signature.
           base=docker.io/library/ubuntu@sha256:42527649dbc4f9197a6073f426f488cbff0e9cc9f2afce32d91c383e4875634a
           docker pull --platform linux/amd64 "$base"
+          # Fetch-only APT sandbox: _apt UID/GID switch and ownership repair.
+          # These three container-local caps are NOT sshd/manager capabilities.
           docker run --rm --platform linux/amd64 --cap-drop=ALL \
+            --cap-add=SETUID --cap-add=SETGID --cap-add=CHOWN \
             --security-opt no-new-privileges --pids-limit=256 --memory=2g \
             -v "$PWD/media:/export" "$base" /bin/bash -euo pipefail -c '
               export DEBIAN_FRONTEND=noninteractive
