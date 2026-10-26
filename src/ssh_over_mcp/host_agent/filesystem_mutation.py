@@ -20,43 +20,67 @@ class FilesystemMutationCommittedError(FilesystemMutationError):
 
 
 def create_directory(path: str) -> None:
-    """Create one directory at an absent final path.
+    """Create absent directory, sync its parent, and report uncertain durability.
 
-    The only namespace mutation is the atomic mkdirat-style syscall itself.
-    The final pathname is deliberately not reopened, chmodded, or removed after
-    creation because a concurrently writable directory could retarget that
-    pathname between syscalls.
+    A directory entry is published atomically by mkdirat. Never reopen or
+    remove the final name: a concurrent writer can replace it at any time.
     """
 
     try:
         parent_fd, final_name = _open_parent(path)
     except FilesystemAccessError as exc:
-        raise FilesystemMutationError(
-            "filesystem mkdir parent is unavailable or unsafe"
-        ) from exc
+        raise FilesystemMutationError("filesystem mkdir parent is unavailable or unsafe") from exc
 
+    sync_parent_fd: int | None = None
+    committed = False
+    primary_error: BaseException | None = None
     try:
         if final_name is None:
-            raise FilesystemMutationError(
-                "filesystem mkdir cannot target the filesystem root"
-            )
+            raise FilesystemMutationError("filesystem mkdir cannot target the filesystem root")
 
+        sync_parent_fd = _open_syncable_parent(parent_fd)
         try:
-            os.mkdir(
-                final_name,
-                DIRECTORY_CREATE_MODE,
-                dir_fd=parent_fd,
-            )
-        except FileExistsError as exc:
-            raise FilesystemMutationError(
-                "filesystem mkdir destination already exists"
-            ) from exc
+            os.fsync(sync_parent_fd)
         except OSError as exc:
             raise FilesystemMutationError(
-                "filesystem mkdir failed"
+                "filesystem mkdir parent does not support durable creation"
             ) from exc
+
+        try:
+            os.mkdir(final_name, DIRECTORY_CREATE_MODE, dir_fd=parent_fd)
+        except FileExistsError as exc:
+            raise FilesystemMutationError("filesystem mkdir destination already exists") from exc
+        except OSError as exc:
+            raise FilesystemMutationError("filesystem mkdir failed") from exc
+
+        committed = True
+        try:
+            os.fsync(sync_parent_fd)
+        except OSError as exc:
+            raise FilesystemMutationCommittedError(
+                "filesystem mkdir committed; parent directory durability uncertain"
+            ) from exc
+    except BaseException as exc:
+        primary_error = exc
+        raise
     finally:
-        os.close(parent_fd)
+        # Never mask a primary result, especially committed/UNKNOWN, or leak
+        # the second fd if closing the first one fails.
+        close_error: OSError | None = None
+        for fd in (sync_parent_fd, parent_fd):
+            if fd is None:
+                continue
+            try:
+                os.close(fd)
+            except OSError as exc:
+                if close_error is None:
+                    close_error = exc
+        if close_error is not None and primary_error is None:
+            if committed:
+                raise FilesystemMutationCommittedError(
+                    "filesystem mkdir committed; close outcome uncertain"
+                ) from close_error
+            raise FilesystemMutationError("filesystem mkdir parent close failed") from close_error
 
 
 def _validate_create_body(data: bytes, expected_length: int) -> None:
@@ -68,13 +92,9 @@ def _validate_create_body(data: bytes, expected_length: int) -> None:
         or expected_length < 0
         or expected_length > MAX_FS_WRITE_BYTES
     ):
-        raise FilesystemMutationError(
-            "filesystem write length is outside the supported range"
-        )
+        raise FilesystemMutationError("filesystem write length is outside the supported range")
     if len(data) != expected_length:
-        raise FilesystemMutationError(
-            "filesystem write body length does not match declared length"
-        )
+        raise FilesystemMutationError("filesystem write body length does not match declared length")
 
 
 def _open_syncable_parent(parent_fd: int) -> int:
@@ -97,17 +117,13 @@ def _open_syncable_parent(parent_fd: int) -> int:
 
     if pinned.st_dev != opened.st_dev or pinned.st_ino != opened.st_ino:
         os.close(sync_fd)
-        raise FilesystemMutationError(
-            "filesystem write parent identity changed unexpectedly"
-        )
+        raise FilesystemMutationError("filesystem write parent identity changed unexpectedly")
     return sync_fd
 
 
 def _open_tmpfile(parent_fd: int) -> int:
     if not hasattr(os, "O_TMPFILE"):
-        raise FilesystemMutationError(
-            "filesystem does not support unnamed temporary files"
-        )
+        raise FilesystemMutationError("filesystem does not support unnamed temporary files")
     flags = os.O_TMPFILE | os.O_WRONLY | os.O_CLOEXEC
     try:
         return os.open(".", flags, FILE_CREATE_MODE, dir_fd=parent_fd)
@@ -127,13 +143,9 @@ def _write_all(fd: int, data: bytes) -> None:
                 view[offset : offset + _WRITE_CHUNK_BYTES],
             )
         except OSError as exc:
-            raise FilesystemMutationError(
-                "filesystem write failed before publication"
-            ) from exc
+            raise FilesystemMutationError("filesystem write failed before publication") from exc
         if written <= 0:
-            raise FilesystemMutationError(
-                "filesystem write made no progress before publication"
-            )
+            raise FilesystemMutationError("filesystem write made no progress before publication")
         offset += written
 
 
@@ -141,26 +153,16 @@ def _verify_tmpfile(fd: int, expected_length: int) -> None:
     try:
         info = os.fstat(fd)
     except OSError as exc:
-        raise FilesystemMutationError(
-            "filesystem write inode cannot be verified"
-        ) from exc
+        raise FilesystemMutationError("filesystem write inode cannot be verified") from exc
 
     if not stat.S_ISREG(info.st_mode):
-        raise FilesystemMutationError(
-            "filesystem write temporary inode is not regular"
-        )
+        raise FilesystemMutationError("filesystem write temporary inode is not regular")
     if stat.S_IMODE(info.st_mode) & ~FILE_CREATE_MODE:
-        raise FilesystemMutationError(
-            "filesystem write temporary inode mode is too permissive"
-        )
+        raise FilesystemMutationError("filesystem write temporary inode mode is too permissive")
     if info.st_size != expected_length:
-        raise FilesystemMutationError(
-            "filesystem write temporary inode has unexpected size"
-        )
+        raise FilesystemMutationError("filesystem write temporary inode has unexpected size")
     if info.st_nlink != 0:
-        raise FilesystemMutationError(
-            "filesystem write temporary inode was published unexpectedly"
-        )
+        raise FilesystemMutationError("filesystem write temporary inode was published unexpectedly")
 
 
 def _publish_tmpfile(tmp_fd: int, parent_fd: int, final_name: str) -> None:
@@ -173,13 +175,9 @@ def _publish_tmpfile(tmp_fd: int, parent_fd: int, final_name: str) -> None:
             follow_symlinks=True,
         )
     except FileExistsError as exc:
-        raise FilesystemMutationError(
-            "filesystem write destination already exists"
-        ) from exc
+        raise FilesystemMutationError("filesystem write destination already exists") from exc
     except (NotImplementedError, OSError) as exc:
-        raise FilesystemMutationError(
-            "filesystem cannot safely publish unnamed file"
-        ) from exc
+        raise FilesystemMutationError("filesystem cannot safely publish unnamed file") from exc
 
 
 def create_regular_file(
@@ -200,17 +198,13 @@ def create_regular_file(
     try:
         parent_fd, final_name = _open_parent(path)
     except FilesystemAccessError as exc:
-        raise FilesystemMutationError(
-            "filesystem write parent is unavailable or unsafe"
-        ) from exc
+        raise FilesystemMutationError("filesystem write parent is unavailable or unsafe") from exc
 
     sync_parent_fd: int | None = None
     tmp_fd: int | None = None
     try:
         if final_name is None:
-            raise FilesystemMutationError(
-                "filesystem write cannot target the filesystem root"
-            )
+            raise FilesystemMutationError("filesystem write cannot target the filesystem root")
 
         sync_parent_fd = _open_syncable_parent(parent_fd)
         try:
@@ -226,9 +220,7 @@ def create_regular_file(
         try:
             os.fsync(tmp_fd)
         except OSError as exc:
-            raise FilesystemMutationError(
-                "filesystem write data cannot be synchronized"
-            ) from exc
+            raise FilesystemMutationError("filesystem write data cannot be synchronized") from exc
 
         _verify_tmpfile(tmp_fd, expected_length)
         _publish_tmpfile(tmp_fd, parent_fd, final_name)
