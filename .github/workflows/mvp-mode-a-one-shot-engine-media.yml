@@ -1,9 +1,9 @@
 name: Mode A approved one-shot offline Docker Engine media
 
 # Test-only packet approved in conversation on 2026-10-26, PR #342.
-# CONSUMED: exact-head run 40350510565 failed in disposable builder when APT
-# rejected dropped CAP_SETUID/CAP_SETGID. No media uploaded; no guest boot.
-# Disabled fail-closed. Never re-enable without a separately reviewed scope.
+# ONE corrective disposable builder trial authorized by user continuation
+# after independent diff review; old attempt 40350510565 stopped on APT EPERM.
+# Exact new commit trailer one-off-20261026-capfix required. Disable after trial.
 on:
   pull_request:
     types: [synchronize]
@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   engine-media:
-    if: github.event.pull_request.number == 342 && github.event.pull_request.head.ref == 'feat/mvp-mode-a-compose-overlay-oct24' && false
+    if: github.event.pull_request.number == 342 && github.event.pull_request.head.ref == 'feat/mvp-mode-a-compose-overlay-oct24'
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
@@ -31,7 +31,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$APPROVED_SHA"
-          git show -s --format=%B HEAD | grep -Fx 'Approved-Builder-Packet: one-off-20261026'
+          git show -s --format=%B HEAD | grep -Fx 'Approved-Builder-Packet: one-off-20261026-capfix'
           . /etc/os-release
           test "$ID" = ubuntu
           test "$VERSION_ID" = 26.04
