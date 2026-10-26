@@ -1,10 +1,8 @@
-name: Mode A approved one-shot offline Docker Engine media
+name: Mode A one-shot signed APT Engine media
 
-# Test-only packet approved in conversation on 2026-10-26, PR #342.
-# CONSUMED/INACTIVE: attempt 40350510565 refused APT setuid/setgid;
-# corrective attempt 40353329472 passed UID/GID sandbox but hit APT index
-# chmod/rename EPERM (exit 100). Neither produced a media artifact.
-# Retained for read-only audit. Never re-enable automatically.
+# New test-only one-off native Ubuntu APT trial after two stopped container-APT
+# attempts. Initially DISABLED until independent code/security review.
+# The runner is GitHub-hosted and disposable. Do not use Yuz.local Docker.
 on:
   pull_request:
     types: [synchronize]
@@ -14,64 +12,72 @@ permissions:
 
 jobs:
   engine-media:
-    if: github.event.pull_request.number == 342 && github.event.pull_request.head.ref == 'feat/mvp-mode-a-compose-overlay-oct24' && false
+    if: github.event.pull_request.number == 342 && github.event.pull_request.head.ref == 'feat/mvp-mode-a-compose-overlay-oct24'
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
-      - name: Checkout exact approved PR source without credentials
+      - name: Checkout exact PR source without repository credentials
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Enforce one-use authorization and disposable x86 runner
+      - name: Verify one-off authorization and disposable x86 builder
         shell: bash
         env:
           APPROVED_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$APPROVED_SHA"
-          git show -s --format=%B HEAD | grep -Fx 'Approved-Builder-Packet: one-off-20261026-capfix'
+          git show -s --format=%B HEAD | grep -Fx 'Approved-Builder-Packet: one-off-20261026-native-apt'
           . /etc/os-release
           test "$ID" = ubuntu
           test "$VERSION_ID" = 26.04
           test "$(uname -m)" = x86_64
           test "$(id -u)" -ne 0
-          test -S /var/run/docker.sock
+          test -r /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          grep -Eq '^URIs: .*ubuntu.com/ubuntu' /etc/apt/sources.list.d/ubuntu.sources
+          grep -Fqx 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' /etc/apt/sources.list.d/ubuntu.sources
           git diff --exit-code
-          echo "Approved one-off GitHub-hosted source/Engine acquisition only; no guest or SSH image."
 
-      - name: Download Ubuntu signed-APT Docker Engine package closure in disposable builder
+      - name: Resolve and download signed Ubuntu APT Engine closure on disposable hosted runner
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p media
-          chmod 0700 media
-          # The digest is the previously reviewed exact linux/amd64 platform
-          # descriptor, not a mutable tag or a claim of publisher signature.
-          base=docker.io/library/ubuntu@sha256:42527649dbc4f9197a6073f426f488cbff0e9cc9f2afce32d91c383e4875634a
-          docker pull --platform linux/amd64 "$base"
-          # Fetch-only APT sandbox: _apt UID/GID switch and ownership repair.
-          # These three container-local caps are NOT sshd/manager capabilities.
-          docker run --rm --platform linux/amd64 --cap-drop=ALL \
-            --cap-add=SETUID --cap-add=SETGID --cap-add=CHOWN \
-            --security-opt no-new-privileges --pids-limit=256 --memory=2g \
-            -v "$PWD/media:/export" "$base" /bin/bash -euo pipefail -c '
-              export DEBIAN_FRONTEND=noninteractive
-              grep -ERq "archive.ubuntu.com|security.ubuntu.com" /etc/apt/sources.list* || exit 72
-              apt-get update
-              apt-get install --download-only -y --no-install-recommends \
-                docker.io containerd runc iptables iproute2 ca-certificates
-              cp /var/cache/apt/archives/*.deb /export/
-              apt-cache policy docker.io containerd runc > /export/engine-package-versions.txt
-              dpkg --print-architecture > /export/architecture.txt
-            '
-          test "$(cat media/architecture.txt)" = amd64
+          # Use Ubuntu's stock _apt sandbox, root-owned index files and signed
+          # official archives on the disposable runner. No OCI capability loop.
+          # This touches ONLY GitHub's ephemeral runner's package index/cache.
+          # Isolate official Ubuntu package indexes from preinstalled runner repos.
+          lists="$RUNNER_TEMP/som342-official-apt-lists"
+          sudo install -d -m 0755 "$lists"
+          sudo install -d -o _apt -g root -m 0700 "$lists/partial"
+          sudo apt-get update \
+            -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
+            -o Dir::Etc::sourceparts=- -o Dir::State::lists="$lists"
+          mkdir -m 0755 media
+          sudo install -d -o _apt -g root -m 0700 "$PWD/media/partial"
+          # A blank dpkg status asks APT for all dependencies, not merely those
+          # missing on GitHub's preinstalled runner. Download only: never install.
+          sudo apt-get -o Dir::State::status=/dev/null \
+            -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
+            -o Dir::Etc::sourceparts=- -o Dir::State::lists="$lists" \
+            -o Dir::Cache::archives="$PWD/media" \
+            install --download-only -y --no-install-recommends \
+            docker.io containerd runc iptables iproute2 ca-certificates
           test "$(find media -maxdepth 1 -name '*.deb' -type f | wc -l)" -gt 0
-          echo "Only downloaded packages from signed Ubuntu APT. No Docker daemon ran on Yuz.local."
+          sudo chown "$(id -u):$(id -g)" media/*.deb
+          # Only allowlisted files are uploaded; APT cache metadata stays local.
+          apt-cache -o Dir::State::lists="$lists" \
+            -o Dir::Etc::sourceparts=- \
+            -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
+            policy docker.io containerd runc > media/engine-package-versions.txt
+          dpkg --print-architecture > media/architecture.txt
+          test "$(cat media/architecture.txt)" = amd64
+          sha256sum /usr/share/keyrings/ubuntu-archive-keyring.gpg > media/ubuntu-archive-keyring.sha256
+          echo 'Authenticity: Ubuntu stock APT verified signed indexes during update; independent offline verify remains required.'
 
-      - name: Verify bounded media and produce per-byte hashes
+      - name: Bound and hash every downloaded package byte
         shell: bash
         env:
           SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
@@ -79,6 +85,7 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           import os
+          import subprocess
           from pathlib import Path
           packages = sorted(Path("media").glob("*.deb"))
           assert 1 <= len(packages) <= 150, "invalid package count"
@@ -86,28 +93,40 @@ jobs:
           max_bytes = 512 * 1024 * 1024
           assert all(0 < n < 100 * 1024 * 1024 for n in sizes)
           assert sum(sizes) <= max_bytes, "media exceeds approved bound"
-          assert os.environ["SOURCE_SHA"] == os.popen("git rev-parse HEAD").read().strip()
-          print(f"Package archives: {len(packages)}; total bytes: {sum(sizes)}")
+          assert all(p.is_file() and not p.is_symlink() for p in packages)
+          assert os.environ["SOURCE_SHA"] == subprocess.check_output(
+              ["git", "rev-parse", "HEAD"], text=True
+          ).strip()
+          print(f"Package files={len(packages)} total bytes={sum(sizes)}")
           PY
-          sha256sum media/*.deb > media/SHA256SUMS
-          sha256sum media/engine-package-versions.txt media/architecture.txt >> media/SHA256SUMS
+          # Hash filenames relative to the artifact extraction root.
+          (cd media && sha256sum ./*.deb > SHA256SUMS && \
+            sha256sum engine-package-versions.txt architecture.txt \
+              ubuntu-archive-keyring.sha256 >> SHA256SUMS)
           cat > media/PROVENANCE.txt <<EOF
           PR=342
           SOURCE_SHA=$SOURCE_SHA
           PACKAGE_ORIGIN=ubuntu-26.04-signed-apt
-          BASE_PLATFORM=docker.io/library/ubuntu@sha256:42527649dbc4f9197a6073f426f488cbff0e9cc9f2afce32d91c383e4875634a
-          ENGINE_BUNDLE_ONLY=true
+          PACKAGE_CLOSURE_BASELINE=empty-dpkg-status-candidate
+          ENGINE_OFFLINE_INSTALL_PROVEN=false
           SSH_IMAGE_BUILT=false
           GUEST_EXECUTED=false
           TRUSTED_KERNEL_LEVEL2_PROVEN=false
           EOF
-          sha256sum media/PROVENANCE.txt >> media/SHA256SUMS
-          sha256sum -c media/SHA256SUMS
+          (cd media && sha256sum PROVENANCE.txt >> SHA256SUMS && \
+            sha256sum -c SHA256SUMS)
 
-      - name: Save finite test-only Engine media artifact
+      - name: Save bounded test-only candidate, never deploy
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: mvp-342-approved-engine-media
-          path: media/
+          name: mvp-342-native-signed-apt-engine-candidate
+          # Explicit allowlist; the APT cache has a root-owned lock file.
+          path: |
+            media/*.deb
+            media/SHA256SUMS
+            media/PROVENANCE.txt
+            media/architecture.txt
+            media/engine-package-versions.txt
+            media/ubuntu-archive-keyring.sha256
           retention-days: 3
           if-no-files-found: error

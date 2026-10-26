@@ -1,4 +1,4 @@
-"""One-off test-only Engine media builder must never run on persistent hosts."""
+"""One-shot signed Ubuntu APT media must stay on disposable hosted builders."""
 
 from pathlib import Path
 
@@ -8,42 +8,69 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/mvp-mode-a-one-shot-engine-media.yml"
 
 
-def test_builder_job_is_specific_to_approved_packet_and_disposable_runner():
-    parsed = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    assert parsed["permissions"] == {"contents": "read"}
-    job = parsed["jobs"]["engine-media"]
+def test_media_job_is_tightly_bound_to_one_approved_exact_head_trial():
+    source = WORKFLOW.read_text(encoding="utf-8")
+    workflow = yaml.safe_load(source)
+    assert workflow["permissions"] == {"contents": "read"}
+    assert "pull_request" in workflow[True]  # YAML 1.1 parses 'on' as True
+    job = workflow["jobs"]["engine-media"]
     assert job["runs-on"] == "ubuntu-26.04"
     assert "github.event.pull_request.number == 342" in job["if"]
     assert "feat/mvp-mode-a-compose-overlay-oct24" in job["if"]
-    # Both bounded trials are consumed. Reject any later workflow reactivation.
-    assert "&& false" in job["if"]
-    assert "one-off-20261026-capfix" in WORKFLOW.read_text(encoding="utf-8")
-    assert "synchronize" in WORKFLOW.read_text(encoding="utf-8")
-    assert "workflow_dispatch" not in WORKFLOW.read_text(encoding="utf-8")
-    assert "self-hosted" not in WORKFLOW.read_text(encoding="utf-8")
-    assert "one-off-20261026" in WORKFLOW.read_text(encoding="utf-8")
+    assert "&& false" not in job["if"]
+    assert "one-off-20261026-native-apt" in source
+    assert "workflow_dispatch" not in source
+    assert "self-hosted" not in source
+    assert "persist-credentials: false" in source
 
 
-def test_engine_media_builder_is_bounded_and_not_a_runnable_ssh_image():
+def test_apt_runs_with_native_hosted_sandbox_not_partial_container_capabilities():
     source = WORKFLOW.read_text(encoding="utf-8")
-    assert "sha256:42527649dbc4f9197a6073f426f488cbff0e9cc9f2afce32d91c383e4875634a" in source
-    assert "apt-get" in source
-    # APT's authenticated _apt downloader must be able to change UID/GID
-    # and own partial directories; no broader privilege is needed here.
-    assert "--cap-drop=ALL" in source
-    assert "--cap-add=SETUID --cap-add=SETGID --cap-add=CHOWN" in source
-    assert "--security-opt no-new-privileges" in source
-    for forbidden_cap in ("SYS_ADMIN", "DAC_OVERRIDE", "SYS_PTRACE", "NET_ADMIN"):
-        assert f"--cap-add={forbidden_cap}" not in source
+    assert "sudo apt-get update" in source
+    assert "--download-only" in source
+    assert "Dir::State::status=/dev/null" in source
+    assert "Dir::Etc::sourceparts=-" in source
+    assert 'Dir::State::lists="$lists"' in source
+    assert "Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg" in source
+    assert "--no-install-recommends" in source
+    assert "docker.io containerd runc iptables iproute2 ca-certificates" in source
     assert "sha256sum" in source
-    assert "docker.io" in source
     assert "max_bytes" in source
     assert "upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in source
     for forbidden in [
-        "QEMU",
+        "docker run",
+        "docker pull",
+        "--cap-add",
+        "--privileged",
+        "APT::Get::AllowUnauthenticated",
+        "allow-unauthenticated",
+        "allow-insecure-repositories",
+        "Trusted: yes",
         "qemu-system",
         "Dockerfile.proposed",
-        "privileged: true",
         "sudo docker",
     ]:
         assert forbidden not in source
+
+
+def test_artifacts_remain_non_executable_until_separate_runtime_review():
+    source = WORKFLOW.read_text(encoding="utf-8")
+    assert "SSH_IMAGE_BUILT=false" in source
+    assert "GUEST_EXECUTED=false" in source
+    assert "ENGINE_OFFLINE_INSTALL_PROVEN=false" in source
+    assert "SOURCE_SHA=" in source
+    assert "(cd media && sha256sum" in source
+    assert "sha256sum -c SHA256SUMS" in source
+    assert "PACKAGE_ORIGIN=ubuntu-26.04-signed-apt" in source
+    assert "retention-days: 3" in source
+    # Never archive root-owned APT lock, partial dirs, or build internals.
+    workflow = yaml.safe_load(source)
+    upload = workflow["jobs"]["engine-media"]["steps"][-1]["with"]["path"]
+    assert set(upload.splitlines()) == {
+        "media/*.deb",
+        "media/SHA256SUMS",
+        "media/PROVENANCE.txt",
+        "media/architecture.txt",
+        "media/engine-package-versions.txt",
+        "media/ubuntu-archive-keyring.sha256",
+    }
