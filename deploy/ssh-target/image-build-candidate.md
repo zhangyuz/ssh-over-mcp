@@ -53,9 +53,13 @@ count as A01–A03.
    identity. The **proposed OCI** login account is UID **2201**/GID 3201,
    while the proposed OCI trusted agent is UID **2202**/GID 3202. This
    genuine mismatch would refuse the sudo handoff. Do not silently weaken
-   the existing launcher to accept either identity; implement a separate
-   reviewed OCI launcher transition using the already coded pinned pidfd
-   `move_source_self` handoff after exact namespace/peer review.
+   the existing launcher to accept either identity. The new OCI-only
+   [admission source](../../src/ssh_over_mcp/host_agent/oci_launcher_admission.py)
+   now checks 2201:3201 and orchestrates fixed manager self-pidfd ACK,
+   root socket close and exact 2202:3202 drop **without** a cgroupfs write.
+   It is not yet a root-owned executable entrypoint with an independently
+   reviewed privileged import chain, actual Linux capability implementation,
+   verified manager socket or approved OCI image wiring. All remain STOP.
 2. The existing accepted launcher writes the **source cgroup** `host-agent-source/cgroup.procs`
    itself. OCI runtime contract **forbids** its writable cgroupfs mount in
    the sshd container; a separate manager must verify peer+pidfd and move
