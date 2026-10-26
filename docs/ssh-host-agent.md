@@ -828,10 +828,14 @@ MCP `fs_stat`/`fs_read` tools separately. OS filesystem permissions remain
 the final access boundary.
 
 Create-only directory mutation is now reachable through typed SMCP v1
-`fs_mkdir`. The internal primitive still performs exactly one pinned-parent
-create-if-absent mutation and never reopens/chmods/removes the final pathname
-afterward. Host policy supplies profile-scoped canonical `mkdir_roots`,
-authorized lexically without touching the filesystem.
+`fs_mkdir`. The internal primitive performs exactly one pinned-parent
+create-if-absent mutation. It opens and identity-checks a syncable descriptor
+for the already-pinned parent, verifies pre-create fsync support, calls mkdirat,
+and fsyncs the same parent after publication. Before-create sync failure leaves
+no new entry. After-create sync failure is **committed/durability uncertain**:
+the created directory is never removed, reopened or retried blindly. Host
+policy supplies profile-scoped canonical `mkdir_roots`, authorized lexically
+without touching the filesystem.
 
 `fs_mkdir` is metadata-only. The envelope contains request ID, profile,
 operation, and path; mode, owner, recursive, and overwrite semantics are not

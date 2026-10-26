@@ -63,7 +63,6 @@ class OutputDeliveryError(RuntimeError):
     """Bounded SSH result delivery failed or exceeded its deadline."""
 
 
-
 def run(
     *,
     env: dict[str, str],
@@ -141,8 +140,7 @@ def run(
         # containment contract may enter the supervised native execution path.
         if policy.version != 4 or policy.containment is None:
             print(
-                "ssh-over-mcp-host-agent: execution unavailable "
-                f"for request {envelope.request_id}",
+                f"ssh-over-mcp-host-agent: execution unavailable for request {envelope.request_id}",
                 file=stderr,
             )
             return EX_UNAVAILABLE
@@ -300,8 +298,9 @@ def _run_filesystem_request(
             )
             output = b""
     except FilesystemMutationCommittedError:
+        operation = "mkdir" if isinstance(envelope, FsMkdirEnvelope) else "write"
         print(
-            "ssh-over-mcp-host-agent: filesystem write committed; "
+            f"ssh-over-mcp-host-agent: filesystem {operation} committed; "
             "durability uncertain; do not retry blindly",
             file=stderr,
         )
