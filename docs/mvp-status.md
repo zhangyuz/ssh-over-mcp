@@ -1,5 +1,7 @@
 # MVP 当前交付入口：Compose 多 SSH 读写试点
 
+> **2026-10-26 #342 OCI manager 独立进程源码入口（不启动）：** 新增 `ops/mvp/ssh-over-mcp-oci-manager.py` 与 `oci_manager_runtime.py`，对可信 root-owned node-id、manager UID/GID `2204:3204`、附加组 `3299`、Linux `NoNewPrivs=1` 与零 CapInh/Prm/Eff/Bnd/Amb 做拒绝式校验，复用已有带所有权/权限复核的 Unix listener，单节点接受自带 pidfd 的 `move_source_self`，通过已有固定 `cgroup.procs` writer 验证后 ACK；失败时关闭 listener、拒绝下一次请求及盲目重试。只做源码、隔离 mock 及现有 manager 组件回归，**尚未打包 manager OCI、未启用 Compose/SSH、未证明 SO_PEERCRED 跨 userns 映射或 PID 竞态**。目前只服务 root-phase 源迁移；子进程 attach/资源管理可留后续 MVP 最小闭环，非阻塞工程细节 TODO。
+
 > **2026-10-26 #342 独立 manager 固定 cgroup writer 源码增量（非实际部署）：** 新增 `oci_source_writer.py`，把已有的 `move_source_self` 认证 pidfd / ACK handler 接到一个 **manager 单节点固定目标** cgroup-v2 writer：逐级 `openat` + `O_NOFOLLOW`，检查 cgroup2 类型、每一级和 `cgroup.procs` 的内核 mount ID，只有一次 PID 写入，前后绑定 pidfd 和 birthtime/cgroup 检查；写入后任何无法确认的情况返回 **UNKNOWN / DO NOT RETRY**。跨节点、symlink/mount 替换与故障注入回归已覆盖。**用户 namespace 映射、PID 退出/复用竞态、真实内核委派及双节点 OCI/SSH E2E 均尚未验证，manager 运行入口仍 HOLD；本次没有执行 cgroup 写操作或 Docker/VM。**
 
 > **2026-10-26 #342 OCI launcher 候选已贯通至镜像内部配置（未启用）：** `ops/mvp/ssh-over-mcp-oci-launcher.py` 是候选 `sshd_config.review-candidate` 与 `sudoers.review-candidate` 唯一匹配的固定 `python3 -I -S` 入口，读取客体 root-owned `node-id`，调用已存在的 manager 自身 pidfd 源迁移并确认 ACK，再通过 Linux `prctl/capset/setresuid/gid` 降权及快照验证，降权后才导入应用。sudo 精确保留 `SSH_ORIGINAL_COMMAND`；特权导入拒绝可选字节码缓存。独立审查提出两项 P2 并已修复、二次复审无新增 P1/P2。**独立 manager/userns/cgroup/源镜像证明与真实 Mode A 双 SSH E2E 仍 HOLD**；原镜像与候选入口 STOP 78 不变，不能据此 Ready/merge。

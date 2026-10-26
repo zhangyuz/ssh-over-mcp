@@ -73,7 +73,13 @@ count as A01–A03.
    the sshd container; a separate manager must verify peer+pidfd and move
    source itself. Merely installing the managed-host launcher does *not*
    satisfy this requirement.
-3. The OCI-specific `oci_source_writer.py` now supplies a node-pinned,
+3. The OCI-only manager process entrypoint `ops/mvp/ssh-over-mcp-oci-manager.py`
+   and `oci_manager_runtime.py` now provide a source-only fixed-node
+   Unix listener, exact UID/GID and NNP/zero-cap verification, root-owned
+   node-id selector and single-operation failure/unknown STOP. They call
+   the existing pidfd source handler. **No manager image is built or enabled;
+   child attach / scoped workload management remains unconnected.**
+   The OCI-specific `oci_source_writer.py` now supplies a node-pinned,
    mount-ID-verified, single-write `cgroup.procs` callback connected to the
    existing self-pidfd manager handler, with explicit post-write UNKNOWN.
    **This is not an accepted kernel-level atomic PID attachment proof.**
