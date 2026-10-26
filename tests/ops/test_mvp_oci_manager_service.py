@@ -12,6 +12,8 @@ from pathlib import Path
 import pytest
 
 from ssh_over_mcp.host_agent import oci_manager_runtime as m
+from ssh_over_mcp.host_agent.containment_manager_peer import LinuxPeerCredentials
+from ssh_over_mcp.host_agent.oci_namespace_identity import IdMapEntry
 from ssh_over_mcp.host_agent.oci_pidfd_handoff import OciPidfdHandoffRefused
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -97,6 +99,7 @@ def test_manager_exposes_real_fixed_source_handler(monkeypatch):
                 identity_check=ident,
                 listener_factory=listener,
                 ready_to_accept=ready,
+                peer_reader=lambda _sock: LinuxPeerCredentials(77, 0, 0),
             )
             == 2
         )
@@ -124,6 +127,7 @@ def test_failed_pidfd_move_exits_server_with_no_retry(monkeypatch):
             identity_check=ident,
             listener_factory=listener,
             ready_to_accept=ready,
+            peer_reader=lambda _sock: LinuxPeerCredentials(77, 0, 0),
         )
     assert e.count("move-or-refuse") == 1
     assert e[-2:] == ["close-peer", "close-listener"]
@@ -259,3 +263,200 @@ def test_manager_guest_entry_is_not_wired_into_ssh_candidate() -> None:
         "Dockerfile.review-candidate"
         not in (ROOT / "deploy/compose/compose.dev-ssh.yaml").read_text()
     )
+
+
+def _one_child_service(
+    monkeypatch, *, node="node01", identity=(2202, 3202), maps=True, reject=False
+):
+    events: list[str] = []
+    calls = 0
+    e, ident, listener, _stop, _ready, _move = _run(node, requests=1)
+
+    def child(_sock, *, peer_policy, policy, trusted_attach):
+        nonlocal calls
+        calls += 1
+        assert (peer_policy.expected_uid, peer_policy.expected_gid) == (2202, 3202)
+        assert policy.target_cgroup == f"/som-mode-a/{node}/workload/mvp"
+        assert policy.expected_child_uid_map == (IdMapEntry(0, 100000, 65536),)
+        assert policy.expected_child_gid_map == (IdMapEntry(0, 100000, 65536),)
+        if reject:
+            raise OciPidfdHandoffRefused("attach refused")
+        events.append("child-ACK")
+
+    monkeypatch.setattr(m, "handle_fixed_child_attach", child)
+    kw = {
+        "trusted_node": node,
+        "stop_requested": lambda: calls >= 1,
+        "identity_check": ident,
+        "listener_factory": listener,
+        "ready_to_accept": lambda _fd: True,
+        "peer_reader": lambda _sock: LinuxPeerCredentials(77, *identity),
+    }
+    if maps:
+        kw.update(
+            expected_child_uid_map=(IdMapEntry(0, 100000, 65536),),
+            expected_child_gid_map=(IdMapEntry(0, 100000, 65536),),
+        )
+    return kw, e, events, lambda: calls
+
+
+def test_postdrop_agent_routes_only_to_fixed_mvp_child_handler(monkeypatch):
+    for node in ("node01", "node02"):
+        kw, actions, child_actions, calls = _one_child_service(monkeypatch, node=node)
+        assert m.serve_oci_source_manager(**kw) == 1
+        assert calls() == 1
+        assert child_actions == ["child-ACK"]
+        assert actions[-2:] == ["close-peer", "close-listener"]
+
+
+def test_child_attach_disabled_without_trusted_maps_is_fatal(monkeypatch):
+    kw, actions, child_actions, calls = _one_child_service(monkeypatch, maps=False)
+    with pytest.raises(m.OciManagerRuntimeRefused):
+        m.serve_oci_source_manager(**kw)
+    assert calls() == 0 and not child_actions
+    assert actions[-2:] == ["close-peer", "close-listener"]
+
+
+def test_wrong_agent_peer_refused_even_when_trusted_maps_present(monkeypatch):
+    kw, actions, child_actions, calls = _one_child_service(monkeypatch, identity=(2202, 0))
+    with pytest.raises(m.OciManagerRuntimeRefused):
+        m.serve_oci_source_manager(**kw)
+    assert calls() == 0 and not child_actions
+    assert actions[-2:] == ["close-peer", "close-listener"]
+
+
+def test_child_attach_failure_terminates_manager_without_retry(monkeypatch):
+    kw, actions, _child_actions, calls = _one_child_service(monkeypatch, reject=True)
+    with pytest.raises(m.OciManagerRuntimeRefused, match="inspect before restart"):
+        m.serve_oci_source_manager(**kw)
+    assert calls() == 1
+    assert actions[-2:] == ["close-peer", "close-listener"]
+
+
+def test_partial_child_userns_map_provision_refused_before_socket():
+    _e, ident, _listener, _stop, ready, _move = _run()
+    with pytest.raises(m.OciManagerRuntimeRefused, match="both trusted"):
+        m.serve_oci_source_manager(
+            trusted_node="node01",
+            stop_requested=lambda: False,
+            identity_check=ident,
+            listener_factory=lambda _: pytest.fail("no listener"),
+            ready_to_accept=ready,
+            expected_child_uid_map=(IdMapEntry(0, 100000, 65536),),
+        )
+
+
+def test_second_child_attach_is_refused_and_scope_not_reused(monkeypatch):
+    actions, identity, factory, _stop, _ready, _move = _run(requests=2)
+    connections = []
+    attached = []
+
+    def read_peer(_sock):
+        connections.append("agent")
+        return LinuxPeerCredentials(77, 2202, 3202)
+
+    def child(_sock, **kwargs):
+        attached.append(kwargs["policy"].target_cgroup)
+
+    monkeypatch.setattr(m, "handle_fixed_child_attach", child)
+    with pytest.raises(m.OciManagerRuntimeRefused):
+        m.serve_oci_source_manager(
+            trusted_node="node01",
+            stop_requested=lambda: len(connections) >= 3,
+            identity_check=identity,
+            listener_factory=factory,
+            ready_to_accept=lambda _fd: True,
+            peer_reader=read_peer,
+            expected_child_uid_map=(IdMapEntry(0, 100000, 65536),),
+            expected_child_gid_map=(IdMapEntry(0, 100000, 65536),),
+        )
+    assert len(connections) == 2
+    assert attached == ["/som-mode-a/node01/workload/mvp"]
+    assert actions[-2:] == ["close-peer", "close-listener"]
+
+
+def test_root_owned_guest_namespace_maps_feed_actual_manager_service(monkeypatch):
+    import signal
+
+    entry = _load()
+    monkeypatch.setattr(entry, "_kernel_unprivileged", lambda: None)
+    checked = []
+    monkeypatch.setattr(entry, "_trusted_file", lambda path: checked.append(path))
+    monkeypatch.setattr(entry, "_node_id", lambda: "node01")
+    monkeypatch.setattr(entry, "_refuse_source_bytecode", lambda: None)
+    monkeypatch.setattr(
+        entry,
+        "_root_owned_map_bytes",
+        lambda path: b"0 100000 65536\n",
+    )
+    monkeypatch.setattr(signal, "signal", lambda *_args: None)
+    recorded = []
+
+    def fake_service(**kwargs):
+        recorded.append(kwargs)
+
+    monkeypatch.setattr(m, "serve_oci_source_manager", fake_service)
+    old_path = list(entry.sys.path)
+    old_bytecode = entry.sys.dont_write_bytecode
+    try:
+        assert entry.main(argv=()) == 0
+    finally:
+        entry.sys.path[:] = old_path
+        entry.sys.dont_write_bytecode = old_bytecode
+
+    assert len(recorded) == 1
+    assert recorded[0]["trusted_node"] == "node01"
+    assert recorded[0]["expected_child_uid_map"] == (IdMapEntry(0, 100000, 65536),)
+    assert recorded[0]["expected_child_gid_map"] == (IdMapEntry(0, 100000, 65536),)
+    assert any(path.endswith("/oci_child_writer.py") for path in checked)
+    assert any(path.endswith("/oci_child_attach.py") for path in checked)
+
+
+@pytest.mark.parametrize("raw", [b"", b"x" * 4097])
+def test_guest_map_file_empty_or_oversized_refused(tmp_path, monkeypatch, raw):
+    from types import SimpleNamespace
+
+    entry = _load()
+    path = tmp_path / "child-map"
+    path.write_bytes(raw)
+    monkeypatch.setattr(entry, "CHILD_UID_MAP_PATH", str(path))
+    monkeypatch.setattr(entry, "_trusted_file", lambda _path: None)
+    monkeypatch.setattr(
+        entry.os,
+        "fstat",
+        lambda _fd: SimpleNamespace(st_uid=0, st_mode=path.stat().st_mode, st_nlink=1),
+    )
+    with pytest.raises(entry.OciManagerStartRefused):
+        entry._root_owned_map_bytes(str(path))
+
+
+def test_untrusted_guest_map_filename_rejected_before_open():
+    entry = _load()
+    with pytest.raises(entry.OciManagerStartRefused, match="path"):
+        entry._root_owned_map_bytes("/tmp/attacker-influenced-map")
+
+
+def test_agent_dispatch_calls_fixed_node_child_writer_no_client_destination(monkeypatch):
+    kw, _actions, _child_actions, _calls = _one_child_service(monkeypatch, node="node02")
+    invoked = []
+
+    def child(_sock, *, policy, trusted_attach, **_kwargs):
+        assert policy.target_cgroup == "/som-mode-a/node02/workload/mvp"
+        trusted_attach("pinned-child")
+
+    def writer(child, *, trusted_node):
+        invoked.append((child, trusted_node))
+
+    monkeypatch.setattr(m, "handle_fixed_child_attach", child)
+    monkeypatch.setattr(m, "move_fixed_mvp_child", writer)
+    observed = 0
+
+    def read_peer(_sock):
+        nonlocal observed
+        observed += 1
+        return LinuxPeerCredentials(77, 2202, 3202)
+
+    kw["peer_reader"] = read_peer
+    kw["stop_requested"] = lambda: observed >= 1
+    assert m.serve_oci_source_manager(**kw) == 1
+    assert invoked == [("pinned-child", "node02")]

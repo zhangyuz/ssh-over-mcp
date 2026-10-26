@@ -77,8 +77,12 @@ count as A01–A03.
    and `oci_manager_runtime.py` now provide a source-only fixed-node
    Unix listener, exact UID/GID and NNP/zero-cap verification, root-owned
    node-id selector and single-operation failure/unknown STOP. They call
-   the existing pidfd source handler. **No manager image is built or enabled;
-   child attach / scoped workload management remains unconnected.**
+   the existing pidfd source handler. A **single** fixed `/workload/mvp`
+   child attach is now source-wired through
+   `SO_PEERCRED` post-drop agent identity and separately guest-provisioned
+   root-owned `child-uid-map`/`child-gid-map`; missing/wrong maps STOP.
+   **No manager image or real kernel/guest admission yet; single-slot request
+   limits, cleanup and no PID reuse proof remain HOLD.**
    The OCI-specific `oci_source_writer.py` now supplies a node-pinned,
    mount-ID-verified, single-write `cgroup.procs` callback connected to the
    existing self-pidfd manager handler, with explicit post-write UNKNOWN.

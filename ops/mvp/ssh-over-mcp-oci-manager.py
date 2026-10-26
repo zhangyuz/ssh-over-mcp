@@ -14,6 +14,8 @@ import sys
 from pathlib import Path
 
 NODE_ID_PATH = "/etc/ssh-over-mcp/node-id"
+CHILD_UID_MAP_PATH = "/etc/ssh-over-mcp/child-uid-map"
+CHILD_GID_MAP_PATH = "/etc/ssh-over-mcp/child-gid-map"
 SOURCE_PATH = "/opt/ssh-over-mcp-e2e/workspace/src"
 SITE_PACKAGES = "/opt/ssh-over-mcp-e2e/venv/lib/python3.14/site-packages"
 _MANAGER_UID = 2204
@@ -80,6 +82,29 @@ def _node_id() -> str:
     raise OciManagerStartRefused("manager node identity invalid")
 
 
+def _root_owned_map_bytes(path: str) -> bytes:
+    """Read a guest-provisioned immutable namespace mapping, never SSH input."""
+    if path not in (CHILD_UID_MAP_PATH, CHILD_GID_MAP_PATH):
+        raise OciManagerStartRefused("untrusted namespace map path")
+    _trusted_file(path)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+    try:
+        info = os.fstat(fd)
+        if (
+            info.st_uid != 0
+            or info.st_mode & 0o022
+            or not stat.S_ISREG(info.st_mode)
+            or info.st_nlink != 1
+        ):
+            raise OciManagerStartRefused("trusted namespace map changed")
+        raw = os.read(fd, 4097)
+        if not 1 <= len(raw) <= 4096:
+            raise OciManagerStartRefused("trusted namespace map missing or oversized")
+        return raw
+    finally:
+        os.close(fd)
+
+
 def _kernel_unprivileged() -> None:
     if sys.platform != "linux" or os.geteuid() != _MANAGER_UID:
         raise OciManagerStartRefused("manager is not required Linux UID")
@@ -110,6 +135,9 @@ def main(argv: tuple[str, ...] | None = None) -> int:
         SOURCE_PATH + "/ssh_over_mcp/host_agent/__init__.py",
         SOURCE_PATH + "/ssh_over_mcp/host_agent/oci_manager_runtime.py",
         SOURCE_PATH + "/ssh_over_mcp/host_agent/oci_source_writer.py",
+        SOURCE_PATH + "/ssh_over_mcp/host_agent/oci_child_writer.py",
+        SOURCE_PATH + "/ssh_over_mcp/host_agent/oci_child_attach.py",
+        SOURCE_PATH + "/ssh_over_mcp/host_agent/oci_namespace_identity.py",
         SOURCE_PATH + "/ssh_over_mcp/host_agent/oci_source_migration.py",
         SOURCE_PATH + "/ssh_over_mcp/host_agent/oci_pidfd_handoff.py",
         SOURCE_PATH + "/ssh_over_mcp/host_agent/containment_manager_peer.py",
@@ -119,11 +147,17 @@ def main(argv: tuple[str, ...] | None = None) -> int:
     ):
         _trusted_file(path)
     node = _node_id()
+    uid_map_bytes = _root_owned_map_bytes(CHILD_UID_MAP_PATH)
+    gid_map_bytes = _root_owned_map_bytes(CHILD_GID_MAP_PATH)
     sys.dont_write_bytecode = True
     _refuse_source_bytecode()
     sys.path.insert(0, SOURCE_PATH)
     sys.path.insert(1, SITE_PACKAGES)
     from ssh_over_mcp.host_agent.oci_manager_runtime import serve_oci_source_manager
+    from ssh_over_mcp.host_agent.oci_namespace_identity import parse_id_map
+
+    expected_child_uid_map = parse_id_map(uid_map_bytes)
+    expected_child_gid_map = parse_id_map(gid_map_bytes)
 
     terminated = False
 
@@ -133,7 +167,12 @@ def main(argv: tuple[str, ...] | None = None) -> int:
 
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
-    serve_oci_source_manager(trusted_node=node, stop_requested=lambda: terminated)
+    serve_oci_source_manager(
+        trusted_node=node,
+        stop_requested=lambda: terminated,
+        expected_child_uid_map=expected_child_uid_map,
+        expected_child_gid_map=expected_child_gid_map,
+    )
     return 0
 
 
