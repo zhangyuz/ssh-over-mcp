@@ -353,3 +353,213 @@ def test_failed_mkdir_never_performs_a_write_and_never_retries(fault):
     assert "fs_write" not in [name for name, _ in calls]
     checked_mkdir = [host for name, host in calls if name == "fs_mkdir"]
     assert len(checked_mkdir) == len(set(checked_mkdir))
+
+
+def approval_result(
+    approval_id: str,
+    *,
+    alias: str,
+    tool: str,
+    path: str,
+    payload: bytes | None = None,
+) -> dict:
+    from datetime import UTC, datetime, timedelta
+
+    return {
+        "approval_id": approval_id,
+        "state": "granted",
+        "expires_at": (datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
+        "host": alias,
+        "tool": tool,
+        "safe_summary": {
+            "host": alias,
+            "tool": tool,
+            "normalized_path": path,
+            "privilege": "user",
+            "content_length": len(payload) if payload is not None else None,
+            "content_fingerprint": (
+                "sha256:" + hashlib.sha256(payload).hexdigest() if payload is not None else None
+            ),
+        },
+    }
+
+
+def valid_approval_rpc(body, calls):
+    import posixpath
+
+    grants = {}
+    for alias in ("node01", "node02"):
+        grants[body[alias]["approval_id"]] = approval_result(
+            body[alias]["approval_id"],
+            alias=alias,
+            tool="fs_write",
+            path=body["path"],
+            payload=base64.b64decode(body[alias]["data_base64"]),
+        )
+        if "mkdir" in body:
+            grants[body["mkdir"][alias]] = approval_result(
+                body["mkdir"][alias],
+                alias=alias,
+                tool="fs_mkdir",
+                path=posixpath.dirname(body["path"]),
+            )
+
+    def rpc(tool, args):
+        calls.append((tool, dict(args)))
+        assert tool == "approval_status"
+        return dict(grants[args["approval_id"]])
+
+    return rpc
+
+
+@pytest.mark.parametrize("with_mkdir", [False, True])
+def test_grant_preflight_verifies_all_binding_summaries_without_mutation(with_mkdir):
+    body = mkdir_fixture() if with_mkdir else fixture()
+    calls = []
+    checked = create.preflight_approvals(valid_approval_rpc(body, calls), body)
+    assert checked == (4 if with_mkdir else 2)
+    assert len(calls) == checked
+    assert all(name == "approval_status" for name, _ in calls)
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "pending",
+        "consumed",
+        "wrong_host",
+        "wrong_tool",
+        "wrong_path",
+        "wrong_content",
+        "wrong_length",
+        "stale",
+        "wrong_identity",
+    ],
+)
+def test_grant_preflight_rejects_wrong_or_expired_approval_before_mutation(fault):
+    body = mkdir_fixture()
+    calls = []
+    rpc = valid_approval_rpc(body, calls)
+
+    def corrupted(tool, args):
+        record = rpc(tool, args)
+        if args["approval_id"] == body["node02"]["approval_id"]:
+            if fault == "pending":
+                record["state"] = "pending"
+            elif fault == "consumed":
+                record["state"] = "consumed"
+            elif fault == "wrong_host":
+                record["host"] = "node01"
+            elif fault == "wrong_tool":
+                record["safe_summary"]["tool"] = "fs_mkdir"
+            elif fault == "wrong_path":
+                record["safe_summary"]["normalized_path"] = "/other"
+            elif fault == "wrong_content":
+                record["safe_summary"]["content_fingerprint"] = "sha256:" + "0" * 64
+            elif fault == "wrong_length":
+                record["safe_summary"]["content_length"] = 999
+            elif fault == "stale":
+                record["expires_at"] = "2020-01-01T00:00:00+00:00"
+            else:
+                record["approval_id"] = body["node01"]["approval_id"]
+        return record
+
+    with pytest.raises(create.SmokeRefused, match="APPROVAL_PREFLIGHT_FAILED"):
+        create.preflight_approvals(corrupted, body)
+    assert all(name == "approval_status" for name, _ in calls)
+
+
+def test_real_operator_preflight_only_mode_never_calls_mutating_mcp(tmp_path, monkeypatch, capsys):
+    import sys
+    from unittest.mock import patch
+
+    body = mkdir_fixture()
+    file = tmp_path / "private.json"
+    file.write_text(json.dumps(body))
+    os.chmod(file, 0o600)
+    token = tmp_path / "token"
+    token.write_bytes(b"synthetic-token")
+    calls = []
+    rpc = valid_approval_rpc(body, calls)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "smoke",
+            "--endpoint",
+            "https://mcp.example.invalid/mcp",
+            "--token-file",
+            str(token),
+            "--manifest",
+            str(file),
+            "--preflight-only",
+        ],
+    )
+
+    class FakeClient:
+        def __init__(self, *args):
+            pass
+
+        def initialize(self):
+            calls.append(("initialize", {}))
+
+        def call(self, tool, args):
+            return rpc(tool, args)
+
+    with patch.object(create, "MCPHTTPClient", FakeClient):
+        assert create.main() == 0
+    assert [tool for tool, _ in calls] == ["initialize"] + ["approval_status"] * 4
+    assert '"mutations_executed": false' in capsys.readouterr().out.lower()
+
+
+def test_execute_mode_validates_all_grants_before_first_mutation(tmp_path, monkeypatch, capsys):
+    import sys
+    from unittest.mock import patch
+
+    body = mkdir_fixture()
+    file = tmp_path / "private.json"
+    file.write_text(json.dumps(body))
+    os.chmod(file, 0o600)
+    token = tmp_path / "token"
+    token.write_bytes(b"synthetic-token")
+    calls = []
+    rpc = valid_approval_rpc(body, calls)
+
+    def bad_last_grant(tool, args):
+        if tool == "approval_status":
+            record = rpc(tool, args)
+            if args["approval_id"] == body["node02"]["approval_id"]:
+                record["safe_summary"]["normalized_path"] = "/invalid"
+            return record
+        calls.append((tool, dict(args)))
+        raise AssertionError("MUTATION MUST NOT OCCUR")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "smoke",
+            "--endpoint",
+            "https://mcp.example.invalid/mcp",
+            "--token-file",
+            str(token),
+            "--manifest",
+            str(file),
+            "--execute-create-once",
+        ],
+    )
+
+    class FakeClient:
+        def __init__(self, *args):
+            pass
+
+        def initialize(self):
+            pass
+
+        def call(self, tool, args):
+            return bad_last_grant(tool, args)
+
+    with patch.object(create, "MCPHTTPClient", FakeClient):
+        assert create.main() == 1
+    assert all(name == "approval_status" for name, _ in calls)
+    assert "APPROVAL_PREFLIGHT_FAILED" in capsys.readouterr().out

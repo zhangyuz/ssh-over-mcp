@@ -1,5 +1,7 @@
 # MVP 当前交付入口：Compose 多 SSH 读写试点
 
+> **2026-10-26 MVP 审批就绪功能（PR #342）：** [双节点写读 CLI](runbooks/mvp-dual-host-read-smoke.md) 新增现有 `approval_status` 的 **全部 grant 只读预检查** 和可执行的 `--preflight-only` 模式，确认每个目标的 create-only 目录/文件授权仍有效且绑定了正确 host/tool/path/content SHA-256；`--execute-create-once` 也会在**首次副作用前**检查全部授权，防止后续节点明显错误的审批导致不必要的部分提交。该检查不分发/消费审批、不扩展权限、不能锁定状态，也**不是**真正 Docker/双 SSH/Native Level-3 验收。真实运行环境/SSH image/全八工具/Mode B 仍 HOLD，APT runner 细节非阻塞 TODO。
+
 > **2026-10-26 本轮 MVP 实际功能增量：** [同一双节点验收工具](runbooks/mvp-dual-host-read-smoke.md) 支持**可选 create-only `fs_mkdir`→`fs_stat`→`fs_write`→`fs_read`**，对两个目标分别使用目录与写入的四个独立一次性审批、先创建并确认两侧目录才写文件，任何不确定结果终止且不重试。只增加既有 API 的实际使用路径，**未**扩展 SSH/Host Policy 权限、运行 Docker 或宣称真实双节点 E2E 已通过；APT 与未启用的全八工具继续作为 TODO。
 
 > **2026-10-26 MVP 写入验收切片（PR #342，源代码完成 / 真实 E2E 待执行）：** [双节点 create-only 写入→读回工具及操作约束](runbooks/mvp-dual-host-read-smoke.md) 使用现有 `fs_write` + Ledger 一次性审批 + `fs_stat`/`fs_read`，两个不同目标、不同小文件，各自审批且显式执行；拒绝不安全清单、错误写回执与哈希不匹配。任何中途失败均视为可能已经部分写入，禁止盲目重试，保留现有 SSH/host-policy/审计边界。真实 Docker Mode A/B、完整八工具和合并前 Native Level-3 仍 HOLD。**不再围绕已消费的 APT 单次试验展开非阻塞微调。**

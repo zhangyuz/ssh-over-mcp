@@ -13,6 +13,7 @@ import posixpath
 import re
 import stat
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from dual_host_read_smoke import (
@@ -129,6 +130,44 @@ def _prepared(
     return path, payloads, approvals, mkdir_grants
 
 
+def preflight_approvals(rpc, document: dict) -> int:
+    """Read-only grant check BEFORE the first mutation, not an authorization substitute."""
+    path, payloads, approvals, mkdir_grants = _prepared(document)
+    checks: list[tuple[str, str, str, bytes | None, str]] = []
+    if mkdir_grants:
+        for alias in _ALIASES:
+            checks.append(("fs_mkdir", alias, posixpath.dirname(path), None, mkdir_grants[alias]))
+    for alias in _ALIASES:
+        checks.append(("fs_write", alias, path, payloads[alias], approvals[alias]))
+
+    for tool, alias, target, data, approval_id in checks:
+        try:
+            result = rpc("approval_status", {"approval_id": approval_id})
+            summary = result["safe_summary"]
+            expiry = datetime.fromisoformat(result["expires_at"])
+            valid = (
+                result.get("approval_id") == approval_id
+                and result.get("state") == "granted"
+                and result.get("host") == alias
+                and result.get("tool") == tool
+                and type(summary) is dict
+                and summary.get("host") == alias
+                and summary.get("tool") == tool
+                and summary.get("normalized_path") == target
+                and summary.get("privilege") == "user"
+                and summary.get("content_length") == (len(data) if data is not None else None)
+                and summary.get("content_fingerprint")
+                == ("sha256:" + hashlib.sha256(data).hexdigest() if data is not None else None)
+                and expiry.utcoffset() == timedelta(0)
+                and expiry > datetime.now(UTC) + timedelta(seconds=10)
+            )
+        except (SmokeRefused, KeyError, TypeError, ValueError, OverflowError):
+            valid = False
+        if not valid:
+            raise SmokeRefused("APPROVAL_PREFLIGHT_FAILED")
+    return len(checks)
+
+
 def create_and_verify(rpc, document: dict) -> dict[str, str]:
     """One call per host for create; NEVER retry a possibly committed write."""
     path, payloads, approvals, mkdir_grants = _prepared(document)
@@ -207,16 +246,25 @@ def main() -> int:
     parser.add_argument("--token-file", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--execute-create-once", action="store_true")
+    parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--allow-loopback-http", action="store_true")
     args = parser.parse_args()
     try:
-        if not args.execute_create_once:
+        if args.execute_create_once == args.preflight_only:
             raise SmokeRefused("WRITE_OPTIN_REQUIRED")
         endpoint = validate_endpoint(args.endpoint, allow_loopback=args.allow_loopback_http)
         document = read_manifest(args.manifest)
         _prepared(document)  # refuse bad inputs before a network connection
         client = MCPHTTPClient(endpoint, _read_token(args.token_file))
         client.initialize()
+        checked = preflight_approvals(client.call, document)
+        if args.preflight_only:
+            print(
+                json.dumps(
+                    {"status": "PASS", "checked_approvals": checked, "mutations_executed": False}
+                )
+            )
+            return 0
         digests = create_and_verify(client.call, document)
     except SmokeRefused as exc:
         print(json.dumps({"status": "REFUSED", "code": str(exc)}))

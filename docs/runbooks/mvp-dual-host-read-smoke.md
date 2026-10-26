@@ -65,3 +65,9 @@ python3 ops/mvp/dual_host_create_roundtrip.py \
 ```
 
 四个 `apr_...` 必须**彼此不同且由已有 Ledger 分别精确审批**（两个 `fs_mkdir` 父目录创建、两个 `fs_write` 文件创建）。示例 ID 无任何授权作用。工具先向两台节点各执行一次 create-only `fs_mkdir`，随后通过 `fs_stat` 确认两边父目录均存在，才各写一次新文件并读回核对哈希。父目录已经存在时不得使用此选项：远端 create-only 会拒绝。**目录创建或文件创建任何一步结果不确定，都停止而不重试**，也不会清理可能创建的目录/文件。没有 `mkdir` 字段时保持原有行为，要求父目录事先存在。
+
+### 执行前：只读审批预检查（降低部分提交风险）
+
+同一个 `dual_host_create_roundtrip.py` 现在可使用 `--preflight-only` 替换 `--execute-create-once`：在 **MCP 上只调用 `approval_status`**，逐项检查两次写入审批（若有 `mkdir` 则共四次）的 `granted` 状态、剩余有效期、host/tool/path、user 权限及写入数据 SHA-256/长度。它不执行 `fs_mkdir` 或 `fs_write`，只输出通过数量及 `mutations_executed=false`，不输出审批 ID 或文件内容。
+
+正式运行 `--execute-create-once` 时也自动做同样的全部预检查；若任一审批缺失、失效或不匹配，**在第一次写入前拒绝**。使用现有 Ledger 获取和授予精确审批，CLI 不自动发放授权。预检查仅是检查当时的快照，不能锁住审批、保证随后成功或替代服务器侧再验授权；状态/策略随时可能变化。真实双节点 E2E 仍待执行。
