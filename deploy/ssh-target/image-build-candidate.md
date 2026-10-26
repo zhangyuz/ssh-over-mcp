@@ -73,7 +73,11 @@ count as A01–A03.
    the sshd container; a separate manager must verify peer+pidfd and move
    source itself. Merely installing the managed-host launcher does *not*
    satisfy this requirement.
-3. The manager's independently mapped UID/user/mount namespace, delegated
+3. The OCI-specific `oci_source_writer.py` now supplies a node-pinned,
+   mount-ID-verified, single-write `cgroup.procs` callback connected to the
+   existing self-pidfd manager handler, with explicit post-write UNKNOWN.
+   **This is not an accepted kernel-level atomic PID attachment proof.**
+   The manager's independently mapped UID/user/mount namespace, delegated
    node-only cgroup common ancestor, pidfd child attach/race, effective
    bounding/NNP/sudo capability matrix and two-direction Docker bridge
    firewall remain **UNPROVEN**. A failure never authorizes `privileged`,
