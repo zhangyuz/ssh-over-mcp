@@ -64,8 +64,11 @@ def read_manifest(path: Path) -> dict:
     return document
 
 
-def _prepared(document: dict) -> tuple[str, dict[str, bytes], dict[str, str]]:
-    if type(document) is not dict or set(document) != {"path", *_ALIASES}:
+def _prepared(
+    document: dict,
+) -> tuple[str, dict[str, bytes], dict[str, str], dict[str, str]]:
+    required = {"path", *_ALIASES}
+    if type(document) is not dict or set(document) not in (required, required | {"mkdir"}):
         raise SmokeRefused("INVALID_MANIFEST")
     path = document["path"]
     if (
@@ -106,12 +109,29 @@ def _prepared(document: dict) -> tuple[str, dict[str, bytes], dict[str, str]]:
         approvals[alias] = approval
     if payloads["node01"] == payloads["node02"] or approvals["node01"] == approvals["node02"]:
         raise SmokeRefused("INVALID_MANIFEST")
-    return path, payloads, approvals
+
+    mkdir_grants: dict[str, str] = {}
+    if "mkdir" in document:
+        provided = document["mkdir"]
+        if (
+            posixpath.dirname(path) == "/"
+            or type(provided) is not dict
+            or set(provided) != set(_ALIASES)
+        ):
+            raise SmokeRefused("INVALID_MANIFEST")
+        for alias in _ALIASES:
+            grant = provided[alias]
+            if type(grant) is not str or _APPROVAL.fullmatch(grant) is None:
+                raise SmokeRefused("INVALID_MANIFEST")
+            mkdir_grants[alias] = grant
+        if len(set(mkdir_grants.values()) | set(approvals.values())) != 4:
+            raise SmokeRefused("INVALID_MANIFEST")
+    return path, payloads, approvals, mkdir_grants
 
 
 def create_and_verify(rpc, document: dict) -> dict[str, str]:
     """One call per host for create; NEVER retry a possibly committed write."""
-    path, payloads, approvals = _prepared(document)
+    path, payloads, approvals, mkdir_grants = _prepared(document)
     visible = rpc("hosts_list", {})
     try:
         hosts = {item["alias"] for item in visible["hosts"]}
@@ -119,6 +139,36 @@ def create_and_verify(rpc, document: dict) -> dict[str, str]:
         raise SmokeRefused("INVALID_RESULT") from None
     if not set(_ALIASES) <= hosts:
         raise SmokeRefused("HOST_NOT_VISIBLE")
+
+    if mkdir_grants:
+        parent = posixpath.dirname(path)
+        for alias in _ALIASES:
+            # Create only the immediate parent; the host refuses if it exists.
+            try:
+                result = rpc(
+                    "fs_mkdir",
+                    {"host": alias, "path": parent, "approval_id": mkdir_grants[alias]},
+                )
+            except SmokeRefused:
+                raise SmokeRefused("CREATE_OUTCOME_UNCERTAIN") from None
+            if (
+                type(result) is not dict
+                or result.get("host") != alias
+                or result.get("path") != parent
+                or type(result.get("request_id")) is not str
+                or not result["request_id"]
+            ):
+                raise SmokeRefused("CREATE_OUTCOME_UNCERTAIN")
+        # Prove both directory operations were effective before writing files.
+        for alias in _ALIASES:
+            metadata = rpc("fs_stat", {"host": alias, "path": parent})
+            if (
+                type(metadata) is not dict
+                or metadata.get("host") != alias
+                or metadata.get("path") != parent
+                or metadata.get("kind") != "directory"
+            ):
+                raise SmokeRefused("CREATE_OUTCOME_UNCERTAIN")
 
     for alias in _ALIASES:
         # Exact approval is minted by the existing ledger for THIS host,

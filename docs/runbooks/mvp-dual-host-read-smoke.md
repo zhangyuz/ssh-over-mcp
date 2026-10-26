@@ -51,3 +51,17 @@ python3 ops/mvp/dual_host_create_roundtrip.py \
 不提供 `--execute-create-once` 会在任何网络操作前拒绝。实际执行调用现有 `hosts_list`、两次 `fs_write`，成功后用 `fs_stat`/`fs_read` 验证每台节点的已写字节和不同哈希。**任何错误都可能意味着已经写入一个或两个节点**，必须由操作员查看审计和远端实际状态；绝不能重新运行同一命令盲目重试。该命令不会自动获取、批准或消费新审批来替代现有 Ledger 机制，运行后凭据文件由操作员单独处理。
 
 目前仅完成了**本地 mocked MCP 定向测试**；真实 Mode A/Mode B 双容器写入与远端隔离仍未运行，不计入 A01–A18/Native Level-3 验收。
+
+
+### 可选：同一命令先创建两个节点的独立目录（无需新 CLI）
+
+若两台 SSH 目标都尚无目标文件的**直接父目录**，可在上述 JSON 清单中增加字段，并把文件 `path` 改为 `/srv/data/new-session-001/result.txt`：
+
+```json
+"mkdir": {
+  "node01": "apr_cccccccccccccccccccccccccccccccc",
+  "node02": "apr_dddddddddddddddddddddddddddddddd"
+}
+```
+
+四个 `apr_...` 必须**彼此不同且由已有 Ledger 分别精确审批**（两个 `fs_mkdir` 父目录创建、两个 `fs_write` 文件创建）。示例 ID 无任何授权作用。工具先向两台节点各执行一次 create-only `fs_mkdir`，随后通过 `fs_stat` 确认两边父目录均存在，才各写一次新文件并读回核对哈希。父目录已经存在时不得使用此选项：远端 create-only 会拒绝。**目录创建或文件创建任何一步结果不确定，都停止而不重试**，也不会清理可能创建的目录/文件。没有 `mkdir` 字段时保持原有行为，要求父目录事先存在。

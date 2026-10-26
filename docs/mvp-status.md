@@ -1,5 +1,7 @@
 # MVP 当前交付入口：Compose 多 SSH 读写试点
 
+> **2026-10-26 本轮 MVP 实际功能增量：** [同一双节点验收工具](runbooks/mvp-dual-host-read-smoke.md) 支持**可选 create-only `fs_mkdir`→`fs_stat`→`fs_write`→`fs_read`**，对两个目标分别使用目录与写入的四个独立一次性审批、先创建并确认两侧目录才写文件，任何不确定结果终止且不重试。只增加既有 API 的实际使用路径，**未**扩展 SSH/Host Policy 权限、运行 Docker 或宣称真实双节点 E2E 已通过；APT 与未启用的全八工具继续作为 TODO。
+
 > **2026-10-26 MVP 写入验收切片（PR #342，源代码完成 / 真实 E2E 待执行）：** [双节点 create-only 写入→读回工具及操作约束](runbooks/mvp-dual-host-read-smoke.md) 使用现有 `fs_write` + Ledger 一次性审批 + `fs_stat`/`fs_read`，两个不同目标、不同小文件，各自审批且显式执行；拒绝不安全清单、错误写回执与哈希不匹配。任何中途失败均视为可能已经部分写入，禁止盲目重试，保留现有 SSH/host-policy/审计边界。真实 Docker Mode A/B、完整八工具和合并前 Native Level-3 仍 HOLD。**不再围绕已消费的 APT 单次试验展开非阻塞微调。**
 
 > **2026-10-26 MVP 开发优先（PR #342）：** 新增 [真实 MCP 双节点只读验收命令](runbooks/mvp-dual-host-read-smoke.md)，复用已有 `hosts_list` / `fs_stat` / `fs_read`，验证 `node01`、`node02` 各自的远端普通文件和**不同的预置 SHA-256**，拒绝节点串线、错误数据和 MCP 失败；不引入新 RPC、绕开审批或改动 host 权限。该代码已在本地通过定向测试，但 **Mode A/B 真实双 SSH 验收尚未运行**，不可作为部署/Native Level-3 完成的证明。构建介质 runner 的前置配置问题记录为 TODO，避免阻塞应用侧验收开发。
