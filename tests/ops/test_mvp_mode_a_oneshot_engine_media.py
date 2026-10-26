@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/mvp-mode-a-one-shot-engine-media.yml"
 
 
-def test_media_job_is_tightly_bound_to_one_approved_exact_head_trial():
+def test_consumed_native_media_job_is_disabled_and_tightly_bound():
     source = WORKFLOW.read_text(encoding="utf-8")
     workflow = yaml.safe_load(source)
     assert workflow["permissions"] == {"contents": "read"}
@@ -17,7 +17,7 @@ def test_media_job_is_tightly_bound_to_one_approved_exact_head_trial():
     assert job["runs-on"] == "ubuntu-26.04"
     assert "github.event.pull_request.number == 342" in job["if"]
     assert "feat/mvp-mode-a-compose-overlay-oct24" in job["if"]
-    assert "&& false" not in job["if"]
+    assert "&& false" in job["if"]
     assert "one-off-20261026-native-apt" in source
     assert "workflow_dispatch" not in source
     assert "self-hosted" not in source

@@ -1,8 +1,9 @@
 name: Mode A one-shot signed APT Engine media
 
-# New test-only one-off native Ubuntu APT trial after two stopped container-APT
-# attempts. Initially DISABLED until independent code/security review.
-# The runner is GitHub-hosted and disposable. Do not use Yuz.local Docker.
+# CONSUMED: native APT trial #40357097647 stopped during strict hosted
+# runner source-provenance preflight, BEFORE apt-get update or any package
+# acquisition. Exact predicate unclear from runner logs. One-off DISABLED.
+# Independent offline/guest media trust remains unproven; no auto-retry.
 on:
   pull_request:
     types: [synchronize]
@@ -12,7 +13,7 @@ permissions:
 
 jobs:
   engine-media:
-    if: github.event.pull_request.number == 342 && github.event.pull_request.head.ref == 'feat/mvp-mode-a-compose-overlay-oct24'
+    if: github.event.pull_request.number == 342 && github.event.pull_request.head.ref == 'feat/mvp-mode-a-compose-overlay-oct24' && false
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
