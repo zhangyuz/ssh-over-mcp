@@ -1,9 +1,10 @@
 name: Mode A approved one-shot offline Docker Engine media
 
 # Test-only packet approved in conversation on 2026-10-26, PR #342.
-# ONE corrective disposable builder trial authorized by user continuation
-# after independent diff review; old attempt 40350510565 stopped on APT EPERM.
-# Exact new commit trailer one-off-20261026-capfix required. Disable after trial.
+# CONSUMED/INACTIVE: attempt 40350510565 refused APT setuid/setgid;
+# corrective attempt 40353329472 passed UID/GID sandbox but hit APT index
+# chmod/rename EPERM (exit 100). Neither produced a media artifact.
+# Retained for read-only audit. Never re-enable automatically.
 on:
   pull_request:
     types: [synchronize]
@@ -13,7 +14,7 @@ permissions:
 
 jobs:
   engine-media:
-    if: github.event.pull_request.number == 342 && github.event.pull_request.head.ref == 'feat/mvp-mode-a-compose-overlay-oct24'
+    if: github.event.pull_request.number == 342 && github.event.pull_request.head.ref == 'feat/mvp-mode-a-compose-overlay-oct24' && false
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:

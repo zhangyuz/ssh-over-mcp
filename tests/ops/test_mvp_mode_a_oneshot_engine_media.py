@@ -15,9 +15,8 @@ def test_builder_job_is_specific_to_approved_packet_and_disposable_runner():
     assert job["runs-on"] == "ubuntu-26.04"
     assert "github.event.pull_request.number == 342" in job["if"]
     assert "feat/mvp-mode-a-compose-overlay-oct24" in job["if"]
-    # Operator resumed a separately reviewed, one-time APT-capability correction.
-    # This activation must be followed by immediate fail-closed disablement.
-    assert "&& false" not in job["if"]
+    # Both bounded trials are consumed. Reject any later workflow reactivation.
+    assert "&& false" in job["if"]
     assert "one-off-20261026-capfix" in WORKFLOW.read_text(encoding="utf-8")
     assert "synchronize" in WORKFLOW.read_text(encoding="utf-8")
     assert "workflow_dispatch" not in WORKFLOW.read_text(encoding="utf-8")
