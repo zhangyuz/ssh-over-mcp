@@ -32,8 +32,12 @@ count as A01–A03.
   from those verified same bytes. Its provenance is Python 3.13; target
   Ubuntu Python 3.14 wheel/ABI compatibility must succeed in the one-off
   builder or STOP; no fallback to unpinned dependencies.
-- Copy source, fixed no-argv native managed-host launcher, proposed exact
-  sshd configuration, and **one** exact sudoers rule into the candidate. The
+- Copy root-owned, read-only application source, the **OCI-specific** fixed
+  no-argv launcher with actual Linux UID/GID/capability syscall adapter,
+  the distinct candidate-only ForceCommand sshd config and **one** narrow
+  matching sudoers rule. The previously accepted managed-host launcher is
+  not copied or modified. The candidate's image ENTRYPOINT **still exits 78**.
+  The
   source installer creates no persistent private keys, authorization tokens,
   or host policy grants. Ubuntu OpenSSH package post-install *may*
   temporarily generate default host keys; builder deletes all such files
@@ -57,9 +61,13 @@ count as A01–A03.
    [admission source](../../src/ssh_over_mcp/host_agent/oci_launcher_admission.py)
    now checks 2201:3201 and orchestrates fixed manager self-pidfd ACK,
    root socket close and exact 2202:3202 drop **without** a cgroupfs write.
-   It is not yet a root-owned executable entrypoint with an independently
-   reviewed privileged import chain, actual Linux capability implementation,
-   verified manager socket or approved OCI image wiring. All remain STOP.
+   The reviewed source now includes a concrete fixed Python `-I -S` OCI
+   launcher with Linux capability syscalls and exact candidate-only
+   ForceCommand/sudoers integration. Sudo retains *only* the needed SSH
+   command variable; privileged Python import refuses bytecode caches.
+   **Image ENTRYPOINT still exits 78**. Actual root-owned file/namespace,
+   socket mapping, cgroup writer and Linux kernel privilege execution remain
+   unproven: no runtime admission or live Mode A claim.
 2. The existing accepted launcher writes the **source cgroup** `host-agent-source/cgroup.procs`
    itself. OCI runtime contract **forbids** its writable cgroupfs mount in
    the sshd container; a separate manager must verify peer+pidfd and move

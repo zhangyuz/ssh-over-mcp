@@ -44,10 +44,10 @@ def _verify(text: str, hold: str, sudoers: str) -> None:
     # The candidate venv package must fail closed if the matching apt version
     # is no longer present; unlike the four pins above this is not C5-verified.
     assert text.count("python3-venv=3.14.3-0ubuntu2") == 2
-    assert "COPY deploy/ssh-target/sshd_config.proposed" in text
+    assert "COPY deploy/ssh-target/sshd_config.review-candidate" in text
     assert "COPY deploy/ssh-target/sudoers.review-candidate" in text
     assert "COPY deploy/ssh-target/entrypoint.review-hold" in text
-    assert "COPY ops/live-e2e/ssh-over-mcp-host-agent-launcher.py" in text
+    assert "COPY ops/mvp/ssh-over-mcp-oci-launcher.py" in text
     assert 'ENTRYPOINT ["/usr/local/libexec/ssh-over-mcp-image-hold"]' in text
     assert "COPY src" in text
     assert "ssh-keygen" not in text and "COPY authorized_keys" not in text
@@ -57,9 +57,10 @@ def _verify(text: str, hold: str, sudoers: str) -> None:
     assert "exit 78" in hold and "sshd" not in hold
     assert sudoers.strip() == (
         "Defaults:ssh-over-mcp-e2e-host !requiretty\n"
+        'Defaults:ssh-over-mcp-e2e-host env_keep += "SSH_ORIGINAL_COMMAND"\n'
         "ssh-over-mcp-e2e-host ALL=(root) NOPASSWD: "
         "/usr/bin/python3 -I -S "
-        "/usr/local/libexec/ssh-over-mcp-host-agent-launcher.py"
+        "/usr/local/libexec/ssh-over-mcp-oci-launcher.py"
     )
 
 

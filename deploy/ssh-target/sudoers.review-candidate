@@ -1,2 +1,3 @@
 Defaults:ssh-over-mcp-e2e-host !requiretty
-ssh-over-mcp-e2e-host ALL=(root) NOPASSWD: /usr/bin/python3 -I -S /usr/local/libexec/ssh-over-mcp-host-agent-launcher.py
+Defaults:ssh-over-mcp-e2e-host env_keep += "SSH_ORIGINAL_COMMAND"
+ssh-over-mcp-e2e-host ALL=(root) NOPASSWD: /usr/bin/python3 -I -S /usr/local/libexec/ssh-over-mcp-oci-launcher.py

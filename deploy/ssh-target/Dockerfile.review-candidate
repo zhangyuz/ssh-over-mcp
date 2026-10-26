@@ -65,8 +65,11 @@ RUN set -eu; \
 # Source + immutable admission candidate. Source is deliberately copied
 # without generating host keys or embedding authorized_keys/policy secrets.
 COPY src /opt/ssh-over-mcp-e2e/workspace/src
-COPY ops/live-e2e/ssh-over-mcp-host-agent-launcher.py /usr/local/libexec/ssh-over-mcp-host-agent-launcher.py
-COPY deploy/ssh-target/sshd_config.proposed /etc/ssh/sshd_config
+RUN set -eu; \
+    test -z "$(find /opt/ssh-over-mcp-e2e/workspace/src \
+      \( -name __pycache__ -o -name '*.pyc' -o -name '*.pyo' \) -print -quit)"
+COPY ops/mvp/ssh-over-mcp-oci-launcher.py /usr/local/libexec/ssh-over-mcp-oci-launcher.py
+COPY deploy/ssh-target/sshd_config.review-candidate /etc/ssh/sshd_config
 COPY deploy/ssh-target/sudoers.review-candidate /etc/sudoers.d/som-e2e
 COPY deploy/ssh-target/entrypoint.review-hold /usr/local/libexec/ssh-over-mcp-image-hold
 
@@ -76,7 +79,7 @@ RUN set -eu; \
     passwd -l ssh-over-mcp-e2e-host; \
     mkdir -p /etc/ssh/hostkeys /etc/ssh/authorized_keys /run/sshd /srv/data; \
     chmod 0555 /opt/ssh-over-mcp-e2e/workspace/src /usr/local/libexec; \
-    chmod 0555 /usr/local/libexec/ssh-over-mcp-host-agent-launcher.py; \
+    chmod 0555 /usr/local/libexec/ssh-over-mcp-oci-launcher.py; \
     chmod 0555 /usr/local/libexec/ssh-over-mcp-image-hold; \
     chmod 0440 /etc/sudoers.d/som-e2e; \
     visudo -cf /etc/sudoers.d/som-e2e; \
