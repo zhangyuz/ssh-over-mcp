@@ -23,3 +23,31 @@ python3 ops/mvp/dual_host_read_smoke.py \
 - [ ] 实现剩余的 `fs_list`、`fs_search`、`fs_move`、`fs_delete`、append/replace，必须先补齐逐节点授权、双路径审批、幂等收据并通过安全门禁。Mode B 的跨 Linux Engine 私网、host-key、故障/撤销测试仍需操作授权。
 
 所有 TODO 都是**待实现/待验收**，不是已通过的门禁。
+
+## 双节点 create-only 写入 → 读回（新增 MVP 验收切片）
+
+**只有在双 SSH 目标已独立验收、操作员批准使用一次性测试数据，并且审批 Ledger 分别批准两次精确 `fs_write` 操作后才能实际执行。** 不触碰现有文件，目标路径必须在两台主机上都不存在，且位于双方均允许的写入根。运行会产生**持久文件**，不会自动删除、回滚或重试。
+
+在本机建立仅归操作者可读的 `chmod 600 approvals-and-fixtures.json` 文件：
+
+```json
+{
+  "path": "/srv/data/unique-probe-001.txt",
+  "node01": {"data_base64": "b25l", "approval_id": "apr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+  "node02": {"data_base64": "dHdv", "approval_id": "apr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+}
+```
+
+此处的 `apr_...` 为格式示例，不是真实授权。审批必须由现有审批流程针对**每个目标、路径及实际内容**分别获得并授予；复用旧审批或手动改审批内容会被拒绝。两个不同的、非空文件内容均不得超过 4096 字节。
+
+```sh
+python3 ops/mvp/dual_host_create_roundtrip.py \
+  --endpoint https://mcp.internal.example/mcp \
+  --token-file /secure/location/origin-bearer \
+  --manifest /secure/location/approvals-and-fixtures.json \
+  --execute-create-once
+```
+
+不提供 `--execute-create-once` 会在任何网络操作前拒绝。实际执行调用现有 `hosts_list`、两次 `fs_write`，成功后用 `fs_stat`/`fs_read` 验证每台节点的已写字节和不同哈希。**任何错误都可能意味着已经写入一个或两个节点**，必须由操作员查看审计和远端实际状态；绝不能重新运行同一命令盲目重试。该命令不会自动获取、批准或消费新审批来替代现有 Ledger 机制，运行后凭据文件由操作员单独处理。
+
+目前仅完成了**本地 mocked MCP 定向测试**；真实 Mode A/Mode B 双容器写入与远端隔离仍未运行，不计入 A01–A18/Native Level-3 验收。
