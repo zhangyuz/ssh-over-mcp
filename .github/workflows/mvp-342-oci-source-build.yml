@@ -101,6 +101,7 @@ jobs:
             ops/mvp/build_native_review_image.py \
             ops/mvp/build_online_pilot_review_image.py \
             ops/mvp/mode_a_hosted_runnable_image_probe.py \
+            ops/mvp/mode_a_online_pilot_receipt.py \
             > proof/SOURCE_SHA256SUMS
           echo FS_ONLY_OCI_SOURCE_BUILD_OK_NO_RUNTIME
 
@@ -137,6 +138,32 @@ jobs:
           echo 'ONLINE_PILOT_SIGNED_RUNTIME_ID=false' >> proof/PROVENANCE.txt
           echo 'ONLINE_PILOT_DEPLOYED=false' >> proof/PROVENANCE.txt
 
+      - name: Export runnable pilot image as TEST-ONLY candidate (not release)
+        id: export_online_pilot
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Export exactly what passed image-default sshd/FS checks. No host
+          # credentials, live key material or production release ID included.
+          expected="$(docker image inspect som-mvp-fs-online-pilot-review:local --format '{{.Id}}')"
+          docker save som-mvp-fs-online-pilot-review:local | gzip -n -1 > proof/som342-online-pilot-review.docker.tar.gz
+          test -s proof/som342-online-pilot-review.docker.tar.gz
+          gzip -t proof/som342-online-pilot-review.docker.tar.gz
+          (cd proof && sha256sum som342-online-pilot-review.docker.tar.gz > ONLINE_PILOT_IMAGE_SHA256SUMS)
+          # The review handoff bytes must survive a real remove/reload and
+          # retain the default sshd entrypoint. Re-run actual SSH/FS on reload.
+          docker image rm som-mvp-fs-online-pilot-review:local
+          gzip -dc proof/som342-online-pilot-review.docker.tar.gz | docker load
+          test "$(docker image inspect som-mvp-fs-online-pilot-review:local --format '{{.Id}}')" = "$expected"
+          test "$(docker image inspect som-mvp-fs-online-pilot-review:local --format '{{json .Config.Entrypoint}}')" = '["/usr/sbin/sshd"]'
+          test "$(docker image inspect som-mvp-fs-online-pilot-review:local --format '{{json .Config.Cmd}}')" = '["-D","-e"]'
+          python3 ops/mvp/mode_a_hosted_runnable_image_probe.py
+          echo "ONLINE_PILOT_SOURCE_IMAGE_ID=$expected" >> proof/PROVENANCE.txt
+          echo "ONLINE_PILOT_ARCHIVE_SHA256=$(cut -d ' ' -f 1 proof/ONLINE_PILOT_IMAGE_SHA256SUMS)" >> proof/PROVENANCE.txt
+          echo 'ONLINE_PILOT_RELOAD_DEFAULT_SSHD_FS_PASSED=true' >> proof/PROVENANCE.txt
+          echo 'PRODUCTION_RELEASE_AUTHORIZED=false' >> proof/PROVENANCE.txt
+          echo 'ONLINE_PILOT_TEST_ARCHIVE_ONLY=true' >> proof/PROVENANCE.txt
+
       - name: Export hash-bound test-only offline Docker image (not signed)
         id: export_archive
         shell: bash
@@ -171,6 +198,18 @@ jobs:
             echo 'TRUSTED_NO_NIC_GUEST_USERNS_PROVEN=false'
           } >> proof/PROVENANCE.txt
 
+      - name: Attest runnable pilot CI-only archive (NOT a release image)
+        id: attest_online_pilot
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: proof/som342-online-pilot-review.docker.tar.gz
+
+      - name: Attest dedicated userns runnable image import receipt (CI only)
+        id: attest_online_remap_receipt
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: proof/ONLINE_PILOT_REMAPPED_TEST_RECEIPT.json
+
       - name: Attest disposable test-only image archive provenance (NOT release)
         id: attest_archive
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
@@ -193,7 +232,7 @@ jobs:
           echo 'DEPLOYED=false' >> proof/PROVENANCE.txt
 
       - name: Upload test-only hash-bound image and proof (never export secrets)
-        if: ${{ always() && steps.oci_smoke.outcome == 'success' && steps.export_archive.outcome == 'success' && steps.userns_proof.outcome == 'success' && steps.attest_archive.outcome == 'success' && steps.attest_remap_receipt.outcome == 'success' }}
+        if: ${{ always() && steps.oci_smoke.outcome == 'success' && steps.export_online_pilot.outcome == 'success' && steps.export_archive.outcome == 'success' && steps.userns_proof.outcome == 'success' && steps.attest_online_pilot.outcome == 'success' && steps.attest_online_remap_receipt.outcome == 'success' && steps.attest_archive.outcome == 'success' && steps.attest_remap_receipt.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: mvp-342-openssh-oci-source-build

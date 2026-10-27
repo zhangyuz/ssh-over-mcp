@@ -97,6 +97,24 @@ echo 'REMAPPED_IMAGE_ADMISSION_REACHED=true'
 export SOM342_REMAPPED_ROOT_UID="$uidbase"
 export SOM342_REMAPPED_ROOT_GID="$gidbase"
 python3 ops/mvp/mode_a_hosted_oci_fs_smoke.py
+
+# Independently import the CI-only RUNNABLE candidate into this second,
+# isolated userns-remapped Engine; do not modify the shared/default daemon.
+# The untrusted image is exercised only with network=none, synthetic keys.
+(cd proof && sha256sum -c ONLINE_PILOT_IMAGE_SHA256SUMS)
+gzip -dc proof/som342-online-pilot-review.docker.tar.gz | docker load
+online_expected="$(sed -n 's/^ONLINE_PILOT_SOURCE_IMAGE_ID=//p' proof/PROVENANCE.txt)"
+online_actual="$(docker image inspect som-mvp-fs-online-pilot-review:local --format '{{.Id}}')"
+online_entrypoint="$(docker image inspect som-mvp-fs-online-pilot-review:local --format '{{json .Config.Entrypoint}}')"
+online_cmd="$(docker image inspect som-mvp-fs-online-pilot-review:local --format '{{json .Config.Cmd}}')"
+test -n "$online_expected" && test -n "$online_actual"
+test "$online_entrypoint" = '["/usr/sbin/sshd"]'
+test "$online_cmd" = '["-D","-e"]'
+python3 ops/mvp/mode_a_hosted_runnable_image_probe.py
+echo 'ONLINE_PILOT_REMAPPED_IMPORT_DEFAULT_SSHD_FS_PASS'
+echo "ONLINE_PILOT_REMAPPED_IMAGE_ID=$online_actual" >> proof/PROVENANCE.txt
+python3 ops/mvp/mode_a_online_pilot_receipt.py "$online_expected" "$online_actual" "$uidbase" "$gidbase"
+
 # Record the tested import ID only AFTER central MCP/Ledger, negative ACL,
 # userns mapping and SSH agent checks all completed successfully.
 python3 ops/mvp/mode_a_userns_image_receipt.py "$expected" "$actual" "$uidbase" "$gidbase"

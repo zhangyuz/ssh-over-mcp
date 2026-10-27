@@ -79,9 +79,28 @@ native no-sudo FS ForceCommand and setting its image-default entrypoint to
 using the **image default entrypoint and CMD** (not an overriding CLI entrypoint)
 with `--network none`, no host ports, no production credentials, a read-only
 filesystem, four admission caps and NNP from container start. The actual
-real-SSH typed FS read/write/negative test is reused. The candidate is **not
-exported, uploaded, signed as release, or wired into Compose**. The existing
-CI-exported signed **test** archive remains the original STOP78 variant.
+real-SSH typed FS read/write/negative test is reused. The candidate is **never signed or approved as a production release or
+wired into Compose**. To avoid losing the actual runnable bytes, the hosted CI
+now exports a **separately named TEST-ONLY runnable review archive**
+(`som342-online-pilot-review.docker.tar.gz`), confirms its SHA256 and exact
+image ID after a Docker remove/reload, and reruns default-start typed FS checks.
+It then imports the **same archive** into a separate userns-remapped Docker
+daemon for another actual default-boot FS test, recording an observed post-import
+image ID in `ONLINE_PILOT_REMAPPED_TEST_RECEIPT.json`. GitHub OIDC attestations
+cover **the review archive bytes and this CI-only receipt separately**;
+an attestation proves origin, **not** production approval. Both contain
+`production_signed_runtime_id=false` / `production_deployed=false`, and
+only short-lived GitHub Actions artifacts carry these synthetic-key-free
+image bytes. The previously signed **STOP78 test** archive remains separate
+and unchanged.
+
+To verify the *test* handoff, require the exact accepted PR HEAD and
+workflow identity, separately verify both GitHub attestations with
+`gh attestation verify`, hash the downloaded archive against
+`ONLINE_PILOT_IMAGE_SHA256SUMS`, compare receipt archive hash/UUID and
+default `/usr/sbin/sshd` + `-D -e`, and treat any mismatched or rewritten
+userns image ID as its own explicit identity. **Do not execute or load this
+CI artifact on Yuz.local merely because it has a valid attestation.**
 
 **Next real release gate:** independently review a final runnable image's exact
 digest, root-owned launch/config, userns/CapBnd policy decision #346, per-node
