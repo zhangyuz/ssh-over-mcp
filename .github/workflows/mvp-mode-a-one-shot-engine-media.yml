@@ -1,9 +1,11 @@
 name: Mode A one-shot signed APT Engine media
 
-# CONSUMED: native APT trial #40357097647 stopped during strict hosted
-# runner source-provenance preflight, BEFORE apt-get update or any package
-# acquisition. Exact predicate unclear from runner logs. One-off DISABLED.
-# Independent offline/guest media trust remains unproven; no auto-retry.
+# Operator reauthorized a future single bounded attempt (PR #342 comment #6450082397).
+# PREPARED BUT DISABLED: commit/push/trigger of enabled packet was refused by
+# execution safety control. Never circumvent that guard or silently run APT.
+# Before any separately permitted use, verify exact new one-off marker and
+# restore && false immediately after the single attempt.
+# Produces non-executable candidate media ONLY, not guest/release authority.
 on:
   pull_request:
     types: [synchronize]
@@ -13,7 +15,7 @@ permissions:
 
 jobs:
   engine-media:
-    if: github.event.pull_request.number == 342 && github.event.pull_request.head.ref == 'feat/mvp-mode-a-compose-overlay-oct24' && false
+    if: github.event.action == 'synchronize' && github.event.pull_request.number == 342 && github.event.pull_request.head.repo.full_name == 'zhangyuz/ssh-over-mcp' && github.event.pull_request.head.ref == 'feat/mvp-mode-a-compose-overlay-oct24' && false
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
@@ -31,7 +33,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$APPROVED_SHA"
-          git show -s --format=%B HEAD | grep -Fx 'Approved-Builder-Packet: one-off-20261026-native-apt'
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          git show -s --format=%B HEAD | grep -Fx 'Approved-Builder-Packet: one-off-20261027-native-apt-reauthorized'
           . /etc/os-release
           test "$ID" = ubuntu
           test "$VERSION_ID" = 26.04

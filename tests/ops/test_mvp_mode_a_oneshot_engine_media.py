@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/mvp-mode-a-one-shot-engine-media.yml"
 
 
-def test_consumed_native_media_job_is_disabled_and_tightly_bound():
+def test_reauthorized_native_media_job_is_one_shot_and_tightly_bound():
     source = WORKFLOW.read_text(encoding="utf-8")
     workflow = yaml.safe_load(source)
     assert workflow["permissions"] == {"contents": "read"}
@@ -17,8 +17,12 @@ def test_consumed_native_media_job_is_disabled_and_tightly_bound():
     assert job["runs-on"] == "ubuntu-26.04"
     assert "github.event.pull_request.number == 342" in job["if"]
     assert "feat/mvp-mode-a-compose-overlay-oct24" in job["if"]
-    assert "&& false" in job["if"]
-    assert "one-off-20261026-native-apt" in source
+    assert "github.event.action == 'synchronize'" in job["if"]
+    assert "github.event.pull_request.head.repo.full_name == 'zhangyuz/ssh-over-mcp'" in job["if"]
+    assert job["if"].endswith("&& false")
+    assert "Approved-Builder-Packet: one-off-20261027-native-apt-reauthorized" in source
+    assert "one-off-20261026-native-apt" not in source
+    assert 'test "${RUNNER_ENVIRONMENT:-}" = github-hosted' in source
     assert "workflow_dispatch" not in source
     assert "self-hosted" not in source
     assert "persist-credentials: false" in source
