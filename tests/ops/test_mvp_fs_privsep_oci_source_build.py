@@ -42,8 +42,27 @@ def test_hosted_image_builder_never_starts_or_exports_running_ssh():
     assert "docker build" in commands
     assert "docker image inspect" in commands
     assert "RUNTIME_STARTED=false" in commands
+    assert "mode_a_hosted_oci_fs_smoke.py" in commands
+    assert "HOSTED_OCI_FS_TWO_NODE_SMOKE_PASSED=true" in commands
+    assert "PRIVATE_USERNS_PROVEN=false" in commands
     assert "GUEST_VERIFIED=false" in commands
     assert not any(
         forbidden in commands
         for forbidden in ("docker run ", "docker compose", "--privileged", "sudo docker")
     )
+
+
+def test_disposable_oci_two_node_smoke_has_only_loopback_and_minimal_ssh_caps():
+    smoke = (ROOT / "ops/mvp/mode_a_hosted_oci_fs_smoke.py").read_text()
+    assert 'os.getenv("RUNNER_ENVIRONMENT") == "github-hosted"' in smoke
+    assert 'os.getenv("GITHUB_EVENT_NAME") == "pull_request"' in smoke
+    assert '"--network"' in smoke and '"none"' in smoke
+    assert '"--cap-drop"' in smoke and '"ALL"' in smoke
+    assert 'SSH_CAPS = ("SETUID", "SETGID", "SETPCAP", "SYS_CHROOT")' in smoke
+    assert '"--read-only"' in smoke
+    assert '"/srv/data:rw,noexec,nosuid,nodev,uid=2201,gid=3201,mode=0700' in smoke
+    assert "MODE_A_OPENSSH_OCI_TWO_NODE_FS_ONLY_HOSTED_PASS" in smoke
+    assert "USERNS_PRIVATE_PROVEN=false" in smoke
+    assert 'run(["docker", "rm", "-f", name]' in smoke
+    assert "docker compose" not in smoke
+    assert "--privileged" not in smoke

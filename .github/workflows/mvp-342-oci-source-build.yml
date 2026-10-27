@@ -75,6 +75,20 @@ jobs:
             requirements/runtime.lock > proof/SOURCE_SHA256SUMS
           echo FS_ONLY_OCI_SOURCE_BUILD_OK_NO_RUNTIME
 
+      - name: Prove actual two-node OpenSSH FS-only over OCI loopback
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This is disposable hosted Docker with --network none. It is NOT
+          # the required independently isolated no-NIC/native guest proof.
+          python3 ops/mvp/mode_a_hosted_oci_fs_smoke.py
+          sed -i 's/^RUNTIME_STARTED=false$/RUNTIME_STARTED_IN_DISPOSABLE_CI=true/' proof/PROVENANCE.txt
+          {
+            echo 'HOSTED_OCI_FS_TWO_NODE_SMOKE_PASSED=true'
+            echo 'PRIVATE_USERNS_PROVEN=false'
+            echo 'NO_NIC_GUEST_OCI_PROVEN=false'
+          } >> proof/PROVENANCE.txt
+
       - name: Upload tiny proof only (never expose images or secrets)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
