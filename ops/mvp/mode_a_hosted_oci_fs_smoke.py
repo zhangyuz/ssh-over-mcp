@@ -49,8 +49,13 @@ def prepare(node: Path, name: str) -> tuple[Path, Path, Path]:
     client = node / "client"
     for key in (host, client):
         run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)])
-    (auth / "ssh-over-mcp-e2e-host").write_bytes(client.with_suffix(".pub").read_bytes())
-    (auth / "ssh-over-mcp-e2e-host").chmod(0o644)
+    authorized = auth / "ssh-over-mcp-e2e-host"
+    authorized.write_bytes(client.with_suffix(".pub").read_bytes())
+    authorized.chmod(0o644)
+    # OpenSSH StrictModes requires every authorized_keys ancestor/file owner
+    # to be root or login UID, never the CI runner's ordinary host UID.
+    # Both binds are readonly inside OCI; the login UID cannot edit either.
+    run(["sudo", "-n", "chown", "root:root", str(keys), str(auth), str(authorized)])
     run(["sudo", "-n", "chown", "root:root", str(host)])
     run(["sudo", "-n", "chmod", "0600", str(host)])
     known = node / "known_hosts"
@@ -238,9 +243,13 @@ def main() -> None:
         finally:
             for name in reversed(running):
                 run(["docker", "rm", "-f", name], timeout=15, ok=False)
-            # Remove the throwaway root-owned keys on the disposable runner.
-            for key in work.glob("*/hostkeys/ssh_host_ed25519_key"):
-                run(["sudo", "-n", "rm", "-f", str(key)], timeout=5, ok=False)
+            # Remove ONLY the two known fixture directories on this disposable
+            # GitHub runner (not any parent or shared host path).
+            for node in work.iterdir():
+                for name in ("hostkeys", "authorized_keys"):
+                    fixture = node / name
+                    if fixture.is_dir() and not fixture.is_symlink():
+                        run(["sudo", "-n", "rm", "-rf", "--", str(fixture)], timeout=5, ok=False)
 
 
 if __name__ == "__main__":

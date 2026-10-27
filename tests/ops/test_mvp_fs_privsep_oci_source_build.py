@@ -66,6 +66,8 @@ def test_disposable_oci_two_node_smoke_has_only_loopback_and_minimal_ssh_caps():
     assert 'run(["docker", "rm", "-f", name]' in smoke
     assert '"--read-only"' in smoke
     assert '"docker"' in smoke and '"exec"' in smoke and '"-i"' in smoke
+    assert "str(keys), str(auth), str(authorized)" in smoke
+    assert "OpenSSH StrictModes" in smoke
     assert '"docker", "cp"' not in smoke
     assert "docker compose" not in smoke
     assert "--privileged" not in smoke
