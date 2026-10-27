@@ -63,6 +63,7 @@ def test_artifacts_remain_non_executable_until_separate_runtime_review():
     assert "sha256sum -c SHA256SUMS" in source
     assert "PACKAGE_ORIGIN=ubuntu-26.04-signed-apt" in source
     assert "retention-days: 3" in source
+
     # Never archive root-owned APT lock, partial dirs, or build internals.
     workflow = yaml.safe_load(source)
     upload = workflow["jobs"]["engine-media"]["steps"][-1]["with"]["path"]
@@ -74,3 +75,32 @@ def test_artifacts_remain_non_executable_until_separate_runtime_review():
         "media/engine-package-versions.txt",
         "media/ubuntu-archive-keyring.sha256",
     }
+
+
+def test_regular_pr_hosted_oci_records_read_only_apt_preflight_for_no_nic_guest():
+    """Locate failed one-shot condition without reauthorizing package downloads."""
+    source = (ROOT / ".github/workflows/mvp-342-oci-source-build.yml").read_text()
+    assert "python3 ops/mvp/mode_a_hosted_apt_probe.py" in source
+    assert "Read-only Ubuntu Engine APT provenance diagnostics" in source
+    script = ROOT / "ops/mvp/mode_a_hosted_apt_probe.py"
+    content = script.read_text()
+    assert "ENGINE_APT_PREFLIGHT_" in content
+    assert "OFFLINE_ENGINE_MEDIA_BUILD_AUTHORIZED=false" in content
+    for forbidden in ("apt-get update", "apt-get install", "sudo ", "subprocess", "socket"):
+        assert forbidden not in content
+
+
+def test_offline_apt_probe_distinguishes_signer_mismatch_without_apt_mutations():
+    from ops.mvp.mode_a_hosted_apt_probe import checks
+
+    release = ["ID=ubuntu", 'VERSION_ID="26.04"']
+    source = [
+        "URIs: http://archive.ubuntu.com/ubuntu",
+        "Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg",
+    ]
+    good = checks(release, source, True, machine="x86_64", uid=1001)
+    assert all(good.values())
+    missing_signer = checks(release, source[:-1], True, machine="x86_64", uid=1001)
+    assert missing_signer["KEYRING_SIGNER"] is False
+    assert missing_signer["UBUNTU_REPOSITORY"] is True
+    assert checks(release, source, True, machine="x86_64", uid=0)["NON_ROOT"] is False

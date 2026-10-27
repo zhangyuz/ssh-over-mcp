@@ -94,6 +94,10 @@ Do not confuse `TEST_ARCHIVE_GITHUB_PROVENANCE_ATTESTED=true` with
 `SIGNED_IMAGE=false` and `SIGNED_RUNTIME_ID=false`. The JSON likewise records `production_signed_runtime_id=false` and `production_deployed=false`. Never execute
 an unsafely imported archive because its checksum or attestation passed.
 
+## Ubuntu 26.04 offline Engine prerequisite (not yet authorized)
+
+The prior one-shot signed APT Engine media builder [#40357097647](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/40357097647) failed **before** `apt-get update`, download, or installation; it remains deliberately disabled. Ordinary disposable OCI CI now runs `ops/mvp/mode_a_hosted_apt_probe.py`, a **read-only** check that reports individual old preflight predicates (`UBUNTU_2604`, `X86_64`, `NON_ROOT`, archive keyring, Ubuntu source URI, keyring signer) without printing source contents, changing APT or fetching dependencies. An all-true result establishes **only** suitability for a separately reviewed signed-APT dependency-media attempt; it never establishes a trusted Engine, an offline guest execution, or release authorization. `OFFLINE_ENGINE_MEDIA_BUILD_AUTHORIZED=false` is always emitted. The consumed one-shot job stays disabled until a distinct execution decision; do not re-enable it just because the diagnostic succeeds.
+
 ## Offline verification (inside a separate, disposable Linux guest ONLY)
 
 After independently verifying the guest **has no NIC**, no host paths,

@@ -36,6 +36,14 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Read-only Ubuntu Engine APT provenance diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Probe why the earlier one-off native APT trial failed *before*
+          # fetching package metadata. No APT changes or release authority.
+          python3 ops/mvp/mode_a_hosted_apt_probe.py
+
       - name: Build immutable-source OpenSSH FS base (NO guest startup)
         shell: bash
         run: |
