@@ -57,6 +57,44 @@ host Docker socket, host root/cgroups, or host PID/network namespace.
    operator release approval and rollback/cleanup evidence. No production
    secrets or privileged changes to existing Yuz.local CI runners.
 
+## 2026-10-27: Ubuntu 26.04 native OpenSSH (no sudo) feasibility
+
+On exact source commit `56893d4e671ed6dbb6c918e7218f911cf8fa50f2`,
+disposable hosted [Linux OCI run #40528910030](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/40528910030)
+performed an **independent, temporary, loopback-only second sshd**
+on port 2223 (the primary immutable image, approved ForceCommand,
+and STOP78 were not modified). The candidate fixed command was
+`setpriv --no-new-privs python3 -I -S <disposable-probe>`, running
+as OpenSSH's native unprivileged login identity, with no sudo.
+
+**Measured**: real/effective/saved UID/GID 2201:3201 PASS; root-owned
+host private key read denied; `NoNewPrivs=1`; `CapInh`, `CapPrm`,
+`CapEff`, `CapAmb` all zero; **`CapBnd` nonzero**.
+The original `setpriv --bounding-set=-all` from the same login identity
+failed `Operation not permitted`, since Linux requires `CAP_SETPCAP`
+to remove inherited bounding capabilities. Reference:
+[PR_CAPBSET_DROP(2const)](https://man7.org/linux/man-pages/man2/PR_CAPBSET_DROP.2const.html).
+The Linux kernel documents that NNP prevents *execve* from gaining
+setuid/file capabilities, but NNP alone is not a proof of zero
+bounding set: [no_new_privs](https://cdn.kernel.org/doc/html/latest/userspace-api/no_new_privs.html).
+
+**Decision: NOT APPROVED FOR LIVE MODE A.** A minimal native-OpenSSH
+design might accept zero permitted/effective/inheritable/ambient caps
+with NNP1 and a nonzero inherited bounding set. That is a **material
+revision to the current five-set-zero FS launcher contract**; do not
+silently apply it. Require independent threat review (including nested
+user namespace creation, permitted capability reacquisition,
+untrusted writable executable paths, open FDs and kernel/runtime
+semantics), a fully isolated test guest and complete real MCP/Ledger
+approved single-use writes/denials before deciding. A purpose-built
+root-owned `CAP_SETPCAP` drop helper or root-only handoff remains a
+separate reviewed alternative, **not an implicit permission grant**.
+Never restore sudo by suppressing kernel audit errors, ignore SSH
+stderr, or retry uncertain writes.
+
+Nonessential execution/manager/Mode B work stays TODO. Do not turn
+off the image STOP78 or start a service on shared Yuz.local Docker.
+
 ## Artifacts and alternatives
 
 Review-only configuration:
