@@ -197,6 +197,10 @@ def check(name: str, known: Path) -> bool:
             print("NATIVE_OPENSSH_NO_SUDO_FULL_KERNEL_BOUNDARY_PASS", flush=True)
             return True
     print("NATIVE_OPENSSH_NO_SUDO_FULL_KERNEL_BOUNDARY_NOT_PROVEN", flush=True)
+    # This stderr is emitted only by the synthetic no-sudo ForceCommand.
+    # It is bounded and never includes private-key content or stdin frames.
+    diagnostic = result.stderr.decode("utf-8", errors="replace")[:160]
+    print("NATIVE_OPENSSH_NO_SUDO_STDERR=" + repr(diagnostic), flush=True)
     print(
         "NATIVE_OPENSSH_NO_SUDO_EXIT="
         + str(result.returncode)
