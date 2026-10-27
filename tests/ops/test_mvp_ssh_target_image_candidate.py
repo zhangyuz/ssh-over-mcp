@@ -47,6 +47,10 @@ def _verify(text: str, hold: str, sudoers: str) -> None:
     assert "COPY deploy/ssh-target/sshd_config.review-candidate" in text
     assert "COPY deploy/ssh-target/host-policy.review-candidate.yaml" in text
     assert "chown 2202:3202 /srv/data" in text
+    assert "usermod -p '*' ssh-over-mcp-e2e-host" in text
+    assert "passwd -l ssh-over-mcp-e2e-host" not in text
+    assert "UsePAM no" in (SOURCE / "sshd_config.review-candidate").read_text()
+    assert "PasswordAuthentication no" in (SOURCE / "sshd_config.review-candidate").read_text()
     assert "chmod 0700 /srv/data" in text
     assert "COPY deploy/ssh-target/sudoers.review-candidate" in text
     assert "COPY deploy/ssh-target/entrypoint.review-hold" in text

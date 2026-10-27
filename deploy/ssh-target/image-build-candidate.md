@@ -19,6 +19,11 @@ count as A01–A03.
 - Runs as `som-manager` UID/GID `2204:3204`, predefines membership group `3299`, without OpenSSH, sudo, exposed ports, keys or code writable by the manager. Guest must prove actual supplementary group mapping and NNP/zero caps; they are not implied by `USER` alone.
 - **Separate manager image entrypoint always exits 78**. Neither manager nor SSH candidate is Compose-wired or runtime-approved. Exact final image digest/attestation and private cgroup/namespace proofs precede any guest boot.
 
+## SSH public-key login account (still runtime HOLD)
+
+- The SSH candidate no longer uses `passwd -l` on its OpenSSH **login** user while `UsePAM no` is selected. Such a shadow-locked account can be rejected even with an otherwise valid authorized public key. The candidate sets an impossible, non-empty password hash `*` instead, while `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PermitEmptyPasswords no` and fixed sudo ForceCommand stay intact. This is **not a password credential** and cannot enable password login.
+- No corresponding change to the separate **non-login** OCI manager account. Real public-key authentication, locked-account behavior, authorized key ownership and force-command result must be validated in the disposable Linux guest before lifting STOP.
+
 ## Minimal filesystem MVP profile (still inactive)
 
 - The SSH candidate now installs a **root-owned, read-only** `host-policy.review-candidate.yaml` as `/etc/ssh-over-mcp/host-policy.yaml`. The existing `rw-operator` profile is v3 **FS-only**: bounded `fs_stat/fs_read/fs_mkdir(create-only)/fs_write(create-only)` only under `/srv/data`; no executable backend. The required `/usr/bin/true` rule is an inert schema placeholder under v3, never a shell grant.

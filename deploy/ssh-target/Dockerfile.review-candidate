@@ -74,10 +74,12 @@ COPY deploy/ssh-target/host-policy.review-candidate.yaml /etc/ssh-over-mcp/host-
 COPY deploy/ssh-target/sudoers.review-candidate /etc/sudoers.d/som-e2e
 COPY deploy/ssh-target/entrypoint.review-hold /usr/local/libexec/ssh-over-mcp-image-hold
 
+# For UsePAM=no public-key SSH, use an impossible password hash '*' rather
+# than passwd -l's account-lock marker '!'. No password can authenticate.
 RUN set -eu; \
     groupadd -g 3201 som-ssh-login; \
     useradd -u 2201 -g 3201 --no-create-home -d /nonexistent -s /bin/sh ssh-over-mcp-e2e-host; \
-    passwd -l ssh-over-mcp-e2e-host; \
+    usermod -p '*' ssh-over-mcp-e2e-host; \
     mkdir -p /etc/ssh/hostkeys /etc/ssh/authorized_keys /run/sshd /srv/data; \
     chown 2202:3202 /srv/data; \
     chmod 0700 /srv/data; \
