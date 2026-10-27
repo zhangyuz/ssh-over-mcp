@@ -76,6 +76,7 @@ jobs:
           echo FS_ONLY_OCI_SOURCE_BUILD_OK_NO_RUNTIME
 
       - name: Prove actual two-node OpenSSH FS-only over OCI loopback
+        id: oci_smoke
         shell: bash
         run: |
           set -euo pipefail
@@ -90,6 +91,7 @@ jobs:
           } >> proof/PROVENANCE.txt
 
       - name: Export hash-bound test-only offline Docker image (not signed)
+        id: export_archive
         shell: bash
         run: |
           set -euo pipefail
@@ -122,6 +124,7 @@ jobs:
           } >> proof/PROVENANCE.txt
 
       - name: Upload test-only hash-bound image and proof (never export secrets)
+        if: ${{ always() && steps.oci_smoke.outcome == 'success' && steps.export_archive.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: mvp-342-openssh-oci-source-build

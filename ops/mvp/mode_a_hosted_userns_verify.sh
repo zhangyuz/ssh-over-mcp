@@ -78,9 +78,15 @@ test "$gidbase" -ne "$(id -g)"
 # Import the exact image archive that passed the earlier normal OCI smoke.
 gzip -dc proof/som342-openssh-fs.docker.tar.gz | docker load
 expected="$(sed -n 's/^FS_PRIVSEP_IMAGE_ID=//p' proof/PROVENANCE.txt)"
+actual="$(docker image inspect som-mvp-fs-privsep:local --format '{{.Id}}')"
+entrypoint="$(docker image inspect som-mvp-fs-privsep:local --format '{{json .Config.Entrypoint}}')"
+printf 'REMAPPED_USERNS_BASE_UID=%s GID=%s\n' "$uidbase" "$gidbase"
+printf 'RECEIPT_IMAGE_ID=%s\nIMPORTED_IMAGE_ID=%s\n' "$expected" "$actual"
+printf 'IMPORTED_ENTRYPOINT=%s\n' "$entrypoint"
 test -n "$expected"
-test "$(docker image inspect som-mvp-fs-privsep:local --format '{{.Id}}')" = "$expected"
-test "$(docker image inspect som-mvp-fs-privsep:local --format '{{json .Config.Entrypoint}}')" = '["/usr/local/libexec/ssh-over-mcp-image-hold"]'
+test "$actual" = "$expected" || { echo 'Image ID mismatch after remapped import' >&2; exit 1; }
+test "$entrypoint" = '["/usr/local/libexec/ssh-over-mcp-image-hold"]' || { echo 'STOP78 missing after remapped import' >&2; exit 1; }
+echo 'REMAPPED_IMAGE_ADMISSION_REACHED=true'
 export SOM342_REMAPPED_ROOT_UID="$uidbase"
 export SOM342_REMAPPED_ROOT_GID="$gidbase"
 python3 ops/mvp/mode_a_hosted_oci_fs_smoke.py

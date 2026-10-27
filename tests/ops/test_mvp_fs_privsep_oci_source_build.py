@@ -51,6 +51,9 @@ def test_hosted_image_builder_never_starts_or_exports_running_ssh():
     assert "gzip -t proof/som342-openssh-fs.docker.tar.gz" in commands
     assert "docker load" in commands
     assert "ARCHIVE_LOAD_TEST_PASSED=true" in commands
+    assert "REMAPPED_IMAGE_ADMISSION_REACHED=true" in (ROOT / "ops/mvp/mode_a_hosted_userns_verify.sh").read_text()
+    assert "steps.oci_smoke.outcome == 'success'" in job["steps"][-1]["if"]
+    assert "steps.export_archive.outcome == 'success'" in job["steps"][-1]["if"]
     assert "OFFLINE_TRANSFER_TEST_ONLY=true" in commands
     assert "SIGNED_IMAGE=false" in commands
     assert "mode_a_hosted_userns_verify.sh" in commands
