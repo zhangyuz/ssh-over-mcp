@@ -32,6 +32,12 @@ def test_apt_runs_with_native_hosted_sandbox_not_partial_container_capabilities(
     assert "Dir::Etc::sourceparts=-" in source
     assert 'Dir::State::lists="$lists"' in source
     assert "Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg" in source
+    # GitHub Ubuntu 26.04 stock source is an authenticated Ubuntu mirror list.
+    # Require signed Ubuntu indexes, not a direct archive URL hostname.
+    assert "mirror\\+file:/etc/apt/mirrors/" in source
+    assert "Suites: " in source and "resolute" in source
+    assert "Components: " in source and "main" in source
+    assert "Allow-Insecure" in source and "Trusted" in source
     assert "--no-install-recommends" in source
     assert "docker.io containerd runc iptables iproute2 ca-certificates" in source
     assert "sha256sum" in source

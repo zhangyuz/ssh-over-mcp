@@ -38,8 +38,16 @@ jobs:
           test "$(uname -m)" = x86_64
           test "$(id -u)" -ne 0
           test -r /usr/share/keyrings/ubuntu-archive-keyring.gpg
-          grep -Eq '^URIs: .*ubuntu.com/ubuntu' /etc/apt/sources.list.d/ubuntu.sources
-          grep -Fqx 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' /etc/apt/sources.list.d/ubuntu.sources
+          sources=/etc/apt/sources.list.d/ubuntu.sources
+          # Ubuntu 26.04 hosted runners use mirror+file:/etc/apt/mirrors/;
+          # URL selection is not an authenticity primitive. Only Ubuntu's
+          # signed InRelease + deb checksums confer package authenticity.
+          grep -Eq '^URIs: (https?://[^[:space:]]*ubuntu\.com/ubuntu|mirror\+file:/etc/apt/mirrors/[^[:space:]]+)' "$sources"
+          grep -Eq '^Types: deb([[:space:]]|$)' "$sources"
+          grep -Eq '^Suites: .*resolute' "$sources"
+          grep -Eq '^Components: .*main' "$sources"
+          ! grep -Eiq '^(Trusted|Allow-Insecure|Allow-Weak):[[:space:]]*(yes|true|1)([[:space:]]|$)' "$sources"
+          test "$(grep '^Signed-By:' "$sources" | LC_ALL=C sort -u)" = 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg'
           git diff --exit-code
 
       - name: Resolve and download signed Ubuntu APT Engine closure on disposable hosted runner
