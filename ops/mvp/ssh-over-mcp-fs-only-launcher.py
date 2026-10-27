@@ -133,6 +133,39 @@ def _fixed_policy(policy: object) -> None:
     ):
         raise FsOnlyStartRefused("filesystem policy unexpectedly expanded")
 
+    # v3 currently refuses execution, but do not admit a silently broadened
+    # command or environment policy should a later Host Agent gain a backend.
+    commands = policy.commands
+    command = commands.get("/usr/bin/true")
+    limits = policy.child_limits
+    if (
+        set(commands) != {"/usr/bin/true"}
+        or command is None
+        or command.resolved_path != "/usr/bin/true"
+        or len(command.argv) != 1
+        or command.argv[0].mode != "exact"
+        or command.argv[0].args != ()
+        or command.cwd_roots != ()
+        or not command.allow_no_cwd
+        or not command.require_root_owned
+        or command.allow_group_or_world_writable
+        or command.allow_setuid_or_setgid
+        or command.allow_file_capabilities
+        or policy.env_allow
+        or policy.max_timeout_seconds != 10
+        or policy.max_output_bytes != 8192
+        or policy.max_stdin_bytes != 0
+        or (
+            limits.cpu_seconds,
+            limits.address_space_bytes,
+            limits.max_processes,
+            limits.file_size_bytes,
+            limits.open_files,
+        )
+        != (10, 536870912, 8, 4194304, 64)
+    ):
+        raise FsOnlyStartRefused("filesystem-only policy limits unexpectedly expanded")
+
 
 def main(argv: tuple[str, ...] | None = None) -> int:
     if tuple(sys.argv[1:] if argv is None else argv):

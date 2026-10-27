@@ -17,7 +17,9 @@ ADR0007 or permission to run Docker, alter host privileges or consume new keys.
   non-writable, non-symlinked (no cached bytecode or setuid files), and
   `/srv/data` is a nonsymlink mode0700 directory owned by 2201:3201.
   It loads the existing root-owned v3 Host Policy, checks its *exact*
-  `rw-operator` filesystem roots and 4096-byte bounds, then delegates
+  `rw-operator` filesystem roots and 4096-byte bounds, as well as the
+  non-executable command placeholder, empty environment allowlist and fixed
+  process/time/input/output bounds, then delegates
   `mcp-v1` to existing Host Agent. The v3 command path is non-executing.
 - An actual FS-only image would need its *separate* signed, immutable
   runtime packaging, root-owned trust assets, postdrop dependencies and data

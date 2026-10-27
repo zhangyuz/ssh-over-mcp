@@ -128,6 +128,46 @@ def test_only_existing_v3_fs_policy_admitted():
             entry._fixed_policy(bad)
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("commands", {}),
+        ("env_allow", frozenset({"SAFE_NAME"})),
+        ("max_timeout_seconds", 11),
+        ("max_output_bytes", 16384),
+        ("max_stdin_bytes", 1),
+    ],
+)
+def test_fs_only_policy_rejects_nonfilesystem_expansion(field, value):
+    entry = _entry()
+    policy = load_host_policy(POLICY, require_root_owner=False)
+    with pytest.raises(entry.FsOnlyStartRefused):
+        entry._fixed_policy(policy.model_copy(update={field: value}))
+
+
+def test_fs_only_policy_rejects_raised_process_limits():
+    entry = _entry()
+    policy = load_host_policy(POLICY, require_root_owner=False)
+    raised = policy.child_limits.model_copy(update={"max_processes": 64})
+    with pytest.raises(entry.FsOnlyStartRefused):
+        entry._fixed_policy(policy.model_copy(update={"child_limits": raised}))
+
+
+def test_fs_only_policy_rejects_widened_command_rules():
+    entry = _entry()
+    policy = load_host_policy(POLICY, require_root_owner=False)
+    original = policy.commands["/usr/bin/true"]
+    for changed in [
+        original.model_copy(update={"allow_file_capabilities": True}),
+        original.model_copy(update={"allow_setuid_or_setgid": True}),
+        original.model_copy(
+            update={"argv": (original.argv[0].model_copy(update={"args": ("run",)}),)}
+        ),
+    ]:
+        with pytest.raises(entry.FsOnlyStartRefused):
+            entry._fixed_policy(policy.model_copy(update={"commands": {"/usr/bin/true": changed}}))
+
+
 def test_alternate_sshd_exact_original_except_forcecommand():
     original = ORIGINAL_CONFIG.read_text()
     reviewed = FS_CONFIG.read_text()
