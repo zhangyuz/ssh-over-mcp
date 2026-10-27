@@ -48,6 +48,8 @@ RUN set -eu; \
 # wheels are copied from an unrelated host. Record raw wheel hashes and install
 # only the downloaded matching bytes. Python ABI compatibility is a build gate.
 COPY requirements/runtime.lock /tmp/runtime.lock
+# pip and ensurepip can explicitly generate .pyc despite
+# PYTHONDONTWRITEBYTECODE; the FS-only launcher rejects cached code.
 RUN set -eu; \
     python3 -m venv /opt/ssh-over-mcp-e2e/venv; \
     /opt/ssh-over-mcp-e2e/venv/bin/pip download \
@@ -58,6 +60,12 @@ RUN set -eu; \
     /opt/ssh-over-mcp-e2e/venv/bin/pip install \
       --no-index --find-links=/tmp/wheels --require-hashes \
       -r /tmp/runtime.lock; \
+    find /opt/ssh-over-mcp-e2e/venv/lib/python3.14/site-packages \
+      -type d -name __pycache__ -prune -exec rm -rf {} +; \
+    find /opt/ssh-over-mcp-e2e/venv/lib/python3.14/site-packages \
+      -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete; \
+    test -z "$(find /opt/ssh-over-mcp-e2e/venv/lib/python3.14/site-packages \
+      \( -name __pycache__ -o -name '*.pyc' -o -name '*.pyo' \) -print -quit)"; \
     rm -rf /tmp/wheels /tmp/runtime.lock
 
 # Immutable source + nonroot OpenSSH ForceCommand candidate. Never embed
