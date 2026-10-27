@@ -201,6 +201,10 @@ def test_hosted_native_login_no_sudo_is_feasibility_only_not_release():
     for negative in ("root_uid_denied", "root_gid_denied", "chroot_denied", "setgroups_denied"):
         assert negative in native
     assert "NATIVE_OPENSSH_NO_SUDO_LIMITED_BOUNDING_NEGATIVES_PASS_ONLY" in native
+    assert "'nested_userns_denied':nested_userns_denied" in native
+    assert "'seccomp_filter':seccomp_filter" in native
+    assert "'/usr/bin/unshare','--user','--map-root-user','/usr/bin/true'" in native
+    assert "Nested user namespaces can grant fresh capabilities" in native
     assert "Diagnostic candidate is NOT the five-zero production release gate" in native
     assert "original all-five-sets-zero release contract" in native
     assert "current_user_ns" not in native

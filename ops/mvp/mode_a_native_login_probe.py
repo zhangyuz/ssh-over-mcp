@@ -19,13 +19,13 @@ def run(args: list[str], *, data: bytes | None = None, timeout: int = 12):
     return subprocess.run(args, input=data, capture_output=True, timeout=timeout, check=False)
 
 
-PROBE = rb"""import json,os,sys
+PROBE = rb"""import json,os,sys,subprocess
 fields={}
 with open('/proc/self/status',encoding='ascii') as f:
  for line in f:
   if ':' in line:
    k,v=line.split(':',1)
-   if k in ('NoNewPrivs','CapInh','CapPrm','CapEff','CapBnd','CapAmb'):
+   if k in ('NoNewPrivs','CapInh','CapPrm','CapEff','CapBnd','CapAmb','Seccomp'):
     fields[k]=v.strip()
 try:
  with open('/etc/ssh/hostkeys/ssh_host_ed25519_key','rb') as k:
@@ -55,9 +55,21 @@ root_uid_denied=denied(lambda:os.setresuid(0,0,0))
 root_gid_denied=denied(lambda:os.setresgid(0,0,0))
 chroot_denied=denied(lambda:os.chroot('/tmp'))
 setgroups_denied=denied(lambda:os.setgroups([]))
+# Nested user namespaces can grant fresh capabilities within that new
+# namespace; test this on the disposable exact Docker seccomp runtime.
+try:
+ unshare=subprocess.run(
+  ['/usr/bin/unshare','--user','--map-root-user','/usr/bin/true'],
+  stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
+  stderr=subprocess.DEVNULL,timeout=3,check=False
+ )
+ nested_userns_denied=unshare.returncode!=0
+except (OSError,subprocess.TimeoutExpired):
+ nested_userns_denied=False
+seccomp_filter=fields.get('Seccomp')=='2'
 zero=nonbounding_zero and bounding_zero
 nnp=fields.get('NoNewPrivs')=='1'
-status={'uid_ok':uid_ok,'gid_ok':gid_ok,'caps_zero':zero,'nnp':nnp,'hostkey_denied':hostkey_denied,'four_sets_zero':nonbounding_zero,'bounding_zero':bounding_zero,'bounding_limited':bounding_limited,'root_uid_denied':root_uid_denied,'root_gid_denied':root_gid_denied,'chroot_denied':chroot_denied,'setgroups_denied':setgroups_denied}
+status={'uid_ok':uid_ok,'gid_ok':gid_ok,'caps_zero':zero,'nnp':nnp,'hostkey_denied':hostkey_denied,'four_sets_zero':nonbounding_zero,'bounding_zero':bounding_zero,'bounding_limited':bounding_limited,'root_uid_denied':root_uid_denied,'root_gid_denied':root_gid_denied,'chroot_denied':chroot_denied,'setgroups_denied':setgroups_denied,'nested_userns_denied':nested_userns_denied,'seccomp_filter':seccomp_filter}
 print(json.dumps(status,sort_keys=True),flush=True)
 sys.exit(0 if all(status.values()) else 77)
 """
@@ -226,6 +238,8 @@ def check(name: str, known: Path) -> bool:
                         "root_gid_denied",
                         "chroot_denied",
                         "setgroups_denied",
+                        "nested_userns_denied",
+                        "seccomp_filter",
                     )
                 },
                 sort_keys=True,
@@ -253,6 +267,8 @@ def check(name: str, known: Path) -> bool:
                 "root_gid_denied",
                 "chroot_denied",
                 "setgroups_denied",
+                "nested_userns_denied",
+                "seccomp_filter",
             )
         )
         if candidate:
