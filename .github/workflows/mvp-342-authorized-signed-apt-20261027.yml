@@ -1,7 +1,9 @@
 name: Mode A authorized one-shot signed SSH and Engine APT
 # One approved TEST-ONLY packet for PR342, on a disposable GitHub Ubuntu runner.
 # No Docker API, guest, package installation, SSH keys, host privilege or deployment.
-# Never reuse this exact marker for another commit or packet.
+# CONSUMED: GitHub run #40449835973 completed. Operator SHA variable revoked.
+# This job must remain disabled. Included non-OpenSSH package bytes in the
+# historical test media are NOT approved for deployment or image use.
 on:
   pull_request:
     types: [synchronize]
@@ -11,7 +13,7 @@ permissions:
 
 jobs:
   signed-apt:
-    if: github.event.pull_request.number == 342 && github.event.pull_request.head.ref == 'feat/mvp-mode-a-compose-overlay-oct24'
+    if: github.event.pull_request.number == 342 && github.event.pull_request.head.ref == 'feat/mvp-mode-a-compose-overlay-oct24' && false
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
@@ -80,7 +82,7 @@ jobs:
             -o Dir::Cache::archives="$PWD/media" \
             install --download-only -y --no-install-recommends \
             docker.io containerd runc iptables iproute2 \
-            openssh-server tinysshd python3 python3-venv ca-certificates
+            openssh-server python3 python3-venv ca-certificates
           sudo install -d -m 0755 media/apt-metadata
           sudo cp -a "$lists"/*_InRelease media/apt-metadata/
           sudo cp -a "$lists"/*_Packages* media/apt-metadata/
@@ -91,7 +93,7 @@ jobs:
           rm -rf media/partial media/lock
           apt-cache -o Dir::State::lists="$lists" \
             -o Dir::Etc::sourceparts=- -o Dir::Etc::sourcelist="$src" \
-            policy docker.io containerd runc openssh-server tinysshd python3 python3-venv \
+            policy docker.io containerd runc openssh-server python3 python3-venv \
             > media/resolved-direct-versions.txt
           dpkg --print-architecture > media/architecture.txt
           test "$(cat media/architecture.txt)" = amd64

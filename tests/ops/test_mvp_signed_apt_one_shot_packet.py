@@ -27,7 +27,10 @@ def test_packet_restricts_pr_head_and_unique_approval():
     assert "GITHUB_RUN_ATTEMPT" in gate["run"]
     assert "vars.SOM342_APPROVED_SOURCE_SHA" in gate["env"]["APPROVED_SHA"]
     assert 'test "$TRIGGERED_SHA" = "$APPROVED_SHA"' in gate["run"]
-    assert "tinysshd" in WORKFLOW.read_text()
+    assert "tinysshd" not in WORKFLOW.read_text()
+    assert "openssh-server" in WORKFLOW.read_text()
+    assert " && false" in job["if"]
+    assert "CONSUMED:" in WORKFLOW.read_text()
     assert "authorized=true" in gate["run"]
     assert all(step["if"] == "steps.packet.outputs.authorized == 'true'" for step in steps[2:])
 
