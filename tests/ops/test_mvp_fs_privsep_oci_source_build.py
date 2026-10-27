@@ -390,5 +390,8 @@ def test_hosted_directional_new_flow_acl_is_real_but_not_production_authority():
     assert "pre-policy node->control not reachable" in acl
     assert "NEW TCP/8000 reached control despite ACL" in acl
     assert "HOSTED_NODE_TO_CONTROL_TCP8000_NEW_DENIED_BOTH_PASS" in acl
+    assert "for _ in range(4)" in acl and "som342-acl-done" in acl
+    assert "while True" not in acl
+    assert "disposable ACL listener did not exit" in acl
     assert "prove_directional_acl(control, node_names, node_networks, run)" in smoke
     assert "NETWORK_DIRECTIONAL_ACL_PROVEN=false SIGNED_MEDIA=false DEPLOYED=false" in smoke

@@ -21,9 +21,12 @@ CONNECT = (
     "sys.exit(0 if rc==0 else 41)"
 )
 LISTENER = (
-    "import socket; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);"
+    "import socket,pathlib; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);"
     "s.bind(('0.0.0.0',8000)); s.listen(32);"
-    "\nwhile True:\n c,_=s.accept(); c.close()"
+    # Exactly four intentional positive connects: readiness, both SSH nodes,
+    # and the final control loopback probe. Do not leave a port-8000 daemon.
+    "\nfor _ in range(4):\n c,_=s.accept(); c.close()"
+    "\ns.close();pathlib.Path('/tmp/som342-acl-done').write_text('1')"
 )
 
 
@@ -177,5 +180,16 @@ def prove(control: str, nodes: list[str], networks: list[str], run: Run) -> None
         ).returncode
         == 0
     )
+    # The test listener must shut down before the REAL MCP binds TCP/8000.
+    for _ in range(35):
+        done = run(
+            ["docker", "exec", "-u", "2201:3201", control, "test", "-f", "/tmp/som342-acl-done"],
+            ok=False,
+        )
+        if done.returncode == 0:
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError("disposable ACL listener did not exit")
     print("HOSTED_NODE_TO_CONTROL_TCP8000_NEW_DENIED_BOTH_PASS", flush=True)
     print("DIRECTIONAL_ACL_DISPOSABLE_CONTROL_NETNS_ONLY=true", flush=True)
