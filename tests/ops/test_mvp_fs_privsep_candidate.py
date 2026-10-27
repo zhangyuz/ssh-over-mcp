@@ -39,6 +39,7 @@ def test_openssh_only_privsep_handoff_no_generic_root_escape():
 def test_sudo_only_exact_fixed_zero_cap_fs_command():
     rules = SUDO.read_text()
     assert 'env_keep += "SSH_ORIGINAL_COMMAND"' in rules
+    assert "requiretty" not in rules
     allowed = [
         line
         for line in rules.splitlines()
