@@ -60,3 +60,25 @@ Before any live test on a disposable **authorized Linux Engine**, independently 
 M1a `A01`–`A03` are reserved for actual live Mode A positive plus hostile lateral network/data/host-key/restart/manager-outage tests on the same accepted image/source SHA. The existing Native Level-3 and hosted CI runs do not substitute for these. Mode B requires separate **three distinct Linux Engines** and `A15`–`A18`; this overlay is intentionally **not** a Mode B deployment template. The static preflight and bundle check always report `deployment_ready=false`, all host/image/ACL/runtime/live-E2E flags false.
 
 See [MVP status](../mvp-status.md), [ADR0021](../decisions/0021-private-compose-rw-mvp-release-track.md), and [M1a plan](../superpowers/plans/2026-10-23-private-compose-rw-mvp.md).
+
+## OpenSSH-only FS runtime review overlay (render-only)
+
+For an **inert** review of the runtime shape proven by hosted Docker tests,
+append `deploy/compose/compose.mode-a-openssh-fs.review-candidate.yaml`
+after `compose.yaml` and `compose.dev-ssh.yaml` in the Compose `-f`
+order. Supply all four separate root-owned node host-key and authorized-key
+directory placeholders from `reference.mode-a.env.example`. Only invoke
+`docker compose --profile mvp-fs-review config`, never `up` or `build`.
+
+The candidate aligns rendered fields with validated OpenSSH admission:
+root user inside a dedicated userns, `CAP_SETUID/SETGID/SETPCAP/SYS_CHROOT`
+only, non-NNP admission for one fixed sudo/setpriv handoff, internal SSH
+port 2222, read-only per-node host keys/authorized keys and node data
+volumes. The final user FS process is independently checked to UID2201,
+NNP=1, CapBnd=0. All nodes explicitly retain the STOP78 entrypoint,
+even when the review-only profile is enabled.
+
+This does NOT prove or authorize live Mode A networking, directional
+node-to-control packet denial, signed production image identity, real
+central MCP/Ledger one-use approvals, rollback, or no-NIC guest runtime.
+No host secrets or bind-source paths are created by `config`.
