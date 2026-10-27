@@ -16,7 +16,13 @@ def test_privsep_image_is_derived_from_pinned_fs_source_and_hard_stopped():
     assert "docker.io/library/ubuntu@sha256:" in base
     assert "ARG SOM_FS_SOURCE_IMAGE" in source
     assert "FROM ${SOM_FS_SOURCE_IMAGE}" in source
-    assert "sudo util-linux" in source
+    assert "sudo=1.9.17p2-1ubuntu3.2" in source
+    assert "sudo-common=1.2ubuntu" in source
+    assert "test -x /usr/bin/setpriv" in source
+    assert "privsep-signed-apt-lists" in source
+    assert "openssh-fs-privsep-deb-sha256.txt" in source
+    assert "apt-installed-final.tsv" in source
+    assert "install --download-only" in source
     assert "visudo -c -f /etc/sudoers.d/ssh-over-mcp-fs" in source
     assert "COPY deploy/ssh-target/sshd_config.fs-privsep-review-candidate" in source
     assert "COPY deploy/ssh-target/sudoers.fs-privsep-review-candidate" in source
