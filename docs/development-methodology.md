@@ -24,6 +24,46 @@ The feature PR MUST contain, when applicable:
 
 Architectural work retains its independent written-spec and implementation-plan approvals; cross-boundary security decisions (trusted signer/root/verifier, real package/host/privilege use, UID502, and releases) remain separate operator gates. Approval of a PR design or a local unit test cannot grant an unrelated runtime authority.
 
+## 1A. Outcome-first prioritization and honest delivery states
+
+Before selecting the next feature slice, record its **user/operator outcome**, intended
+runtime environment, real success **and refusal** acceptance path, earliest missing
+end-to-end evidence, and the current security/approval gates. Optimize for the
+shortest **safe** path to an independently usable capability, not number of PRs,
+tests, helper scripts, or documents. This does not relax Section 13.
+
+Triage pending work as follows:
+
+- **RELEASE_BLOCKER:** mandatory security, trust, authorization, isolation, audit,
+  real E2E, recovery, cleanup or release gate. It cannot be deferred to call the
+  affected release complete; an unexpected blocker requires explicit evidence
+  and a safe ruling, not a silent waiver.
+- **FUNCTIONAL_BLOCKER:** the agreed user workflow cannot succeed in the stated
+  environment. Resolve it, or deliver a clearly named *technical pilot* while
+  preserving the original MVP acceptance scope and its unresolved gate.
+- **DEFERRED:** noncritical enhancement or optional hardening not required by the
+  declared deliverable and its security invariant. Record its risk, owner,
+  dependency and revisit criterion in the appropriate tracked issue/roadmap.
+
+A static preflight, synthetic policy preview, shape-only check or signed test
+artifact MAY be a useful independent operator deliverable or remove a measured
+blocker. It MUST NOT be described as a deployed user function, production trust
+decision or substitute for missing real positive/negative E2E. Prefer exercising
+the complete runtime path as early as the authorized isolated environment permits.
+
+Report `IMPLEMENTED`, `TESTED`, `REVIEWED`, `MERGED`, `DEPLOYED`,
+and `ACCEPTED` as **distinct states**, tied to the corresponding exact revision,
+environment and evidence. A pilot, the agreed full functional MVP and an
+authorized production release are distinct milestones. Do not silently narrow
+user-approved scope to match what has been tested.
+
+For throughput reviews, prefer accepted capabilities, feature lead time
+(start to real user/operator acceptance), mandatory-blocker age, escaped
+regressions and CI/review feedback latency. PR count and raw test count are
+secondary diagnostics, not delivery metrics. See
+[project engineering lessons](engineering-lessons.md) for examples; that
+retrospective is not itself an authorization or release gate.
+
 ## 2. Continuous iteration
 
 Every slice MUST produce new evidence and reduce uncertainty.
