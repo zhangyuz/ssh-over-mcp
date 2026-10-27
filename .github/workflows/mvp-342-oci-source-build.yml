@@ -1,4 +1,4 @@
-name: MVP #342 OpenSSH OCI source build (no runtime)
+name: MVP #342 OpenSSH OCI hosted test and offline handoff
 
 on:
   pull_request:
@@ -89,10 +89,34 @@ jobs:
             echo 'NO_NIC_GUEST_OCI_PROVEN=false'
           } >> proof/PROVENANCE.txt
 
-      - name: Upload tiny proof only (never expose images or secrets)
+      - name: Export hash-bound test-only offline Docker image (not signed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Export the EXACT container image exercised above. Its embedded
+          # STOP78 entrypoint remains unchanged; no real keys enter this tar.
+          expected="$(docker image inspect som-mvp-fs-privsep:local --format '{{.Id}}')"
+          docker save som-mvp-fs-privsep:local | gzip -n -1 > proof/som342-openssh-fs.docker.tar.gz
+          test -s proof/som342-openssh-fs.docker.tar.gz
+          gzip -t proof/som342-openssh-fs.docker.tar.gz
+          (cd proof && sha256sum som342-openssh-fs.docker.tar.gz > OFFLINE_IMAGE_SHA256SUMS)
+          # Actually prove the exported archive can be reimported.
+          docker image rm som-mvp-fs-privsep:local
+          gzip -dc proof/som342-openssh-fs.docker.tar.gz | docker load
+          test "$(docker image inspect som-mvp-fs-privsep:local --format '{{.Id}}')" = "$expected"
+          test "$(docker image inspect som-mvp-fs-privsep:local --format '{{json .Config.Entrypoint}}')" = '["/usr/local/libexec/ssh-over-mcp-image-hold"]'
+          echo "OFFLINE_IMAGE_ARCHIVE_SHA256=$(cut -d ' ' -f 1 proof/OFFLINE_IMAGE_SHA256SUMS)" >> proof/PROVENANCE.txt
+          echo 'OFFLINE_IMAGE_FORMAT=docker-save-gzip' >> proof/PROVENANCE.txt
+          echo 'OFFLINE_TRANSFER_TEST_ONLY=true' >> proof/PROVENANCE.txt
+          echo 'ARCHIVE_LOAD_TEST_PASSED=true' >> proof/PROVENANCE.txt
+          echo 'SIGNED_IMAGE=false' >> proof/PROVENANCE.txt
+
+      - name: Upload test-only hash-bound image and proof (never export secrets)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: mvp-342-openssh-oci-source-build
           path: proof/*
           retention-days: 3
           if-no-files-found: error
+          # tar.gz is already compressed; no double zipping.
+          compression-level: 0

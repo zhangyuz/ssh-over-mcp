@@ -46,6 +46,15 @@ def test_hosted_image_builder_never_starts_or_exports_running_ssh():
     assert "HOSTED_OCI_FS_TWO_NODE_SMOKE_PASSED=true" in commands
     assert "PRIVATE_USERNS_PROVEN=false" in commands
     assert "GUEST_VERIFIED=false" in commands
+    assert "docker save som-mvp-fs-privsep:local | gzip -n -1" in commands
+    assert "OFFLINE_IMAGE_SHA256SUMS" in commands
+    assert "gzip -t proof/som342-openssh-fs.docker.tar.gz" in commands
+    assert "docker load" in commands
+    assert "ARCHIVE_LOAD_TEST_PASSED=true" in commands
+    assert "OFFLINE_TRANSFER_TEST_ONLY=true" in commands
+    assert "SIGNED_IMAGE=false" in commands
+    assert job["steps"][-1]["with"]["retention-days"] <= 3
+    assert job["steps"][-1]["with"]["compression-level"] == 0
     assert not any(
         forbidden in commands
         for forbidden in ("docker run ", "docker compose", "--privileged", "sudo docker")
