@@ -10,7 +10,10 @@ test -x /usr/bin/dockerd
 test -x /usr/bin/sudo
 test -s proof/som342-openssh-fs.docker.tar.gz
 (cd proof && sha256sum -c OFFLINE_IMAGE_SHA256SUMS)
-scratch="$(mktemp -d "${RUNNER_TEMP:?}/som342-userns-XXXXXX")"
+# Hosted RUNNER_TEMP can have a parent (e.g. /home/runner/work/_temp)
+# with owner-only traverse, breaking userns graphroot access. /tmp is a
+# disposable Ubuntu runner filesystem with traverseable ancestor directories.
+scratch="$(mktemp -d /tmp/som342-userns-XXXXXX)"
 # Subordinate Docker IDs must traverse their graphroot's ancestors. Grant
 # execute-only, NOT read/list/write, on this ephemeral fixture directory.
 chmod 0711 "$scratch"

@@ -99,6 +99,7 @@ def test_ephemeral_userns_engine_does_not_change_host_daemon():
     assert '--host "unix://$scratch/docker.sock"' in body
     assert "--bridge=none --iptables=false --ip-forward=false --ip-masq=false" in body
     assert "SOM342_REMAPPED_ROOT_UID" in body
+    assert 'mktemp -d /tmp/som342-userns-XXXXXX' in body
     assert 'chmod 0711 "$scratch"' in body
     assert 'chmod 0711 "$scratch/data"' in body
     assert 'chmod 0777 "$scratch"' not in body
