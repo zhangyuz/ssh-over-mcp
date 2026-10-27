@@ -37,3 +37,5 @@ Current ADRs:
 - [0021 — Private multi-SSH Compose read/write MVP release track (proposed)](0021-private-compose-rw-mvp-release-track.md) — two mandatory deployment topologies confirmed by operator (single-engine development/E2E; separate control-plane plus two remote SSH Compose Engines for actual deployment); remaining safety/release-track decision Proposed, no security-gate waiver or implementation authorization.
 
 - [0022 — Proposed Compose SSH runtime privilege domains (NOT accepted)](0022-proposed-compose-ssh-privilege-domains.md) — mode A sshd/launcher/manager split and exact authority/evidence gates.
+
+- [0023 — FS-only OpenSSH admission (proposed, NOT accepted)](0023-proposed-fs-only-openssh-admission.md) — fixed sudo/setpriv capability-drop handoff and unchanged deployment HOLD.

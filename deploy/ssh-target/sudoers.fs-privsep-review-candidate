@@ -1,0 +1,5 @@
+# Proposed exact command only. Install root-owned 0440, verify visudo in guest.
+# No generic root shell, PATH search or caller-supplied argv.
+Defaults:ssh-over-mcp-e2e-host !requiretty
+Defaults:ssh-over-mcp-e2e-host env_keep += "SSH_ORIGINAL_COMMAND"
+ssh-over-mcp-e2e-host ALL=(root) NOPASSWD: /usr/bin/setpriv --inh-caps=-all --ambient-caps=-all --bounding-set=-all --no-new-privs --reuid=2201 --regid=3201 --clear-groups /usr/bin/python3 -I -S /usr/local/libexec/ssh-over-mcp-fs-only-launcher.py
