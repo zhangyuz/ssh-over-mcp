@@ -302,3 +302,18 @@ def test_native_ci_mount_renders_exact_one_gate_change_without_host_sudo(tmp_pat
     assert "ForceCommand /usr/bin/sudo" not in config
     assert "PermitRootLogin no" in config
     assert "DisableForwarding yes" in config
+
+
+def test_attested_archive_handoff_never_claims_production_image_is_signed():
+    runbook = (ROOT / "docs/runbooks/mvp-mode-a-oci-offline-handoff.md").read_text()
+    assert "gh attestation verify" in runbook
+    assert (
+        "--signer-workflow zhangyuz/ssh-over-mcp/.github/workflows/mvp-342-oci-source-build.yml"
+        in runbook
+    )
+    assert "--deny-self-hosted-runners" in runbook
+    assert "f7a931a4644be812bd5493808d8613a7ef7a57ec" in runbook
+    assert "TEST_ARCHIVE_GITHUB_PROVENANCE_ATTESTED=true" in runbook
+    assert "not embedded in this archive" in runbook
+    assert "SIGNED_RUNTIME_ID=false" in runbook
+    assert "STOP78" in runbook

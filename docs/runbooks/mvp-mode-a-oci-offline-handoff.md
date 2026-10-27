@@ -1,6 +1,7 @@
 # MVP #342 OpenSSH OCI offline image handoff — TEST ONLY
 
-**Status:** artifact transport candidate, **not a signed release**. The
+**Status:** GitHub OIDC/Sigstore-attested *test archive* available;
+**not a signed runtime image or production release**. The
 `som342-openssh-fs.docker.tar.gz` produced by the dedicated GitHub-hosted
 Ubuntu build is a Docker image archive (not an OCI-layout directory).
 Its image still has the reviewed **STOP78 entrypoint**. Do not publish,
@@ -27,6 +28,46 @@ Retained only three days. Access must stay limited to repository-authorized
 operators because the image embeds application source. The GitHub artifact
 digest and source commit must also be checked against the workflow run.
 SHA256 alone ensures integrity *relative to the receipt*, not authenticity.
+
+## Verified GitHub OIDC/Sigstore archive handoff (host-side, TEST ONLY)
+
+The public repository's PR-only build signs the compressed test **archive**
+using the pinned official GitHub `actions/attest` action *after* normal
+and separate userns Engine central Ledger E2E succeeds. Its OIDC certificate
+binds the producing workflow identity to the archive SHA256. On an
+operator-controlled host, before bringing bytes into an isolated guest:
+
+```sh
+umask 077
+dir=$(mktemp -d /tmp/som342-attested-handoff-XXXXXX)
+gh run download <EXACT_GREEN_RUN_ID> --repo zhangyuz/ssh-over-mcp \
+  --name mvp-342-openssh-oci-source-build --dir "$dir"
+(cd "$dir" && sha256sum -c OFFLINE_IMAGE_SHA256SUMS)  # Linux; use shasum -a 256 on macOS
+grep -Fx "PR_SOURCE_SHA=<EXACT_APPROVED_PR_HEAD_SHA>" "$dir/PROVENANCE.txt"
+grep -Fx 'TEST_ARCHIVE_GITHUB_PROVENANCE_ATTESTED=true' "$dir/PROVENANCE.txt"
+gh attestation verify "$dir/som342-openssh-fs.docker.tar.gz" \
+  --repo zhangyuz/ssh-over-mcp \
+  --signer-workflow zhangyuz/ssh-over-mcp/.github/workflows/mvp-342-oci-source-build.yml \
+  --deny-self-hosted-runners --format json > "$dir/attestation-verified.json"
+```
+
+**Actually verified on Yuz.local:** workflow
+[#40539689998](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/40539689998),
+exact source SHA `f7a931a4644be812bd5493808d8613a7ef7a57ec`,
+archive SHA256 checked, `gh attestation verify` returned one
+cryptographically valid SLSA provenance statement with the pinned
+workflow identity. GitHub attestation guarantees provenance of **these
+archived bytes**, not security or signature of the remapped Docker
+runtime image ID. An arbitrary PR-side test mount of the native no-sudo
+FS launcher is **not embedded in this archive**; this is why the
+fully-working native runtime is still **NOT a production-deployable
+signed artifact**. The image itself still contains the old sudo
+ForceCommand, and `STOP78` remains enforced.
+
+Do not confuse `TEST_ARCHIVE_GITHUB_PROVENANCE_ATTESTED=true` with
+`SIGNED_IMAGE=true`; the provenance receipt explicitly keeps
+`SIGNED_IMAGE=false` and `SIGNED_RUNTIME_ID=false`. Never execute
+an unsafely imported archive because its checksum or attestation passed.
 
 ## Offline verification (inside a separate, disposable Linux guest ONLY)
 
