@@ -62,6 +62,9 @@ def test_disposable_oci_two_node_smoke_has_only_loopback_and_minimal_ssh_caps():
     assert '"--read-only"' in smoke
     assert '"/srv/data:rw,noexec,nosuid,nodev,uid=2201,gid=3201,mode=0700' in smoke
     assert "MODE_A_OPENSSH_OCI_TWO_NODE_FS_ONLY_HOSTED_PASS" in smoke
+    assert "foreign_known.read_bytes()" in smoke
+    assert "Host key verification failed" in smoke
+    assert "oci_node_{i}_cross" in smoke
     assert "USERNS_PRIVATE_PROVEN=false" in smoke
     assert 'run(["docker", "rm", "-f", name]' in smoke
     assert '"--read-only"' in smoke

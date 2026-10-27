@@ -229,14 +229,70 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="som342-oci-", dir=os.environ["RUNNER_TEMP"]) as tmp:
         work = Path(tmp)
         try:
+            nodes: dict[int, tuple[str, Path]] = {}
             for i in (1, 2):
                 name = f"som342-oci-node{i}-{uuid.uuid4().hex[:6]}"
-                start_node(name, work / name, running)
+                _name, _client, known = start_node(name, work / name, running)
+                nodes[i] = (name, known)
                 try:
                     check_node(name, i)
                 except AssertionError as exc:
                     logs = run(["docker", "logs", name], ok=False).stderr
                     raise AssertionError((exc.args, logs[-1700:].decode(errors="replace"))) from exc
+
+            # Both nodes are still running with network=none, separate tmpfs
+            # /srv/data and independent SSH host keys. A sibling path isn't
+            # available even though each has the same policy prefix.
+            for i in (1, 2):
+                name, known = nodes[i]
+                _, foreign_known = nodes[3 - i]
+                cross = call(
+                    name,
+                    frame(
+                        "fs_read",
+                        f"oci_node_{i}_cross",
+                        f"/srv/data/mvp-node-{3 - i}/probe.bin",
+                        max_bytes=4096,
+                    ),
+                )
+                assert cross.returncode != 0 and cross.stdout == b""
+
+                # Deliberately substitute the sibling's host fingerprint.
+                # OpenSSH must refuse the connection, then recover once its
+                # exact pinned host key is restored.
+                wrong_pinned_host = foreign_known.read_bytes()
+                run(
+                    [
+                        "docker",
+                        "exec",
+                        "-i",
+                        "-u",
+                        "0:0",
+                        name,
+                        "/bin/sh",
+                        "-c",
+                        "umask 077; cat > /tmp/known_hosts; chmod 0644 /tmp/known_hosts",
+                    ],
+                    stdin=wrong_pinned_host,
+                )
+                denied = call(name, frame("fs_stat", f"oci_node_{i}_bad_hostkey", "/srv/data"))
+                assert denied.returncode != 0 and b"Host key verification failed" in denied.stderr
+                run(
+                    [
+                        "docker",
+                        "exec",
+                        "-i",
+                        "-u",
+                        "0:0",
+                        name,
+                        "/bin/sh",
+                        "-c",
+                        "umask 077; cat > /tmp/known_hosts; chmod 0644 /tmp/known_hosts",
+                    ],
+                    stdin=known.read_bytes(),
+                )
+                verified = call(name, frame("fs_stat", f"oci_node_{i}_restored_key", "/srv/data"))
+                assert verified.returncode == 0, verified.stderr[-500:]
             print("MODE_A_OPENSSH_OCI_TWO_NODE_FS_ONLY_HOSTED_PASS")
             print("HOSTED_DISPOSABLE=true NETWORK_NONE=true USERNS_PRIVATE_PROVEN=false")
             print("SIGNED_IMAGE=false NO_NIC_VM_PROVEN=false DEPLOYED=false")
