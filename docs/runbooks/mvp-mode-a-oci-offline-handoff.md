@@ -87,6 +87,34 @@ files inside a derived review-only image. Require a fresh archive containing
 both central Ledger passes, and its own GitHub attestation. The new image
 remains a candidate; `STOP78` is still enforced.
 
+### 2026-10-27 exact-head host-side verification (test media only)
+
+For PR source `154880cc0cfa9fea756a863e07c63d4c84384760`, downloaded
+[run #40569048733](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/40569048733)
+to a private temporary directory on `yuz.local` **without Docker load or
+execution**. Verified `OFFLINE_IMAGE_SHA256SUMS`; independently checked
+**both** GitHub OIDC attestations against the exact pinned workflow and
+`TEST_MERGE_SHA=3fd850681bc0843cc41a808acdfcdb5570ff4242`:
+[archive #60536842](https://github.com/zhangyuz/ssh-over-mcp/attestations/60536842),
+[remapped receipt #60536862](https://github.com/zhangyuz/ssh-over-mcp/attestations/60536862).
+Each verification returned one trusted statement.
+
+Read the *compressed test archive*, without extraction/`docker load`, and
+independently hash-check its embedded OCI descriptors: top-level `index.json`
+selects test source OCI index `sha256:ce126ce7d228825ab4805707fd731390f6c1bdd89939a7a3c5670092218fb2ef`;
+its **unique `linux/amd64`** manifest points to config
+`sha256:32783927f2394afa34ce29cd25d7995513052ae8f92f8ddd24b25fb0baa43fd0`.
+This config digest equals the separately signed receipt's *test-only*
+`remapped_runtime_image_id`; `manifest.json` points to that config too.
+The config entrypoint is still
+`/usr/local/libexec/ssh-over-mcp-image-hold` (**STOP78**).
+The archive is a Docker-save tar which includes both `manifest.json` and
+`oci-layout`/`index.json`/`blobs/sha256` entries; do not assume legacy-only
+`<image-id>.json` archive paths. OCI descriptor consistency is **not** an
+Engine package signature or a production deployable image approval.
+The handoff requires an independently signed final runtime image and the
+same checks **inside the actual no-NIC guest** before deployment.
+
 The hosted userns test now records `REMAPPED_IMAGE_TEST_RECEIPT.json` **only after** its real two-node central MCP/Ledger, SSH privilege and directional ACL probes succeed. The receipt links the archive SHA-256, original test image ID, observed post-import image ID, subordinate UID/GID bases, PR HEAD and merge SHA. GitHub separately attests the JSON file with the same pinned workflow. An operator must verify **both** attestations, require the exact approved PR HEAD and merge source digest, and independently compare the JSON archive SHA-256 with the downloaded archive. This only authenticates a **CI test observation**, not the final guest OCI image or its startup permission. Any missing or mismatched receipt must fail closed.
 
 Do not confuse `TEST_ARCHIVE_GITHUB_PROVENANCE_ATTESTED=true` with
