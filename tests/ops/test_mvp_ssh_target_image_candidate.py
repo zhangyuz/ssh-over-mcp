@@ -114,3 +114,19 @@ def test_existing_managed_host_launcher_is_not_represented_as_oci_compatible() -
     # login UID is 2201; never silently modify the accepted native launcher.
     launcher = (ROOT / "ops/live-e2e/ssh-over-mcp-host-agent-launcher.py").read_text()
     assert 'env.get("SUDO_UID") != str(HOST_AGENT_UID)' in launcher
+
+
+def test_nested_python_bytecode_is_excluded_from_both_oci_build_contexts() -> None:
+    """Source checkout caches must not force a STOP during ordinary image COPY."""
+    excluded = set((ROOT / ".dockerignore").read_text().splitlines())
+    assert {"**/__pycache__", "**/*.pyc", "**/*.pyo"} <= excluded
+    assert "__pycache__" in excluded
+    for image in (
+        CANDIDATE,
+        SOURCE / "Dockerfile.manager-review-candidate",
+    ):
+        text = image.read_text()
+        assert "COPY src /opt/ssh-over-mcp-e2e/workspace/src" in text
+        assert "-name __pycache__" in text
+        assert "-name '*.pyc'" in text
+        assert "-name '*.pyo'" in text
