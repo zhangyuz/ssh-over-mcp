@@ -57,7 +57,8 @@ def prove(
     address = end[origin]["IPAddress"]
     assert address and address != "127.0.0.1"
     assert all(end[n]["IPAddress"] != address for n in node_networks)
-    assert not detail["NetworkSettings"]["Ports"]
+    # An image may EXPOSE 2222 without any published host binding.
+    assert all(not bindings for bindings in detail["NetworkSettings"]["Ports"].values())
 
     run(["docker", "exec", "-d", "-u", "2201:3201", control, PYTHON, "-c", LISTENER, address])
     for _ in range(60):
