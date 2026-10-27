@@ -86,7 +86,14 @@ now exports a **separately named TEST-ONLY runnable review archive**
 image ID after a Docker remove/reload, and reruns default-start typed FS checks.
 It then imports the **same archive** into a separate userns-remapped Docker
 daemon for another actual default-boot FS test, recording an observed post-import
-image ID in `ONLINE_PILOT_REMAPPED_TEST_RECEIPT.json`. GitHub OIDC attestations
+image ID in `ONLINE_PILOT_REMAPPED_TEST_RECEIPT.json`. The same CI now
+verifies **both runnable SSH nodes' image-default startup** against the actual
+central MCP HTTP interface and once-only Security Ledger, including approved
+create-only writes, replay denial, peer-network denial, and reverse TCP/8000
+restriction before issuing the test-only receipt. The control container still
+uses a test-only boot override from the original STOP78 test image; this does
+**not** prove final production Compose startup of the control plane.
+GitHub OIDC attestations
 cover **the review archive bytes and this CI-only receipt separately**;
 an attestation proves origin, **not** production approval. Both contain
 `production_signed_runtime_id=false` / `production_deployed=false`, and

@@ -13,7 +13,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from mode_a_hosted_oci_fs_smoke import check_node, run, start_node
+from mode_a_hosted_oci_fs_smoke import check_node, prove_central_mcp_ledger, run, start_node
 
 IMAGE = "som-mvp-fs-online-pilot-review:local"
 
@@ -30,6 +30,7 @@ def main() -> None:
     assert config["Entrypoint"] == ["/usr/sbin/sshd"]
     assert config["Cmd"] == ["-D", "-e"]
     running: list[str] = []
+    networks: list[str] = []
     with tempfile.TemporaryDirectory(
         prefix="som342-online-pilot-proof-", dir=os.environ["RUNNER_TEMP"]
     ) as tmp:
@@ -44,14 +45,30 @@ def main() -> None:
             assert not any(observed["NetworkSettings"]["Ports"].values())
             check_node(name, 1)
             print("HOSTED_ONLINE_PILOT_DEFAULT_SSHD_FS_PASS", flush=True)
+            # Use the SAME baked default-boot image for both networked SSH
+            # nodes; the real central MCP HTTP + persistent Ledger sends
+            # independently approved once-only FS mutations to both.
+            prove_central_mcp_ledger(
+                work,
+                running,
+                networks,
+                node_image=IMAGE,
+                default_node_entrypoint=True,
+            )
+            print("HOSTED_ONLINE_PILOT_DEFAULT_SSHD_TWO_NODE_MCP_LEDGER_PASS", flush=True)
             print("TEST_ONLY=true IMAGE_RELEASE_ATTESTED=false DEPLOYED=false", flush=True)
         finally:
             for current in reversed(running):
                 run(["docker", "rm", "-f", current], ok=False)
-            for directory in ("hostkeys", "authorized_keys"):
-                target = work / name / directory
-                if target.is_dir() and not target.is_symlink():
-                    run(["sudo", "-n", "rm", "-rf", "--", str(target)], ok=False)
+            for network in reversed(networks):
+                run(["docker", "network", "rm", network], ok=False)
+            # Clean only fixture-owned directories in the temp work root.
+            # Normal and userns-remapped root ownership may differ on host.
+            for node in work.iterdir():
+                for directory in ("hostkeys", "authorized_keys"):
+                    target = node / directory
+                    if target.is_dir() and not target.is_symlink():
+                        run(["sudo", "-n", "rm", "-rf", "--", str(target)], ok=False)
 
 
 if __name__ == "__main__":

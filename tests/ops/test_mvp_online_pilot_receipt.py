@@ -21,6 +21,8 @@ def test_receipt_hash_binds_runnable_archive_and_both_image_ids(tmp_path):
         f"ONLINE_PILOT_REMAPPED_IMAGE_ID={actual}",
         f"ONLINE_PILOT_ARCHIVE_SHA256={digest}",
         "ONLINE_PILOT_RELOAD_DEFAULT_SSHD_FS_PASSED=true",
+        "ONLINE_PILOT_RELOAD_DUAL_MCP_LEDGER=true",
+        "ONLINE_PILOT_REMAPPED_DUAL_MCP_LEDGER=true",
         "ONLINE_PILOT_TEST_ARCHIVE_ONLY=true",
         "PRODUCTION_RELEASE_AUTHORIZED=false",
     ]
@@ -33,6 +35,7 @@ def test_receipt_hash_binds_runnable_archive_and_both_image_ids(tmp_path):
     assert result["entrypoint"] == "/usr/sbin/sshd"
     assert result["command"] == ["-D", "-e"]
     assert result["remapped_default_start_and_typed_fs_passed"] is True
+    assert result["remapped_default_start_two_node_mcp_ledger_passed"] is True
     assert result["production_signed_runtime_id"] is False
     assert result["production_deployed"] is False
 

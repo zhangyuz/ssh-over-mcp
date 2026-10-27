@@ -33,6 +33,22 @@ def test_runnable_image_default_start_is_proved_with_actual_ssh_and_fs() -> None
     assert "docker compose" not in proof
 
 
+def test_runnable_image_default_boot_is_used_for_full_two_node_mcp_ledger() -> None:
+    proof = (ROOT / "ops/mvp/mode_a_hosted_runnable_image_probe.py").read_text()
+    smoke = (ROOT / "ops/mvp/mode_a_hosted_oci_fs_smoke.py").read_text()
+    assert "prove_central_mcp_ledger(" in proof
+    assert "node_image=IMAGE" in proof
+    assert "default_node_entrypoint=True" in proof
+    assert "HOSTED_ONLINE_PILOT_DEFAULT_SSHD_TWO_NODE_MCP_LEDGER_PASS" in proof
+    assert "node_image: str = IMAGE" in smoke
+    assert "default_node_entrypoint: bool = False" in smoke
+    central = smoke.split("def prove_central_mcp_ledger(", 1)[1].split("\\ndef main()", 1)[0]
+    assert "image=node_image" in central
+    assert "use_default_entrypoint=default_node_entrypoint" in central
+    # The single and dual node probes both use disposable-only host keys.
+    assert 'run(["docker", "network", "rm", network]' in proof
+
+
 def test_runnable_ci_candidate_never_promoted_as_release_image() -> None:
     workflow = yaml.safe_load((ROOT / ".github/workflows/mvp-342-oci-source-build.yml").read_text())
     steps = workflow["jobs"]["build-source"]["steps"]
@@ -93,6 +109,8 @@ def test_runnable_archive_roundtrip_and_signed_test_only_receipt_in_dedicated_us
     assert "gzip -dc proof/som342-online-pilot-review.docker.tar.gz | docker load" in userns
     assert "python3 ops/mvp/mode_a_hosted_runnable_image_probe.py" in userns
     assert "ONLINE_PILOT_REMAPPED_IMPORT_DEFAULT_SSHD_FS_PASS" in userns
+    assert "ONLINE_PILOT_REMAPPED_DUAL_MCP_LEDGER=true" in userns
+    assert "ONLINE_PILOT_RELOAD_DUAL_MCP_LEDGER=true" in export["run"]
     assert "mode_a_online_pilot_receipt.py" in userns
     source = (ROOT / "ops/mvp/mode_a_online_pilot_receipt.py").read_text()
     for field in (
@@ -106,3 +124,4 @@ def test_runnable_archive_roundtrip_and_signed_test_only_receipt_in_dedicated_us
         assert field in source
     assert "som342-online-pilot-review.docker.tar.gz" in source
     assert '"/usr/sbin/sshd"' in source
+    assert "remapped_default_start_two_node_mcp_ledger_passed" in source

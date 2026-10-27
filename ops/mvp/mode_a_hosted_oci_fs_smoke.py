@@ -281,13 +281,27 @@ def check_node(name: str, index: int) -> None:
     )
 
 
-def prove_central_mcp_ledger(work: Path, running: list[str], networks: list[str]) -> None:
+def prove_central_mcp_ledger(
+    work: Path,
+    running: list[str],
+    networks: list[str],
+    *,
+    node_image: str = IMAGE,
+    default_node_entrypoint: bool = False,
+) -> None:
     """Two test-only node-local bridges, central MCP+Ledger over real SSH.
 
     This proves node-to-node isolation, NOT directional node-to-MCP egress
     firewall rules or production Compose startup.
     Previously verified per-node network=none tests run separately.
     """
+    # Run the same central MCP/Ledger proof against either the historical
+    # STOP78 test image with explicit test-only entrypoint, or the DISTINCT
+    # runnable pilot image using its exact baked default sshd entrypoint.
+    if default_node_entrypoint:
+        assert node_image == "som-mvp-fs-online-pilot-review:local"
+    else:
+        assert node_image == IMAGE
     # Separate per-node internal bridges: the control can reach both nodes,
     # while neither node is attached to the other node's SSH network.
     node_networks: list[str] = []
@@ -307,6 +321,8 @@ def prove_central_mcp_ledger(work: Path, running: list[str], networks: list[str]
             running,
             network=network,
             alias=f"node{index:02}",
+            image=node_image,
+            use_default_entrypoint=default_node_entrypoint,
         )
         node_names.append(name)
         prepared.append((client, work / name / "hostkeys" / "ssh_host_ed25519_key.pub"))

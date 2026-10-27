@@ -112,6 +112,7 @@ test "$online_entrypoint" = '["/usr/sbin/sshd"]'
 test "$online_cmd" = '["-D","-e"]'
 python3 ops/mvp/mode_a_hosted_runnable_image_probe.py
 echo 'ONLINE_PILOT_REMAPPED_IMPORT_DEFAULT_SSHD_FS_PASS'
+echo 'ONLINE_PILOT_REMAPPED_DUAL_MCP_LEDGER=true' >> proof/PROVENANCE.txt
 echo "ONLINE_PILOT_REMAPPED_IMAGE_ID=$online_actual" >> proof/PROVENANCE.txt
 python3 ops/mvp/mode_a_online_pilot_receipt.py "$online_expected" "$online_actual" "$uidbase" "$gidbase"
 

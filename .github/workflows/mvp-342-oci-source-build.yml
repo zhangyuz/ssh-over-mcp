@@ -135,6 +135,7 @@ jobs:
           set -euo pipefail
           python3 ops/mvp/mode_a_hosted_runnable_image_probe.py
           echo 'ONLINE_PILOT_CI_ONLY_DEFAULT_SSHD_FS_PROVED=true' >> proof/PROVENANCE.txt
+          echo 'ONLINE_PILOT_CI_ONLY_DUAL_MCP_LEDGER_PROVED=true' >> proof/PROVENANCE.txt
           echo 'ONLINE_PILOT_SIGNED_RUNTIME_ID=false' >> proof/PROVENANCE.txt
           echo 'ONLINE_PILOT_DEPLOYED=false' >> proof/PROVENANCE.txt
 
@@ -161,6 +162,7 @@ jobs:
           echo "ONLINE_PILOT_SOURCE_IMAGE_ID=$expected" >> proof/PROVENANCE.txt
           echo "ONLINE_PILOT_ARCHIVE_SHA256=$(cut -d ' ' -f 1 proof/ONLINE_PILOT_IMAGE_SHA256SUMS)" >> proof/PROVENANCE.txt
           echo 'ONLINE_PILOT_RELOAD_DEFAULT_SSHD_FS_PASSED=true' >> proof/PROVENANCE.txt
+          echo 'ONLINE_PILOT_RELOAD_DUAL_MCP_LEDGER=true' >> proof/PROVENANCE.txt
           echo 'PRODUCTION_RELEASE_AUTHORIZED=false' >> proof/PROVENANCE.txt
           echo 'ONLINE_PILOT_TEST_ARCHIVE_ONLY=true' >> proof/PROVENANCE.txt
 

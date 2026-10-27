@@ -34,6 +34,8 @@ def make_receipt(proof: Path, expected: str, actual: str, uid: int, gid: int) ->
     assert field("ONLINE_PILOT_SOURCE_IMAGE_ID") == expected
     assert field("ONLINE_PILOT_REMAPPED_IMAGE_ID") == actual
     assert field("ONLINE_PILOT_RELOAD_DEFAULT_SSHD_FS_PASSED") == "true"
+    assert field("ONLINE_PILOT_RELOAD_DUAL_MCP_LEDGER") == "true"
+    assert field("ONLINE_PILOT_REMAPPED_DUAL_MCP_LEDGER") == "true"
     archive = proof / IMAGE
     assert archive.is_file() and not archive.is_symlink()
     assert 0 < archive.stat().st_size < 512 * 1024 * 1024
@@ -57,6 +59,7 @@ def make_receipt(proof: Path, expected: str, actual: str, uid: int, gid: int) ->
         "entrypoint": "/usr/sbin/sshd",
         "command": ["-D", "-e"],
         "remapped_default_start_and_typed_fs_passed": True,
+        "remapped_default_start_two_node_mcp_ledger_passed": True,
         "production_signed_runtime_id": False,
         "production_deployed": False,
     }
