@@ -99,6 +99,9 @@ def test_ephemeral_userns_engine_does_not_change_host_daemon():
     assert '--host "unix://$scratch/docker.sock"' in body
     assert "--bridge=none --iptables=false --ip-forward=false --ip-masq=false" in body
     assert "SOM342_REMAPPED_ROOT_UID" in body
+    assert 'chmod 0711 "$scratch"' in body
+    assert 'chmod 0711 "$scratch/data"' in body
+    assert 'chmod 0777 "$scratch"' not in body
     assert "SOM342_REMAPPED_ROOT_GID" in body
     assert "python3 ops/mvp/mode_a_hosted_oci_fs_smoke.py" in body
     assert "sha256sum -c OFFLINE_IMAGE_SHA256SUMS" in body

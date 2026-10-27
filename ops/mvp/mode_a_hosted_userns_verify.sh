@@ -11,7 +11,11 @@ test -x /usr/bin/sudo
 test -s proof/som342-openssh-fs.docker.tar.gz
 (cd proof && sha256sum -c OFFLINE_IMAGE_SHA256SUMS)
 scratch="$(mktemp -d "${RUNNER_TEMP:?}/som342-userns-XXXXXX")"
-chmod 0700 "$scratch"
+# Subordinate Docker IDs must traverse their graphroot's ancestors. Grant
+# execute-only, NOT read/list/write, on this ephemeral fixture directory.
+chmod 0711 "$scratch"
+sudo -n mkdir -p "$scratch/data"
+sudo -n chmod 0711 "$scratch/data"
 daemon_child=""
 cleanup() {
   if [ -s "$scratch/dockerd.pid" ]; then
