@@ -4,11 +4,23 @@ This document defines the normative development method for `ssh-over-mcp`.
 
 ## Core principle
 
-> **小步快跑，持续迭代，关注质量、安全、一致性。**
+> **从第一性原理出发：明确用户真正需要的能力，分清产品需求与实现假设；小步快跑，持续迭代，关注质量、安全、一致性。**
 
-In English: **ship small, iterate continuously, and keep quality, security, and consistency as first-class constraints.**
+In English: **start from the user goal, separate functional requirements and security boundaries from inherited implementation assumptions, then ship small with quality, security and consistency.**
 
 These are operating rules, not slogans. A change is not complete merely because code exists or a happy-path test passes.
+
+### First-principles decision test (required for architecture, P0 gates and MVP scope)
+
+Before adopting a requirement, design or release blocker, write down these answers in the design/ADR or PR:
+
+1. **User outcome:** what real user/operator action must work, and on which actual deployment topology? Separate the complete product MVP from a narrower pilot.
+2. **Necessary constraints:** which properties would cause real loss of security, correctness or usability if absent? Preserve authentication, authorization, key trust, auditing, data isolation and fail-closed uncertainty; do not waive them merely to gain a green test.
+3. **Inherited assumptions:** which requirements came from an earlier test fixture, tooling limitation or rejected design rather than the user outcome? Ask whether the product works without them. Example: a no-NIC VM isolates *untrusted tests*, whereas a remotely accessible MCP→SSH service needs a controlled network; an offline Docker package supply chain is not automatically a product P0.
+4. **Simplest sufficient option:** prefer standard, well-supported platform mechanisms and existing tested code. State the smallest *real positive and negative* evidence needed; avoid bespoke subsystems, speculative gates and redundant CI.
+5. **Decision/evidence:** explicitly record what is retained, changed, deferred, who has authorized which runtime side effects, and what remains unproven. Never relabel a test-only signed image, an author review or a skipped job as production acceptance.
+
+**Reevaluate P0/P1 classification whenever the product goal or topology changes.** A previously sensible test safeguard is not automatically a release requirement. Conversely, changing an architecture goal does not authorize touching a shared host, installing packages, deploying credentials, bypassing a blocked tool action, or weakening a distinct security invariant. Use a short ADR and a bounded executable pilot rather than endlessly elaborating the old plan.
 
 ## 1. One independently verifiable user/operator function per feature PR
 

@@ -1,5 +1,8 @@
 # Mode A disposable VM — offline safety preflight
 
+> **Historical no-NIC test concept, not the networked product deployment topology.** See [ADR0024](../decisions/0024-networked-docker-mvp-vs-isolated-e2e.md). The operator's online Mode A delivery choice removes a no-NIC OCI guest as a pilot release prerequisite but retains trusted no-NIC Native Level-3 for isolating tests. This read-only checker does **not** authorize booting the existing stopped Lima instance; it also does **not** certify an online host's private network ACL.
+
+
 **Status: config inspection only; VM BOOT / Docker / SSH / LAN access HOLD.**
 Operator selected an independent Ubuntu 26.04 x86_64 VM on `yuz.local` and delegated B environment planning. The previously created, stopped `som-mode-a-ubuntu2604` definition is preserved. This runbook does **not** authorize using that instance or its disk as a trusted workload or container image.
 

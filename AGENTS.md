@@ -2,7 +2,7 @@
 
 This repository is security-sensitive infrastructure. Automated coding agents must treat `/docs` as the source of truth.
 
-All automated coding agents MUST read and follow [`docs/development-methodology.md`](docs/development-methodology.md). Its core principle is: **小步快跑，持续迭代，关注质量、安全、一致性。**
+All automated coding agents MUST read and follow [`docs/development-methodology.md`](docs/development-methodology.md). Its core principle is: **从第一性原理出发；小步快跑，持续迭代，关注质量、安全、一致性。** First establish the user-visible product goal and actual trust boundaries; challenge inherited implementation assumptions instead of making their costs permanent requirements.
 
 ## Required workflow
 

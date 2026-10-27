@@ -1,5 +1,8 @@
 # MVP 当前交付入口：Compose 多 SSH 读写试点
 
+> **2026-10-27 第一性原理修正（见 [ADR0024](decisions/0024-networked-docker-mvp-vs-isolated-e2e.md)）：** 真正的 MCP→SSH 远程管理必须具备受控网络连通性。因此，**联网 Ubuntu + 官方签名 APT + 标准 Docker Compose** 是新的 Mode A FS-only 试点交付方向。以前为 no-NIC 测试环境规划的自定义离线 Docker Engine 完整依赖介质、无网卡 OCI 客体**不再是联网试点的 P0 门槛**。保留 trusted-main 无网卡 Native Level-3 安全回归（隔离不可信测试代码，不是生产拓扑）。**这不是直接允许启动已停用的 Lima VM、修改共享 Docker、替换 STOP78、使用生产密钥、合并或发布。** Mode B 三个独立 Engine/真实跨宿主机私网与完整八文件工具仍是原产品 MVP 目标，Mode A FS-only 仅是较窄试点。
+
+
 > **2026-10-26 #342 Linux 原生文件回环验证增量：** 新增 `tests/ops/test_mvp_mode_a_native_fs_roundtrip.py`，在 Ubuntu CI 使用现有 Host Agent 协议帧、候选 FS-only Host Policy 和 Linux `O_PATH`/dirfd/fsync 文件原语，分别对两个隔离的 pytest 临时节点执行 `mkdir → create-only write → stat/read`，拒绝重复写入、跨节点读与执行。仅将候选 `/srv/data` 根重定向为 disposable `tmp_path`，不访问主机生产目录，不启动 Docker/SSH。**这是 Linux 原生 Host Agent 集成验证，不代表真实 SSH/OCI 双节点 A01–A03；后者仍 HOLD。**
 
 > **2026-10-26 #342 独立 OCI manager 镜像构建候选（仍未启动）：** 新增 `deploy/ssh-target/Dockerfile.manager-review-candidate` 与独立 STOP 78 入口，复用 SSH 候选的精确 Ubuntu 26.04 amd64 基础 digest、官方签名 APT 固定 Python/CA 包及 InRelease/包索引/.deb 收据。manager 镜像只有 unprivileged `som-manager` UID 2204/GID 3204（预置 group 3299）、root-owned 不可写源码，无 sshd/sudo/authorized_keys/密钥或 TCP 暴露，不接入 Compose。最初隔离导入发现 `host_agent/__init__.py` 提前加载 pydantic；随后通过懒加载公开导出修复，真实 `python -I -S` 证明 manager 和 SSH root-phase 入口仅需标准库，manager 镜像已删除 pip/venv/wheel 步骤；SSH 应用的降权后依赖仍使用原有锁。**manager 仅剩实际 Ubuntu APT 精确版本及镜像构建验证；SSH 仍有 Python 3.14 wheel ABI 门禁。最终镜像字节/签名、group/NNP/caps/cgroup/uid_map、Linux PID 生命周期与真实双节点 A01–A03 E2E 均未验证；双镜像 HOLD 保留。**

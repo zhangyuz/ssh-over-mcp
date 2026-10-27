@@ -1,5 +1,8 @@
 # MVP #342 OpenSSH OCI offline image handoff — TEST ONLY
 
+> **Historical test-media evidence, not a networked pilot P0.** Under operator-selected [ADR0024](../decisions/0024-networked-docker-mvp-vs-isolated-e2e.md), online Ubuntu + standard signed APT Docker is the planned Mode A FS-only pilot deployment. The one-shot offline Engine workflow remains disabled after execution safety blocked it; do not retry by another channel. Retain this archive handoff only for signed **test-only** source/provenance evidence. The image remains STOP78 and cannot be started as production.
+
+
 **Status:** GitHub OIDC/Sigstore-attested *test archive* available;
 **not a signed runtime image or production release**. The
 `som342-openssh-fs.docker.tar.gz` produced by the dedicated GitHub-hosted

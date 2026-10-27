@@ -39,3 +39,5 @@ Current ADRs:
 - [0022 — Proposed Compose SSH runtime privilege domains (NOT accepted)](0022-proposed-compose-ssh-privilege-domains.md) — mode A sshd/launcher/manager split and exact authority/evidence gates.
 
 - [0023 — FS-only OpenSSH admission (proposed, NOT accepted)](0023-proposed-fs-only-openssh-admission.md) — fixed sudo/setpriv capability-drop handoff and unchanged deployment HOLD.
+
+- [0024 — Networked Docker MVP versus isolated no-NIC E2E](0024-networked-docker-mvp-vs-isolated-e2e.md) — operator-selected online Mode A delivery direction: signed Ubuntu APT + private MCP↔SSH network, no custom offline Engine/no-NIC OCI guest production prerequisite; security/launch authorization remains separate.
