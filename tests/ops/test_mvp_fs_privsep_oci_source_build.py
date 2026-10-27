@@ -233,6 +233,8 @@ def test_native_review_oci_is_only_ci_overlay_not_release_admission():
     assert "native_review=True" in smoke
     assert "NATIVE_FOUR_ZERO_LIMITED_CAPBND_TEST_ONLY=true" in smoke
     assert "FS_LAUNCHER_FIVE_ZERO_RELEASE_CONTRACT_UNCHANGED=true" in smoke
+    assert "native_review=native_userns" in smoke
+    assert "USERNS_REMAPPED_NATIVE_NO_SUDO_TWO_REAL_FS_NODES_PASS" in smoke
     assert '"/usr/sbin/sshd"' in smoke and '"--entrypoint"' in smoke
     assert "ENTRYPOINT" not in overlay
 

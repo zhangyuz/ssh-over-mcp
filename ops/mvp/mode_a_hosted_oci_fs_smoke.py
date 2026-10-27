@@ -471,7 +471,14 @@ def main() -> None:
             nodes: dict[int, tuple[str, Path]] = {}
             for i in (1, 2):
                 name = f"som342-oci-node{i}-{uuid.uuid4().hex[:6]}"
-                _name, _client, known = start_node(name, work / name, running)
+                # In dedicated remapped Engine, require the no-sudo
+                # ForceCommand candidate for BOTH actual OCI FS agents.
+                # The normal Engine already tests the same candidate through
+                # real central MCP+Ledger on two isolated bridge networks.
+                native_userns = bool(os.getenv("SOM342_REMAPPED_ROOT_UID"))
+                _name, _client, known = start_node(
+                    name, work / name, running, native_review=native_userns
+                )
                 nodes[i] = (name, known)
                 if i == 1:
                     # Independent NO-SUDO review feasibility probe. Never
@@ -544,6 +551,8 @@ def main() -> None:
             # MCP HTTP+Ledger control plane against two different SSH nodes.
             if not os.getenv("SOM342_REMAPPED_ROOT_UID"):
                 prove_central_mcp_ledger(work, running, networks)
+            if os.getenv("SOM342_REMAPPED_ROOT_UID"):
+                print("USERNS_REMAPPED_NATIVE_NO_SUDO_TWO_REAL_FS_NODES_PASS", flush=True)
             print("MODE_A_OPENSSH_OCI_TWO_NODE_FS_ONLY_HOSTED_PASS")
             print("HOSTED_DISPOSABLE=true NETWORK_NONE=true USERNS_PRIVATE_PROVEN=false")
             print("SIGNED_IMAGE=false NO_NIC_VM_PROVEN=false DEPLOYED=false")
