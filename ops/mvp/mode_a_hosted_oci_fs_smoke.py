@@ -78,8 +78,14 @@ def start_node(
     *,
     network: str = "none",
     alias: str | None = None,
+    native_review: bool = False,
 ) -> tuple[str, Path, Path]:
     _host, client, known = prepare(work, name)
+    native_mounts: list[str] = []
+    if native_review:
+        from mode_a_hosted_native_review import stage
+
+        native_mounts = stage(work)
     args = [
         "docker",
         "run",
@@ -106,6 +112,7 @@ def start_node(
         f"type=bind,src={work / 'hostkeys'},dst=/etc/ssh/hostkeys,readonly",
         "--mount",
         f"type=bind,src={work / 'authorized_keys'},dst=/etc/ssh/authorized_keys,readonly",
+        *native_mounts,
         "--entrypoint",
         "/usr/sbin/sshd",
         IMAGE,
@@ -300,6 +307,7 @@ def prove_central_mcp_ledger(work: Path, running: list[str], networks: list[str]
             running,
             network=network,
             alias=f"node{index:02}",
+            native_review=True,
         )
         node_names.append(name)
         prepared.append((client, work / name / "hostkeys" / "ssh_host_ed25519_key.pub"))
@@ -439,6 +447,8 @@ def prove_central_mcp_ledger(work: Path, running: list[str], networks: list[str]
     assert b"CENTRAL_MCP_LEDGER_ONCE_ONLY_REAL_SSH_node01_PASS" in result.stdout
     assert b"CENTRAL_MCP_LEDGER_ONCE_ONLY_REAL_SSH_node02_PASS" in result.stdout
     print("CENTRAL_MCP_LEDGER_TWO_OPENSSH_NODES_TEST_ONLY_PASS", flush=True)
+    print("NATIVE_FOUR_ZERO_LIMITED_CAPBND_TEST_ONLY=true", flush=True)
+    print("FS_LAUNCHER_FIVE_ZERO_RELEASE_CONTRACT_UNCHANGED=true", flush=True)
     print("NODE_TO_NODE_TCP_DENIAL_PROVEN=true", flush=True)
     print("NETWORK_DIRECTIONAL_ACL_PROVEN=false SIGNED_MEDIA=false DEPLOYED=false")
 

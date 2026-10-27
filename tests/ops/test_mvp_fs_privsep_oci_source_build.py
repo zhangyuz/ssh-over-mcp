@@ -217,3 +217,69 @@ def test_hosted_native_login_no_sudo_is_feasibility_only_not_release():
     assert "sudo" not in native.split("FORCE = (", 1)[1].split("\n", 1)[0]
     assert "ENTRYPOINT" not in native
     assert "docker compose" not in native
+
+
+def test_native_review_oci_is_only_ci_overlay_not_release_admission():
+    overlay = (ROOT / "ops/mvp/mode_a_hosted_native_review.py").read_text()
+    smoke = (ROOT / "ops/mvp/mode_a_hosted_oci_fs_smoke.py").read_text()
+    assert "GITHUB_ACTIONS" in overlay and "github-hosted" in overlay
+    assert "old_gate = " in overlay and "new_gate = " in overlay
+    assert "assert launcher_src.count(old_gate) == 1" in overlay
+    assert "FOUR_CAPS == 0x401C0" in overlay
+    assert 'or found.get("Seccomp") != "2"' in overlay
+    assert "no-new-privs" in overlay
+    assert "dst={dest},readonly" in overlay
+    assert '"ForceCommand /usr/bin/sudo" not in cfg' in overlay
+    assert "native_review=True" in smoke
+    assert "NATIVE_FOUR_ZERO_LIMITED_CAPBND_TEST_ONLY=true" in smoke
+    assert "FS_LAUNCHER_FIVE_ZERO_RELEASE_CONTRACT_UNCHANGED=true" in smoke
+    assert '"/usr/sbin/sshd"' in smoke and '"--entrypoint"' in smoke
+    assert "ENTRYPOINT" not in overlay
+
+
+def test_native_ci_mount_renders_exact_one_gate_change_without_host_sudo(tmp_path, monkeypatch):
+    import importlib.util
+    import sys
+
+    module_path = ROOT / "ops/mvp/mode_a_hosted_native_review.py"
+    spec = importlib.util.spec_from_file_location("mode_a_hosted_native_review", module_path)
+    assert spec and spec.loader
+    sys.path.insert(0, str(module_path.parent))
+    try:
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.pop(0)
+    for k, v in {
+        "GITHUB_ACTIONS": "true",
+        "RUNNER_ENVIRONMENT": "github-hosted",
+        "GITHUB_EVENT_NAME": "pull_request",
+    }.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("SOM342_REMAPPED_ROOT_UID", raising=False)
+    monkeypatch.delenv("SOM342_REMAPPED_ROOT_GID", raising=False)
+    calls = []
+    monkeypatch.setattr(module, "run", lambda args: calls.append(args))
+    mounts = module.stage(tmp_path)
+    assert len(calls) == 4 and all(
+        x[:3] == ["sudo", "-n", "chown"] or x[:3] == ["sudo", "-n", "chmod"] for x in calls
+    )
+    assert len(mounts) == 4 and mounts[0] == "--mount" and mounts[2] == "--mount"
+    launcher = (tmp_path / "fs-only-native-review.py").read_text()
+    python = ROOT / "ops/mvp/ssh-over-mcp-fs-only-launcher.py"
+    original = python.read_text()
+    assert launcher.count('int(found["CapBnd"], 16) != 0x401c0') == 1
+    assert launcher.count('found.get("Seccomp") != "2"') == 1
+    assert 'found["NoNewPrivs"] != "1"' in launcher
+    assert (
+        'or any(found[name] != zero for name in ("CapInh", "CapPrm", "CapEff", "CapAmb"))'
+        in launcher
+    )
+    assert 'CapBnd", "CapAmb", "Seccomp"' in launcher
+    assert 'int(found["CapBnd"], 16)' not in original
+    assert "FsOnlyStartRefused" in launcher
+    config = (tmp_path / "sshd_config.native-review").read_text()
+    assert "ForceCommand /usr/bin/setpriv --no-new-privs /usr/bin/python3 -I -S" in config
+    assert "ForceCommand /usr/bin/sudo" not in config
+    assert "PermitRootLogin no" in config
+    assert "DisableForwarding yes" in config
