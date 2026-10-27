@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -61,7 +62,14 @@ def _test_render() -> dict:
         "--format",
         "json",
     ]
-    result = subprocess.run(args, env=env, capture_output=True, text=True, timeout=15, check=False)
+    # On hosted CI, HOME may resolve to /root while the job runs as an
+    # unprivileged user. Compose config needs no saved Docker credentials;
+    # isolate Docker client metadata to a private empty temporary directory.
+    with tempfile.TemporaryDirectory(prefix="som342-compose-docker-config-") as config_dir:
+        env["DOCKER_CONFIG"] = config_dir
+        result = subprocess.run(
+            args, env=env, capture_output=True, text=True, timeout=15, check=False
+        )
     if "docker: 'compose' is not a docker command" in result.stderr:
         pytest.skip("Compose CLI plugin unavailable")
     assert result.returncode == 0, result.stderr[:450]
