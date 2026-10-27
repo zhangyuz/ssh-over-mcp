@@ -70,6 +70,7 @@ RUN set -eu; \
       \( -name __pycache__ -o -name '*.pyc' -o -name '*.pyo' \) -print -quit)"
 COPY ops/mvp/ssh-over-mcp-oci-launcher.py /usr/local/libexec/ssh-over-mcp-oci-launcher.py
 COPY deploy/ssh-target/sshd_config.review-candidate /etc/ssh/sshd_config
+COPY deploy/ssh-target/host-policy.review-candidate.yaml /etc/ssh-over-mcp/host-policy.yaml
 COPY deploy/ssh-target/sudoers.review-candidate /etc/sudoers.d/som-e2e
 COPY deploy/ssh-target/entrypoint.review-hold /usr/local/libexec/ssh-over-mcp-image-hold
 
@@ -78,6 +79,9 @@ RUN set -eu; \
     useradd -u 2201 -g 3201 --no-create-home -d /nonexistent -s /bin/sh ssh-over-mcp-e2e-host; \
     passwd -l ssh-over-mcp-e2e-host; \
     mkdir -p /etc/ssh/hostkeys /etc/ssh/authorized_keys /run/sshd /srv/data; \
+    chown 2202:3202 /srv/data; \
+    chmod 0700 /srv/data; \
+    chmod 0444 /etc/ssh-over-mcp/host-policy.yaml; \
     chmod 0555 /opt/ssh-over-mcp-e2e/workspace/src /usr/local/libexec; \
     chmod 0555 /usr/local/libexec/ssh-over-mcp-oci-launcher.py; \
     chmod 0555 /usr/local/libexec/ssh-over-mcp-image-hold; \

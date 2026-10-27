@@ -45,6 +45,9 @@ def _verify(text: str, hold: str, sudoers: str) -> None:
     # is no longer present; unlike the four pins above this is not C5-verified.
     assert text.count("python3-venv=3.14.3-0ubuntu2") == 2
     assert "COPY deploy/ssh-target/sshd_config.review-candidate" in text
+    assert "COPY deploy/ssh-target/host-policy.review-candidate.yaml" in text
+    assert "chown 2202:3202 /srv/data" in text
+    assert "chmod 0700 /srv/data" in text
     assert "COPY deploy/ssh-target/sudoers.review-candidate" in text
     assert "COPY deploy/ssh-target/entrypoint.review-hold" in text
     assert "COPY ops/mvp/ssh-over-mcp-oci-launcher.py" in text

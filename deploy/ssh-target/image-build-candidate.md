@@ -19,6 +19,12 @@ count as A01–A03.
 - Runs as `som-manager` UID/GID `2204:3204`, predefines membership group `3299`, without OpenSSH, sudo, exposed ports, keys or code writable by the manager. Guest must prove actual supplementary group mapping and NNP/zero caps; they are not implied by `USER` alone.
 - **Separate manager image entrypoint always exits 78**. Neither manager nor SSH candidate is Compose-wired or runtime-approved. Exact final image digest/attestation and private cgroup/namespace proofs precede any guest boot.
 
+## Minimal filesystem MVP profile (still inactive)
+
+- The SSH candidate now installs a **root-owned, read-only** `host-policy.review-candidate.yaml` as `/etc/ssh-over-mcp/host-policy.yaml`. The existing `rw-operator` profile is v3 **FS-only**: bounded `fs_stat/fs_read/fs_mkdir(create-only)/fs_write(create-only)` only under `/srv/data`; no executable backend. The required `/usr/bin/true` rule is an inert schema placeholder under v3, never a shell grant.
+- `/srv/data` is mode `0700`, owned by the postdrop agent `2202:3202`. A guest volume or bind mount must independently prove this ownership, type and node isolation: image-layer chown alone is **not** proof after mount. Central policy and one-use Ledger approvals are still mandatory for mutations.
+- TODO: independently prove root-owned policy, real bind/mount ownership, node01/node02 data isolation and the four typed FS operations under the actual guest before lifting any STOP. No additional execution tools or production directory grants.
+
 ## Bounded build source
 
 - Base: exact inspected Canonical Ubuntu 26.04 linux/amd64 OCI digest. Merely
