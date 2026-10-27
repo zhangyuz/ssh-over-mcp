@@ -463,6 +463,13 @@ def main() -> None:
                 name = f"som342-oci-node{i}-{uuid.uuid4().hex[:6]}"
                 _name, _client, known = start_node(name, work / name, running)
                 nodes[i] = (name, known)
+                if i == 1:
+                    # Independent NO-SUDO review feasibility probe. Never
+                    # changes the production ForceCommand/STOP78; an unproved
+                    # kernel boundary cannot be counted as release approval.
+                    from mode_a_native_login_probe import check as check_native_login
+
+                    check_native_login(name, known)
                 try:
                     check_node(name, i)
                 except AssertionError as exc:

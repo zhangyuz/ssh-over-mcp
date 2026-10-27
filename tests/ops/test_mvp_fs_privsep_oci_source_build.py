@@ -181,3 +181,24 @@ def test_openssh_fs_account_home_exists_but_is_root_owned_and_immutable():
     assert "chown 0:0 /opt/ssh-over-mcp-e2e/empty-home" in source
     assert "chmod 0555 /opt/ssh-over-mcp-e2e/empty-home" in source
     assert "-d /nonexistent -s /bin/sh ssh-over-mcp-e2e-host" not in source
+
+
+def test_hosted_native_login_no_sudo_is_feasibility_only_not_release():
+    native = (ROOT / "ops/mvp/mode_a_native_login_probe.py").read_text()
+    oci = (ROOT / "ops/mvp/mode_a_hosted_oci_fs_smoke.py").read_text()
+    assert "from mode_a_native_login_probe import check as check_native_login" in oci
+    assert "check_native_login(name, known)" in oci
+    assert 'RUNNER_ENVIRONMENT") == "github-hosted"' in native
+    assert 'GITHUB_EVENT_NAME") == "pull_request"' in native
+    assert "Port 2223" in native and "ListenAddress 127.0.0.1" in native
+    assert "--bounding-set=-all --no-new-privs" in native
+    assert "current_user_ns" not in native
+    assert "NATIVE_OPENSSH_NO_SUDO_FULL_KERNEL_BOUNDARY_NOT_PROVEN" in native
+    assert "NATIVE_OPENSSH_NO_SUDO_FULL_KERNEL_BOUNDARY_PASS" in native
+    assert 'status.get("hostkey_denied") is True' in native
+    assert '"caps_zero", "nnp", "hostkey_denied"' in native
+    assert '"docker"' in native and '"exec"' in native and '"-d"' in native
+    assert '"docker", "run"' not in native
+    assert "sudo" not in native.split("FORCE = (", 1)[1].split("\n", 1)[0]
+    assert "ENTRYPOINT" not in native
+    assert "docker compose" not in native
