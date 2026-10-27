@@ -549,10 +549,13 @@ def main() -> None:
             # No shared network is used for the preceding isolation proof.
             # Separate *test-only* internal bridge exercises the real central
             # MCP HTTP+Ledger control plane against two different SSH nodes.
-            if not os.getenv("SOM342_REMAPPED_ROOT_UID"):
-                prove_central_mcp_ledger(work, running, networks)
+            # Prove the full central one-use Ledger operation in the
+            # dedicated remapped Engine too; never substitute local SSH-only
+            # probes for a real control-plane operation.
+            prove_central_mcp_ledger(work, running, networks)
             if os.getenv("SOM342_REMAPPED_ROOT_UID"):
                 print("USERNS_REMAPPED_NATIVE_NO_SUDO_TWO_REAL_FS_NODES_PASS", flush=True)
+                print("USERNS_REMAPPED_CENTRAL_LEDGER_TWO_NODE_TEST_ONLY_PASS", flush=True)
             print("MODE_A_OPENSSH_OCI_TWO_NODE_FS_ONLY_HOSTED_PASS")
             print("HOSTED_DISPOSABLE=true NETWORK_NONE=true USERNS_PRIVATE_PROVEN=false")
             print("SIGNED_IMAGE=false NO_NIC_VM_PROVEN=false DEPLOYED=false")

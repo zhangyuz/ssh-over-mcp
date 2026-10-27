@@ -155,7 +155,7 @@ def test_hosted_central_mcp_ledger_two_node_control_is_real_and_test_only():
     assert '"docker", "network", "connect", node_networks[1], control' in smoke
     assert "s.connect_ex((sys.argv[1],2222))" in smoke
     assert "NETWORK_DIRECTIONAL_ACL_PROVEN=false" in smoke
-    assert 'if not os.getenv("SOM342_REMAPPED_ROOT_UID"):' in smoke
+    assert "prove_central_mcp_ledger(work, running, networks)" in smoke
     assert '"--cap-drop"' in smoke and '"no-new-privileges:true"' in smoke
     assert "CENTRAL_MCP_LEDGER_TWO_OPENSSH_NODES_TEST_ONLY_PASS" in smoke
     for token in (
@@ -234,6 +234,7 @@ def test_native_review_oci_is_only_ci_overlay_not_release_admission():
     assert "NATIVE_FOUR_ZERO_LIMITED_CAPBND_TEST_ONLY=true" in smoke
     assert "FS_LAUNCHER_FIVE_ZERO_RELEASE_CONTRACT_UNCHANGED=true" in smoke
     assert "native_review=native_userns" in smoke
+    assert "USERNS_REMAPPED_CENTRAL_LEDGER_TWO_NODE_TEST_ONLY_PASS" in smoke
     assert "USERNS_REMAPPED_NATIVE_NO_SUDO_TWO_REAL_FS_NODES_PASS" in smoke
     assert '"/usr/sbin/sshd"' in smoke and '"--entrypoint"' in smoke
     assert "ENTRYPOINT" not in overlay
