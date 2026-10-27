@@ -103,9 +103,23 @@ def start_node(name: str, work: Path, running: list[str]) -> tuple[str, Path, Pa
     assert {c.removeprefix("CAP_") for c in hostconfig["CapAdd"]} == set(SSH_CAPS)
     assert not hostconfig["Binds"]
     assert all(not bindings for bindings in details["NetworkSettings"]["Ports"].values())
-    run(["docker", "cp", str(client), f"{name}:/tmp/client"])
-    run(["docker", "cp", str(known), f"{name}:/tmp/known_hosts"])
-    run(["docker", "exec", "-u", "0:0", name, "chmod", "0600", "/tmp/client"])
+    # docker cp refuses a read-only OCI rootfs even for tmpfs destinations.
+    # Use stdin to populate only the independently mounted /tmp tmpfs.
+    for src, target, mode in ((client, "client", "0600"), (known, "known_hosts", "0644")):
+        run(
+            [
+                "docker",
+                "exec",
+                "-i",
+                "-u",
+                "0:0",
+                name,
+                "/bin/sh",
+                "-c",
+                f"umask 077; cat > /tmp/{target}; chmod {mode} /tmp/{target}",
+            ],
+            stdin=src.read_bytes(),
+        )
     for _ in range(40):
         state = json.loads(run(["docker", "inspect", name]).stdout)[0]["State"]
         if not state["Running"]:
