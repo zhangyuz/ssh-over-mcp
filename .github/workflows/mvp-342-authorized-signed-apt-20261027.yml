@@ -1,0 +1,155 @@
+name: Mode A authorized one-shot signed SSH and Engine APT
+# One approved TEST-ONLY packet for PR342, on a disposable GitHub Ubuntu runner.
+# No Docker API, guest, package installation, SSH keys, host privilege or deployment.
+# Never reuse this exact marker for another commit or packet.
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  signed-apt:
+    if: github.event.pull_request.number == 342 && github.event.pull_request.head.ref == 'feat/mvp-mode-a-compose-overlay-oct24'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact PR source without credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Enforce unique one-shot consent and official OS trust
+        id: packet
+        shell: bash
+        env:
+          # This value is managed OUTSIDE the PR source by the operator.
+          APPROVED_SHA: ${{ vars.SOM342_APPROVED_SOURCE_SHA }}
+          TRIGGERED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "$APPROVED_SHA" ]; then
+            echo "authorized=false" >> "$GITHUB_OUTPUT"
+            echo "Operator SHA grant absent; no APT operation"
+            exit 0
+          fi
+          if [ "${GITHUB_RUN_ATTEMPT:-0}" != "1" ]; then
+            echo "authorized=false" >> "$GITHUB_OUTPUT"
+            echo "Rerun explicitly disabled for single-use approval"
+            exit 0
+          fi
+          if ! git show -s --format=%B HEAD | grep -Fxq 'Approved-Builder-Packet: one-off-20261027-signed-apt'; then
+            echo "authorized=false" >> "$GITHUB_OUTPUT"
+            echo "No approved one-off marker on HEAD; no APT operation"
+            exit 0
+          fi
+          test "$(git rev-parse HEAD)" = "$APPROVED_SHA"
+          test "$TRIGGERED_SHA" = "$APPROVED_SHA"
+          . /etc/os-release
+          test "$ID" = ubuntu && test "$VERSION_ID" = 26.04
+          test "$(uname -m)" = x86_64 && test "$(id -u)" -ne 0
+          src=/etc/apt/sources.list.d/ubuntu.sources
+          test -r "$src" && test -r /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          grep -Eq '^Suites: .*resolute' "$src"
+          grep -Eq '^Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg[[:space:]]*$' "$src"
+          ! grep -Eiq 'Trusted: yes|Allow-Insecure: yes' "$src"
+          git diff --exit-code
+          echo "authorized=true" >> "$GITHUB_OUTPUT"
+
+      - name: Download Ubuntu-signed offline Engine and OpenSSH package closure
+        if: steps.packet.outputs.authorized == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          src=/etc/apt/sources.list.d/ubuntu.sources
+          lists="$RUNNER_TEMP/som342-resolute-apt-lists"
+          sudo install -d -m 0755 "$lists"
+          sudo install -d -o _apt -g root -m 0700 "$lists/partial"
+          sudo apt-get update -o Dir::Etc::sourcelist="$src" \
+            -o Dir::Etc::sourceparts=- -o Dir::State::lists="$lists"
+          mkdir -m 0755 media
+          sudo install -d -o _apt -g root -m 0700 "$PWD/media/partial"
+          # Empty dpkg status requests the FULL dependency closure regardless
+          # of preinstalled host tools. Do not install any package.
+          sudo apt-get -o Dir::State::status=/dev/null \
+            -o Dir::Etc::sourcelist="$src" \
+            -o Dir::Etc::sourceparts=- -o Dir::State::lists="$lists" \
+            -o Dir::Cache::archives="$PWD/media" \
+            install --download-only -y --no-install-recommends \
+            docker.io containerd runc iptables iproute2 \
+            openssh-server tinysshd python3 python3-venv ca-certificates
+          sudo install -d -m 0755 media/apt-metadata
+          sudo cp -a "$lists"/*_InRelease media/apt-metadata/
+          sudo cp -a "$lists"/*_Packages* media/apt-metadata/
+          sudo cp "$src" media/apt-metadata/ubuntu.sources
+          sudo cp /usr/share/keyrings/ubuntu-archive-keyring.gpg \
+            media/apt-metadata/ubuntu-archive-keyring.gpg
+          sudo chown -R "$(id -u):$(id -g)" media
+          rm -rf media/partial media/lock
+          apt-cache -o Dir::State::lists="$lists" \
+            -o Dir::Etc::sourceparts=- -o Dir::Etc::sourcelist="$src" \
+            policy docker.io containerd runc openssh-server tinysshd python3 python3-venv \
+            > media/resolved-direct-versions.txt
+          dpkg --print-architecture > media/architecture.txt
+          test "$(cat media/architecture.txt)" = amd64
+
+      - name: Bound, hash and label all downloaded bytes
+        if: steps.packet.outputs.authorized == 'true'
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import subprocess
+          from pathlib import Path
+          root = Path("media")
+          packages = sorted(root.glob("*.deb"))
+          assert 1 <= len(packages) <= 250, "invalid package count"
+          assert all(p.is_file() and not p.is_symlink() for p in packages)
+          assert all(0 < p.stat().st_size < 100 * 1024 * 1024 for p in packages)
+          entries = [p for p in root.rglob("*") if p.is_file()]
+          assert len(entries) <= 300, "invalid manifest size"
+          assert all(not p.is_symlink() for p in entries)
+          assert sum(p.stat().st_size for p in entries) <= 768 * 1024 * 1024, "oversize artifact"
+          assert any(p.name.endswith("_InRelease") for p in entries)
+          assert any("_Packages" in p.name for p in entries)
+          assert os.environ["SOURCE_SHA"] == subprocess.check_output(
+              ["git", "rev-parse", "HEAD"], text=True
+          ).strip()
+          print("Signed APT candidate: deb files", len(packages), "total files", len(entries))
+          PY
+          cat > media/PROVENANCE.txt <<EOF
+          PR=342
+          SOURCE_SHA=$SOURCE_SHA
+          BUILDER=github-hosted-ubuntu-26.04-x86_64
+          PURPOSE=SIGNED_APT_DOWNLOAD_ONLY
+          ENGINE_INSTALLED=false
+          SSH_IMAGE_BUILT=false
+          GUEST_BOOTED=false
+          SSH_MCP_E2E=false
+          SIGNED_INRELEASE_AND_PACKAGES_CAPTURED=true
+          INDEPENDENT_OFFLINE_VERIFICATION_REQUIRED=true
+          EOF
+          (cd media && find . -type f ! -name SHA256SUMS -print0 \
+            | sort -z | xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+          echo "SIGNED_APT_MEDIA_READY_TEST_ONLY"
+
+      - name: Retain bounded evidence without deploying
+        if: steps.packet.outputs.authorized == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mvp-342-authorized-signed-apt-20261027
+          path: |
+            media/*.deb
+            media/apt-metadata/*
+            media/PROVENANCE.txt
+            media/SHA256SUMS
+            media/architecture.txt
+            media/resolved-direct-versions.txt
+          retention-days: 3
+          if-no-files-found: error
