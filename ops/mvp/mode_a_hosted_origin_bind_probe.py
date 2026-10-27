@@ -12,23 +12,24 @@ from typing import Any
 IMAGE = "som-mvp-fs-native-review:local"
 PYTHON = "/opt/ssh-over-mcp-e2e/venv/bin/python"
 
-# Accept exactly one ingress connection from the isolated origin network.
+# Accept one ingress connection on disposable port 18000, not MCP port 8000.
+# Keeping ports distinct avoids a just-closed TCP listener affecting MCP bind.
 # The listener runs inside disposable control OCI, as unprivileged UID2201.
 LISTENER = (
     "import socket,sys,pathlib;"
     "s=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);"
-    "s.bind((sys.argv[1],8000));s.listen(5);"
+    "s.bind((sys.argv[1],18000));s.listen(5);"
     "pathlib.Path('/tmp/som342-origin-ready').write_text('1');"
     "s.settimeout(30);c,_=s.accept();c.sendall(b'ORIGIN_OK');c.close();s.close();"
     "pathlib.Path('/tmp/som342-origin-done').write_text('1')"
 )
 NEGATIVE = (
     "import socket,sys;s=socket.socket();s.settimeout(1);"
-    "rc=s.connect_ex((sys.argv[1],8000));s.close();"
+    "rc=s.connect_ex((sys.argv[1],18000));s.close();"
     "sys.exit(0 if rc!=0 else 35)"
 )
 POSITIVE = (
-    "import socket,sys;s=socket.create_connection((sys.argv[1],8000),3);"
+    "import socket,sys;s=socket.create_connection((sys.argv[1],18000),3);"
     "reply=s.recv(16);s.close();sys.exit(0 if reply==b'ORIGIN_OK' else 36)"
 )
 
@@ -126,5 +127,5 @@ def prove(
         time.sleep(0.1)
     else:
         raise AssertionError("origin-only listener did not close")
-    print("HOSTED_ORIGIN_BIND_ONLY_TWO_NODE_REVERSE_TCP8000_DENIED_PASS", flush=True)
+    print("HOSTED_ORIGIN_BIND_ONLY_TWO_NODE_REVERSE_TCP18000_DENIED_PASS", flush=True)
     return address

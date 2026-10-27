@@ -179,7 +179,7 @@ def test_hosted_central_mcp_ledger_two_node_control_is_real_and_test_only():
         in smoke
     )
     origin = (ROOT / "ops/mvp/mode_a_hosted_origin_bind_probe.py").read_text()
-    assert "HOSTED_ORIGIN_BIND_ONLY_TWO_NODE_REVERSE_TCP8000_DENIED_PASS" in origin
+    assert "HOSTED_ORIGIN_BIND_ONLY_TWO_NODE_REVERSE_TCP18000_DENIED_PASS" in origin
     assert "origin_ip = prove_origin_only_bind(" in smoke
     assert '"-",\n            origin_ip,\n            *control_node_ips,' in smoke
     assert "bind_host=origin_ip" in script

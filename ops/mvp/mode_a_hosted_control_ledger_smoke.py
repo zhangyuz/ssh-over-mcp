@@ -167,8 +167,7 @@ async def prove(
         )
     )
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # A disposable origin-network probe previously used this same address;
-    # allow immediate rebind after its accepted TCP connection closes.
+    # Allow normal rapid listener restarts within this disposable OCI test.
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((origin_ip, 8000))
     sock.listen(64)
