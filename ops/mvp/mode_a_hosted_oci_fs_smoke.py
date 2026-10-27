@@ -52,11 +52,19 @@ def prepare(node: Path, name: str) -> tuple[Path, Path, Path]:
     authorized = auth / "ssh-over-mcp-e2e-host"
     authorized.write_bytes(client.with_suffix(".pub").read_bytes())
     authorized.chmod(0o644)
-    # OpenSSH StrictModes requires every authorized_keys ancestor/file owner
-    # to be root or login UID, never the CI runner's ordinary host UID.
-    # Both binds are readonly inside OCI; the login UID cannot edit either.
-    run(["sudo", "-n", "chown", "root:root", str(keys), str(auth), str(authorized)])
-    run(["sudo", "-n", "chown", "root:root", str(host)])
+    # OpenSSH StrictModes checks *container* root ownership. Under Docker
+    # userns-remap, container root maps to a subordinate, nonzero HOST uid.
+    # CI alone supplies that exact mapped uid; no host daemon is modified.
+    mapped_root = os.getenv("SOM342_REMAPPED_ROOT_UID")
+    root_owner = (
+        f"{int(mapped_root)}:{int(os.getenv('SOM342_REMAPPED_ROOT_GID', '0'))}"
+        if mapped_root
+        else "root:root"
+    )
+    if mapped_root:
+        assert int(mapped_root) >= 65536
+    run(["sudo", "-n", "chown", root_owner, str(keys), str(auth), str(authorized)])
+    run(["sudo", "-n", "chown", root_owner, str(host)])
     run(["sudo", "-n", "chmod", "0600", str(host)])
     known = node / "known_hosts"
     known.write_text(f"[127.0.0.1]:2222 {host.with_suffix('.pub').read_text().strip()}\n")
@@ -102,6 +110,12 @@ def start_node(name: str, work: Path, running: list[str]) -> tuple[str, Path, Pa
     details = json.loads(run(["docker", "inspect", name]).stdout)[0]
     hostconfig = details["HostConfig"]
     assert hostconfig["NetworkMode"] == "none"
+    if os.getenv("SOM342_REMAPPED_ROOT_UID"):
+        security = json.loads(
+            run(["docker", "info", "--format", "{{json .SecurityOptions}}"]).stdout
+        )
+        assert any("userns" in entry for entry in security)
+        assert hostconfig["UsernsMode"] != "host"
     assert hostconfig["Privileged"] is False
     assert hostconfig["ReadonlyRootfs"] is True
     assert set(hostconfig["CapDrop"]) == {"ALL"}

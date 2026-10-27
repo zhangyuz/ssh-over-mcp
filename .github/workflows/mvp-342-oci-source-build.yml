@@ -111,6 +111,16 @@ jobs:
           echo 'ARCHIVE_LOAD_TEST_PASSED=true' >> proof/PROVENANCE.txt
           echo 'SIGNED_IMAGE=false' >> proof/PROVENANCE.txt
 
+      - name: Prove separately isolated userns-remapped Engine with same two SSH nodes
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ops/mvp/mode_a_hosted_userns_verify.sh
+          {
+            echo 'HOSTED_DEDICATED_USERNS_REMAP_TEST_PASSED=true'
+            echo 'TRUSTED_NO_NIC_GUEST_USERNS_PROVEN=false'
+          } >> proof/PROVENANCE.txt
+
       - name: Upload test-only hash-bound image and proof (never export secrets)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

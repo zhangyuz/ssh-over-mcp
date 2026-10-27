@@ -53,6 +53,9 @@ def test_hosted_image_builder_never_starts_or_exports_running_ssh():
     assert "ARCHIVE_LOAD_TEST_PASSED=true" in commands
     assert "OFFLINE_TRANSFER_TEST_ONLY=true" in commands
     assert "SIGNED_IMAGE=false" in commands
+    assert "mode_a_hosted_userns_verify.sh" in commands
+    assert "HOSTED_DEDICATED_USERNS_REMAP_TEST_PASSED=true" in commands
+    assert "TRUSTED_NO_NIC_GUEST_USERNS_PROVEN=false" in commands
     assert job["steps"][-1]["with"]["retention-days"] <= 3
     assert job["steps"][-1]["with"]["compression-level"] == 0
     assert not any(
@@ -79,7 +82,34 @@ def test_disposable_oci_two_node_smoke_has_only_loopback_and_minimal_ssh_caps():
     assert '"--read-only"' in smoke
     assert '"docker"' in smoke and '"exec"' in smoke and '"-i"' in smoke
     assert "str(keys), str(auth), str(authorized)" in smoke
+    assert "SOM342_REMAPPED_ROOT_UID" in smoke
+    assert 'hostconfig["UsernsMode"] != "host"' in smoke
     assert "OpenSSH StrictModes" in smoke
     assert '"docker", "cp"' not in smoke
     assert "docker compose" not in smoke
     assert "--privileged" not in smoke
+
+
+def test_ephemeral_userns_engine_does_not_change_host_daemon():
+    body = (ROOT / "ops/mvp/mode_a_hosted_userns_verify.sh").read_text()
+    assert "RUNNER_ENVIRONMENT:-" in body and "github-hosted" in body
+    assert "GITHUB_EVENT_NAME:-" in body and "pull_request" in body
+    assert "--userns-remap=default" in body
+    assert '--data-root "$scratch/data"' in body
+    assert '--host "unix://$scratch/docker.sock"' in body
+    assert "--bridge=none --iptables=false --ip-forward=false --ip-masq=false" in body
+    assert "SOM342_REMAPPED_ROOT_UID" in body
+    assert "SOM342_REMAPPED_ROOT_GID" in body
+    assert "python3 ops/mvp/mode_a_hosted_oci_fs_smoke.py" in body
+    assert "sha256sum -c OFFLINE_IMAGE_SHA256SUMS" in body
+    assert "DEDICATED_USERNS_REMAP_OCI_TWO_NODE_FS_PASS" in body
+    assert 'sudo -n rm -rf -- "$scratch"' in body
+    for forbidden in (
+        "systemctl",
+        "/etc/docker/daemon.json",
+        "docker compose",
+        "docker context",
+        "--privileged",
+        "--userns=host",
+    ):
+        assert forbidden not in body
