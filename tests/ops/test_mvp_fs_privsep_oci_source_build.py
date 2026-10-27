@@ -46,7 +46,10 @@ def test_hosted_image_builder_never_starts_or_exports_running_ssh():
     assert "HOSTED_OCI_FS_TWO_NODE_SMOKE_PASSED=true" in commands
     assert "PRIVATE_USERNS_PROVEN=false" in commands
     assert "GUEST_VERIFIED=false" in commands
-    assert "docker save som-mvp-fs-privsep:local | gzip -n -1" in commands
+    assert "docker save som-mvp-fs-native-review:local | gzip -n -1" in commands
+    assert "FS_NATIVE_REVIEW_IMAGE_ID=" in commands
+    assert "NATIVE_NOSUDO_CODE_BAKED=true" in commands
+    assert "python3 ops/mvp/build_native_review_image.py" in commands
     assert "OFFLINE_IMAGE_SHA256SUMS" in commands
     assert "gzip -t proof/som342-openssh-fs.docker.tar.gz" in commands
     assert "docker load" in commands
@@ -246,10 +249,24 @@ def test_native_review_oci_is_only_ci_overlay_not_release_admission():
     assert "no-new-privs" in overlay
     assert "dst={dest},readonly" in overlay
     assert '"ForceCommand /usr/bin/sudo" not in cfg' in overlay
-    assert "native_review=True" in smoke
+    assert 'IMAGE = "som-mvp-fs-native-review:local"' in smoke
+    assert "native_mounts" not in smoke
+    assert "NATIVE_FOUR_ZERO_LIMITED_CAPBND_TEST_ONLY=true" in smoke
     assert "NATIVE_FOUR_ZERO_LIMITED_CAPBND_TEST_ONLY=true" in smoke
     assert "FS_LAUNCHER_FIVE_ZERO_RELEASE_CONTRACT_UNCHANGED=true" in smoke
-    assert "native_review=native_userns" in smoke
+    assert "start_node(name, work / name, running)" in smoke
+    builder = (ROOT / "ops/mvp/build_native_review_image.py").read_text()
+    assert "FROM som-mvp-fs-privsep:local" in builder
+    assert "COPY --chown=0:0 --chmod=0555" in builder
+    assert "COPY --chown=0:0 --chmod=0644" in builder
+    assert "ENTRYPOINT" in builder and "ssh-over-mcp-image-hold" in builder
+    assert "stage(context)" in builder
+    assert '"--network"' in builder and '"none"' in builder
+    assert 'NATIVE_IMAGE = "som-mvp-fs-native-review:local"' in builder
+    userns = (ROOT / "ops/mvp/mode_a_hosted_userns_verify.sh").read_text()
+    assert "FS_NATIVE_REVIEW_IMAGE_ID=" in userns
+    assert "som-mvp-fs-native-review:local" in userns
+    assert "som-mvp-fs-privsep:local" not in userns
     assert "USERNS_REMAPPED_CENTRAL_LEDGER_TWO_NODE_TEST_ONLY_PASS" in smoke
     assert "USERNS_REMAPPED_NATIVE_NO_SUDO_TWO_REAL_FS_NODES_PASS" in smoke
     assert '"/usr/sbin/sshd"' in smoke and '"--entrypoint"' in smoke
@@ -314,6 +331,27 @@ def test_attested_archive_handoff_never_claims_production_image_is_signed():
     assert "--deny-self-hosted-runners" in runbook
     assert "f7a931a4644be812bd5493808d8613a7ef7a57ec" in runbook
     assert "TEST_ARCHIVE_GITHUB_PROVENANCE_ATTESTED=true" in runbook
-    assert "not embedded in this archive" in runbook
+    assert "historical f7a931a test archive" in runbook
+    assert "NATIVE_NOSUDO_CODE_BAKED=true" in runbook
+    assert "FS_NATIVE_REVIEW_IMAGE_ID" in runbook
     assert "SIGNED_RUNTIME_ID=false" in runbook
     assert "STOP78" in runbook
+
+
+def test_baked_native_review_source_equals_official_patch_not_runtime_mount():
+    smoke = (ROOT / "ops/mvp/mode_a_hosted_oci_fs_smoke.py").read_text()
+    builder = (ROOT / "ops/mvp/build_native_review_image.py").read_text()
+    workflow = yaml.safe_load(WORKFLOW.read_text())["jobs"]["build-source"]
+    assert 'IMAGE = "som-mvp-fs-native-review:local"' in smoke
+    assert '"--entrypoint"' in smoke
+    assert "native_mounts" not in smoke
+    assert "stage(context)" in builder
+    assert "fs-only-native-review.py" in builder
+    assert "sshd_config.native-review" in builder
+    assert "som-mvp-fs-native-review:local" in builder
+    cmds = "\n".join(str(s.get("run", "")) for s in workflow["steps"])
+    assert "python3 ops/mvp/build_native_review_image.py" in cmds
+    assert "docker save som-mvp-fs-native-review:local" in cmds
+    assert "FS_NATIVE_REVIEW_IMAGE_ID=" in cmds
+    assert "som-mvp-fs-privsep:local" in cmds  # old base retained for provenance
+    assert "SIGNED_IMAGE=false" in cmds and "DEPLOYED=false" in cmds

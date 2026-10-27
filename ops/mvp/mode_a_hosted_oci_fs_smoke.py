@@ -17,7 +17,7 @@ import time
 import uuid
 from pathlib import Path
 
-IMAGE = "som-mvp-fs-privsep:local"
+IMAGE = "som-mvp-fs-native-review:local"
 SSH_CAPS = ("SETUID", "SETGID", "SETPCAP", "SYS_CHROOT")
 
 
@@ -78,14 +78,10 @@ def start_node(
     *,
     network: str = "none",
     alias: str | None = None,
-    native_review: bool = False,
 ) -> tuple[str, Path, Path]:
     _host, client, known = prepare(work, name)
-    native_mounts: list[str] = []
-    if native_review:
-        from mode_a_hosted_native_review import stage
-
-        native_mounts = stage(work)
+    # The immutable native no-sudo review files are baked into IMAGE.
+    # No per-container code or sshd configuration mounts are accepted.
     args = [
         "docker",
         "run",
@@ -112,7 +108,6 @@ def start_node(
         f"type=bind,src={work / 'hostkeys'},dst=/etc/ssh/hostkeys,readonly",
         "--mount",
         f"type=bind,src={work / 'authorized_keys'},dst=/etc/ssh/authorized_keys,readonly",
-        *native_mounts,
         "--entrypoint",
         "/usr/sbin/sshd",
         IMAGE,
@@ -307,7 +302,6 @@ def prove_central_mcp_ledger(work: Path, running: list[str], networks: list[str]
             running,
             network=network,
             alias=f"node{index:02}",
-            native_review=True,
         )
         node_names.append(name)
         prepared.append((client, work / name / "hostkeys" / "ssh_host_ed25519_key.pub"))
@@ -471,14 +465,8 @@ def main() -> None:
             nodes: dict[int, tuple[str, Path]] = {}
             for i in (1, 2):
                 name = f"som342-oci-node{i}-{uuid.uuid4().hex[:6]}"
-                # In dedicated remapped Engine, require the no-sudo
-                # ForceCommand candidate for BOTH actual OCI FS agents.
-                # The normal Engine already tests the same candidate through
-                # real central MCP+Ledger on two isolated bridge networks.
-                native_userns = bool(os.getenv("SOM342_REMAPPED_ROOT_UID"))
-                _name, _client, known = start_node(
-                    name, work / name, running, native_review=native_userns
-                )
+                # Same baked review image in normal and userns Engines.
+                _name, _client, known = start_node(name, work / name, running)
                 nodes[i] = (name, known)
                 if i == 1:
                     # Independent NO-SUDO review feasibility probe. Never

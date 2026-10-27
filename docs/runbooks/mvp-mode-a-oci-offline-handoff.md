@@ -58,11 +58,14 @@ archive SHA256 checked, `gh attestation verify` returned one
 cryptographically valid SLSA provenance statement with the pinned
 workflow identity. GitHub attestation guarantees provenance of **these
 archived bytes**, not security or signature of the remapped Docker
-runtime image ID. An arbitrary PR-side test mount of the native no-sudo
-FS launcher is **not embedded in this archive**; this is why the
-fully-working native runtime is still **NOT a production-deployable
-signed artifact**. The image itself still contains the old sudo
-ForceCommand, and `STOP78` remains enforced.
+runtime image ID. The **historical f7a931a test archive** did not embed
+the native no-sudo launcher; it used a separate test bind mount, and
+is **NOT a deployable production image**. New test source bakes the
+exactly generated native launcher and sshd config as root-owned immutable
+files inside a derived review-only image. Require a fresh archive containing
+`NATIVE_NOSUDO_CODE_BAKED=true`, its exact `FS_NATIVE_REVIEW_IMAGE_ID`,
+both central Ledger passes, and its own GitHub attestation. The new image
+remains a candidate; `STOP78` is still enforced.
 
 Do not confuse `TEST_ARCHIVE_GITHUB_PROVENANCE_ATTESTED=true` with
 `SIGNED_IMAGE=true`; the provenance receipt explicitly keeps
@@ -80,11 +83,11 @@ into a fresh private directory **inside that guest**:
 sha256sum -c OFFLINE_IMAGE_SHA256SUMS
 gzip -t som342-openssh-fs.docker.tar.gz
 gzip -dc som342-openssh-fs.docker.tar.gz | docker load
-docker image inspect som-mvp-fs-privsep:local \
+docker image inspect som-mvp-fs-native-review:local \
   --format '{{.Id}} {{json .Config.Entrypoint}}'
 ```
 
-Compare the *full* image ID with `FS_PRIVSEP_IMAGE_ID` in
+Compare the *full* image ID with `FS_NATIVE_REVIEW_IMAGE_ID` in
 `PROVENANCE.txt`, and require the entrypoint to be
 `["/usr/local/libexec/ssh-over-mcp-image-hold"]`. **No `docker run`
 yet.** This import is a test-only provenance/transport step, not an
@@ -96,12 +99,14 @@ GitHub Actions runners for this experiment.
 1. Independently authenticated/signature-verified image promotion and a
    userns-remapped dedicated Linux Engine (never daemon-wide changes on the
    shared Yuz.local Docker Engine).
-2. Same image's root OpenSSH hostkey custody, UID2201/NNP/cap0, real
+2. Same image's root OpenSSH hostkey custody and approved FS kernel
+   boundary (candidate currently NNP1, four capability sets zero,
+   exact nonzero `CapBnd`, **not** yet approved five-zero), real
    two-node typed FS protocol and denied cross-node actions under the
    **actual no-NIC VM and final Compose networks**.
-3. Real MCP control + central approval/Ledger, per-node SSH inventory pinned
-   to the internal **2222** port, one-use FS writes and network egress
-   negatives; independent whole-PR security review and rollback evidence.
+3. Revalidate real central MCP + one-use Ledger using **the same baked
+   image**, per-node internal port **2222**, directionally denied node→MCP
+   traffic, independent whole-PR security review and rollback evidence.
 
 All nonessential exec/manager/cgroup/Mode B functionality remains TODO.
 Until then: **deployment HOLD; PR Draft; Yuz.local not live.**

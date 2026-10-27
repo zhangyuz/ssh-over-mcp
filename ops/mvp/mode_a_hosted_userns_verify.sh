@@ -77,9 +77,9 @@ test "$uidbase" -ne "$(id -u)"
 test "$gidbase" -ne "$(id -g)"
 # Import the exact image archive that passed the earlier normal OCI smoke.
 gzip -dc proof/som342-openssh-fs.docker.tar.gz | docker load
-expected="$(sed -n 's/^FS_PRIVSEP_IMAGE_ID=//p' proof/PROVENANCE.txt)"
-actual="$(docker image inspect som-mvp-fs-privsep:local --format '{{.Id}}')"
-entrypoint="$(docker image inspect som-mvp-fs-privsep:local --format '{{json .Config.Entrypoint}}')"
+expected="$(sed -n 's/^FS_NATIVE_REVIEW_IMAGE_ID=//p' proof/PROVENANCE.txt)"
+actual="$(docker image inspect som-mvp-fs-native-review:local --format '{{.Id}}')"
+entrypoint="$(docker image inspect som-mvp-fs-native-review:local --format '{{json .Config.Entrypoint}}')"
 printf 'REMAPPED_USERNS_BASE_UID=%s GID=%s\n' "$uidbase" "$gidbase"
 printf 'RECEIPT_IMAGE_ID=%s\nIMPORTED_IMAGE_ID=%s\n' "$expected" "$actual"
 printf 'IMPORTED_ENTRYPOINT=%s\n' "$entrypoint"

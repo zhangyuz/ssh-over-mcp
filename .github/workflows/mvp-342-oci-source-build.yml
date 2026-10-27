@@ -53,6 +53,12 @@ jobs:
             -f deploy/ssh-target/Dockerfile.fs-privsep-review-candidate \
             -t som-mvp-fs-privsep:local .
 
+      - name: Bake exact no-sudo FS review image (STOP78; test-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ops/mvp/build_native_review_image.py
+
       - name: Verify STOP78 entrypoint and record source-only evidence
         shell: bash
         env:
@@ -62,6 +68,8 @@ jobs:
           test "$(docker image inspect som-mvp-fs-privsep:local --format '{{.Config.User}}')" = '0:0'
           test "$(docker image inspect som-mvp-fs-privsep:local --format '{{json .Config.Entrypoint}}')" = '["/usr/local/libexec/ssh-over-mcp-image-hold"]'
           test "$(docker image inspect som-mvp-fs-privsep:local --format '{{json .Config.ExposedPorts}}')" = '{"2222/tcp":{}}'
+          test "$(docker image inspect som-mvp-fs-native-review:local --format '{{.Config.User}}')" = '0:0'
+          test "$(docker image inspect som-mvp-fs-native-review:local --format '{{json .Config.Entrypoint}}')" = '["/usr/local/libexec/ssh-over-mcp-image-hold"]'
           mkdir -p proof
           {
             echo "PR=342"
@@ -69,6 +77,8 @@ jobs:
             echo "TEST_MERGE_SHA=$(git rev-parse HEAD)"
             echo "FS_BASE_IMAGE_ID=$(docker image inspect som-mvp-fs-source:local --format '{{.Id}}')"
             echo "FS_PRIVSEP_IMAGE_ID=$(docker image inspect som-mvp-fs-privsep:local --format '{{.Id}}')"
+            echo "FS_NATIVE_REVIEW_IMAGE_ID=$(docker image inspect som-mvp-fs-native-review:local --format '{{.Id}}')"
+            echo 'NATIVE_NOSUDO_CODE_BAKED=true'
             echo 'SIGNED_IMAGE=false'
             echo 'RUNTIME_STARTED=false'
             echo 'GUEST_VERIFIED=false'
@@ -77,7 +87,10 @@ jobs:
           sha256sum deploy/ssh-target/Dockerfile.fs-*-review-candidate \
             deploy/ssh-target/sshd_config.fs-privsep-review-candidate \
             deploy/ssh-target/sudoers.fs-privsep-review-candidate \
-            requirements/runtime.lock > proof/SOURCE_SHA256SUMS
+            requirements/runtime.lock \
+            ops/mvp/ssh-over-mcp-fs-only-launcher.py \
+            ops/mvp/mode_a_hosted_native_review.py \
+            ops/mvp/build_native_review_image.py > proof/SOURCE_SHA256SUMS
           echo FS_ONLY_OCI_SOURCE_BUILD_OK_NO_RUNTIME
 
       - name: Prove actual two-node OpenSSH FS-only over OCI loopback
@@ -102,16 +115,16 @@ jobs:
           set -euo pipefail
           # Export the EXACT container image exercised above. Its embedded
           # STOP78 entrypoint remains unchanged; no real keys enter this tar.
-          expected="$(docker image inspect som-mvp-fs-privsep:local --format '{{.Id}}')"
-          docker save som-mvp-fs-privsep:local | gzip -n -1 > proof/som342-openssh-fs.docker.tar.gz
+          expected="$(docker image inspect som-mvp-fs-native-review:local --format '{{.Id}}')"
+          docker save som-mvp-fs-native-review:local | gzip -n -1 > proof/som342-openssh-fs.docker.tar.gz
           test -s proof/som342-openssh-fs.docker.tar.gz
           gzip -t proof/som342-openssh-fs.docker.tar.gz
           (cd proof && sha256sum som342-openssh-fs.docker.tar.gz > OFFLINE_IMAGE_SHA256SUMS)
           # Actually prove the exported archive can be reimported.
-          docker image rm som-mvp-fs-privsep:local
+          docker image rm som-mvp-fs-native-review:local
           gzip -dc proof/som342-openssh-fs.docker.tar.gz | docker load
-          test "$(docker image inspect som-mvp-fs-privsep:local --format '{{.Id}}')" = "$expected"
-          test "$(docker image inspect som-mvp-fs-privsep:local --format '{{json .Config.Entrypoint}}')" = '["/usr/local/libexec/ssh-over-mcp-image-hold"]'
+          test "$(docker image inspect som-mvp-fs-native-review:local --format '{{.Id}}')" = "$expected"
+          test "$(docker image inspect som-mvp-fs-native-review:local --format '{{json .Config.Entrypoint}}')" = '["/usr/local/libexec/ssh-over-mcp-image-hold"]'
           echo "OFFLINE_IMAGE_ARCHIVE_SHA256=$(cut -d ' ' -f 1 proof/OFFLINE_IMAGE_SHA256SUMS)" >> proof/PROVENANCE.txt
           echo 'OFFLINE_IMAGE_FORMAT=docker-save-gzip' >> proof/PROVENANCE.txt
           echo 'OFFLINE_TRANSFER_TEST_ONLY=true' >> proof/PROVENANCE.txt
