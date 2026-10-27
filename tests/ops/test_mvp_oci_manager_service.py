@@ -236,7 +236,7 @@ def test_manager_kernel_nnp_and_zero_caps_proven_from_procfs(monkeypatch, nnp, b
             entry._kernel_unprivileged()
     source = ENTRY.read_text()
     assert "sys.path.insert(0, SOURCE_PATH)" in source
-    assert "sys.path.insert(1, SITE_PACKAGES)" in source
+    assert "sys.path.insert(1, SITE_PACKAGES)" not in source
     assert "docker.sock" not in source
 
 

@@ -17,7 +17,6 @@ NODE_ID_PATH = "/etc/ssh-over-mcp/node-id"
 CHILD_UID_MAP_PATH = "/etc/ssh-over-mcp/child-uid-map"
 CHILD_GID_MAP_PATH = "/etc/ssh-over-mcp/child-gid-map"
 SOURCE_PATH = "/opt/ssh-over-mcp-e2e/workspace/src"
-SITE_PACKAGES = "/opt/ssh-over-mcp-e2e/venv/lib/python3.14/site-packages"
 _MANAGER_UID = 2204
 
 
@@ -152,7 +151,6 @@ def main(argv: tuple[str, ...] | None = None) -> int:
     sys.dont_write_bytecode = True
     _refuse_source_bytecode()
     sys.path.insert(0, SOURCE_PATH)
-    sys.path.insert(1, SITE_PACKAGES)
     from ssh_over_mcp.host_agent.oci_manager_runtime import serve_oci_source_manager
     from ssh_over_mcp.host_agent.oci_namespace_identity import parse_id_map
 

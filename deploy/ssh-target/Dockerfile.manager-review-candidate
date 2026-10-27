@@ -19,27 +19,16 @@ RUN set -eu; \
     cp /usr/share/keyrings/ubuntu-archive-keyring.gpg /usr/share/ssh-over-mcp/provenance/signed-apt-lists/ubuntu-archive-keyring.gpg; \
     (cd /usr/share/ssh-over-mcp/provenance/signed-apt-lists && sha256sum ./* > ../signed-apt-lists-sha256.txt); \
     apt-get -y -o Dir::Cache::archives=/tmp/apt-archives --download-only install --no-install-recommends \
-      python3=3.14.3-0ubuntu2 python3-venv=3.14.3-0ubuntu2 ca-certificates=20260816ubuntu0.26.04.1; \
+      python3=3.14.3-0ubuntu2 ca-certificates=20260816ubuntu0.26.04.1; \
     test -n "$(find /tmp/apt-archives -maxdepth 1 -name '*.deb' -print -quit)"; \
     (cd /tmp/apt-archives && sha256sum ./*.deb) > /usr/share/ssh-over-mcp/provenance/apt-deb-sha256.txt; \
     apt-get -y -o Dir::Cache::archives=/tmp/apt-archives install --no-install-recommends \
-      python3=3.14.3-0ubuntu2 python3-venv=3.14.3-0ubuntu2 ca-certificates=20260816ubuntu0.26.04.1; \
+      python3=3.14.3-0ubuntu2 ca-certificates=20260816ubuntu0.26.04.1; \
     dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' > /usr/share/ssh-over-mcp/provenance/apt-installed.tsv; \
     rm -rf /tmp/apt-archives /var/lib/apt/lists/*
 
-# Use the existing committed project lock, not a new unreviewed dependency
-# graph. The manager's host_agent package init imports pydantic eagerly, so
-# stdlib-only Python -I -S is insufficient. Python 3.14 wheel ABI is a STOP.
-COPY requirements/runtime.lock /tmp/runtime.lock
-RUN set -eu; \
-    python3 -m venv /opt/ssh-over-mcp-e2e/venv; \
-    /opt/ssh-over-mcp-e2e/venv/bin/pip download --require-hashes --only-binary=:all: \
-      --dest /tmp/wheels -r /tmp/runtime.lock; \
-    (cd /tmp/wheels && sha256sum ./*.whl) > /usr/share/ssh-over-mcp/provenance/python-wheel-sha256.txt; \
-    /opt/ssh-over-mcp-e2e/venv/bin/pip install --no-index --find-links=/tmp/wheels \
-      --require-hashes -r /tmp/runtime.lock; \
-    rm -rf /tmp/wheels /tmp/runtime.lock
-
+# OCI manager source imports only stdlib with python3 -I -S, even without
+# third-party site packages; there are no unverified wheel/ABI dependencies.
 # Image contains code only; node-id, UID/GID maps, cgroup delegation and
 # socket parent MUST be provisioned by an independently approved guest.
 COPY src /opt/ssh-over-mcp-e2e/workspace/src

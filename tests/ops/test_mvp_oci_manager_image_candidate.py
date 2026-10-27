@@ -11,7 +11,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pydantic
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -37,12 +36,11 @@ def verify_candidate(source: str, hold: str) -> None:
     assert "--download-only install --no-install-recommends" in source
     assert "python3=3.14.3-0ubuntu2" in source
     assert source.count("python3=3.14.3-0ubuntu2") == 2
-    assert source.count("python3-venv=3.14.3-0ubuntu2") == 2
+    assert "python3-venv=" not in source
     assert source.count("ca-certificates=20260816ubuntu0.26.04.1") == 2
-    assert "COPY requirements/runtime.lock /tmp/runtime.lock" in source
-    assert "pip download --require-hashes --only-binary=:all:" in source
-    assert "pip install --no-index --find-links=/tmp/wheels" in source
-    assert "python-wheel-sha256.txt" in source
+    assert "requirements/runtime.lock" not in source
+    assert "pip install" not in source and "pip download" not in source
+    assert "SITE_PACKAGES" not in source
     assert "COPY src /opt/ssh-over-mcp-e2e/workspace/src" in source
     assert "COPY ops/mvp/ssh-over-mcp-oci-manager.py" in source
     assert "COPY deploy/ssh-target/entrypoint.manager-review-hold" in source
@@ -85,7 +83,6 @@ def test_separate_manager_candidate_has_verified_inputs_and_hard_hold():
     "before,after",
     [
         (f"FROM --platform=linux/amd64 {BASE}", "FROM ubuntu:latest"),
-        ("--require-hashes", "--no-cache-dir"),
         ("python3=3.14.3-0ubuntu2", "python3"),
         ("cp -a /var/lib/apt/lists/*_InRelease", "echo skip-signature-record"),
         (
@@ -102,35 +99,21 @@ def test_tamper_does_not_silently_unlock_manager(before: str, after: str):
         verify_candidate(original.replace(before, after), HOLD.read_text())
 
 
-def test_manager_isolated_python_requires_committed_lock_dependency():
-    """Real -I -S import: eager host_agent imports pydantic, so lock is needed."""
+def test_manager_isolated_python_import_requires_no_third_party():
+    """The fixed manager + OCI root admission really import under -I -S."""
     program = (
         "import sys;"
         f"sys.path.insert(0,{str(ROOT / 'src')!r});"
-        "from ssh_over_mcp.host_agent.oci_manager_runtime import serve_oci_source_manager"
+        "from ssh_over_mcp.host_agent.oci_manager_runtime import serve_oci_source_manager;"
+        "from ssh_over_mcp.host_agent.oci_launcher_admission import OciLauncherDomain;"
+        "assert 'pydantic' not in sys.modules;"
+        "assert 'yaml' not in sys.modules;"
+        "assert 'mcp' not in sys.modules"
     )
-    missing = subprocess.run(
+    result = subprocess.run(
         [sys.executable, "-I", "-S", "-c", program],
         capture_output=True,
         text=True,
         check=False,
     )
-    assert missing.returncode != 0
-    assert "pydantic" in missing.stderr
-
-    site_root = str(Path(pydantic.__file__).resolve().parent.parent)
-    supplied = subprocess.run(
-        [
-            sys.executable,
-            "-I",
-            "-S",
-            "-c",
-            program.replace(
-                "from ssh_over_mcp", f"sys.path.insert(1,{site_root!r});from ssh_over_mcp"
-            ),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert supplied.returncode == 0, supplied.stderr
+    assert result.returncode == 0, result.stderr

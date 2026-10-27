@@ -15,7 +15,7 @@ count as A01–A03.
 ## Separate manager image candidate (still not built)
 
 - `Dockerfile.manager-review-candidate` builds a **different** non-SSH OCI image with the same immutable Ubuntu 26.04 amd64 base, stock signed APT and exact Python/CA direct package versions. It preserves signed package index/keyring, `.deb` closure and installed inventory receipts.
-- Reuses the **existing** `requirements/runtime.lock` and hashed wheel receipts: `host_agent/__init__.py` eagerly imports `pydantic`, so `python3 -I -S` without third-party wheels **does not run**. This avoids a new manager-specific lock or refactor. Its Python 3.14 ABI must succeed under isolated build or STOP.
+- **No wheel installation in the manager image.** `host_agent/__init__.py` now exports its historical public symbols lazily, so the OCI manager and root-phase SSH admission import under real `python3 -I -S` **without pydantic, yaml or third-party wheels**. Its Ubuntu Python package must still be independently built/verified. The SSH image retains the existing hash-locked application dependencies for post-drop imports.
 - Runs as `som-manager` UID/GID `2204:3204`, predefines membership group `3299`, without OpenSSH, sudo, exposed ports, keys or code writable by the manager. Guest must prove actual supplementary group mapping and NNP/zero caps; they are not implied by `USER` alone.
 - **Separate manager image entrypoint always exits 78**. Neither manager nor SSH candidate is Compose-wired or runtime-approved. Exact final image digest/attestation and private cgroup/namespace proofs precede any guest boot.
 
