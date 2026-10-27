@@ -14,6 +14,10 @@
 - HEAD (full SHA):
 - PR/issue links:
 - Objective and one independently verifiable deliverable:
+- End-user/operator workflow and target environment:
+- Real positive and refusal acceptance path:
+- Delivery state (IMPLEMENTED / TESTED / REVIEWED / MERGED / DEPLOYED / ACCEPTED / BLOCKED), with evidence:
+- Pilot versus full agreed MVP/release milestone:
 - In scope:
 - Out of scope:
 
