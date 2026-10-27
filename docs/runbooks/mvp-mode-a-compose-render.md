@@ -32,6 +32,45 @@ python3 ops/mvp/bundle_preflight.py \
 
 The command requires Docker Compose **2.33.1+** (both `!override` and the base file's `gw_priority`; tested with v5.5.1), but **does not require or contact a Docker Engine** for `config` output. Never paste rendered Compose output containing interpolated paths/config/secret references into tickets or logs. The topology JSON is independently provided, including both distinct node aliases and *synthetic* SSH host-key fingerprint syntax; syntax/consistency checks do not establish trust. All image variables — `SSH_OVER_MCP_IMAGE`, `SSH_OVER_MCP_NODE01_IMAGE`, `SSH_OVER_MCP_NODE02_IMAGE` — must be explicitly set; the overlay rejects missing values rather than falling back to the control project's mutable historic `phase6b` image tag. A syntactically well-formed digest string still **does not prove image contents, signature or provenance**.
 
+## First-principles networked render preflight (read-only, not release)
+
+Render the **third** review overlay in a cleared environment, with a
+private *synthetic-only* env file containing all mandatory image digest
+placeholders, origin IPv4/CIDR and mount-source paths (never real keys):
+
+```sh
+env -i PATH="$PATH" HOME="$HOME" COMPOSE_DISABLE_ENV_FILE=1 \
+  DOCKER_HOST=unix:///nonexistent-som-mode-a.sock \
+  docker compose --project-name som-mode-a-review \
+  -f deploy/compose/compose.yaml \
+  -f deploy/compose/compose.dev-ssh.yaml \
+  -f deploy/compose/compose.mode-a-openssh-fs.review-candidate.yaml \
+  --profile mvp-fs-review \
+  --env-file /operator-owned/private/synthetic-mode-a.env \
+  config --format json > /operator-owned/private/rendered-mode-a-review.json
+```
+
+Then validate its *actual merged JSON* (not the historical two-file
+dev-E2E render):
+
+```sh
+python3 ops/mvp/mode_a_networked_render_preflight.py \
+  --rendered-json /operator-owned/private/rendered-mode-a-review.json
+```
+
+Only `REVIEW_ONLY_HOLD` is a successful *static* result. The program
+refuses origin IPv4 outside the declared canonical RFC1918 subnet, gateway
+or network/broadcast addresses, mismatched `SSH_OVER_MCP_BIND_HOST`,
+unexpected lateral node/MCP attachments, published service ports,
+unreviewed capabilities, missing NNP, writable/auto-created SSH key
+mounts, mutable image tags and removal of the SSH STOP78 hold. It prints
+no interpolated file paths or credentials. Rendering is strictly
+`config` only with `DOCKER_HOST` pointing to a nonexistent socket.
+The static PASS explicitly reports `network_acl_verified=false` and
+`deployment_ready=false`; it **cannot verify actual host firewall,
+user namespace, image digest contents, keys, or container startup**.
+Do not use this preflight as justification for `docker compose up`.
+
 ## Isolation represented by the YAML (not yet proven in running containers)
 
 - Overlay **replaces**, not appends, MCP network attachments: `origin_internal`, `node01_ssh` and `node02_ssh`. The baseline unbounded `ssh_egress` is removed from this Mode A render, not from the historical production Compose file; no implicit default bridge or SSH-node-to-node shared network is intended.
