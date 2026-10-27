@@ -64,6 +64,32 @@ M1a `A01`–`A03` are reserved for actual live Mode A positive plus hostile late
 
 See [MVP status](../mvp-status.md), [ADR0021](../decisions/0021-private-compose-rw-mvp-release-track.md), and [M1a plan](../superpowers/plans/2026-10-23-private-compose-rw-mvp.md).
 
+## Online pilot image: distinct runnable CI candidate, not production
+
+For the networked Mode A decision [ADR0024](../decisions/0024-networked-docker-mvp-vs-isolated-e2e.md),
+the next deliverable is a real **default-boot** OpenSSH image, not another
+air-gapped Engine installation. `ops/mvp/build_online_pilot_review_image.py`
+creates a separate `som-mvp-fs-online-pilot-review:local` candidate from
+the same reviewed signed-APT Ubuntu/OpenSSH source build, baking the exact
+native no-sudo FS ForceCommand and setting its image-default entrypoint to
+`/usr/sbin/sshd` with `-D -e`. Its only permitted caller is a disposable
+**GitHub-hosted PR #342** runner. No Yuz.local Docker build/pull/load occurs.
+
+`ops/mvp/mode_a_hosted_runnable_image_probe.py` then starts that candidate
+using the **image default entrypoint and CMD** (not an overriding CLI entrypoint)
+with `--network none`, no host ports, no production credentials, a read-only
+filesystem, four admission caps and NNP from container start. The actual
+real-SSH typed FS read/write/negative test is reused. The candidate is **not
+exported, uploaded, signed as release, or wired into Compose**. The existing
+CI-exported signed **test** archive remains the original STOP78 variant.
+
+**Next real release gate:** independently review a final runnable image's exact
+digest, root-owned launch/config, userns/CapBnd policy decision #346, per-node
+keys and private network. Verify it on an **explicitly authorized** isolated
+Compose project / selected Engine with positive MCP→SSH and negative
+SSH→MCP/sibling probes, then release. Do **not** replace the runtime overlay's
+STOP78 guard or make test-only success count as production approval.
+
 ## OpenSSH-only FS runtime review overlay (render-only)
 
 For an **inert** review of the runtime shape proven by hosted Docker tests,

@@ -78,7 +78,11 @@ def start_node(
     *,
     network: str = "none",
     alias: str | None = None,
+    image: str = IMAGE,
+    use_default_entrypoint: bool = False,
 ) -> tuple[str, Path, Path]:
+    if use_default_entrypoint:
+        assert image == "som-mvp-fs-online-pilot-review:local"
     _host, client, known = prepare(work, name)
     # The immutable native no-sudo review files are baked into IMAGE.
     # No per-container code or sshd configuration mounts are accepted.
@@ -110,11 +114,9 @@ def start_node(
         f"type=bind,src={work / 'hostkeys'},dst=/etc/ssh/hostkeys,readonly",
         "--mount",
         f"type=bind,src={work / 'authorized_keys'},dst=/etc/ssh/authorized_keys,readonly",
-        "--entrypoint",
-        "/usr/sbin/sshd",
-        IMAGE,
-        "-D",
-        "-e",
+        *([] if use_default_entrypoint else ["--entrypoint", "/usr/sbin/sshd"]),
+        image,
+        *([] if use_default_entrypoint else ["-D", "-e"]),
     ]
     output = run(args, timeout=40).stdout.decode().strip()
     assert output and len(output) >= 12

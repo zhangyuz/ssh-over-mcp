@@ -1,5 +1,8 @@
 # MVP 当前交付入口：Compose 多 SSH 读写试点
 
+> **2026-10-27 联网镜像启动闭环开发：** PR #342 新增独立 **CI-only 默认可启动** OpenSSH 镜像候选与实测脚本，使用已验证的 Ubuntu/OpenSSH 构建层与固定 no-sudo FS ForceCommand，真实 Docker 启动不需要覆盖 `ENTRYPOINT`；复用 SSH typed FS 正向和拒绝测试。仍限 GitHub-hosted 临时 Runner，**不发布该运行镜像、不修改原 STOP78 测试归档、不部署到共享 Docker**。下一步是新 HEAD 的真实 Linux CI、独立发布镜像审查/签名、获准 Engine 私网 Compose 验收。
+
+
 > **2026-10-27 第一性原理修正（见 [ADR0024](decisions/0024-networked-docker-mvp-vs-isolated-e2e.md)）：** 真正的 MCP→SSH 远程管理必须具备受控网络连通性。因此，**联网 Linux Docker Engine + Ubuntu 26.04 官方签名 APT 容器镜像 + 标准 Docker Compose** 是新的 Mode A FS-only 试点交付方向；允许在批准的共享 Engine 上使用隔离 Compose 项目，不强制重复创建 Ubuntu VM。以前为 no-NIC 测试环境规划的自定义离线 Docker Engine 完整依赖介质、无网卡 OCI 客体**不再是联网试点的 P0 门槛**。保留 trusted-main 无网卡 Native Level-3 安全回归（隔离不可信测试代码，不是生产拓扑）。**这不是直接允许启动已停用的 Lima VM、修改共享 Docker、替换 STOP78、使用生产密钥、合并或发布。** Mode B 三个独立 Engine/真实跨宿主机私网与完整八文件工具仍是原产品 MVP 目标，Mode A FS-only 仅是较窄试点。
 
 

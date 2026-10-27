@@ -98,7 +98,10 @@ jobs:
             requirements/runtime.lock \
             ops/mvp/ssh-over-mcp-fs-only-launcher.py \
             ops/mvp/mode_a_hosted_native_review.py \
-            ops/mvp/build_native_review_image.py > proof/SOURCE_SHA256SUMS
+            ops/mvp/build_native_review_image.py \
+            ops/mvp/build_online_pilot_review_image.py \
+            ops/mvp/mode_a_hosted_runnable_image_probe.py \
+            > proof/SOURCE_SHA256SUMS
           echo FS_ONLY_OCI_SOURCE_BUILD_OK_NO_RUNTIME
 
       - name: Prove actual two-node OpenSSH FS-only over OCI loopback
@@ -115,6 +118,24 @@ jobs:
             echo 'PRIVATE_USERNS_PROVEN=false'
             echo 'NO_NIC_GUEST_OCI_PROVEN=false'
           } >> proof/PROVENANCE.txt
+
+      # Build a separate disposable admission image from the same reviewed
+      # privsep layer. This is NOT derived from a signed test archive, and it
+      # is NEVER uploaded, tagged for production or deployed.
+      - name: Build distinct runnable online pilot image (CI only; no export)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ops/mvp/build_online_pilot_review_image.py
+
+      - name: Prove default runnable image starts real SSH/FS (CI only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ops/mvp/mode_a_hosted_runnable_image_probe.py
+          echo 'ONLINE_PILOT_CI_ONLY_DEFAULT_SSHD_FS_PROVED=true' >> proof/PROVENANCE.txt
+          echo 'ONLINE_PILOT_SIGNED_RUNTIME_ID=false' >> proof/PROVENANCE.txt
+          echo 'ONLINE_PILOT_DEPLOYED=false' >> proof/PROVENANCE.txt
 
       - name: Export hash-bound test-only offline Docker image (not signed)
         id: export_archive
