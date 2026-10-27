@@ -6,6 +6,11 @@ on:
 
 permissions:
   contents: read
+  # Public-repository OIDC provenance for the disposable, PR-only test tarball.
+  # This does NOT authorize promotion to a production signed OCI runtime ID.
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 jobs:
   build-source:
@@ -114,6 +119,7 @@ jobs:
           echo 'SIGNED_IMAGE=false' >> proof/PROVENANCE.txt
 
       - name: Prove separately isolated userns-remapped Engine with same two SSH nodes
+        id: userns_proof
         shell: bash
         run: |
           set -euo pipefail
@@ -123,8 +129,23 @@ jobs:
             echo 'TRUSTED_NO_NIC_GUEST_USERNS_PROVEN=false'
           } >> proof/PROVENANCE.txt
 
+      - name: Attest disposable test-only image archive provenance (NOT release)
+        id: attest_archive
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: proof/som342-openssh-fs.docker.tar.gz
+
+      - name: Record signed test-archive claim; production image still unsigned
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'TEST_ARCHIVE_GITHUB_PROVENANCE_ATTESTED=true' >> proof/PROVENANCE.txt
+          echo 'SIGNED_IMAGE=false' >> proof/PROVENANCE.txt
+          echo 'SIGNED_RUNTIME_ID=false' >> proof/PROVENANCE.txt
+          echo 'DEPLOYED=false' >> proof/PROVENANCE.txt
+
       - name: Upload test-only hash-bound image and proof (never export secrets)
-        if: ${{ always() && steps.oci_smoke.outcome == 'success' && steps.export_archive.outcome == 'success' }}
+        if: ${{ always() && steps.oci_smoke.outcome == 'success' && steps.export_archive.outcome == 'success' && steps.userns_proof.outcome == 'success' && steps.attest_archive.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: mvp-342-openssh-oci-source-build

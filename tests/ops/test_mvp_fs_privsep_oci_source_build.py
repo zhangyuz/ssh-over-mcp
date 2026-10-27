@@ -57,6 +57,22 @@ def test_hosted_image_builder_never_starts_or_exports_running_ssh():
     )
     assert "steps.oci_smoke.outcome == 'success'" in job["steps"][-1]["if"]
     assert "steps.export_archive.outcome == 'success'" in job["steps"][-1]["if"]
+    assert "steps.userns_proof.outcome == 'success'" in job["steps"][-1]["if"]
+    assert "steps.attest_archive.outcome == 'success'" in job["steps"][-1]["if"]
+    perms = yaml.safe_load(WORKFLOW.read_text())["permissions"]
+    assert perms == {
+        "contents": "read",
+        "id-token": "write",
+        "attestations": "write",
+        "artifact-metadata": "write",
+    }
+    attest = [step for step in steps if step.get("id") == "attest_archive"]
+    assert len(attest) == 1
+    assert attest[0]["uses"] == "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6"
+    assert attest[0]["with"]["subject-path"] == "proof/som342-openssh-fs.docker.tar.gz"
+    assert "TEST_ARCHIVE_GITHUB_PROVENANCE_ATTESTED=true" in commands
+    assert "SIGNED_RUNTIME_ID=false" in commands
+
     assert "OFFLINE_TRANSFER_TEST_ONLY=true" in commands
     assert "SIGNED_IMAGE=false" in commands
     assert "mode_a_hosted_userns_verify.sh" in commands
