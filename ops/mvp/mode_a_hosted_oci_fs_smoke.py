@@ -116,6 +116,14 @@ def start_node(name: str, work: Path, running: list[str]) -> tuple[str, Path, Pa
         )
         assert any("userns" in entry for entry in security)
         assert hostconfig["UsernsMode"] != "host"
+        uid_map = run(
+            ["docker", "exec", "-u", "0:0", name, "cat", "/proc/self/uid_map"]
+        ).stdout.decode()
+        gid_map = run(
+            ["docker", "exec", "-u", "0:0", name, "cat", "/proc/self/gid_map"]
+        ).stdout.decode()
+        assert uid_map.split()[0:2] == ["0", os.environ["SOM342_REMAPPED_ROOT_UID"]]
+        assert gid_map.split()[0:2] == ["0", os.environ["SOM342_REMAPPED_ROOT_GID"]]
     assert hostconfig["Privileged"] is False
     assert hostconfig["ReadonlyRootfs"] is True
     assert set(hostconfig["CapDrop"]) == {"ALL"}

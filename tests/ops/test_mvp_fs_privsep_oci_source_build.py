@@ -51,7 +51,10 @@ def test_hosted_image_builder_never_starts_or_exports_running_ssh():
     assert "gzip -t proof/som342-openssh-fs.docker.tar.gz" in commands
     assert "docker load" in commands
     assert "ARCHIVE_LOAD_TEST_PASSED=true" in commands
-    assert "REMAPPED_IMAGE_ADMISSION_REACHED=true" in (ROOT / "ops/mvp/mode_a_hosted_userns_verify.sh").read_text()
+    assert (
+        "REMAPPED_IMAGE_ADMISSION_REACHED=true"
+        in (ROOT / "ops/mvp/mode_a_hosted_userns_verify.sh").read_text()
+    )
     assert "steps.oci_smoke.outcome == 'success'" in job["steps"][-1]["if"]
     assert "steps.export_archive.outcome == 'success'" in job["steps"][-1]["if"]
     assert "OFFLINE_TRANSFER_TEST_ONLY=true" in commands
@@ -87,6 +90,7 @@ def test_disposable_oci_two_node_smoke_has_only_loopback_and_minimal_ssh_caps():
     assert "str(keys), str(auth), str(authorized)" in smoke
     assert "SOM342_REMAPPED_ROOT_UID" in smoke
     assert 'hostconfig["UsernsMode"] != "host"' in smoke
+    assert '"/proc/self/uid_map"' in smoke and '"/proc/self/gid_map"' in smoke
     assert "OpenSSH StrictModes" in smoke
     assert '"docker", "cp"' not in smoke
     assert "docker compose" not in smoke
@@ -102,7 +106,7 @@ def test_ephemeral_userns_engine_does_not_change_host_daemon():
     assert '--host "unix://$scratch/docker.sock"' in body
     assert "--bridge=none --iptables=false --ip-forward=false --ip-masq=false" in body
     assert "SOM342_REMAPPED_ROOT_UID" in body
-    assert 'mktemp -d /tmp/som342-userns-XXXXXX' in body
+    assert "mktemp -d /tmp/som342-userns-XXXXXX" in body
     assert 'chmod 0711 "$scratch"' in body
     assert 'chmod 0711 "$scratch/data"' in body
     assert 'chmod 0777 "$scratch"' not in body

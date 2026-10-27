@@ -84,7 +84,14 @@ printf 'REMAPPED_USERNS_BASE_UID=%s GID=%s\n' "$uidbase" "$gidbase"
 printf 'RECEIPT_IMAGE_ID=%s\nIMPORTED_IMAGE_ID=%s\n' "$expected" "$actual"
 printf 'IMPORTED_ENTRYPOINT=%s\n' "$entrypoint"
 test -n "$expected"
-test "$actual" = "$expected" || { echo 'Image ID mismatch after remapped import' >&2; exit 1; }
+# On userns-remapped imports Docker may re-ID ownership-shifted layers.
+# This is TEST-ONLY transport proof, NOT a signed-image release decision.
+# Do not silently treat a rewritten image ID as the originally signed ID.
+if [ "$actual" != "$expected" ]; then
+  echo "REMAPPED_RUNTIME_IMAGE_ID=$actual" >> proof/PROVENANCE.txt
+  echo 'REMAP_IMAGE_ID_MATCHES_BUILD=false' >> proof/PROVENANCE.txt
+  echo 'SIGNED_RUNTIME_ID=false' >> proof/PROVENANCE.txt
+fi
 test "$entrypoint" = '["/usr/local/libexec/ssh-over-mcp-image-hold"]' || { echo 'STOP78 missing after remapped import' >&2; exit 1; }
 echo 'REMAPPED_IMAGE_ADMISSION_REACHED=true'
 export SOM342_REMAPPED_ROOT_UID="$uidbase"
