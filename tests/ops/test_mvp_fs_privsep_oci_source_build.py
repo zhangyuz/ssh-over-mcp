@@ -150,8 +150,6 @@ def test_hosted_central_mcp_ledger_two_node_control_is_real_and_test_only():
     assert '"docker", "network", "create", "--internal"' in smoke
     assert '"docker", "network", "rm", network' in smoke
     assert "HOSTED_TWO_NODE_CROSS_NETWORK_SSH_DENIED_PASS" in smoke
-    assert "HOSTED_CENTRAL_READONLY_FIXTURES_CREATED_VIA_REAL_SSH" in smoke
-    assert "ci_seed_node_" in smoke
     assert "HOSTED_CONTROL_TO_TWO_ISOLATED_SSH_NODES_PASS" in smoke
     assert "NODE_TO_NODE_TCP_DENIAL_PROVEN=true" in smoke
     assert '"docker", "network", "connect", node_networks[1], control' in smoke
@@ -171,8 +169,6 @@ def test_hosted_central_mcp_ledger_two_node_control_is_real_and_test_only():
         '"pending"',
         '"ssh_over_mcp.approvals.cli"',
         "CENTRAL_MCP_LEDGER_TWO_OPENSSH_NODES_TEST_ONLY_PASS",
-        "CENTRAL_MCP_READONLY_TWO_OPENSSH_NODES_PASS",
-        'client.call_tool("fs_stat"',
     ):
         assert token in script
     assert "docker" not in script

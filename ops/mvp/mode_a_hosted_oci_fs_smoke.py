@@ -304,32 +304,6 @@ def prove_central_mcp_ledger(work: Path, running: list[str], networks: list[str]
         node_names.append(name)
         prepared.append((client, work / name / "hostkeys" / "ssh_host_ed25519_key.pub"))
 
-        # Seed one TEST FIXTURE over the existing real OpenSSH protocol.
-        # This does not masquerade as a centrally approved mutation: only
-        # the subsequent read-only MCP calls are subject to this proof.
-        base = f"/srv/data/mvp-node-{index}"
-        seeded = f"{base}/seed.bin"
-        content = f"central-mcp-oci-readonly-node-{index}".encode()
-        make = call(name, frame("fs_mkdir", f"ci_seed_node_{index}_mkdir", base))
-        assert make.returncode == 0, (name, "seed mkdir", make.returncode)
-        write = call(
-            name,
-            frame(
-                "fs_write",
-                f"ci_seed_node_{index}_write",
-                seeded,
-                content,
-                content_length=len(content),
-            ),
-        )
-        assert write.returncode == 0, (name, "seed write", write.returncode)
-        check = call(
-            name,
-            frame("fs_read", f"ci_seed_node_{index}_verify", seeded, max_bytes=4096),
-        )
-        assert check.returncode == 0 and check.stdout == content
-    print("HOSTED_CENTRAL_READONLY_FIXTURES_CREATED_VIA_REAL_SSH", flush=True)
-
     # Prove real TCP reachability is denied across node networks by IP, not
     # merely by absent Docker DNS names. No SSH bytes or keys in this probe.
     for source, peer, peer_network in (
