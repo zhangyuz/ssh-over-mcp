@@ -2,7 +2,8 @@
 # PROPOSED ONLY - not wired into Compose or an approved SSH image.
 # Must be reviewed alongside exact startup, sudo, cgroup, host policy, image
 # provenance and host-key/authorized-key supply before any runtime use.
-Port 22
+# Unprivileged OpenSSH listener; deployment/inventory port is not switched.
+Port 2222
 AddressFamily inet
 HostKey /etc/ssh/hostkeys/ssh_host_ed25519_key
 AuthorizedKeysFile /etc/ssh/authorized_keys/%u

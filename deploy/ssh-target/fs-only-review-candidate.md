@@ -43,3 +43,32 @@ ADR0007 or permission to run Docker, alter host privileges or consume new keys.
   Level-3 remain required for Ready. Workload execution, manager-backed
   process containment, concurrency and extra FS operations stay out of this
   reduced test scope (TODO, independent architecture review).
+
+
+## 2026-10-27: OpenSSH-only nonroot feasibility, MVP direction (source-only)
+
+OpenSSH upstream explicitly supports running its **normal privilege-separation
+path as a non-root user** (Darren Tucker, 2022:
+https://lists.mindrot.org/pipermail/openssh-unix-dev/2022-February/039973.html).
+Thus **do not** require a root master, `CAP_SETUID`, sudo, manager, or
+`UsePrivilegeSeparation no` *by default* for the bounded FS-only MVP.
+The separate FS-only candidate now listens on unprivileged internal TCP
+**2222**, uses `UsePAM no`, publickey-only authentication, the original
+deny-forwarding restrictions and the fixed no-sudo Python ForceCommand.
+Its app identity remains the single SSH user **2201:3201**, NNP=1, all
+capabilities (including bounding) zero. **No substitute SSH daemon.**
+
+**P1 proof remains:** real Ubuntu 26.04 OpenSSH login/session with the
+final OCI `USER 2201:3201`, `cap_drop: ALL`, `no-new-privileges:true`,
+and per-node isolated keys; prove sshd's preauth/privsep/session identity,
+`/proc` capabilities, `ForceCommand` and SSH denial probes. An OpenSSH
+process running under the same UID as the session may expose its *private host
+key* to the agent. Before deployment, demonstrate that per-node host-key
+signing/key access cannot be abused by the session (or **STOP** and request
+an independently reviewed narrow signer/isolated domain). Never grant a
+private host key or trust override to MCP/agent input. The existing FS-only
+image is not built, Compose still points to port 22 and STOP78, and no
+runtime/guest was executed. Align the SSH target's service port and the
+server-owned inventory **only after** Linux rootless verification and
+separate explicit deployment approval. Process containment/ssh_exec and
+manager-backed arbitrary child execution stay TODO.

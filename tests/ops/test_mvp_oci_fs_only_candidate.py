@@ -180,7 +180,11 @@ def test_alternate_sshd_exact_original_except_forcecommand():
     )
     assert original.count(root_command) == reviewed.count(fs_command) == 1
     assert fs_command in reviewed
-    assert reviewed.splitlines()[1:] == original.replace(root_command, fs_command).splitlines()
+    assert [line for line in reviewed.splitlines() if not line.startswith("#")] == [
+        line.replace("Port 22", "Port 2222").replace(root_command, fs_command)
+        for line in original.splitlines()
+        if not line.startswith("#")
+    ]
     assert "PasswordAuthentication no" in reviewed
     assert "AuthenticationMethods publickey" in reviewed
     assert "DisableForwarding yes" in reviewed
@@ -188,6 +192,24 @@ def test_alternate_sshd_exact_original_except_forcecommand():
     assert "UsePAM no" in reviewed
     assert "sudo" not in fs_command
     assert "cap_add:" not in reviewed
+
+
+def test_unprivileged_openssh_candidate_requires_high_port_and_no_sudo():
+    reviewed = FS_CONFIG.read_text()
+    assert "Port 2222" in reviewed.splitlines()
+    assert "Port 22" not in reviewed.splitlines()
+    assert "UsePAM no" in reviewed
+    assert "AllowUsers ssh-over-mcp-e2e-host" in reviewed
+    assert "AuthenticationMethods publickey" in reviewed
+    assert "PermitRootLogin no" in reviewed
+    assert "PermitTTY no" in reviewed
+    assert "DisableForwarding yes" in reviewed
+    assert "UsePrivilegeSeparation no" not in reviewed
+    assert (
+        "ForceCommand /usr/bin/python3 -I -S /usr/local/libexec/ssh-over-mcp-fs-only-launcher.py"
+        in reviewed
+    )
+    assert "/usr/bin/sudo" not in reviewed
 
 
 def test_non_admitted_rootless_candidate_does_not_change_image_or_compose():
