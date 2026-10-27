@@ -80,6 +80,8 @@ def test_disposable_oci_two_node_smoke_has_only_loopback_and_minimal_ssh_caps():
     assert '"--read-only"' in smoke
     assert '"/srv/data:rw,noexec,nosuid,nodev,uid=2201,gid=3201,mode=0700' in smoke
     assert "MODE_A_OPENSSH_OCI_TWO_NODE_FS_ONLY_HOSTED_PASS" in smoke
+    assert "mode_a_hosted_project_transport_smoke.py" in smoke
+    assert "PROJECT_ASYNCSSH_TRANSPORT_TYPED_FS_NODE_" in smoke
     assert "foreign_known.read_bytes()" in smoke
     assert "Host key verification failed" in smoke
     assert "oci_node_{i}_cross" in smoke
@@ -124,3 +126,19 @@ def test_ephemeral_userns_engine_does_not_change_host_daemon():
         "--userns=host",
     ):
         assert forbidden not in body
+
+
+def test_hosted_project_transport_uses_real_project_ssh_code_not_shell():
+    source = (ROOT / "ops/mvp/mode_a_hosted_project_transport_smoke.py").read_text()
+    assert "SSHConnectionManager(" in source
+    assert "StaticCredentialProvider(" in source
+    assert "StructuredSSHTransport(connections=manager)" in source
+    assert "FsReadEnvelope(" in source
+    assert "FsStatEnvelope(" in source
+    assert "FsWriteEnvelope(" in source
+    assert "encode_request(envelope, data)" in source
+    assert "result.exit_status == expected_status" in source
+    assert "host_key=f" in source
+    assert "await manager.close()" in source
+    assert "PROJECT_ASYNCSSH_TRANSPORT_TYPED_FS_NODE_" in source
+    assert "subprocess" not in source

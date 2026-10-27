@@ -236,6 +236,35 @@ def check_node(name: str, index: int) -> None:
     logs = run(["docker", "logs", name], ok=False).stderr.decode(errors="replace")
     assert "Accepted publickey for ssh-over-mcp-e2e-host" in logs, logs[-750:]
 
+    # The preceding probes used the stock ssh CLI. Verify the *real product*
+    # AsyncSSH connection pool, explicit pinned host key, typed SMCP protocol
+    # and transport byte collection against this actual OpenSSH container.
+    project_client = (
+        Path(__file__).with_name("mode_a_hosted_project_transport_smoke.py").read_bytes()
+    )
+    project_result = run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            "-u",
+            "0:0",
+            name,
+            "/opt/ssh-over-mcp-e2e/venv/bin/python",
+            "-",
+            str(index),
+        ],
+        stdin=project_client,
+        timeout=35,
+        ok=False,
+    )
+    marker = f"PROJECT_ASYNCSSH_TRANSPORT_TYPED_FS_NODE_{index}_PASS".encode()
+    assert project_result.returncode == 0 and marker in project_result.stdout, (
+        project_result.returncode,
+        project_result.stderr[-900:],
+        project_result.stdout[-250:],
+    )
+
 
 def main() -> None:
     assert sys.platform == "linux" and os.geteuid() != 0
