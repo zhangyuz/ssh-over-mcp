@@ -51,6 +51,8 @@ Differentiate focused tests, full regression, exact PR-head CI, independent revi
 ## Blockers, deferred gates, and shared resources
 
 - Current blocker (evidence vs assumption):
+- Blocker class (RELEASE_BLOCKER / FUNCTIONAL_BLOCKER / DEFERRED), owner and revisit criterion:
+- Earliest missing actual runtime/E2E evidence:
 - Explicitly deferred issue/owner/acceptance gate:
 - Concurrent agents/worktree owners:
 - Shared runner/Mac/guest/container/process state (read-only observations):
