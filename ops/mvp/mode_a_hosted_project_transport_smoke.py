@@ -32,7 +32,9 @@ async def prove(index: int, known: list[str]) -> None:
     node = f"node{index:02}"
     path = f"/srv/data/mvp-node-{index}/probe.bin"
     expected = f"oci-openssh-fs-node-{index}\x00".encode()
-    assert len(known) == 3 and known[1] == "ssh-ed25519"
+    # OpenSSH public-key lines can contain an optional trailing comment.
+    # Pin the exact key-type and key bytes; never use comment text as key data.
+    assert len(known) >= 3 and known[1] == "ssh-ed25519"
     inventory = Inventory(
         hosts={
             node: Host(
