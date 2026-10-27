@@ -193,6 +193,9 @@ def test_hosted_native_login_no_sudo_is_feasibility_only_not_release():
     assert "Port 2223" in native and "ListenAddress 127.0.0.1" in native
     assert "ForceCommand /usr/bin/setpriv --no-new-privs" in native
     assert "NATIVE_OPENSSH_NO_SUDO_KERNEL_CHECKS=" in native
+    assert "'four_sets_zero':nonbounding_zero" in native
+    assert "'bounding_zero':bounding_zero" in native
+    assert "zero=nonbounding_zero and bounding_zero" in native
     assert "original all-five-sets-zero release contract" in native
     assert "current_user_ns" not in native
     assert "NATIVE_OPENSSH_NO_SUDO_FULL_KERNEL_BOUNDARY_NOT_PROVEN" in native

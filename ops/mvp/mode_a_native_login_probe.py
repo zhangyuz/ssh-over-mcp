@@ -35,9 +35,11 @@ except PermissionError:
  hostkey_denied=True
 uid_ok=os.getresuid()==(2201,2201,2201)
 gid_ok=os.getresgid()==(3201,3201,3201)
-zero=all(fields.get(k)=='0000000000000000' for k in ('CapInh','CapPrm','CapEff','CapBnd','CapAmb'))
+nonbounding_zero=all(fields.get(k)=='0000000000000000' for k in ('CapInh','CapPrm','CapEff','CapAmb'))
+bounding_zero=fields.get('CapBnd')=='0000000000000000'
+zero=nonbounding_zero and bounding_zero
 nnp=fields.get('NoNewPrivs')=='1'
-status={'uid_ok':uid_ok,'gid_ok':gid_ok,'caps_zero':zero,'nnp':nnp,'hostkey_denied':hostkey_denied}
+status={'uid_ok':uid_ok,'gid_ok':gid_ok,'caps_zero':zero,'nnp':nnp,'hostkey_denied':hostkey_denied,'four_sets_zero':nonbounding_zero,'bounding_zero':bounding_zero}
 print(json.dumps(status,sort_keys=True),flush=True)
 sys.exit(0 if all(status.values()) else 77)
 """
@@ -193,7 +195,15 @@ def check(name: str, known: Path) -> bool:
             + json.dumps(
                 {
                     key: status.get(key) is True
-                    for key in ("uid_ok", "gid_ok", "caps_zero", "nnp", "hostkey_denied")
+                    for key in (
+                        "uid_ok",
+                        "gid_ok",
+                        "caps_zero",
+                        "nnp",
+                        "hostkey_denied",
+                        "four_sets_zero",
+                        "bounding_zero",
+                    )
                 },
                 sort_keys=True,
             ),
