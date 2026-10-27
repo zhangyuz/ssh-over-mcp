@@ -393,6 +393,10 @@ def prove_central_mcp_ledger(work: Path, running: list[str], networks: list[str]
     assert control_info["HostConfig"]["CapDrop"] == ["ALL"]
     assert control_info["HostConfig"]["SecurityOpt"] == ["no-new-privileges:true"]
     assert control_info["HostConfig"]["NetworkMode"] == node_networks[0]
+    # Prove an explicit stateful ingress filter in the disposable control netns.
+    from mode_a_hosted_directional_acl import prove as prove_directional_acl
+
+    prove_directional_acl(control, node_names, node_networks, run)
     for index, (client, hostkey) in enumerate(prepared, 1):
         for label, content, mode in (
             (f"client{index}", client.read_bytes(), "0600"),
@@ -444,6 +448,7 @@ def prove_central_mcp_ledger(work: Path, running: list[str], networks: list[str]
     print("NATIVE_FOUR_ZERO_LIMITED_CAPBND_TEST_ONLY=true", flush=True)
     print("FS_LAUNCHER_FIVE_ZERO_RELEASE_CONTRACT_UNCHANGED=true", flush=True)
     print("NODE_TO_NODE_TCP_DENIAL_PROVEN=true", flush=True)
+    print("HOSTED_DIRECTIONAL_NETNS_ACL_TEST_ONLY_PASS=true", flush=True)
     print("NETWORK_DIRECTIONAL_ACL_PROVEN=false SIGNED_MEDIA=false DEPLOYED=false")
 
 

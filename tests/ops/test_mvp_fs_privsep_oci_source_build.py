@@ -355,3 +355,19 @@ def test_baked_native_review_source_equals_official_patch_not_runtime_mount():
     assert "FS_NATIVE_REVIEW_IMAGE_ID=" in cmds
     assert "som-mvp-fs-privsep:local" in cmds  # old base retained for provenance
     assert "SIGNED_IMAGE=false" in cmds and "DEPLOYED=false" in cmds
+
+
+def test_hosted_directional_new_flow_acl_is_real_but_not_production_authority():
+    acl = (ROOT / "ops/mvp/mode_a_hosted_directional_acl.py").read_text()
+    smoke = (ROOT / "ops/mvp/mode_a_hosted_oci_fs_smoke.py").read_text()
+    assert 'os.getenv("RUNNER_ENVIRONMENT") == "github-hosted"' in acl
+    assert 'os.getenv("GITHUB_EVENT_NAME") == "pull_request"' in acl
+    assert 'control.startswith("som342-mcp-control-")' in acl
+    assert '"--target"' in acl and "str(pid)" in acl and '"--net"' in acl
+    assert '"INPUT"' in acl and '"--ctstate"' in acl and '"NEW"' in acl
+    assert '"REJECT"' in acl and '"8000"' in acl
+    assert "pre-policy node->control not reachable" in acl
+    assert "NEW TCP/8000 reached control despite ACL" in acl
+    assert "HOSTED_NODE_TO_CONTROL_TCP8000_NEW_DENIED_BOTH_PASS" in acl
+    assert "prove_directional_acl(control, node_names, node_networks, run)" in smoke
+    assert "NETWORK_DIRECTIONAL_ACL_PROVEN=false SIGNED_MEDIA=false DEPLOYED=false" in smoke
