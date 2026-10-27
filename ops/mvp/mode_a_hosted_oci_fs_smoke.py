@@ -275,18 +275,24 @@ def check_node(name: str, index: int) -> None:
 
 
 def prove_central_mcp_ledger(work: Path, running: list[str], networks: list[str]) -> None:
-    """Test-only internal bridge, real project MCP+Ledger to distinct SSH nodes.
+    """Two test-only node-local bridges, central MCP+Ledger over real SSH.
 
-    This is NOT directional egress ACL proof or production Compose startup.
+    This proves node-to-node isolation, NOT directional node-to-MCP egress
+    firewall rules or production Compose startup.
     Previously verified per-node network=none tests run separately.
     """
-    network = f"som342-private-{uuid.uuid4().hex[:8]}"
-    run(["docker", "network", "create", "--internal", "--driver", "bridge", network])
-    networks.append(network)
-    desc = json.loads(run(["docker", "network", "inspect", network]).stdout)[0]
-    assert desc["Internal"] is True and desc["Driver"] == "bridge"
+    # Separate per-node internal bridges: the control can reach both nodes,
+    # while neither node is attached to the other node's SSH network.
+    node_networks: list[str] = []
+    node_names: list[str] = []
     prepared: list[tuple[Path, Path]] = []
     for index in (1, 2):
+        network = f"som342-node{index}-{uuid.uuid4().hex[:8]}"
+        run(["docker", "network", "create", "--internal", "--driver", "bridge", network])
+        networks.append(network)
+        desc = json.loads(run(["docker", "network", "inspect", network]).stdout)[0]
+        assert desc["Internal"] is True and desc["Driver"] == "bridge"
+        node_networks.append(network)
         name = f"som342-mcp-node{index}-{uuid.uuid4().hex[:5]}"
         _, client, _ = start_node(
             name,
@@ -295,7 +301,39 @@ def prove_central_mcp_ledger(work: Path, running: list[str], networks: list[str]
             network=network,
             alias=f"node{index:02}",
         )
+        node_names.append(name)
         prepared.append((client, work / name / "hostkeys" / "ssh_host_ed25519_key.pub"))
+
+    # Prove real TCP reachability is denied across node networks by IP, not
+    # merely by absent Docker DNS names. No SSH bytes or keys in this probe.
+    for source, peer, peer_network in (
+        (node_names[0], node_names[1], node_networks[1]),
+        (node_names[1], node_names[0], node_networks[0]),
+    ):
+        peer_details = json.loads(run(["docker", "inspect", peer]).stdout)[0]
+        target_ip = peer_details["NetworkSettings"]["Networks"][peer_network]["IPAddress"]
+        assert target_ip and target_ip != "127.0.0.1"
+        probe = run(
+            [
+                "docker",
+                "exec",
+                "-u",
+                "2201:3201",
+                source,
+                "/opt/ssh-over-mcp-e2e/venv/bin/python",
+                "-c",
+                (
+                    "import socket,sys; s=socket.socket(); s.settimeout(1);"
+                    "rc=s.connect_ex((sys.argv[1],2222)); s.close();"
+                    "sys.exit(0 if rc!=0 else 31)"
+                ),
+                target_ip,
+            ],
+            timeout=8,
+            ok=False,
+        )
+        assert probe.returncode == 0, ("node reached sibling isolated SSH address", source, peer)
+    print("HOSTED_TWO_NODE_CROSS_NETWORK_SSH_DENIED_PASS", flush=True)
 
     control = f"som342-mcp-control-{uuid.uuid4().hex[:6]}"
     run(
@@ -307,7 +345,7 @@ def prove_central_mcp_ledger(work: Path, running: list[str], networks: list[str]
             "--name",
             control,
             "--network",
-            network,
+            node_networks[0],
             "--cap-drop",
             "ALL",
             "--security-opt",
@@ -325,12 +363,34 @@ def prove_central_mcp_ledger(work: Path, running: list[str], networks: list[str]
         timeout=35,
     )
     running.append(control)
+    run(["docker", "network", "connect", node_networks[1], control])
     control_info = json.loads(run(["docker", "inspect", control]).stdout)[0]
+    assert set(control_info["NetworkSettings"]["Networks"]) == set(node_networks)
+    # Both host aliases must be routable from the control plane, not from
+    # each other; only SSH from the control is required for this probe.
+    for index in (1, 2):
+        candidate = run(
+            [
+                "docker",
+                "exec",
+                "-u",
+                "2201:3201",
+                control,
+                "/opt/ssh-over-mcp-e2e/venv/bin/python",
+                "-c",
+                "import socket,sys; s=socket.create_connection((sys.argv[1],2222),3); s.close()",
+                f"node{index:02}",
+            ],
+            timeout=8,
+            ok=False,
+        )
+        assert candidate.returncode == 0, ("control cannot access SSH node", index)
+    print("HOSTED_CONTROL_TO_TWO_ISOLATED_SSH_NODES_PASS", flush=True)
     assert control_info["HostConfig"]["Privileged"] is False
     assert control_info["HostConfig"]["ReadonlyRootfs"] is True
     assert control_info["HostConfig"]["CapDrop"] == ["ALL"]
     assert control_info["HostConfig"]["SecurityOpt"] == ["no-new-privileges:true"]
-    assert control_info["HostConfig"]["NetworkMode"] == network
+    assert control_info["HostConfig"]["NetworkMode"] == node_networks[0]
     for index, (client, hostkey) in enumerate(prepared, 1):
         for label, content, mode in (
             (f"client{index}", client.read_bytes(), "0600"),
@@ -379,6 +439,7 @@ def prove_central_mcp_ledger(work: Path, running: list[str], networks: list[str]
     assert b"CENTRAL_MCP_LEDGER_ONCE_ONLY_REAL_SSH_node01_PASS" in result.stdout
     assert b"CENTRAL_MCP_LEDGER_ONCE_ONLY_REAL_SSH_node02_PASS" in result.stdout
     print("CENTRAL_MCP_LEDGER_TWO_OPENSSH_NODES_TEST_ONLY_PASS", flush=True)
+    print("NODE_TO_NODE_TCP_DENIAL_PROVEN=true", flush=True)
     print("NETWORK_DIRECTIONAL_ACL_PROVEN=false SIGNED_MEDIA=false DEPLOYED=false")
 
 

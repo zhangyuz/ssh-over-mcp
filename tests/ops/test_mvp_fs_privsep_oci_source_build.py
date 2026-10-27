@@ -149,6 +149,12 @@ def test_hosted_central_mcp_ledger_two_node_control_is_real_and_test_only():
     script = (ROOT / "ops/mvp/mode_a_hosted_control_ledger_smoke.py").read_text()
     assert '"docker", "network", "create", "--internal"' in smoke
     assert '"docker", "network", "rm", network' in smoke
+    assert "HOSTED_TWO_NODE_CROSS_NETWORK_SSH_DENIED_PASS" in smoke
+    assert "HOSTED_CONTROL_TO_TWO_ISOLATED_SSH_NODES_PASS" in smoke
+    assert "NODE_TO_NODE_TCP_DENIAL_PROVEN=true" in smoke
+    assert '"docker", "network", "connect", node_networks[1], control' in smoke
+    assert "s.connect_ex((sys.argv[1],2222))" in smoke
+    assert "NETWORK_DIRECTIONAL_ACL_PROVEN=false" in smoke
     assert 'if not os.getenv("SOM342_REMAPPED_ROOT_UID"):' in smoke
     assert '"--cap-drop"' in smoke and '"no-new-privileges:true"' in smoke
     assert "CENTRAL_MCP_LEDGER_TWO_OPENSSH_NODES_TEST_ONLY_PASS" in smoke
