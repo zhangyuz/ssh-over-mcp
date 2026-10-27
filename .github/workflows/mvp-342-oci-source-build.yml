@@ -148,6 +148,12 @@ jobs:
         with:
           subject-path: proof/som342-openssh-fs.docker.tar.gz
 
+      - name: Attest verified userns import identity receipt (test-only)
+        id: attest_remap_receipt
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: proof/REMAPPED_IMAGE_TEST_RECEIPT.json
+
       - name: Record signed test-archive claim; production image still unsigned
         shell: bash
         run: |
@@ -158,7 +164,7 @@ jobs:
           echo 'DEPLOYED=false' >> proof/PROVENANCE.txt
 
       - name: Upload test-only hash-bound image and proof (never export secrets)
-        if: ${{ always() && steps.oci_smoke.outcome == 'success' && steps.export_archive.outcome == 'success' && steps.userns_proof.outcome == 'success' && steps.attest_archive.outcome == 'success' }}
+        if: ${{ always() && steps.oci_smoke.outcome == 'success' && steps.export_archive.outcome == 'success' && steps.userns_proof.outcome == 'success' && steps.attest_archive.outcome == 'success' && steps.attest_remap_receipt.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: mvp-342-openssh-oci-source-build

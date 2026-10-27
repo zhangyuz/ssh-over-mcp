@@ -87,8 +87,8 @@ test -n "$expected"
 # On userns-remapped imports Docker may re-ID ownership-shifted layers.
 # This is TEST-ONLY transport proof, NOT a signed-image release decision.
 # Do not silently treat a rewritten image ID as the originally signed ID.
+echo "REMAPPED_RUNTIME_IMAGE_ID=$actual" >> proof/PROVENANCE.txt
 if [ "$actual" != "$expected" ]; then
-  echo "REMAPPED_RUNTIME_IMAGE_ID=$actual" >> proof/PROVENANCE.txt
   echo 'REMAP_IMAGE_ID_MATCHES_BUILD=false' >> proof/PROVENANCE.txt
   echo 'SIGNED_RUNTIME_ID=false' >> proof/PROVENANCE.txt
 fi
@@ -97,4 +97,7 @@ echo 'REMAPPED_IMAGE_ADMISSION_REACHED=true'
 export SOM342_REMAPPED_ROOT_UID="$uidbase"
 export SOM342_REMAPPED_ROOT_GID="$gidbase"
 python3 ops/mvp/mode_a_hosted_oci_fs_smoke.py
+# Record the tested import ID only AFTER central MCP/Ledger, negative ACL,
+# userns mapping and SSH agent checks all completed successfully.
+python3 ops/mvp/mode_a_userns_image_receipt.py "$expected" "$actual" "$uidbase" "$gidbase"
 echo 'DEDICATED_USERNS_REMAP_OCI_TWO_NODE_FS_PASS'

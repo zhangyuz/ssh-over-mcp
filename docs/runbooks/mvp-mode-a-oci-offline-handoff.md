@@ -49,6 +49,26 @@ gh attestation verify "$dir/som342-openssh-fs.docker.tar.gz" \
   --repo zhangyuz/ssh-over-mcp \
   --signer-workflow zhangyuz/ssh-over-mcp/.github/workflows/mvp-342-oci-source-build.yml \
   --deny-self-hosted-runners --format json > "$dir/attestation-verified.json"
+# Same signer identity and exact merge-source digest are mandatory for BOTH.
+merge_sha=$(sed -n 's/^TEST_MERGE_SHA=//p' "$dir/PROVENANCE.txt")
+gh attestation verify "$dir/REMAPPED_IMAGE_TEST_RECEIPT.json" \
+  --repo zhangyuz/ssh-over-mcp \
+  --signer-workflow zhangyuz/ssh-over-mcp/.github/workflows/mvp-342-oci-source-build.yml \
+  --source-digest "$merge_sha" --deny-self-hosted-runners --format json \
+  > "$dir/remap-receipt-attestation-verified.json"
+# After both attestations succeed, compare the signed JSON claims to
+# independently downloaded manifest and archive, never only to CI output.
+python3 - "$dir" <<'PY'
+import hashlib, json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+r = json.loads((p / "REMAPPED_IMAGE_TEST_RECEIPT.json").read_text())
+sha = hashlib.sha256((p / "som342-openssh-fs.docker.tar.gz").read_bytes()).hexdigest()
+assert r["source_archive_sha256"] == sha
+assert r["schema"] == "som342-userns-test-only-v1"
+assert r["production_signed_runtime_id"] is False
+assert r["production_deployed"] is False
+assert r["entrypoint"] == "/usr/local/libexec/ssh-over-mcp-image-hold"
+PY
 ```
 
 **Actually verified on Yuz.local:** workflow
@@ -67,9 +87,11 @@ files inside a derived review-only image. Require a fresh archive containing
 both central Ledger passes, and its own GitHub attestation. The new image
 remains a candidate; `STOP78` is still enforced.
 
+The hosted userns test now records `REMAPPED_IMAGE_TEST_RECEIPT.json` **only after** its real two-node central MCP/Ledger, SSH privilege and directional ACL probes succeed. The receipt links the archive SHA-256, original test image ID, observed post-import image ID, subordinate UID/GID bases, PR HEAD and merge SHA. GitHub separately attests the JSON file with the same pinned workflow. An operator must verify **both** attestations, require the exact approved PR HEAD and merge source digest, and independently compare the JSON archive SHA-256 with the downloaded archive. This only authenticates a **CI test observation**, not the final guest OCI image or its startup permission. Any missing or mismatched receipt must fail closed.
+
 Do not confuse `TEST_ARCHIVE_GITHUB_PROVENANCE_ATTESTED=true` with
 `SIGNED_IMAGE=true`; the provenance receipt explicitly keeps
-`SIGNED_IMAGE=false` and `SIGNED_RUNTIME_ID=false`. Never execute
+`SIGNED_IMAGE=false` and `SIGNED_RUNTIME_ID=false`. The JSON likewise records `production_signed_runtime_id=false` and `production_deployed=false`. Never execute
 an unsafely imported archive because its checksum or attestation passed.
 
 ## Offline verification (inside a separate, disposable Linux guest ONLY)
