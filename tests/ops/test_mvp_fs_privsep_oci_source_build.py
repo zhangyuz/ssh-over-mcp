@@ -173,6 +173,14 @@ def test_hosted_central_mcp_ledger_two_node_control_is_real_and_test_only():
     assert '"docker", "network", "rm", network' in smoke
     assert "HOSTED_TWO_NODE_CROSS_NETWORK_SSH_DENIED_PASS" in smoke
     assert "HOSTED_CONTROL_TO_TWO_ISOLATED_SSH_NODES_PASS" in smoke
+    assert "from mode_a_hosted_origin_bind_probe import prove as prove_origin_only_bind" in smoke
+    assert "prove_origin_only_bind(control, node_names, node_networks, networks, run)" in smoke
+    origin = (ROOT / "ops/mvp/mode_a_hosted_origin_bind_probe.py").read_text()
+    assert "HOSTED_ORIGIN_BIND_ONLY_TWO_NODE_REVERSE_TCP8000_DENIED_PASS" in origin
+    assert '"--internal"' in origin and '"--network"' in origin
+    assert 'for target in (end[network]["IPAddress"], address)' in origin
+    assert "iptables" not in origin.replace("ANY iptables rule", "")
+    assert '"--privileged"' not in origin
     assert "NODE_TO_NODE_TCP_DENIAL_PROVEN=true" in smoke
     assert '"docker", "network", "connect", node_networks[1], control' in smoke
     assert "s.connect_ex((sys.argv[1],2222))" in smoke

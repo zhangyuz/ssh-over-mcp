@@ -26,8 +26,10 @@ class _ComposeTagLoader(yaml.SafeLoader):
     pass
 
 
-def _override(loader: _ComposeTagLoader, node: yaml.SequenceNode):
-    return loader.construct_sequence(node)
+def _override(loader: _ComposeTagLoader, node: yaml.SequenceNode | yaml.MappingNode):
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node)
+    return loader.construct_mapping(node)
 
 
 _ComposeTagLoader.add_constructor("!override", _override)
@@ -36,8 +38,19 @@ _ComposeTagLoader.add_constructor("!override", _override)
 def test_inert_two_node_runtime_overlay_has_exactly_reviewed_admission():
     source = MANIFEST.read_text()
     document = yaml.load(source, Loader=_ComposeTagLoader)
-    assert set(document) == {"services"}
-    assert set(document["services"]) == {"node01", "node02"}
+    assert set(document) == {"services", "networks"}
+    assert set(document["services"]) == {"mcp", "node01", "node02"}
+    mcp = document["services"]["mcp"]
+    assert mcp["environment"]["SSH_OVER_MCP_BIND_HOST"].startswith(
+        "${SSH_OVER_MCP_MODE_A_ORIGIN_IPV4:"
+    )
+    origin = mcp["networks"]["origin_internal"]
+    assert origin["ipv4_address"] == mcp["environment"]["SSH_OVER_MCP_BIND_HOST"]
+    assert set(mcp["networks"]) == {"origin_internal", "node01_ssh", "node02_ssh"}
+    assert "SSH_OVER_MCP_BIND_HOST" in " ".join(mcp["healthcheck"]["test"])
+    assert document["networks"]["origin_internal"]["ipam"]["config"][0]["subnet"].startswith(
+        "${SSH_OVER_MCP_MODE_A_ORIGIN_CIDR:"
+    )
     assert "DO NOT copy test-only root sshd" in source
     assert "reviewed" in source
 
@@ -87,6 +100,8 @@ def test_actual_compose_render_preserves_hard_stop_without_guest_boot():
             "SSH_OVER_MCP_NODE01_IMAGE": "registry.invalid/node01@sha256:" + "2" * 64,
             "SSH_OVER_MCP_NODE02_IMAGE": "registry.invalid/node02@sha256:" + "3" * 64,
             "SSH_OVER_MCP_PROFILE": "rw-operator",
+            "SSH_OVER_MCP_MODE_A_ORIGIN_IPV4": "172.30.252.10",
+            "SSH_OVER_MCP_MODE_A_ORIGIN_CIDR": "172.30.252.0/24",
             "SSH_OVER_MCP_CONFIG_FILE": "/tmp/som-review-does-not-exist/config",
             "SSH_OVER_MCP_CREDENTIAL_MAP_FILE": "/tmp/som-review-does-not-exist/creds",
             "SSH_OVER_MCP_SSH_SECRETS_DIR": "/tmp/som-review-does-not-exist/secrets",
@@ -131,6 +146,11 @@ def test_actual_compose_render_preserves_hard_stop_without_guest_boot():
     data = json.loads(proc.stdout)
     services = data["services"]
     assert "mcp" in services
+    mcp = services["mcp"]
+    assert mcp["environment"]["SSH_OVER_MCP_BIND_HOST"] == "172.30.252.10"
+    assert mcp["networks"]["origin_internal"]["ipv4_address"] == "172.30.252.10"
+    assert set(mcp["networks"]) == {"origin_internal", "node01_ssh", "node02_ssh"}
+    assert data["networks"]["origin_internal"]["ipam"]["config"][0]["subnet"] == "172.30.252.0/24"
     for number in ("01", "02"):
         node = services[f"node{number}"]
         assert node["entrypoint"] == HOLD

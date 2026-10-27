@@ -64,8 +64,8 @@ The MCP origin SHOULD remain private:
 Phase 6A implements a static Portal-to-origin bearer boundary. Configure an
 absolute mounted secret path in `SSH_OVER_MCP_ORIGIN_BEARER_TOKEN_FILE`; when
 configured, `/mcp` accepts only `Authorization: Bearer <token>`. Binding the
-server to `0.0.0.0` through `SSH_OVER_MCP_BIND_HOST` is rejected unless that
-token-file setting is present. Health/readiness remain credential-free and
+server to `0.0.0.0` **or a canonical RFC1918 origin-interface IPv4** through
+`SSH_OVER_MCP_BIND_HOST` is rejected unless that token-file setting is present. Health/readiness remain credential-free and
 bounded.
 
 This origin bearer is **not** a Cloudflare Access service token. The origin

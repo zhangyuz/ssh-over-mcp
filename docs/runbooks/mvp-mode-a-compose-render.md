@@ -80,7 +80,18 @@ This is a CI-only candidate security model; independently approved production
 policy still requires **all five sets zero** until separately reviewed. All nodes explicitly retain the STOP78 entrypoint,
 even when the review-only profile is enabled.
 
-This does NOT prove or authorize live Mode A networking, directional
-node-to-control packet denial, signed production image identity, real
-central MCP/Ledger one-use approvals, rollback, or no-NIC guest runtime.
-No host secrets or bind-source paths are created by `config`.
+The candidate MCP service now **requires** two operator-selected nonconflicting
+RFC1918 values at offline render: `SSH_OVER_MCP_MODE_A_ORIGIN_CIDR`
+(e.g. `172.30.252.0/24`) and `SSH_OVER_MCP_MODE_A_ORIGIN_IPV4`
+(e.g. `172.30.252.10`, contained in that subnet). The MCP listener and
+`origin_internal` static address must be identical; healthcheck probes this
+address rather than loopback. Nodes remain on their separate `node01_ssh`
+and `node02_ssh` bridges. This removes `0.0.0.0` from the Mode A review-only
+control service with **no NET_ADMIN/host firewall capability**. CI separately
+exercises a disposable origin-only TCP listener against real two SSH nodes,
+followed by the existing stateful ACL test; neither is a production startup
+or signed guest acceptance.
+
+This does NOT prove or authorize live Mode A networking, production directional
+ACL, signed production image identity, rollback or no-NIC OCI guest runtime.
+No host secrets or bind-source paths are created by `config`. Keep STOP78.

@@ -396,7 +396,11 @@ def prove_central_mcp_ledger(work: Path, running: list[str], networks: list[str]
     assert control_info["HostConfig"]["CapDrop"] == ["ALL"]
     assert control_info["HostConfig"]["SecurityOpt"] == ["no-new-privileges:true"]
     assert control_info["HostConfig"]["NetworkMode"] == node_networks[0]
-    # Prove an explicit stateful ingress filter in the disposable control netns.
+    # First prove a separate origin-only listener rejects both SSH nodes
+    # WITHOUT any netns firewall, then retain the stronger stateful ACL proof.
+    from mode_a_hosted_origin_bind_probe import prove as prove_origin_only_bind
+
+    prove_origin_only_bind(control, node_names, node_networks, networks, run)
     from mode_a_hosted_directional_acl import prove as prove_directional_acl
 
     prove_directional_acl(control, node_names, node_networks, run)
