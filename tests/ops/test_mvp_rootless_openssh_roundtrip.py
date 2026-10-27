@@ -13,6 +13,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import ExitStack
 from pathlib import Path
@@ -177,7 +178,7 @@ def test_rootless_openssh_template_and_typed_agent_fixture_are_closed():
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="requires real Linux OpenSSH")
-def test_two_real_rootless_openssh_sessions_fs_create_read_and_isolation(tmp_path):
+def test_two_real_rootless_openssh_sessions_fs_create_read_and_isolation():
     if os.geteuid() == 0:
         pytest.skip("must run as an unprivileged CI identity")
     if not all(shutil.which(x) for x in ("ssh", "ssh-keygen", "setpriv")):
@@ -189,9 +190,17 @@ def test_two_real_rootless_openssh_sessions_fs_create_read_and_isolation(tmp_pat
     assert identity.pw_shell.startswith("/")
     user, uid, gid = identity.pw_name, os.getuid(), os.getgid()
     with ExitStack() as stack:
+        # StrictModes rejects keys beneath a writable ancestor such as /tmp.
+        # Keep both ephemeral server identities inside the user's private home
+        # (and dispose of the full tree after stopping both sshd processes).
+        fixture_root = Path(
+            stack.enter_context(
+                tempfile.TemporaryDirectory(prefix=".som-ssh-rootless-", dir=identity.pw_dir)
+            )
+        )
         nodes = []
         for alias in ("node01", "node02"):
-            conf, key, port, data, known = _one_node(tmp_path / alias, user, uid, gid)
+            conf, key, port, data, known = _one_node(fixture_root / alias, user, uid, gid)
             log_path = conf.parent / "sshd-test.log"
             log_path.touch(mode=0o600)
             log_path.chmod(0o600)
@@ -233,10 +242,15 @@ def test_two_real_rootless_openssh_sessions_fs_create_read_and_isolation(tmp_pat
                     request_id=base + "_mkdir", profile="rw-operator", path=str(directory)
                 )
             )
-            assert mkdir.returncode == 0, (
-                mkdir.stderr[-450:],
-                (data.parent / "sshd-test.log").read_bytes()[-3000:],
-            )
+            diagnostics = [
+                line[-400:]
+                for line in (data.parent / "sshd-test.log").read_text(errors="replace").splitlines()
+                if any(
+                    word in line.lower()
+                    for word in ("auth", "account", "key", "user", "refus", "fail", "error", "bad")
+                )
+            ]
+            assert mkdir.returncode == 0, (mkdir.stderr[-450:], diagnostics[-45:])
             write = call(
                 FsWriteEnvelope(
                     request_id=base + "_write",
