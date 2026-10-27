@@ -95,6 +95,8 @@ def start_node(
         "--cap-drop",
         "ALL",
         *[argument for cap in SSH_CAPS for argument in ("--cap-add", cap)],
+        "--security-opt",
+        "no-new-privileges:true",
         "--read-only",
         "--tmpfs",
         "/run:rw,noexec,nosuid,nodev,mode=0755,size=8m",
@@ -138,6 +140,7 @@ def start_node(
     assert hostconfig["ReadonlyRootfs"] is True
     assert set(hostconfig["CapDrop"]) == {"ALL"}
     assert {c.removeprefix("CAP_") for c in hostconfig["CapAdd"]} == set(SSH_CAPS)
+    assert hostconfig["SecurityOpt"] == ["no-new-privileges:true"]
     assert not hostconfig["Binds"]
     assert all(not bindings for bindings in details["NetworkSettings"]["Ports"].values())
     # docker cp refuses a read-only OCI rootfs even for tmpfs destinations.

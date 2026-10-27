@@ -72,10 +72,12 @@ directory placeholders from `reference.mode-a.env.example`. Only invoke
 
 The candidate aligns rendered fields with validated OpenSSH admission:
 root user inside a dedicated userns, `CAP_SETUID/SETGID/SETPCAP/SYS_CHROOT`
-only, non-NNP admission for one fixed sudo/setpriv handoff, internal SSH
-port 2222, read-only per-node host keys/authorized keys and node data
-volumes. The final user FS process is independently checked to UID2201,
-NNP=1, CapBnd=0. All nodes explicitly retain the STOP78 entrypoint,
+only, **NNP=1 from container startup**, native no-sudo fixed ForceCommand,
+internal SSH port 2222, read-only per-node host keys/authorized keys and
+node data volumes. Hosted OCI verifies the final FS process UID2201,
+NNP=1, four zero capability sets and an exact **nonzero** CapBnd=0x401c0.
+This is a CI-only candidate security model; independently approved production
+policy still requires **all five sets zero** until separately reviewed. All nodes explicitly retain the STOP78 entrypoint,
 even when the review-only profile is enabled.
 
 This does NOT prove or authorize live Mode A networking, directional

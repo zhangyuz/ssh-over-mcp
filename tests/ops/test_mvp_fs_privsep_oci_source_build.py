@@ -96,6 +96,9 @@ def test_disposable_oci_two_node_smoke_has_only_loopback_and_minimal_ssh_caps():
     assert '"--network"' in smoke and '"none"' in smoke
     assert '"--cap-drop"' in smoke and '"ALL"' in smoke
     assert 'SSH_CAPS = ("SETUID", "SETGID", "SETPCAP", "SYS_CHROOT")' in smoke
+    node = smoke.split("def start_node(", 1)[1].split("\ndef ", 1)[0]
+    assert '"--security-opt"' in node and '"no-new-privileges:true"' in node
+    assert 'hostconfig["SecurityOpt"] == ["no-new-privileges:true"]' in node
     assert '"--read-only"' in smoke
     assert '"/srv/data:rw,noexec,nosuid,nodev,uid=2201,gid=3201,mode=0700' in smoke
     assert "MODE_A_OPENSSH_OCI_TWO_NODE_FS_ONLY_HOSTED_PASS" in smoke

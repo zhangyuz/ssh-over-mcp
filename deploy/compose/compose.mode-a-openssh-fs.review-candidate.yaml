@@ -16,9 +16,10 @@ services:
     cap_drop: !override ["ALL"]
     # Only the 4 caps established by real hosted userns-remapped OpenSSH test.
     cap_add: !override ["SETUID", "SETGID", "SETPCAP", "SYS_CHROOT"]
-    # Exact sudo->setpriv admission cannot start under inherited NNP=1.
-    # The immutable launcher verifies NNP=1 + zero CapBnd in the FS process.
-    security_opt: !override ["no-new-privileges:false"]
+    # No-sudo native ForceCommand: NNP=1 from container start through SSH login.
+    # Final FS process: 4 capability sets zero, CapBnd exactly 0x401c0.
+    # Still a P1 review candidate, not all-five-zero production acceptance.
+    security_opt: !override ["no-new-privileges:true"]
     entrypoint: ["/usr/local/libexec/ssh-over-mcp-image-hold"]
     expose: !override ["2222"]
     tmpfs:
@@ -48,7 +49,7 @@ services:
     read_only: true
     cap_drop: !override ["ALL"]
     cap_add: !override ["SETUID", "SETGID", "SETPCAP", "SYS_CHROOT"]
-    security_opt: !override ["no-new-privileges:false"]
+    security_opt: !override ["no-new-privileges:true"]
     entrypoint: ["/usr/local/libexec/ssh-over-mcp-image-hold"]
     expose: !override ["2222"]
     tmpfs:

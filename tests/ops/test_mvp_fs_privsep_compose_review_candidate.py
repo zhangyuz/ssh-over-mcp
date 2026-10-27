@@ -49,7 +49,7 @@ def test_inert_two_node_runtime_overlay_has_exactly_reviewed_admission():
         assert node["entrypoint"] == HOLD
         assert node["cap_drop"] == ["ALL"]
         assert set(node["cap_add"]) == CAPS
-        assert node["security_opt"] == ["no-new-privileges:false"]
+        assert node["security_opt"] == ["no-new-privileges:true"]
         assert node["expose"] == ["2222"]
         assert "ports" not in node
         assert "privileged" not in node
@@ -138,7 +138,7 @@ def test_actual_compose_render_preserves_hard_stop_without_guest_boot():
         assert node["read_only"] is True
         assert set(node["cap_add"]) == CAPS
         assert node["cap_drop"] == ["ALL"]
-        assert node["security_opt"] == ["no-new-privileges:false"]
+        assert node["security_opt"] == ["no-new-privileges:true"]
         assert node["expose"] == ["2222"]
         assert not node.get("ports")
         assert node["profiles"] == ["mvp-fs-review"]
