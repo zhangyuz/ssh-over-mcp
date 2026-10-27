@@ -97,6 +97,18 @@ def test_actual_compose_render_preserves_hard_stop_without_guest_boot():
             "SSH_OVER_MCP_NODE02_AUTHORIZED_KEYS_DIR": "/tmp/som-review-does-not-exist/node02/auth",
         }
     )
+    # Some CI partitions have docker(1) but no Compose v2 plugin.
+    # Static reviewed overlay assertions still run everywhere.
+    plugin = subprocess.run(
+        ["docker", "compose", "version"],
+        capture_output=True,
+        text=True,
+        timeout=8,
+        check=False,
+        env=env,
+    )
+    if plugin.returncode != 0:
+        pytest.skip("Docker Compose v2 plugin unavailable in this CI partition")
     args = [
         "docker",
         "compose",
