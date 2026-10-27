@@ -36,10 +36,28 @@ except PermissionError:
 uid_ok=os.getresuid()==(2201,2201,2201)
 gid_ok=os.getresgid()==(3201,3201,3201)
 nonbounding_zero=all(fields.get(k)=='0000000000000000' for k in ('CapInh','CapPrm','CapEff','CapAmb'))
-bounding_zero=fields.get('CapBnd')=='0000000000000000'
+bounding_hex=fields.get('CapBnd','')
+bounding_zero=bounding_hex=='0000000000000000'
+# Exact four admission capabilities: SETGID=6, SETUID=7,
+# SETPCAP=8, SYS_CHROOT=18. Never accept a broader inherited mask.
+admission_mask=(1<<6)|(1<<7)|(1<<8)|(1<<18)
+try:
+ bounding_limited=int(bounding_hex,16)==admission_mask
+except ValueError:
+ bounding_limited=False
+def denied(action):
+ try:
+  action()
+ except PermissionError:
+  return True
+ return False
+root_uid_denied=denied(lambda:os.setresuid(0,0,0))
+root_gid_denied=denied(lambda:os.setresgid(0,0,0))
+chroot_denied=denied(lambda:os.chroot('/tmp'))
+setgroups_denied=denied(lambda:os.setgroups([]))
 zero=nonbounding_zero and bounding_zero
 nnp=fields.get('NoNewPrivs')=='1'
-status={'uid_ok':uid_ok,'gid_ok':gid_ok,'caps_zero':zero,'nnp':nnp,'hostkey_denied':hostkey_denied,'four_sets_zero':nonbounding_zero,'bounding_zero':bounding_zero}
+status={'uid_ok':uid_ok,'gid_ok':gid_ok,'caps_zero':zero,'nnp':nnp,'hostkey_denied':hostkey_denied,'four_sets_zero':nonbounding_zero,'bounding_zero':bounding_zero,'bounding_limited':bounding_limited,'root_uid_denied':root_uid_denied,'root_gid_denied':root_gid_denied,'chroot_denied':chroot_denied,'setgroups_denied':setgroups_denied}
 print(json.dumps(status,sort_keys=True),flush=True)
 sys.exit(0 if all(status.values()) else 77)
 """
@@ -203,6 +221,11 @@ def check(name: str, known: Path) -> bool:
                         "hostkey_denied",
                         "four_sets_zero",
                         "bounding_zero",
+                        "bounding_limited",
+                        "root_uid_denied",
+                        "root_gid_denied",
+                        "chroot_denied",
+                        "setgroups_denied",
                     )
                 },
                 sort_keys=True,
@@ -216,6 +239,24 @@ def check(name: str, known: Path) -> bool:
             status.get(k) is True
             for k in ("uid_ok", "gid_ok", "caps_zero", "nnp", "hostkey_denied")
         )
+        # Diagnostic candidate is NOT the five-zero production release gate.
+        candidate = all(
+            status.get(k) is True
+            for k in (
+                "uid_ok",
+                "gid_ok",
+                "four_sets_zero",
+                "nnp",
+                "hostkey_denied",
+                "bounding_limited",
+                "root_uid_denied",
+                "root_gid_denied",
+                "chroot_denied",
+                "setgroups_denied",
+            )
+        )
+        if candidate:
+            print("NATIVE_OPENSSH_NO_SUDO_LIMITED_BOUNDING_NEGATIVES_PASS_ONLY", flush=True)
         assert verified == (result.returncode == 0)
         if verified:
             print("NATIVE_OPENSSH_NO_SUDO_FULL_KERNEL_BOUNDARY_PASS", flush=True)

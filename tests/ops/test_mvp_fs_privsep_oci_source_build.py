@@ -196,6 +196,12 @@ def test_hosted_native_login_no_sudo_is_feasibility_only_not_release():
     assert "'four_sets_zero':nonbounding_zero" in native
     assert "'bounding_zero':bounding_zero" in native
     assert "zero=nonbounding_zero and bounding_zero" in native
+    assert "admission_mask=(1<<6)|(1<<7)|(1<<8)|(1<<18)" in native
+    assert "int(bounding_hex,16)==admission_mask" in native
+    for negative in ("root_uid_denied", "root_gid_denied", "chroot_denied", "setgroups_denied"):
+        assert negative in native
+    assert "NATIVE_OPENSSH_NO_SUDO_LIMITED_BOUNDING_NEGATIVES_PASS_ONLY" in native
+    assert "Diagnostic candidate is NOT the five-zero production release gate" in native
     assert "original all-five-sets-zero release contract" in native
     assert "current_user_ns" not in native
     assert "NATIVE_OPENSSH_NO_SUDO_FULL_KERNEL_BOUNDARY_NOT_PROVEN" in native
