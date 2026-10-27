@@ -132,7 +132,11 @@ def policy_config() -> dict:
                     "roles": ["rw-operator"],
                     "hosts": list(NODES),
                     "tools": ["fs_stat", "fs_read", "fs_mkdir", "fs_write"],
-                    "paths": [*paths, *(f"{p}/approved.bin" for p in paths)],
+                    "paths": [
+                        *paths,
+                        *(f"{p}/seed.bin" for p in paths),
+                        *(f"{p}/approved.bin" for p in paths),
+                    ],
                 }
             ],
         },
@@ -194,6 +198,37 @@ async def prove(root: Path, ledger: SecurityLedgerRuntimeSettings) -> None:
                 tools = {x.name for x in (await client.list_tools()).tools}
                 assert {"fs_stat", "fs_read", "fs_mkdir", "fs_write", "approval_status"} <= tools
                 assert "approval_grant" not in tools and "approval_deny" not in tools
+
+                # First prove real central MCP HTTP typed reads on BOTH SSH
+                # nodes, with no approval or write privilege consumed here.
+                # Fixtures were explicitly created by test setup via SSH.
+                for index, node in enumerate(NODES, 1):
+                    seed = f"/srv/data/mvp-node-{index}/seed.bin"
+                    expected = f"central-mcp-oci-readonly-node-{index}".encode()
+                    stat = success(
+                        await client.call_tool("fs_stat", {"host": node, "path": seed}),
+                        f"readonly stat {node}",
+                    )
+                    assert stat["size"] == len(expected)
+                    actual = success(
+                        await client.call_tool(
+                            "fs_read", {"host": node, "path": seed, "max_bytes": 4096}
+                        ),
+                        f"readonly read {node}",
+                    )
+                    assert base64.b64decode(actual["data_base64"], validate=True) == expected
+                    other_node = NODES[1 if index == 1 else 0]
+                    denied = error(
+                        await client.call_tool(
+                            "fs_read",
+                            {"host": other_node, "path": seed, "max_bytes": 4096},
+                        ),
+                        f"cross-node readonly {node}",
+                    )
+                    assert "denied" in denied.lower() or "failed" in denied.lower()
+                    print(f"CENTRAL_MCP_READONLY_REAL_OPENSSH_{node}_PASS", flush=True)
+                print("CENTRAL_MCP_READONLY_TWO_OPENSSH_NODES_PASS", flush=True)
+
                 for i, node in enumerate(NODES, 1):
                     base = f"/srv/data/mvp-node-{i}"
                     target = f"{base}/approved.bin"
