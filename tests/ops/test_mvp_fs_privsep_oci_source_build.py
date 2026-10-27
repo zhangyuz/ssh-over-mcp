@@ -167,3 +167,11 @@ def test_hosted_central_mcp_ledger_two_node_control_is_real_and_test_only():
         assert token in script
     assert "docker" not in script
     assert 'client.call_tool("ssh_exec"' not in script
+
+
+def test_openssh_fs_account_home_exists_but_is_root_owned_and_immutable():
+    source = (ROOT / "deploy/ssh-target/Dockerfile.fs-only-review-candidate").read_text()
+    assert "useradd -u 2201 -g 3201 --no-create-home -d /opt/ssh-over-mcp-e2e/empty-home" in source
+    assert "chown 0:0 /opt/ssh-over-mcp-e2e/empty-home" in source
+    assert "chmod 0555 /opt/ssh-over-mcp-e2e/empty-home" in source
+    assert "-d /nonexistent -s /bin/sh ssh-over-mcp-e2e-host" not in source

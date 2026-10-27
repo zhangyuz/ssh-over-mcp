@@ -83,9 +83,12 @@ COPY deploy/ssh-target/entrypoint.review-hold /usr/local/libexec/ssh-over-mcp-im
 # '*' is an impossible password hash; password and interactive auth disabled.
 RUN set -eu; \
     groupadd -g 3201 som-ssh-login; \
-    useradd -u 2201 -g 3201 --no-create-home -d /nonexistent -s /bin/sh ssh-over-mcp-e2e-host; \
+    useradd -u 2201 -g 3201 --no-create-home -d /opt/ssh-over-mcp-e2e/empty-home -s /bin/sh ssh-over-mcp-e2e-host; \
     usermod -p '*' ssh-over-mcp-e2e-host; \
-    mkdir -p /etc/ssh/hostkeys /etc/ssh/authorized_keys /run/sshd /srv/data; \
+    mkdir -p /etc/ssh/hostkeys /etc/ssh/authorized_keys /run/sshd /srv/data \
+      /opt/ssh-over-mcp-e2e/empty-home; \
+    chown 0:0 /opt/ssh-over-mcp-e2e/empty-home; \
+    chmod 0555 /opt/ssh-over-mcp-e2e/empty-home; \
     chown 2201:3201 /srv/data; \
     chmod 0700 /srv/data; \
     chmod 0444 /etc/ssh-over-mcp/host-policy.yaml; \
