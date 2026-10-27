@@ -286,3 +286,26 @@ def test_two_real_rootless_openssh_sessions_fs_create_read_and_isolation(tmp_pat
                 ),
             )
             assert wrong_host.returncode != 0
+
+
+def test_rootless_openssh_oci_candidate_is_nonroot_and_startup_stays_disabled():
+    """Static source contract; this is not a Docker build or kernel proof."""
+    image = (ROOT / "deploy/ssh-target/Dockerfile.fs-only-review-candidate").read_text()
+    assert "FROM --platform=linux/amd64 docker.io/library/ubuntu@sha256:" in image
+    assert "openssh-server=" in image
+    assert "COPY ops/mvp/ssh-over-mcp-fs-only-launcher.py " in image
+    assert "COPY deploy/ssh-target/sshd_config.fs-only-review-candidate " in image
+    assert "COPY deploy/ssh-target/host-policy.review-candidate.yaml " in image
+    assert "chown 2201:3201 /srv/data" in image
+    assert "USER 2201:3201" in image
+    assert "EXPOSE 2222" in image
+    assert "usermod -p '*' ssh-over-mcp-e2e-host" in image
+    assert 'ENTRYPOINT ["/usr/local/libexec/ssh-over-mcp-image-hold"]' in image
+    assert "docker.sock" not in image
+    assert "sudo=" not in image
+    assert "sudoers" not in image
+    assert "visudo" not in image
+    assert "CAP_SETUID" not in image
+    assert "CAP_SETGID" not in image
+    assert "COPY ops/mvp/ssh-over-mcp-oci-launcher.py" not in image
+    assert "ssh-keygen" not in image
