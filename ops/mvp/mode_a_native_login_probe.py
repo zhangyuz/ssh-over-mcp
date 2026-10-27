@@ -42,12 +42,13 @@ print(json.dumps(status,sort_keys=True),flush=True)
 sys.exit(0 if all(status.values()) else 77)
 """
 
-# Note: bare native login is not sufficient if CapBnd survives. setpriv
-# attempts to drop the bounding set as the *already unprivileged SSH user*.
-# If the kernel denies it, no privileges are requested to make the test pass.
+# A previous strict probe proved unprivileged native login cannot use
+# --bounding-set=-all (EPERM; no CAP_SETPCAP). Instead measure what *native*
+# OpenSSH login + unprivileged NNP actually supplies. Keep demanding the
+# original all-five-sets-zero release contract: if bounding is not zero,
+# this proposal is NOT ACCEPTED; do not weaken the invariant to get green.
 FORCE = (
-    "ForceCommand /usr/bin/setpriv --inh-caps=-all --ambient-caps=-all "
-    "--bounding-set=-all --no-new-privs "
+    "ForceCommand /usr/bin/setpriv --no-new-privs "
     "/usr/bin/python3 -I -S /tmp/som342-native-probe.py"
 )
 
@@ -185,6 +186,19 @@ def check(name: str, known: Path) -> bool:
         except (UnicodeError, ValueError):
             pass
     if isinstance(status, dict):
+        # Diagnostic summary uses only boolean kernel/protection assertions;
+        # no SSH keys, request data, or arbitrary stdout is published.
+        print(
+            "NATIVE_OPENSSH_NO_SUDO_KERNEL_CHECKS="
+            + json.dumps(
+                {
+                    key: status.get(key) is True
+                    for key in ("uid_ok", "gid_ok", "caps_zero", "nnp", "hostkey_denied")
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
         # This branch can only be claimed safe with all checks explicitly
         # true; no source line or private SSH key bytes are ever emitted.
         assert status.get("hostkey_denied") is True, "SSH login read root hostkey"

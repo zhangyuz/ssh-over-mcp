@@ -191,7 +191,9 @@ def test_hosted_native_login_no_sudo_is_feasibility_only_not_release():
     assert 'RUNNER_ENVIRONMENT") == "github-hosted"' in native
     assert 'GITHUB_EVENT_NAME") == "pull_request"' in native
     assert "Port 2223" in native and "ListenAddress 127.0.0.1" in native
-    assert "--bounding-set=-all --no-new-privs" in native
+    assert "ForceCommand /usr/bin/setpriv --no-new-privs" in native
+    assert "NATIVE_OPENSSH_NO_SUDO_KERNEL_CHECKS=" in native
+    assert "original all-five-sets-zero release contract" in native
     assert "current_user_ns" not in native
     assert "NATIVE_OPENSSH_NO_SUDO_FULL_KERNEL_BOUNDARY_NOT_PROVEN" in native
     assert "NATIVE_OPENSSH_NO_SUDO_FULL_KERNEL_BOUNDARY_PASS" in native
