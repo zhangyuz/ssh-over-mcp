@@ -30,6 +30,37 @@ from ssh_over_mcp.api.app import build_application
 from ssh_over_mcp.api.runtime import MCPRuntimeSettings
 from ssh_over_mcp.approvals.runtime import SecurityLedgerRuntimeSettings
 from ssh_over_mcp.approvals.service import SecurityLedgerService
+from ssh_over_mcp.ssh.transport import StructuredSSHTransport
+
+# Diagnostic-only observer: delegates unmodified to the real SSH transport.
+# It records no request bodies, secrets or file content.
+_REAL_RUN = StructuredSSHTransport.run
+
+
+async def _observe_real_transport(
+    self, *, host, payload, request_id, timeout_seconds, max_output_bytes
+):
+    result = await _REAL_RUN(
+        self,
+        host=host,
+        payload=payload,
+        request_id=request_id,
+        timeout_seconds=timeout_seconds,
+        max_output_bytes=max_output_bytes,
+    )
+    if b'"operation":"fs_mkdir"' in payload or b'"operation":"fs_write"' in payload:
+        print(
+            f"FS_MUTATION_TRANSPORT_OBSERVED host={host} status={result.exit_status}"
+            f" signal={result.exit_signal} timeout={result.timed_out}"
+            f" truncated={result.truncated} stdout_length={len(result.stdout)}"
+            f" stderr_length={len(result.stderr)}",
+            file=sys.stderr,
+            flush=True,
+        )
+    return result
+
+
+StructuredSSHTransport.run = _observe_real_transport
 
 NODES = ("node01", "node02")
 _APPROVAL = re.compile(r"apr_[0-9a-f]{32}")
