@@ -71,7 +71,14 @@ def prepare(node: Path, name: str) -> tuple[Path, Path, Path]:
     return host, client, known
 
 
-def start_node(name: str, work: Path, running: list[str]) -> tuple[str, Path, Path]:
+def start_node(
+    name: str,
+    work: Path,
+    running: list[str],
+    *,
+    network: str = "none",
+    alias: str | None = None,
+) -> tuple[str, Path, Path]:
     _host, client, known = prepare(work, name)
     args = [
         "docker",
@@ -81,7 +88,8 @@ def start_node(name: str, work: Path, running: list[str]) -> tuple[str, Path, Pa
         "--name",
         name,
         "--network",
-        "none",
+        network,
+        *([] if alias is None else ["--network-alias", alias]),
         "--cap-drop",
         "ALL",
         *[argument for cap in SSH_CAPS for argument in ("--cap-add", cap)],
@@ -109,7 +117,7 @@ def start_node(name: str, work: Path, running: list[str]) -> tuple[str, Path, Pa
     running.append(name)
     details = json.loads(run(["docker", "inspect", name]).stdout)[0]
     hostconfig = details["HostConfig"]
-    assert hostconfig["NetworkMode"] == "none"
+    assert hostconfig["NetworkMode"] == network
     if os.getenv("SOM342_REMAPPED_ROOT_UID"):
         security = json.loads(
             run(["docker", "info", "--format", "{{json .SecurityOptions}}"]).stdout
@@ -266,6 +274,114 @@ def check_node(name: str, index: int) -> None:
     )
 
 
+def prove_central_mcp_ledger(work: Path, running: list[str], networks: list[str]) -> None:
+    """Test-only internal bridge, real project MCP+Ledger to distinct SSH nodes.
+
+    This is NOT directional egress ACL proof or production Compose startup.
+    Previously verified per-node network=none tests run separately.
+    """
+    network = f"som342-private-{uuid.uuid4().hex[:8]}"
+    run(["docker", "network", "create", "--internal", "--driver", "bridge", network])
+    networks.append(network)
+    desc = json.loads(run(["docker", "network", "inspect", network]).stdout)[0]
+    assert desc["Internal"] is True and desc["Driver"] == "bridge"
+    prepared: list[tuple[Path, Path]] = []
+    for index in (1, 2):
+        name = f"som342-mcp-node{index}-{uuid.uuid4().hex[:5]}"
+        _, client, _ = start_node(
+            name,
+            work / name,
+            running,
+            network=network,
+            alias=f"node{index:02}",
+        )
+        prepared.append((client, work / name / "hostkeys" / "ssh_host_ed25519_key.pub"))
+
+    control = f"som342-mcp-control-{uuid.uuid4().hex[:6]}"
+    run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            control,
+            "--network",
+            network,
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges:true",
+            "--read-only",
+            "--user",
+            "2201:3201",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,uid=2201,gid=3201,mode=1777,size=16m",
+            "--entrypoint",
+            "/bin/sleep",
+            IMAGE,
+            "120",
+        ],
+        timeout=35,
+    )
+    running.append(control)
+    control_info = json.loads(run(["docker", "inspect", control]).stdout)[0]
+    assert control_info["HostConfig"]["Privileged"] is False
+    assert control_info["HostConfig"]["ReadonlyRootfs"] is True
+    assert control_info["HostConfig"]["CapDrop"] == ["ALL"]
+    assert control_info["HostConfig"]["SecurityOpt"] == ["no-new-privileges:true"]
+    assert control_info["HostConfig"]["NetworkMode"] == network
+    for index, (client, hostkey) in enumerate(prepared, 1):
+        for label, content, mode in (
+            (f"client{index}", client.read_bytes(), "0600"),
+            (f"hostkey{index}.pub", hostkey.read_bytes(), "0644"),
+        ):
+            run(
+                [
+                    "docker",
+                    "exec",
+                    "-i",
+                    "-u",
+                    "2201:3201",
+                    control,
+                    "/bin/sh",
+                    "-c",
+                    f"umask 077; cat > /tmp/{label}; chmod {mode} /tmp/{label}",
+                ],
+                stdin=content,
+            )
+    controller = Path(__file__).with_name("mode_a_hosted_control_ledger_smoke.py").read_bytes()
+    result = run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            "-u",
+            "2201:3201",
+            control,
+            "/opt/ssh-over-mcp-e2e/venv/bin/python",
+            "-",
+        ],
+        stdin=controller,
+        timeout=65,
+        ok=False,
+    )
+    if result.returncode:
+        raise AssertionError(
+            (
+                "central MCP/Ledger two-node proof",
+                result.returncode,
+                result.stderr[-4000:],
+                result.stdout[-650:],
+            )
+        )
+    assert b"CENTRAL_MCP_LEDGER_TWO_OPENSSH_NODES_TEST_ONLY_PASS" in result.stdout
+    assert b"CENTRAL_MCP_LEDGER_ONCE_ONLY_REAL_SSH_node01_PASS" in result.stdout
+    assert b"CENTRAL_MCP_LEDGER_ONCE_ONLY_REAL_SSH_node02_PASS" in result.stdout
+    print("CENTRAL_MCP_LEDGER_TWO_OPENSSH_NODES_TEST_ONLY_PASS", flush=True)
+    print("NETWORK_DIRECTIONAL_ACL_PROVEN=false SIGNED_MEDIA=false DEPLOYED=false")
+
+
 def main() -> None:
     assert sys.platform == "linux" and os.geteuid() != 0
     assert os.getenv("GITHUB_ACTIONS") == "true"
@@ -277,6 +393,7 @@ def main() -> None:
     detail = json.loads(run(["docker", "image", "inspect", IMAGE]).stdout)[0]
     assert detail["Config"]["Entrypoint"] == ["/usr/local/libexec/ssh-over-mcp-image-hold"]
     running: list[str] = []
+    networks: list[str] = []
     with tempfile.TemporaryDirectory(prefix="som342-oci-", dir=os.environ["RUNNER_TEMP"]) as tmp:
         work = Path(tmp)
         try:
@@ -344,12 +461,19 @@ def main() -> None:
                 )
                 verified = call(name, frame("fs_stat", f"oci_node_{i}_restored_key", "/srv/data"))
                 assert verified.returncode == 0, verified.stderr[-500:]
+            # No shared network is used for the preceding isolation proof.
+            # Separate *test-only* internal bridge exercises the real central
+            # MCP HTTP+Ledger control plane against two different SSH nodes.
+            if not os.getenv("SOM342_REMAPPED_ROOT_UID"):
+                prove_central_mcp_ledger(work, running, networks)
             print("MODE_A_OPENSSH_OCI_TWO_NODE_FS_ONLY_HOSTED_PASS")
             print("HOSTED_DISPOSABLE=true NETWORK_NONE=true USERNS_PRIVATE_PROVEN=false")
             print("SIGNED_IMAGE=false NO_NIC_VM_PROVEN=false DEPLOYED=false")
         finally:
             for name in reversed(running):
                 run(["docker", "rm", "-f", name], timeout=15, ok=False)
+            for network in reversed(networks):
+                run(["docker", "network", "rm", network], timeout=15, ok=False)
             # Remove ONLY the two known fixture directories on this disposable
             # GitHub runner (not any parent or shared host path).
             for node in work.iterdir():

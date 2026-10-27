@@ -142,3 +142,28 @@ def test_hosted_project_transport_uses_real_project_ssh_code_not_shell():
     assert "await manager.close()" in source
     assert "PROJECT_ASYNCSSH_TRANSPORT_TYPED_FS_NODE_" in source
     assert "subprocess" not in source
+
+
+def test_hosted_central_mcp_ledger_two_node_control_is_real_and_test_only():
+    smoke = (ROOT / "ops/mvp/mode_a_hosted_oci_fs_smoke.py").read_text()
+    script = (ROOT / "ops/mvp/mode_a_hosted_control_ledger_smoke.py").read_text()
+    assert '"docker", "network", "create", "--internal"' in smoke
+    assert '"docker", "network", "rm", network' in smoke
+    assert 'if not os.getenv("SOM342_REMAPPED_ROOT_UID"):' in smoke
+    assert '"--cap-drop"' in smoke and '"no-new-privileges:true"' in smoke
+    assert "CENTRAL_MCP_LEDGER_TWO_OPENSSH_NODES_TEST_ONLY_PASS" in smoke
+    for token in (
+        "build_application(",
+        "SecurityLedgerService.create(",
+        "Client(transport)",
+        '("fs_mkdir",',
+        '"fs_write",',
+        'client.call_tool("approval_status"',
+        '"consumed"',
+        '"pending"',
+        '"ssh_over_mcp.approvals.cli"',
+        "CENTRAL_MCP_LEDGER_TWO_OPENSSH_NODES_TEST_ONLY_PASS",
+    ):
+        assert token in script
+    assert "docker" not in script
+    assert 'client.call_tool("ssh_exec"' not in script
