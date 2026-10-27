@@ -1,0 +1,84 @@
+name: MVP #342 OpenSSH OCI source build (no runtime)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  build-source:
+    if: github.event.pull_request.number == 342 && github.event.pull_request.head.repo.full_name == 'zhangyuz/ssh-over-mcp'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 28
+    steps:
+      - name: Require disposable GitHub-hosted x86 Ubuntu
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_ACTIONS" = true
+          . /etc/os-release
+          test "$ID" = ubuntu && test "$VERSION_ID" = 26.04
+          test "$(uname -m)" = x86_64
+          test "$(id -u)" -ne 0
+          docker info --format '{{.OSType}}/{{.Architecture}}'
+
+      - name: Checkout exact pull-request merge snapshot
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Build immutable-source OpenSSH FS base (NO guest startup)
+        shell: bash
+        run: |
+          set -euo pipefail
+          DOCKER_BUILDKIT=1 docker build --progress=plain --no-cache \
+            -f deploy/ssh-target/Dockerfile.fs-only-review-candidate \
+            -t som-mvp-fs-source:local .
+
+      - name: Build root OpenSSH key-custody layer (NO guest startup)
+        shell: bash
+        run: |
+          set -euo pipefail
+          DOCKER_BUILDKIT=1 docker build --progress=plain --no-cache \
+            --build-arg SOM_FS_SOURCE_IMAGE=som-mvp-fs-source:local \
+            -f deploy/ssh-target/Dockerfile.fs-privsep-review-candidate \
+            -t som-mvp-fs-privsep:local .
+
+      - name: Verify STOP78 entrypoint and record source-only evidence
+        shell: bash
+        env:
+          PR_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect som-mvp-fs-privsep:local --format '{{.Config.User}}')" = '0:0'
+          test "$(docker image inspect som-mvp-fs-privsep:local --format '{{json .Config.Entrypoint}}')" = '["/usr/local/libexec/ssh-over-mcp-image-hold"]'
+          test "$(docker image inspect som-mvp-fs-privsep:local --format '{{json .Config.ExposedPorts}}')" = '{"2222/tcp":{}}'
+          mkdir -p proof
+          {
+            echo "PR=342"
+            echo "PR_SOURCE_SHA=$PR_SOURCE_SHA"
+            echo "TEST_MERGE_SHA=$(git rev-parse HEAD)"
+            echo "FS_BASE_IMAGE_ID=$(docker image inspect som-mvp-fs-source:local --format '{{.Id}}')"
+            echo "FS_PRIVSEP_IMAGE_ID=$(docker image inspect som-mvp-fs-privsep:local --format '{{.Id}}')"
+            echo 'SIGNED_IMAGE=false'
+            echo 'RUNTIME_STARTED=false'
+            echo 'GUEST_VERIFIED=false'
+            echo 'DEPLOYED=false'
+          } > proof/PROVENANCE.txt
+          sha256sum deploy/ssh-target/Dockerfile.fs-*-review-candidate \
+            deploy/ssh-target/sshd_config.fs-privsep-review-candidate \
+            deploy/ssh-target/sudoers.fs-privsep-review-candidate \
+            requirements/runtime.lock > proof/SOURCE_SHA256SUMS
+          echo FS_ONLY_OCI_SOURCE_BUILD_OK_NO_RUNTIME
+
+      - name: Upload tiny proof only (never expose images or secrets)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mvp-342-openssh-oci-source-build
+          path: proof/*
+          retention-days: 3
+          if-no-files-found: error
