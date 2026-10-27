@@ -53,7 +53,8 @@ async def _observe_real_transport(
             f"FS_MUTATION_TRANSPORT_OBSERVED host={host} status={result.exit_status}"
             f" signal={result.exit_signal} timeout={result.timed_out}"
             f" truncated={result.truncated} stdout_length={len(result.stdout)}"
-            f" stderr_length={len(result.stderr)}",
+            f" stderr_length={len(result.stderr)}"
+            f" stderr_bounded={result.stderr[:180]!r}",
             file=sys.stderr,
             flush=True,
         )
