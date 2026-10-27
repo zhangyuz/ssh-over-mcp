@@ -1,6 +1,6 @@
 # MVP 当前交付入口：Compose 多 SSH 读写试点
 
-> **2026-10-27 第一性原理修正（见 [ADR0024](decisions/0024-networked-docker-mvp-vs-isolated-e2e.md)）：** 真正的 MCP→SSH 远程管理必须具备受控网络连通性。因此，**联网 Ubuntu + 官方签名 APT + 标准 Docker Compose** 是新的 Mode A FS-only 试点交付方向。以前为 no-NIC 测试环境规划的自定义离线 Docker Engine 完整依赖介质、无网卡 OCI 客体**不再是联网试点的 P0 门槛**。保留 trusted-main 无网卡 Native Level-3 安全回归（隔离不可信测试代码，不是生产拓扑）。**这不是直接允许启动已停用的 Lima VM、修改共享 Docker、替换 STOP78、使用生产密钥、合并或发布。** Mode B 三个独立 Engine/真实跨宿主机私网与完整八文件工具仍是原产品 MVP 目标，Mode A FS-only 仅是较窄试点。
+> **2026-10-27 第一性原理修正（见 [ADR0024](decisions/0024-networked-docker-mvp-vs-isolated-e2e.md)）：** 真正的 MCP→SSH 远程管理必须具备受控网络连通性。因此，**联网 Linux Docker Engine + Ubuntu 26.04 官方签名 APT 容器镜像 + 标准 Docker Compose** 是新的 Mode A FS-only 试点交付方向；允许在批准的共享 Engine 上使用隔离 Compose 项目，不强制重复创建 Ubuntu VM。以前为 no-NIC 测试环境规划的自定义离线 Docker Engine 完整依赖介质、无网卡 OCI 客体**不再是联网试点的 P0 门槛**。保留 trusted-main 无网卡 Native Level-3 安全回归（隔离不可信测试代码，不是生产拓扑）。**这不是直接允许启动已停用的 Lima VM、修改共享 Docker、替换 STOP78、使用生产密钥、合并或发布。** Mode B 三个独立 Engine/真实跨宿主机私网与完整八文件工具仍是原产品 MVP 目标，Mode A FS-only 仅是较窄试点。
 
 
 > **2026-10-26 #342 Linux 原生文件回环验证增量：** 新增 `tests/ops/test_mvp_mode_a_native_fs_roundtrip.py`，在 Ubuntu CI 使用现有 Host Agent 协议帧、候选 FS-only Host Policy 和 Linux `O_PATH`/dirfd/fsync 文件原语，分别对两个隔离的 pytest 临时节点执行 `mkdir → create-only write → stat/read`，拒绝重复写入、跨节点读与执行。仅将候选 `/srv/data` 根重定向为 disposable `tmp_path`，不访问主机生产目录，不启动 Docker/SSH。**这是 Linux 原生 Host Agent 集成验证，不代表真实 SSH/OCI 双节点 A01–A03；后者仍 HOLD。**
