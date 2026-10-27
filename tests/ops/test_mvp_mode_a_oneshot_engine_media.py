@@ -104,3 +104,33 @@ def test_offline_apt_probe_distinguishes_signer_mismatch_without_apt_mutations()
     assert missing_signer["KEYRING_SIGNER"] is False
     assert missing_signer["UBUNTU_REPOSITORY"] is True
     assert checks(release, source, True, machine="x86_64", uid=0)["NON_ROOT"] is False
+
+
+def test_os_release_symlink_platform_parser_is_used_for_hosted_probe(monkeypatch, capsys):
+    from ops.mvp import mode_a_hosted_apt_probe as probe
+
+    monkeypatch.setattr(
+        probe.platform, "freedesktop_os_release", lambda: {"ID": "ubuntu", "VERSION_ID": "26.04"}
+    )
+    monkeypatch.setattr(probe.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(probe.os, "getuid", lambda: 1001)
+    monkeypatch.setattr(probe.os, "access", lambda *_: True)
+    monkeypatch.setattr(
+        probe,
+        "_bounded_lines",
+        lambda _: [
+            "URIs: mirror+file:/etc/apt/mirrors",
+            "Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg",
+        ],
+    )
+    monkeypatch.setattr(
+        probe,
+        "_KEYRING",
+        type("Keyring", (), {"is_file": lambda self: True, "is_symlink": lambda self: False})(),
+    )
+    probe.main()
+    lines = capsys.readouterr().out.splitlines()
+    assert "ENGINE_APT_PREFLIGHT_UBUNTU_2604=true" in lines
+    assert "ENGINE_APT_URI_CLASS=UBUNTU_MIRROR_LIST" in lines
+    assert "ENGINE_APT_PREFLIGHT_UBUNTU_REPOSITORY=false" in lines
+    assert "OFFLINE_ENGINE_MEDIA_BUILD_AUTHORIZED=false" in lines
