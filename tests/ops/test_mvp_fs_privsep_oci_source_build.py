@@ -174,9 +174,19 @@ def test_hosted_central_mcp_ledger_two_node_control_is_real_and_test_only():
     assert "HOSTED_TWO_NODE_CROSS_NETWORK_SSH_DENIED_PASS" in smoke
     assert "HOSTED_CONTROL_TO_TWO_ISOLATED_SSH_NODES_PASS" in smoke
     assert "from mode_a_hosted_origin_bind_probe import prove as prove_origin_only_bind" in smoke
-    assert "prove_origin_only_bind(control, node_names, node_networks, networks, run)" in smoke
+    assert (
+        "origin_ip = prove_origin_only_bind(control, node_names, node_networks, networks, run)"
+        in smoke
+    )
     origin = (ROOT / "ops/mvp/mode_a_hosted_origin_bind_probe.py").read_text()
     assert "HOSTED_ORIGIN_BIND_ONLY_TWO_NODE_REVERSE_TCP8000_DENIED_PASS" in origin
+    assert "origin_ip = prove_origin_only_bind(" in smoke
+    assert '"-",\n            origin_ip,\n            *control_node_ips,' in smoke
+    assert "bind_host=origin_ip" in script
+    assert "sock.bind((origin_ip, 8000))" in script
+    assert "REAL_MCP_HTTP_ORIGIN_INTERFACE_ONLY_PASS" in script
+    assert 'assert b"REAL_MCP_HTTP_ORIGIN_INTERFACE_ONLY_PASS" in result.stdout' in smoke
+    assert "node-facing MCP TCP/8000 should be closed" in script
     assert '"--internal"' in origin and '"--network"' in origin
     assert 'for target in (end[network]["IPAddress"], address)' in origin
     assert "iptables" not in origin.replace("ANY iptables rule", "")

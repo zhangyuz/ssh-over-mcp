@@ -139,7 +139,9 @@ def policy_config() -> dict:
     }
 
 
-async def prove(root: Path, ledger: SecurityLedgerRuntimeSettings) -> None:
+async def prove(
+    root: Path, ledger: SecurityLedgerRuntimeSettings, origin_ip: str, node_ips: list[str]
+) -> None:
     cfg = root / "config.yaml"
     cfg.write_text(yaml.safe_dump(policy_config()))
     os.chmod(cfg, 0o600)
@@ -160,16 +162,16 @@ async def prove(root: Path, ledger: SecurityLedgerRuntimeSettings) -> None:
             ledger_socket_path=ledger.execution_socket_path,
             ledger_server_uid=ledger.service_uid,
             ledger_server_gid=ledger.service_gid,
-            bind_host="127.0.0.1",
+            bind_host=origin_ip,
             origin_bearer_token_file=bearer,
         )
     )
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(("127.0.0.1", 0))
+    sock.bind((origin_ip, 8000))
     sock.listen(64)
     port = sock.getsockname()[1]
     server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="critical", access_log=False)
+        uvicorn.Config(app, host=origin_ip, port=port, log_level="critical", access_log=False)
     )
     task = asyncio.create_task(server.serve(sockets=[sock]))
     try:
@@ -180,11 +182,20 @@ async def prove(root: Path, ledger: SecurityLedgerRuntimeSettings) -> None:
                 raise AssertionError("central MCP exited before startup")
             await asyncio.sleep(0.01)
         assert server.started
+        # The REAL MCP HTTP listener must not accept traffic on either
+        # node-facing control interface, even from its own network namespace.
+        for node_ip in node_ips:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.settimeout(1)
+                assert probe.connect_ex((node_ip, 8000)) != 0, (
+                    "node-facing MCP TCP/8000 should be closed",
+                    node_ip,
+                )
         async with httpx2.AsyncClient(
             headers={"Authorization": "Bearer " + token}, trust_env=False
         ) as http:
             transport = streamable_http_client(
-                f"http://127.0.0.1:{port}/mcp",
+                f"http://{origin_ip}:{port}/mcp",
                 http_client=http,
                 terminate_on_close=False,
             )
@@ -258,10 +269,14 @@ async def prove(root: Path, ledger: SecurityLedgerRuntimeSettings) -> None:
         server.should_exit = True
         await asyncio.wait_for(task, 6)
         sock.close()
+    print("REAL_MCP_HTTP_ORIGIN_INTERFACE_ONLY_PASS", flush=True)
 
 
 async def main() -> None:
     assert os.getuid() == 2201 and os.getgid() == 3201
+    assert len(sys.argv) == 4
+    origin_ip, *node_ips = sys.argv[1:]
+    assert origin_ip not in node_ips and len(set(node_ips)) == 2
     assert Path("/tmp/client1").is_file() and Path("/tmp/client2").is_file()
     with tempfile.TemporaryDirectory(prefix="som342-central-", dir="/tmp") as td:
         root = Path(td)
@@ -294,7 +309,7 @@ async def main() -> None:
         )
         thread.start()
         try:
-            await prove(root, setting)
+            await prove(root, setting, origin_ip, node_ips)
         finally:
             stop.set()
             thread.join(timeout=4)

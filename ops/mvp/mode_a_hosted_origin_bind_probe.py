@@ -39,7 +39,7 @@ def prove(
     node_networks: list[str],
     networks: list[str],
     run: Callable[..., Any],
-) -> None:
+) -> str:
     assert os.getenv("GITHUB_ACTIONS") == "true"
     assert os.getenv("RUNNER_ENVIRONMENT") == "github-hosted"
     assert os.getenv("GITHUB_EVENT_NAME") == "pull_request"
@@ -127,3 +127,4 @@ def prove(
     else:
         raise AssertionError("origin-only listener did not close")
     print("HOSTED_ORIGIN_BIND_ONLY_TWO_NODE_REVERSE_TCP8000_DENIED_PASS", flush=True)
+    return address

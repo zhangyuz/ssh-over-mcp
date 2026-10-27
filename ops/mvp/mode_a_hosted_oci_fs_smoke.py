@@ -400,7 +400,10 @@ def prove_central_mcp_ledger(work: Path, running: list[str], networks: list[str]
     # WITHOUT any netns firewall, then retain the stronger stateful ACL proof.
     from mode_a_hosted_origin_bind_probe import prove as prove_origin_only_bind
 
-    prove_origin_only_bind(control, node_names, node_networks, networks, run)
+    origin_ip = prove_origin_only_bind(control, node_names, node_networks, networks, run)
+    control_node_ips = [
+        control_info["NetworkSettings"]["Networks"][net]["IPAddress"] for net in node_networks
+    ]
     from mode_a_hosted_directional_acl import prove as prove_directional_acl
 
     prove_directional_acl(control, node_names, node_networks, run)
@@ -434,6 +437,8 @@ def prove_central_mcp_ledger(work: Path, running: list[str], networks: list[str]
             control,
             "/opt/ssh-over-mcp-e2e/venv/bin/python",
             "-",
+            origin_ip,
+            *control_node_ips,
         ],
         stdin=controller,
         timeout=65,
@@ -448,6 +453,7 @@ def prove_central_mcp_ledger(work: Path, running: list[str], networks: list[str]
                 result.stdout[-650:],
             )
         )
+    assert b"REAL_MCP_HTTP_ORIGIN_INTERFACE_ONLY_PASS" in result.stdout
     assert b"CENTRAL_MCP_LEDGER_TWO_OPENSSH_NODES_TEST_ONLY_PASS" in result.stdout
     assert b"CENTRAL_MCP_LEDGER_ONCE_ONLY_REAL_SSH_node01_PASS" in result.stdout
     assert b"CENTRAL_MCP_LEDGER_ONCE_ONLY_REAL_SSH_node02_PASS" in result.stdout
