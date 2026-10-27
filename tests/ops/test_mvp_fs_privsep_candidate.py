@@ -3,6 +3,7 @@
 This is an architecture candidate, not permission to run Docker or change caps.
 """
 
+import shlex
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -43,7 +44,11 @@ def test_sudo_only_exact_fixed_zero_cap_fs_command():
         for line in rules.splitlines()
         if line and not line.startswith("#") and not line.startswith("Defaults:")
     ]
-    assert allowed == [f"ssh-over-mcp-e2e-host ALL=(root) NOPASSWD: {DROP}"]
+    assert len(allowed) == 1
+    assert allowed[0].startswith("ssh-over-mcp-e2e-host ALL=(root) NOPASSWD: ")
+    rule_args = allowed[0].split("NOPASSWD: ", 1)[1]
+    assert r"\=" in rule_args
+    assert shlex.split(rule_args) == shlex.split(DROP)
     assert "NOPASSWD: ALL" not in rules
     assert "SETENV:" not in rules
     assert "/bin/sh" not in rules

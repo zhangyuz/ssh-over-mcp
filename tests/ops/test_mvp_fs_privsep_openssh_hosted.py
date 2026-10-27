@@ -174,10 +174,24 @@ def test_hosted_root_openssh_keeps_hostkey_from_zero_cap_session():
             str(login_gid),
             "-d",
             str(user_home),
-            "-m",
+            "-M",
             "-s",
             "/bin/sh",
             username,
+            timeout=25,
+        )
+        _run(
+            "/usr/bin/sudo",
+            "-n",
+            "/usr/bin/install",
+            "-d",
+            "-o",
+            username,
+            "-g",
+            username,
+            "-m",
+            "0700",
+            str(user_home),
         )
         _run("/usr/bin/sudo", "-n", "/usr/sbin/usermod", "-p", "*", username)
         _run("/usr/bin/ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(hostkey))
