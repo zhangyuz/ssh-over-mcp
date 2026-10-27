@@ -79,7 +79,7 @@ def _one_node(node: Path, user: str, uid: int, gid: int):
     _keygen(client)
     (node / "authorized_keys").write_text(client.with_suffix(".pub").read_text())
     (node / "authorized_keys").chmod(0o600)
-    (data / "existing.bin").write_bytes(node.name.encode() + b"\\x00")
+    (data / "existing.bin").write_bytes(node.name.encode() + b"\x00")
 
     agent = node / "agent.py"
     policy = ROOT / "deploy/ssh-target/host-policy.review-candidate.yaml"
@@ -87,11 +87,11 @@ def _one_node(node: Path, user: str, uid: int, gid: int):
     agent.chmod(0o500)
     port = _free_port()
     (node / "known_hosts").write_text(
-        f"[127.0.0.1]:{port} {hostkey.with_suffix('.pub').read_text().strip()}\\n"
+        f"[127.0.0.1]:{port} {hostkey.with_suffix('.pub').read_text().strip()}\n"
     )
     config = REVIEW.read_text()
     replacements = {
-        "Port 2222": f"Port {port}\\nListenAddress 127.0.0.1",
+        "Port 2222": f"Port {port}\nListenAddress 127.0.0.1",
         "/etc/ssh/hostkeys/ssh_host_ed25519_key": str(hostkey),
         "/etc/ssh/authorized_keys/%u": str(node / "authorized_keys"),
         "ssh-over-mcp-e2e-host": user,
@@ -100,7 +100,8 @@ def _one_node(node: Path, user: str, uid: int, gid: int):
     for original, replacement in replacements.items():
         assert config.count(original) == 1
         config = config.replace(original, replacement)
-    config += f"\\nPidFile {node / 'sshd.pid'}\\n"
+    assert "\nListenAddress 127.0.0.1\n" in config
+    config += f"\nPidFile {node / 'sshd.pid'}\n"
     conf = node / "sshd.conf"
     conf.write_text(config)
     verify = subprocess.run(
@@ -212,7 +213,7 @@ def test_two_real_rootless_openssh_sessions_fs_create_read_and_isolation(tmp_pat
         for i, (key, known, port, data) in enumerate(nodes):
             directory = data / "mvp"
             file = directory / "probe.bin"
-            payload = f"node-{i}-ssh".encode() + b"\\x00"
+            payload = f"node-{i}-ssh".encode() + b"\x00"
             base = f"rootless_node_{i}"
 
             def call(envelope, body=b"", key=key, known=known, port=port):
