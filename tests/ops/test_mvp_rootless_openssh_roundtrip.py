@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from ssh_over_mcp.host_agent.cli import EX_NOPERM, EX_UNAVAILABLE
 from ssh_over_mcp.ssh.protocol import (
     FsMkdirEnvelope,
     FsReadEnvelope,
@@ -101,6 +102,9 @@ def _one_node(node: Path, user: str, uid: int, gid: int):
         assert config.count(original) == 1
         config = config.replace(original, replacement)
     assert "\nListenAddress 127.0.0.1\n" in config
+    # Debug logging is test-local only; production config stays VERBOSE.
+    assert config.count("LogLevel VERBOSE") == 1
+    config = config.replace("LogLevel VERBOSE", "LogLevel DEBUG2")
     config += f"\nPidFile {node / 'sshd.pid'}\n"
     conf = node / "sshd.conf"
     conf.write_text(config)
@@ -188,11 +192,16 @@ def test_two_real_rootless_openssh_sessions_fs_create_read_and_isolation(tmp_pat
         nodes = []
         for alias in ("node01", "node02"):
             conf, key, port, data, known = _one_node(tmp_path / alias, user, uid, gid)
+            log_path = conf.parent / "sshd-test.log"
+            log_path.touch(mode=0o600)
+            log_path.chmod(0o600)
+            log = log_path.open("wb")
+            stack.callback(log.close)
             proc = subprocess.Popen(
                 ["setpriv", "--no-new-privs", "/usr/sbin/sshd", "-D", "-e", "-f", str(conf)],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=log,
             )
             stack.callback(
                 lambda p=proc: (p.terminate(), p.wait(timeout=4)) if p.poll() is None else None
@@ -224,7 +233,10 @@ def test_two_real_rootless_openssh_sessions_fs_create_read_and_isolation(tmp_pat
                     request_id=base + "_mkdir", profile="rw-operator", path=str(directory)
                 )
             )
-            assert mkdir.returncode == 0, mkdir.stderr[-450:]
+            assert mkdir.returncode == 0, (
+                mkdir.stderr[-450:],
+                (data.parent / "sshd-test.log").read_bytes()[-3000:],
+            )
             write = call(
                 FsWriteEnvelope(
                     request_id=base + "_write",
@@ -256,8 +268,8 @@ def test_two_real_rootless_openssh_sessions_fs_create_read_and_isolation(tmp_pat
                 ),
                 b"evil",
             )
-            assert repeat.returncode != 0 and file.read_bytes() == payload
-            foreign = nodes[1 - i][3] / "mvp" / "probe.bin"
+            assert repeat.returncode == EX_UNAVAILABLE and file.read_bytes() == payload
+            foreign = nodes[1 - i][3] / "existing.bin"
             cross = call(
                 FsReadEnvelope(
                     request_id=base + "_cross",
@@ -266,7 +278,8 @@ def test_two_real_rootless_openssh_sessions_fs_create_read_and_isolation(tmp_pat
                     max_bytes=4096,
                 )
             )
-            assert cross.returncode != 0
+            assert cross.returncode == EX_NOPERM, cross.stderr[-450:]
+            assert b"denied" in cross.stderr
             bad = _rpc(
                 key,
                 known,
@@ -275,18 +288,23 @@ def test_two_real_rootless_openssh_sessions_fs_create_read_and_isolation(tmp_pat
                 FsStatEnvelope(request_id=base + "_badcmd", profile="rw-operator", path=str(file)),
                 command="unexpected-command",
             )
-            assert bad.returncode != 0
-            other_known = nodes[1 - i][1]
+            assert bad.returncode == 78, bad.stderr[-450:]
+            # Pin the *other node's key* against THIS endpoint, not merely
+            # an absent port. Wrong key must trigger host-identity rejection.
+            other_hostkey = nodes[1 - i][3].parent / "hostkey.pub"
+            wrong_known = data.parent / "wrong_known_hosts"
+            wrong_known.write_text(f"[127.0.0.1]:{port} {other_hostkey.read_text().strip()}\n")
             wrong_host = _rpc(
                 key,
-                other_known,
+                wrong_known,
                 port,
                 user,
                 FsStatEnvelope(
                     request_id=base + "_wronghost", profile="rw-operator", path=str(file)
                 ),
             )
-            assert wrong_host.returncode != 0
+            assert wrong_host.returncode == 255
+            assert b"Host key verification failed" in wrong_host.stderr
 
 
 def test_rootless_openssh_oci_candidate_is_nonroot_and_startup_stays_disabled():
