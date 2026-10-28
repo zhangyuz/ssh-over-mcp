@@ -96,3 +96,15 @@
   results, check epoch guard before/throughout/after, no partial result.
 - [ ] Run full exact-head Ubuntu CI and targeted Linux test suites on
   resulting commit. Remains no runtime activation.
+
+### Task 1C: in-process Linux multi-root integration (not deployed E2E)
+
+**File:** `tests/host_agent/test_visibility_pipeline_linux.py`
+
+- [x] Construct test-only two logical host policies, compile central
+  subtree rules, sign and verify against host-specific expected identity
+  and local deny roots, inspect two real Linux test directories,
+  reauthorize paths centrally. Assert cross-host snapshot replay and
+  denied result injection are refused.
+- [ ] Verify on a fresh exact-head Ubuntu 26.04 CI run. Do not count
+  local macOS SKIP as Linux PASS or this kernel test as two-OpenSSH E2E.

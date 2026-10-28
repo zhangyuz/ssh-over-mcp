@@ -179,3 +179,18 @@ protocol, FD mount/hardlink/rename race guarantees, a bounded coherent
 directory snapshot/page protocol, typed SMCP v2 host policy loader, audited
 SSH/MCP glue, exact-response metadata validation, two-node positive/negative
 real Mode A E2E and exact-head Native Level-3 cleanup PASS. No Mode B.
+
+## 2026-10-28 checkpoint: synthetic two-root Linux pipeline
+
+- `tests/host_agent/test_visibility_pipeline_linux.py` composes the
+  actual central rule compiler, HMAC signer, strict host binding and
+  replay-consumer interface, host-local visibility intersection,
+  descriptor-pinned Linux listing and final central path recheck. It
+  verifies two different *test directories* with different logical host
+  IDs, central deny subtree pruning, host deny rules and cross-host
+  signature-binding rejection.
+- **This is an in-process Linux kernel integration test, NOT Mode A
+  acceptance:** no real SSH transport, ForceCommand, MCP, Ledger, live
+  key provisioning or monotonic epoch ACK. The host-key bytes and HMAC
+  key are synthetic and replay consumption is not durable. Never call
+  this a real two-node SSH test or a release receipt.
