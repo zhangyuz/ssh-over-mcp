@@ -32,6 +32,37 @@ python3 ops/mvp/bundle_preflight.py \
 
 The command requires Docker Compose **2.33.1+** (both `!override` and the base file's `gw_priority`; tested with v5.5.1), but **does not require or contact a Docker Engine** for `config` output. Never paste rendered Compose output containing interpolated paths/config/secret references into tickets or logs. The topology JSON is independently provided, including both distinct node aliases and *synthetic* SSH host-key fingerprint syntax; syntax/consistency checks do not establish trust. All image variables — `SSH_OVER_MCP_IMAGE`, `SSH_OVER_MCP_NODE01_IMAGE`, `SSH_OVER_MCP_NODE02_IMAGE` — must be explicitly set; the overlay rejects missing values rather than falling back to the control project's mutable historic `phase6b` image tag. A syntactically well-formed digest string still **does not prove image contents, signature or provenance**.
 
+## Full five-service Compose boot proof (GitHub CI ONLY)
+
+A separate step in `.github/workflows/mvp-342-oci-source-build.yml`
+runs `ops/mvp/mode_a_hosted_online_compose_startup.py` on a **disposable
+GitHub-hosted Ubuntu PR runner**, never `yuz.local`. It builds the existing
+control `Dockerfile` locally and reuses the already-proven default-boot
+OpenSSH candidate, then **really starts** the existing three-file Mode A
+Compose topology: `ledger-init` (exits 0), `ledger` (running), `mcp`
+(ready), `node01` and `node02` (running with valid sshd configuration).
+The fourth Compose overlay is written only in a private temporary directory;
+it resets the two nodes' STOP78 `entrypoint` / `command` fields to the
+tested SSH image defaults. This override is **never checked in, exported,
+applied to an operator environment, or promoted to a release**.
+
+It uses new synthetic SSH identities, private configuration and a one-time
+origin bearer token; it starts **no** Cloudflare tunnel, published host port,
+manager, host-cgroup workload or production secret. The test asserts
+`docker compose config` network and identity shape before `up --wait`,
+checks the actual MCP readiness and node `sshd -t`, and always executes
+project-scoped `down --volumes --remove-orphans` with bounded cleanup.
+The CI marker is
+`MODE_A_COMPOSE_ALL_FIVE_SERVICES_HEALTHY_CI_ONLY_PASS` and does **not**
+mean network egress ACL enforcement or production approval. Real once-only
+MCP/Ledger FS writes on two runnable OpenSSH nodes remain covered separately
+by the dedicated ordinary and userns-remapped hosted OCI proofs.
+
+**Release remains HOLD:** the tracked Compose overlay still forces STOP78.
+Use only reviewed, finalized immutable image IDs, a userns-isolated approved
+Engine, operator-managed host keys, real origin/SSH network controls,
+live/rollback evidence and independent review to authorize actual rollout.
+
 ## First-principles networked render preflight (read-only, not release)
 
 Render the **third** review overlay in a cleared environment, with a
