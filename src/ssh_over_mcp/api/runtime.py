@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import ipaddress
 import os
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal, Self
+from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .errors import RuntimeConfigurationError
 
 _MAX_KERNEL_ID = (1 << 32) - 1
+_PRIVATE_BIND_NETWORKS = tuple(
+    ipaddress.IPv4Network(network) for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+)
 
 
 class MCPRuntimeSettings(BaseModel):
@@ -21,7 +25,21 @@ class MCPRuntimeSettings(BaseModel):
     ledger_socket_path: Path
     ledger_server_uid: int = Field(strict=True, ge=0, le=_MAX_KERNEL_ID)
     ledger_server_gid: int = Field(strict=True, ge=0, le=_MAX_KERNEL_ID)
-    bind_host: Literal["127.0.0.1", "0.0.0.0"] = "127.0.0.1"
+    bind_host: str = "127.0.0.1"
+
+    @field_validator("bind_host")
+    @classmethod
+    def validate_bind_host(cls, value: str) -> str:
+        if value in {"127.0.0.1", "0.0.0.0"}:
+            return value
+        try:
+            ip = ipaddress.IPv4Address(value)
+        except ipaddress.AddressValueError as exc:
+            raise ValueError("unsupported origin interface address") from exc
+        if str(ip) != value or not any(ip in net for net in _PRIVATE_BIND_NETWORKS):
+            raise ValueError("unsupported origin interface address")
+        return value
+
     origin_bearer_token_file: Path | None = None
     port: int = Field(default=8000, ge=1, le=65535)
 
@@ -39,7 +57,7 @@ class MCPRuntimeSettings(BaseModel):
 
     @model_validator(mode="after")
     def require_origin_auth_for_private_bind(self) -> Self:
-        if self.bind_host == "0.0.0.0" and self.origin_bearer_token_file is None:
+        if self.bind_host != "127.0.0.1" and self.origin_bearer_token_file is None:
             raise ValueError("origin bearer token file is required for private bind")
         return self
 
@@ -81,9 +99,7 @@ def load_runtime_settings(
         or not ledger_uid_value.strip()
         or not ledger_gid_value.strip()
     ):
-        raise RuntimeConfigurationError(
-            "runtime configuration is invalid"
-        )
+        raise RuntimeConfigurationError("runtime configuration is invalid")
 
     origin_token_file = (
         None
@@ -95,9 +111,7 @@ def load_runtime_settings(
         ledger_uid = int(ledger_uid_value, 10)
         ledger_gid = int(ledger_gid_value, 10)
     except (TypeError, ValueError) as exc:
-        raise RuntimeConfigurationError(
-            "runtime configuration is invalid"
-        ) from exc
+        raise RuntimeConfigurationError("runtime configuration is invalid") from exc
 
     try:
         return MCPRuntimeSettings(
@@ -112,6 +126,4 @@ def load_runtime_settings(
             port=port,
         )
     except ValueError as exc:
-        raise RuntimeConfigurationError(
-            "runtime configuration is invalid"
-        ) from exc
+        raise RuntimeConfigurationError("runtime configuration is invalid") from exc

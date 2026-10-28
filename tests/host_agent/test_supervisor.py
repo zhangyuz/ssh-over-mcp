@@ -1,6 +1,7 @@
 import os
 import resource
 import shutil
+import sys
 import time
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from ssh_over_mcp.host_agent.containment import (
     ContainmentLimits,
     ContainmentRequest,
     ContainmentStats,
+    PidfdContainmentHandle,
 )
 from ssh_over_mcp.host_agent.containment_manager_identity import (
     LinuxProcessIdentity,
@@ -91,11 +93,7 @@ def _identity(fd: int, *, bind_content: bool = False) -> HostObjectIdentity:
         ctime_ns=info.st_ctime_ns,
         mtime_ns=info.st_mtime_ns,
         size=info.st_size,
-        content_sha256=(
-            sha256_fd(fd, expected_size=info.st_size)
-            if bind_content
-            else None
-        ),
+        content_sha256=(sha256_fd(fd, expected_size=info.st_size) if bind_content else None),
     )
 
 
@@ -429,9 +427,7 @@ def test_file_size_rlimit_is_enforced_in_real_child(tmp_path: Path):
     if not Path(source).exists():
         pytest.skip("dd is required for RLIMIT_FSIZE integration test")
 
-    limits = _child_limits().model_copy(
-        update={"file_size_bytes": 1024}
-    )
+    limits = _child_limits().model_copy(update={"file_size_bytes": 1024})
     prepared = _prepared(
         tmp_path,
         source=source,
@@ -830,3 +826,163 @@ def test_contained_child_barrier_base_exception_exits_125(monkeypatch):
                 os.close(fd)
             except OSError:
                 pass
+
+
+class PinnedBarrierHandle(BarrierHandle, PidfdContainmentHandle):
+    """Test-only OCI capability; no cgroup write or fake integer fallback."""
+
+    def __init__(self, marker: Path, *, fail_attach: bool = False):
+        super().__init__(marker, fail_attach=fail_attach)
+        self.pinned_fd: int | None = None
+        self.legacy_attach_called = False
+        self.observed_pid: int | None = None
+
+    def attach(self, pid: int) -> None:
+        self.legacy_attach_called = True
+        raise AssertionError("OCI pidfd handle must never use integer attach")
+
+    def attach_pinned(self, pidfd: int) -> None:
+        self.pinned_fd = pidfd
+        self.marker_seen_during_attach = self.marker.exists()
+        os.fstat(pidfd)
+        if self.fail_attach:
+            raise ContainmentError("OCI manager refused pinned attach")
+        self.observed_pid = 1
+
+
+@pytest.mark.parametrize("fail_attach", [False, True])
+def test_oci_supervisor_pins_before_attach_never_uses_legacy_pid(
+    tmp_path: Path, monkeypatch, fail_attach: bool
+):
+    from ssh_over_mcp.host_agent import supervisor
+
+    prepared = _prepared(tmp_path)
+    marker = tmp_path / "oci-child-executed"
+    backend = BarrierBackend(marker)
+    handle = PinnedBarrierHandle(marker, fail_attach=fail_attach)
+    backend.handle = handle
+    read_fd, write_fd = os.pipe()
+    monkeypatch.setattr(
+        supervisor.os, "pidfd_open", lambda _pid, _flags: os.dup(read_fd), raising=False
+    )
+
+    def fake_child_main(*_args, **_kwargs):
+        marker.write_text("executed", encoding="ascii")
+        os._exit(0)
+
+    monkeypatch.setattr(supervisor, "_child_main", fake_child_main)
+    try:
+        if fail_attach:
+            with pytest.raises(ChildSupervisorError, match="cannot attach contained child"):
+                spawn_prepared_native_contained(
+                    prepared,
+                    backend,
+                    _containment_request(prepared.request_id),
+                    workload_identity_policy=_workload_policy(),
+                )
+            assert not marker.exists()
+            assert handle.killed and handle.closed
+        else:
+            child = spawn_prepared_native_contained(
+                prepared,
+                backend,
+                _containment_request(prepared.request_id),
+                workload_identity_policy=_workload_policy(),
+            )
+            try:
+                assert child.wait() == 0
+                assert marker.read_text(encoding="ascii") == "executed"
+                child.close_containment()
+            finally:
+                child.close_pipes()
+        assert not handle.legacy_attach_called
+        assert handle.pinned_fd is not None
+        with pytest.raises(OSError):
+            os.fstat(handle.pinned_fd)
+    finally:
+        prepared.close()
+        os.close(read_fd)
+        os.close(write_fd)
+
+
+def test_oci_supervisor_pidfd_pin_failure_never_releases_barrier(tmp_path: Path, monkeypatch):
+    from ssh_over_mcp.host_agent import supervisor
+
+    prepared = _prepared(tmp_path)
+    marker = tmp_path / "must-not-execute"
+    backend = BarrierBackend(marker)
+    backend.handle = PinnedBarrierHandle(marker)
+
+    def fail_pin(_pid, _flags):
+        raise OSError("unavailable kernel pidfd")
+
+    monkeypatch.setattr(supervisor.os, "pidfd_open", fail_pin, raising=False)
+
+    def fake_child_main(*_args, **_kwargs):
+        marker.write_text("executed", encoding="ascii")
+        os._exit(0)
+
+    monkeypatch.setattr(supervisor, "_child_main", fake_child_main)
+    try:
+        with pytest.raises(ChildSupervisorError, match="cannot attach contained child"):
+            spawn_prepared_native_contained(
+                prepared,
+                backend,
+                _containment_request(prepared.request_id),
+                workload_identity_policy=_workload_policy(),
+            )
+        assert not marker.exists()
+        assert backend.handle.pinned_fd is None
+        assert not backend.handle.legacy_attach_called
+        assert backend.handle.killed and backend.handle.closed
+    finally:
+        prepared.close()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux kernel pidfd integration only")
+def test_oci_supervisor_receives_real_pinned_child_fd_before_release(tmp_path: Path, monkeypatch):
+    from ssh_over_mcp.host_agent import supervisor
+
+    prepared = _prepared(tmp_path)
+    marker = tmp_path / "real-pidfd-workload"
+    backend = BarrierBackend(marker)
+
+    class KernelPinnedHandle(PinnedBarrierHandle):
+        def attach_pinned(self, pidfd: int) -> None:
+            super().attach_pinned(pidfd)
+            with open(f"/proc/self/fdinfo/{pidfd}", encoding="ascii") as detail:
+                pid_fields = [
+                    int(line.split(":", 1)[1].strip()) for line in detail if line.startswith("Pid:")
+                ]
+            assert len(pid_fields) == 1
+            self.observed_pid = pid_fields[0]
+            assert self.observed_pid > 0
+            assert not os.get_inheritable(pidfd)
+
+    backend.handle = KernelPinnedHandle(marker)
+
+    def fake_child_main(*_args, **_kwargs):
+        marker.write_text("executed", encoding="ascii")
+        os._exit(0)
+
+    monkeypatch.setattr(supervisor, "_child_main", fake_child_main)
+    try:
+        child = spawn_prepared_native_contained(
+            prepared,
+            backend,
+            _containment_request(prepared.request_id),
+            workload_identity_policy=_workload_policy(),
+        )
+        try:
+            assert backend.handle.observed_pid == child.pid
+            assert backend.handle.marker_seen_during_attach is False
+            assert child.wait() == 0
+            assert marker.read_text(encoding="ascii") == "executed"
+            child.close_containment()
+        finally:
+            child.close_pipes()
+        assert backend.handle.pinned_fd is not None
+        with pytest.raises(OSError):
+            os.fstat(backend.handle.pinned_fd)
+    finally:
+        prepared.close()

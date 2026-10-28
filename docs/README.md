@@ -22,7 +22,25 @@ This directory is the canonical behavioral and security specification for `ssh-o
 
 **MVP offline subtree-visibility operator preview** — [synthetic per-path allow/deny dry-run](runbooks/mvp-subtree-visibility-preview.md) (not an authorization or deployed FS capability).
 
+**SSH-container privilege boundary proposal** — [ADR0022](decisions/0022-proposed-compose-ssh-privilege-domains.md) (NOT accepted/authorized).
+
+**Mode A SSH image/ForceCommand feasibility (review candidate)** — [proposed runtime handoff contract](superpowers/specs/2026-10-24-mode-a-ssh-runtime-handoff-review.md); no approved image/bootstrap, Linux Engine, or release authority.
+
 **MVP offline artifact consistency operator CLI** — [topology + rendered Compose bundle preflight](runbooks/mvp-compose-bundle-preflight.md) (static only; no deployment authorization).
+
+**M1a static Mode A multi-SSH Compose overlay** — [offline render-only runbook](runbooks/mvp-mode-a-compose-render.md) (no Docker deployment/startup authorization).
+
+**Mode A disposable VM definition preflight** — [read-only VM gate](runbooks/mvp-mode-a-vm-offline-gate.md) (does not authorize boot; host/LAN egress remains unverified).
+
+**Yuz.local Mode A FS-only pilot — LIVE ON HOST LOOPBACK** — [operational endpoint, exact pinned image IDs, tests and rollback](runbooks/mvp-mode-a-yuz-local-live-operations.md) and [operator-scoped decision ADR0025](decisions/0025-mode-a-fs-only-operator-pilot-release.md). Accessible only at `127.0.0.1:18801/mcp` on the Mac with bearer auth; not a public or Mode B release. [Historical Engine/key preparation](runbooks/mvp-mode-a-yuz-local-networked-engine.md).
+
+**Operator-selected networked MVP vs isolated test boundary** — [ADR 0024](decisions/0024-networked-docker-mvp-vs-isolated-e2e.md): production must have controlled MCP↔SSH connectivity, while no-NIC remains for trusted E2E isolation; no offline Docker dependency-chain requirement for online pilot. Not an authorization to deploy or bypass STOP78.
+
+**Mode A OCI/SSH trust proposal** — [per-role and directional network proof matrix](superpowers/specs/2026-10-24-mode-a-oci-privilege-and-network-proof-matrix.md) and [concrete same-node PID, separate-manager OCI execution/no-NIC QEMU Level-2 design](superpowers/specs/2026-10-25-mode-a-runtime-execution-contract.md) (offline review only, P1 executable runtime authority HOLD).
+
+**Mode A C1–C4 trusted source proposal** — [Canonical Ubuntu OCI manifest pins, fail-closed SSH image candidate, disconnected import and test-only key lifecycle](superpowers/specs/2026-10-24-mode-a-ssh-source-and-offline-transfer.md) (public metadata/offline design only).
+
+**Mode A C5 signed distro metadata** — [Ubuntu 26.04 GPG signature and Packages.xz hash-chain offline verification](runbooks/mvp-mode-a-ubuntu-package-index-offline.md), 10 candidate packages only; no `.deb` bytes or complete install lock.
 
 ## Three-layer agent collaboration
 

@@ -329,11 +329,14 @@ Read-only and restricted to profiles permitted to inspect audit events.
 
 The server uses the official MCP Python SDK v2 and exposes Streamable HTTP at
 `/mcp` with stateless JSON responses. The packaged server defaults to
-`127.0.0.1`. Phase 6A adds one explicit container/private-network opt-in:
-`SSH_OVER_MCP_BIND_HOST` accepts exactly `127.0.0.1` or `0.0.0.0`, with
-`127.0.0.1` as the default. Any `0.0.0.0` runtime loaded from the environment
-MUST also configure `SSH_OVER_MCP_ORIGIN_BEARER_TOKEN_FILE`, or startup fails
-closed.
+`127.0.0.1`. `SSH_OVER_MCP_BIND_HOST` accepts loopback `127.0.0.1`
+(the default), `0.0.0.0` for the historical private tunnel, or a canonical
+RFC1918 IPv4 address (`10/8`, `172.16/12`, `192.168/16`) for the explicit
+Mode A origin-interface-only candidate. **Any non-loopback bind requires**
+`SSH_OVER_MCP_ORIGIN_BEARER_TOKEN_FILE`; missing auth fails closed. Public,
+link-local, alternative loopback and noncanonical IPv4/IPv6 hosts are rejected.
+An origin-only listener reduces reachable interfaces but is not a firewall;
+verify the specific Docker network topology before treating it as isolation.
 
 The server still uses one operator-configured static principal profile from
 `SSH_OVER_MCP_PROFILE`. The origin bearer authenticates the upstream HTTP

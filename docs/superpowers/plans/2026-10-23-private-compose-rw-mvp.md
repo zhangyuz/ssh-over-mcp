@@ -91,6 +91,7 @@ M5 `A13` 精确 RC 全量回归及 **Mode A + Mode B 两套独立真实 Compose 
 
 - [ ] **RED：** 静态负向测试证明不存在目前可部署的两个 SSH targets；检测公网/未受限 `ports: 22`、`privileged`、docker.sock、host PID/NET、宿主 `/`、宽写 cgroup、共同 RW 卷、未 pin host key，缺少每目标隔离配置不得通过。再对**现有 MCP `ssh_egress: {}` 没有目的地 allowlist**与**默认可变镜像 `ssh-over-mcp:phase6b`**建立 RED 安全测试，避免将现有配置误判为仅可 SSH egress / digest 固定；生产新入口必须对现有 Compose 行为提供明确回归和迁移边界。
 - [ ] **RED：** `tests/live/test_compose_ssh_targets.py` 定义真实连接正向：控制面可连接两台 `sshd` 的固定 SMCP/ForceCommand；负向：错误 host key、SSH PTY/port forwarding、manager outage、容器重启后隔离失效、横向卷访问失败；未获主机权限时标记 NOT_RUN/SKIPPED，不伪装通过。
+- [ ] **ADR0022 决策前置（仍 PROPOSED）：** [Mode A sshd/manager 最小权限与 cgroup-v2 委托架构](../../decisions/0022-proposed-compose-ssh-privilege-domains.md)。先独立评审固定 sudo/launcher 在容器级 NNP + cap_drop ALL 下的冲突及可证实的替代最小权限域；未经 operator 明确批准不得放宽现有 Compose、构建/拉取镜像或触碰真实 Engine。
 - [ ] **设计/权限门禁：** 对 Compose 中 Linux Engine 的 cgroup v2 可委托范围、manager UID、launcher bootstrap 和仅 CAP_SETUID/CAP_SETGID 使用做单独威胁分析与独立审核；在每个 target 内验证不共享能写入祖先 `cgroup.procs` 的 workload 权能。若可行性不成立，**不要用 privileged/cgroup host root mount 解决**，保持 M1 HOLD 并提交可审阅的替代隔离架构 ADR。
 - [ ] **GREEN：** 在获准的受限环境实现 Compose overlay/镜像/固定端点/手册，让 `node01` 和 `node02` 可以按指定身份配置启动并分别持久化卷与 host keys；复用原控制面 Ledger、admin socket 分隔、可选 private Tunnel，禁止 `sshd` 公网 host port。
 - [ ] **验证 Mode A：** `docker compose config` 负向扫描 + 新测试；随后**仅经明确许可**在干净、可销毁 Linux Engine 上运行两个真实 sshd/manager, 验证 A01–A03 全项正反、重启清理、host-key 不变、审计前置；所有验收绑定镜像 digest/配置/源码 SHA。**明确记录 `MODE_A_PASS` 不能作为 `MODE_B_PASS`。**

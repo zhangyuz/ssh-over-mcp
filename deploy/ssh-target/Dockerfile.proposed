@@ -1,0 +1,32 @@
+# REVIEW CANDIDATE ONLY — NOT BUILDABLE, NOT WIRED INTO COMPOSE.
+# PR #342 C approval #6392167263 permits source design, NOT image pull/build/use.
+# This deliberate nonzero guard prevents a project SSH image from being
+# assembled with missing package pinning, signer attestations or OCI privileges.
+# Do not try to build it: FROM resolution itself could download image layers.
+#
+# Docker Official Image maintained by Canonical; linux/amd64 OCI platform
+# manifest bytes/digest inspected via read-only public registry metadata C4.
+# No provenance signature or actual layers have been verified/approved.
+FROM --platform=linux/amd64 docker.io/library/ubuntu@sha256:42527649dbc4f9197a6073f426f488cbff0e9cc9f2afce32d91c383e4875634a
+
+# HARD STOP: requires independent package-lock, signed offline inputs,
+# approved launcher + sudo/NNP process boundary, manager cgroup delegation,
+# per-node host-key design and explicit build authority before removal.
+RUN printf '%s\n' 'STOP: SSH target OCI runtime is not approved' >&2; exit 78
+
+# POST-GATE DESIGN ONLY (non-executable notes; DO NOT implement by unpinned APT):
+# - COPY preverified offline .deb and Python wheel artifacts with exact SHA256s
+#   from a signed and bounded canonical source manifest; no public network use.
+# - Candidate signed Ubuntu C5 metadata is review-only; see
+#   ubuntu-2604-amd64-metadata-candidates.json and C5 runbook.
+# - Verify signed Ubuntu InRelease+Packages AND each actual .deb SHA256
+#   only after a separate payload-fetch/import/build approval.
+# - Install exact locked openssh-server, sudo, python3 and transitive runtime.
+# - COPY hashed trusted launcher from ops/live-e2e/ and proposed sshd config.
+# - Verify launcher no-argv/sanitized env and signed root-owned sudoers rule.
+# - Install authenticated containment manager, separate UID/GID, socket ACL.
+# - Configure fail-closed health/entrypoint based on live cgroup v2 delegation.
+# - Mount independent host/authorized keys at runtime; NEVER COPY key bytes
+#   into image layers or persist node secrets during build.
+# - Never weaken cap_drop: ALL or no-new-privileges without accepted ADR.
+# - Reproducibly hash and independently review the FINAL image digest + SBOM.

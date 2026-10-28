@@ -11,6 +11,7 @@ from .containment import (
     ContainmentError,
     ContainmentHandle,
     ContainmentRequest,
+    PidfdContainmentHandle,
 )
 from .containment_manager_identity import LinuxProcessIdentityPolicy
 from .execute import (
@@ -81,9 +82,7 @@ class SpawnedChild:
         try:
             self.containment.close()
         except ContainmentError as exc:
-            raise ChildSupervisorError(
-                "cannot close child containment scope"
-            ) from exc
+            raise ChildSupervisorError("cannot close child containment scope") from exc
         self.containment = None
 
     def wait(self) -> int:
@@ -108,9 +107,7 @@ def _require_standard_fds() -> None:
         try:
             os.fstat(fd)
         except OSError as exc:
-            raise ChildSupervisorError(
-                "standard file descriptors must be open"
-            ) from exc
+            raise ChildSupervisorError("standard file descriptors must be open") from exc
 
 
 def _pipe_cloexec() -> tuple[int, int]:
@@ -142,14 +139,10 @@ def _wait_start_barrier(fd: int) -> None:
         except InterruptedError:
             continue
         except OSError as exc:
-            raise ChildSupervisorError(
-                "cannot read child start barrier"
-            ) from exc
+            raise ChildSupervisorError("cannot read child start barrier") from exc
 
     if token != _START_BARRIER_RELEASE:
-        raise ChildSupervisorError(
-            "child start barrier was not released"
-        )
+        raise ChildSupervisorError("child start barrier was not released")
 
 
 def _release_start_barrier(fd: int) -> None:
@@ -160,14 +153,10 @@ def _release_start_barrier(fd: int) -> None:
         except InterruptedError:
             continue
         except OSError as exc:
-            raise ChildSupervisorError(
-                "cannot release child start barrier"
-            ) from exc
+            raise ChildSupervisorError("cannot release child start barrier") from exc
 
     if written != len(_START_BARRIER_RELEASE):
-        raise ChildSupervisorError(
-            "cannot release child start barrier"
-        )
+        raise ChildSupervisorError("cannot release child start barrier")
 
 
 def _reap_pid_bounded(pid: int, timeout_seconds: float = 0.20) -> bool:
@@ -279,9 +268,7 @@ def _apply_child_rlimits(limits: HostChildLimits) -> None:
 
     for name, requested in required.items():
         if not hasattr(resource, name):
-            raise ChildSupervisorError(
-                f"required child resource limit is unavailable: {name}"
-            )
+            raise ChildSupervisorError(f"required child resource limit is unavailable: {name}")
         _set_bounded_rlimit(getattr(resource, name), requested)
 
 
@@ -355,9 +342,7 @@ def _validate_spawn_preconditions(prepared: PreparedCommand) -> None:
     try:
         build_native_exec_spec(prepared)
     except NativeExecutionError as exc:
-        raise ChildSupervisorError(
-            "prepared command cannot enter native execution"
-        ) from exc
+        raise ChildSupervisorError("prepared command cannot enter native execution") from exc
 
 
 def _contained_child_entry(
@@ -468,7 +453,6 @@ def spawn_prepared_native(
     )
 
 
-
 def _cleanup_failed_contained_spawn(
     *,
     pid: int,
@@ -487,7 +471,8 @@ def _cleanup_failed_contained_spawn(
 
     try:
         containment.kill_all()
-    except ContainmentError:
+    except BaseException:  # noqa: BLE001
+        # Even an unexpected backend error must not skip direct child kill/reap.
         cleanup_failed = True
 
     try:
@@ -502,13 +487,12 @@ def _cleanup_failed_contained_spawn(
 
     try:
         containment.close()
-    except ContainmentError:
+    except BaseException:  # noqa: BLE001
+        # Report failed cleanup even if an adapter violates its error contract.
         cleanup_failed = True
 
     if cleanup_failed:
-        raise ChildSupervisorError(
-            "cannot clean failed contained child"
-        )
+        raise ChildSupervisorError("cannot clean failed contained child")
 
 
 def spawn_prepared_native_contained(
@@ -523,16 +507,12 @@ def spawn_prepared_native_contained(
     _validate_spawn_preconditions(prepared)
 
     if request.request_id != prepared.request_id:
-        raise ChildSupervisorError(
-            "containment request id does not match prepared command"
-        )
+        raise ChildSupervisorError("containment request id does not match prepared command")
 
     try:
         containment = backend.create(request)
     except ContainmentError as exc:
-        raise ChildSupervisorError(
-            "cannot create child containment scope"
-        ) from exc
+        raise ChildSupervisorError("cannot create child containment scope") from exc
 
     stdin_read = stdin_write = -1
     stdout_read = stdout_write = -1
@@ -561,15 +541,11 @@ def spawn_prepared_native_contained(
         try:
             containment.close()
         except ContainmentError as cleanup_exc:
-            raise ChildSupervisorError(
-                "cannot clean unstarted containment scope"
-            ) from cleanup_exc
+            raise ChildSupervisorError("cannot clean unstarted containment scope") from cleanup_exc
 
         if isinstance(exc, ChildSupervisorError):
             raise
-        raise ChildSupervisorError(
-            "cannot fork contained child"
-        ) from exc
+        raise ChildSupervisorError("cannot fork contained child") from exc
 
     if pid == 0:
         _contained_child_entry(
@@ -604,7 +580,28 @@ def spawn_prepared_native_contained(
     )
 
     try:
-        containment.attach(pid)
+        if isinstance(containment, PidfdContainmentHandle):
+            # Explicit OCI-only capability, never the legacy integer attach.
+            # While the forked child is blocked and unreaped, its pidfd pins
+            # the process identity until the manager confirms containment.
+            try:
+                pinned_fd = os.pidfd_open(pid, 0)
+            except (AttributeError, OSError) as exc:
+                raise ContainmentError("cannot pin OCI child before attach") from exc
+            try:
+                try:
+                    containment.attach_pinned(pinned_fd)
+                except BaseException as exc:
+                    # OCI manager adapters must never bypass the existing
+                    # kill/reap path with an unexpected exception.
+                    raise ContainmentError("OCI pinned child attach failed") from exc
+            finally:
+                try:
+                    os.close(pinned_fd)
+                except OSError as exc:
+                    raise ContainmentError("cannot close OCI child pidfd") from exc
+        else:
+            containment.attach(pid)
         _release_start_barrier(barrier_write)
     except (ContainmentError, ChildSupervisorError) as exc:
         try:
@@ -616,9 +613,7 @@ def spawn_prepared_native_contained(
             )
         except ChildSupervisorError as cleanup_exc:
             raise cleanup_exc from exc
-        raise ChildSupervisorError(
-            "cannot attach contained child"
-        ) from exc
+        raise ChildSupervisorError("cannot attach contained child") from exc
     finally:
         _close_many((barrier_write,))
 

@@ -201,6 +201,22 @@ def test_runtime_settings_accept_private_bind_with_origin_token_file() -> None:
     assert settings.origin_bearer_token_file == Path("/run/secrets/origin-bearer")
 
 
+@pytest.mark.parametrize("bind_host", ["10.88.2.3", "172.30.252.10", "192.168.10.20"])
+def test_runtime_settings_accept_explicit_private_origin_ipv4_with_token(bind_host: str) -> None:
+    env = _base_runtime_env()
+    env["SSH_OVER_MCP_BIND_HOST"] = bind_host
+    env["SSH_OVER_MCP_ORIGIN_BEARER_TOKEN_FILE"] = "/run/secrets/origin-bearer"
+    assert load_runtime_settings(env).bind_host == bind_host
+
+
+@pytest.mark.parametrize("bind_host", ["10.88.2.3", "172.30.252.10", "192.168.10.20"])
+def test_runtime_settings_reject_private_origin_ipv4_without_token(bind_host: str) -> None:
+    env = _base_runtime_env()
+    env["SSH_OVER_MCP_BIND_HOST"] = bind_host
+    with pytest.raises(RuntimeConfigurationError):
+        load_runtime_settings(env)
+
+
 def test_runtime_settings_accept_origin_token_file_on_loopback() -> None:
     env = _base_runtime_env()
     env["SSH_OVER_MCP_ORIGIN_BEARER_TOKEN_FILE"] = "/run/secrets/origin-bearer"
@@ -213,7 +229,19 @@ def test_runtime_settings_accept_origin_token_file_on_loopback() -> None:
 
 @pytest.mark.parametrize(
     "bind_host",
-    ["", "localhost", "::", "::1", "*", "0.0.0.0 ", "10.0.0.5"],
+    [
+        "",
+        "localhost",
+        "::",
+        "::1",
+        "*",
+        "0.0.0.0 ",
+        "8.8.8.8",
+        "169.254.0.10",
+        "127.0.0.2",
+        "10.0.0.01",
+        "172.32.0.2",
+    ],
 )
 def test_runtime_settings_reject_unsupported_bind_hosts(bind_host: str) -> None:
     env = _base_runtime_env()

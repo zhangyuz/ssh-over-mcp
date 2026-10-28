@@ -1,0 +1,228 @@
+# M1a Mode A — two-SSH Compose declaration overlay (render-only)
+
+> **2026-10-27 delivery direction:** [ADR0024](../decisions/0024-networked-docker-mvp-vs-isolated-e2e.md) chooses an authorized **networked Linux Docker Engine** (an isolated project on an existing compatible Engine or a dedicated one if necessary), with official signed Ubuntu image APT and private MCP↔SSH connectivity for the Mode A FS-only pilot. This file remains an inert **render-only** candidate until a separate reviewed running image replaces STOP78 and target-specific private network/identity/rollback acceptance is complete. Neither offline Engine media nor a no-NIC OCI guest is a pilot deployment prerequisite; trusted no-NIC Native Level-3 remains a separate security test.
+
+
+**Status: STATIC DECLARATION DELIVERABLE, NOT STARTUP/DEPLOYMENT AUTHORITY.** This feature adds `deploy/compose/compose.dev-ssh.yaml`, an offline-renderable *Mode A only* overlay for one disposable Linux Engine with one MCP control project and `node01`/`node02` SSH service descriptions. **Do not run `docker compose up`, `pull`, `build`, or supply production credentials/real host-key assets based on this feature.** The host-level privilege, cgroup delegation, approved SSH target image, ForceCommand/sshd bootstrap and authenticated host keys are not yet implemented or independently verified; Mode A `A01`–`A03` and Mode B `A15`–`A18` remain `NOT_RUN/HOLD`.
+
+## Reproducible static operator action
+
+The operator must supply digest-pinned image *references* out of band for the control stack and two future SSH image assets. The included [`reference.mode-a.env.example`](../../deploy/compose/reference.mode-a.env.example) is intentionally **not runnable**: image digest fields contain invalid `DO_NOT_DEPLOY` markers, and file paths are placeholders, not real credentials. Do not populate this checked-in file with secrets. Use only synthetic, non-sensitive test paths and reviewed OCI reference strings when testing offline.
+
+A purely offline render command (do not append `up`, `pull` or `build`): **use a cleared process environment**. An inherited `COMPOSE_ENV_FILES`, `COMPOSE_PROFILES`, `COMPOSE_FILE`, exported image variable or local `.env` can silently change what Compose renders; an explicit `--env-file` is not sufficient proof of input provenance. In the example, only PATH/HOME are retained for CLI plugin discovery, and the Docker host points to a nonexistent socket:
+
+```sh
+env -i PATH="$PATH" HOME="$HOME" COMPOSE_DISABLE_ENV_FILE=1 \
+  DOCKER_HOST=unix:///nonexistent-som-mode-a.sock \
+  docker compose \
+  -f deploy/compose/compose.yaml \
+  -f deploy/compose/compose.dev-ssh.yaml \
+  --project-name som-mode-a-synthetic \
+  --env-file /operator-owned/private/synthetic-mode-a.env \
+  config --format json > /operator-owned/private/rendered-mode-a.json
+
+python3 ops/mvp/compose_config_preflight.py \
+  --mode dev-e2e \
+  --control-json /operator-owned/private/rendered-mode-a.json
+
+python3 ops/mvp/bundle_preflight.py \
+  --topology-json /operator-owned/private/synthetic-mode-a-topology.json \
+  --control-json /operator-owned/private/rendered-mode-a.json
+```
+
+The command requires Docker Compose **2.33.1+** (both `!override` and the base file's `gw_priority`; tested with v5.5.1), but **does not require or contact a Docker Engine** for `config` output. Never paste rendered Compose output containing interpolated paths/config/secret references into tickets or logs. The topology JSON is independently provided, including both distinct node aliases and *synthetic* SSH host-key fingerprint syntax; syntax/consistency checks do not establish trust. All image variables — `SSH_OVER_MCP_IMAGE`, `SSH_OVER_MCP_NODE01_IMAGE`, `SSH_OVER_MCP_NODE02_IMAGE` — must be explicitly set; the overlay rejects missing values rather than falling back to the control project's mutable historic `phase6b` image tag. A syntactically well-formed digest string still **does not prove image contents, signature or provenance**.
+
+## Full five-service Compose boot proof (GitHub CI ONLY)
+
+A separate step in `.github/workflows/mvp-342-oci-source-build.yml`
+runs `ops/mvp/mode_a_hosted_online_compose_startup.py` on a **disposable
+GitHub-hosted Ubuntu PR runner**, never `yuz.local`. It builds the existing
+control `Dockerfile` locally and reuses the already-proven default-boot
+OpenSSH candidate, then **really starts** the existing three-file Mode A
+Compose topology: `ledger-init` (exits 0), `ledger` (running), `mcp`
+(ready), `node01` and `node02` (running with valid sshd configuration).
+The fourth Compose overlay is written only in a private temporary directory;
+it resets the two nodes' STOP78 `entrypoint` / `command` fields to the
+tested SSH image defaults. This override is **never checked in, exported,
+applied to an operator environment, or promoted to a release**.
+
+It uses new synthetic SSH identities, private configuration and a one-time
+origin bearer token; it starts **no** Cloudflare tunnel, published host port,
+manager, host-cgroup workload or production secret. The test asserts
+`docker compose config` network and identity shape before `up --wait`,
+checks the actual MCP readiness and node `sshd -t`, and then uses the **running** Compose MCP listener for two-node
+`fs_mkdir` + `fs_write` via one-time `approvalctl` grants, `fs_read`
+readback, replay refusals, and bearer-less origin rejection. Those calls
+exercise the actual Compose Ledger execution/admin sockets and running
+OpenSSH containers instead of an in-process Ledger test fixture.
+It always executes project-scoped `down --volumes --remove-orphans` with
+bounded cleanup.
+The CI marker is
+`MODE_A_COMPOSE_ALL_FIVE_SERVICES_HEALTHY_CI_ONLY_PASS` plus
+`MODE_A_COMPOSE_REAL_MCP_LEDGER_TWO_NODE_FS_PASS`, and does **not**
+mean network egress ACL enforcement or production approval. Real once-only
+MCP/Ledger FS writes on two runnable OpenSSH nodes remain covered separately
+by the dedicated ordinary and userns-remapped hosted OCI proofs.
+
+**Release remains HOLD:** the tracked Compose overlay still forces STOP78.
+Use only reviewed, finalized immutable image IDs, a userns-isolated approved
+Engine, operator-managed host keys, real origin/SSH network controls,
+live/rollback evidence and independent review to authorize actual rollout.
+
+## First-principles networked render preflight (read-only, not release)
+
+Render the **third** review overlay in a cleared environment, with a
+private *synthetic-only* env file containing all mandatory image digest
+placeholders, origin IPv4/CIDR and mount-source paths (never real keys):
+
+```sh
+env -i PATH="$PATH" HOME="$HOME" COMPOSE_DISABLE_ENV_FILE=1 \
+  DOCKER_HOST=unix:///nonexistent-som-mode-a.sock \
+  docker compose --project-name som-mode-a-review \
+  -f deploy/compose/compose.yaml \
+  -f deploy/compose/compose.dev-ssh.yaml \
+  -f deploy/compose/compose.mode-a-openssh-fs.review-candidate.yaml \
+  --profile mvp-fs-review \
+  --env-file /operator-owned/private/synthetic-mode-a.env \
+  config --format json > /operator-owned/private/rendered-mode-a-review.json
+```
+
+Then validate its *actual merged JSON* (not the historical two-file
+dev-E2E render):
+
+```sh
+python3 ops/mvp/mode_a_networked_render_preflight.py \
+  --rendered-json /operator-owned/private/rendered-mode-a-review.json
+```
+
+Only `REVIEW_ONLY_HOLD` is a successful *static* result. The program
+refuses origin IPv4 outside the declared canonical RFC1918 subnet, gateway
+or network/broadcast addresses, mismatched `SSH_OVER_MCP_BIND_HOST`,
+unexpected lateral node/MCP attachments, published service ports,
+unreviewed capabilities, missing NNP, writable/auto-created SSH key
+mounts, mutable image tags and removal of the SSH STOP78 hold. It prints
+no interpolated file paths or credentials. Rendering is strictly
+`config` only with `DOCKER_HOST` pointing to a nonexistent socket.
+The static PASS explicitly reports `network_acl_verified=false` and
+`deployment_ready=false`; it **cannot verify actual host firewall,
+user namespace, image digest contents, keys, or container startup**.
+Do not use this preflight as justification for `docker compose up`.
+
+## Isolation represented by the YAML (not yet proven in running containers)
+
+- Overlay **replaces**, not appends, MCP network attachments: `origin_internal`, `node01_ssh` and `node02_ssh`. The baseline unbounded `ssh_egress` is removed from this Mode A render, not from the historical production Compose file; no implicit default bridge or SSH-node-to-node shared network is intended.
+- `node01` attaches only to its dedicated internal network `node01_ssh`; `node02` only to `node02_ssh`. Each has separate named data and SSH host-key volumes. SSH host keys are mounted read-only; operator-owned secure provisioning and runtime image contract remain an explicit prerequisite.
+- **Reverse reachability HOLD:** these shared Docker bridges are **bidirectional**; MCP binds its server on `0.0.0.0`. A compromised SSH node can attempt a **node-initiated** connection to MCP over its shared bridge (including MCP TCP/8000), regardless of `internal: true`. An internal bridge alone is not a source-restricted, directional ACL. Require **real negative** node→MCP and origin-authentication-bypass probes, plus independently authorized host/network policy enforcement before claiming ingress restrictions or network ACL verification. The preflight correctly reports `network_acl_verified=false`. A disposable hosted OCI test now installs INPUT conntrack NEW-flow denial rules inside the **test control-container network namespace**, checks both nodes could connect before enforcement and cannot connect after, and repeats real MCP→SSH Ledger FS operations afterward. This is a CI feasibility proof only; production Compose does not install these rules and remains HOLD.
+- No host `ports`, Docker socket bind, `privileged`, host PID/net namespace, extra capabilities, arbitrary user/entrypoint overrides or writable cgroup/host root. Both future SSH targets are declared `read_only: true`, `cap_drop: [ALL]`, `no-new-privileges:true`. These fields **are not evidence that a real sshd, authorized launcher, manager or cgroup delegation can function** with these constraints. No root exception is silently granted.
+- The MCP service mounts operator config, credential references, SSH secret directory and origin bearer file read-only with `bind.create_host_path: false`. Ledger DB/admin/exec named-volume boundaries are preserved; control-plane `ledger-init` remains the already-reviewed distinct initialization privilege domain.
+- `cloudflared` and `approvalctl` stay in existing opt-in profiles; no public origin/SSH host port is published by the overlay. Compose bridge isolation alone is **not** a host firewall, egress ACL or Mode B private network proof.
+
+## SSH runtime handoff review candidate (not an executable deployment)
+
+The [SSH bootstrap/privilege proposal](../superpowers/specs/2026-10-24-mode-a-ssh-runtime-handoff-review.md) documents the exact incompatibility between the current `cap_drop: ALL` + `no-new-privileges:true` and ADR0007's privileged fixed ForceCommand handoff. The candidate [`sshd_config.proposed`](../../deploy/ssh-target/sshd_config.proposed) is intentionally **not mounted, built, started or accepted** by the Compose overlay; it contains only an E2E-only fixed SSH account and has no trusted container sudo/UID/cgroup/image/authorized-keys assets. There is **no authorized workaround** based on adding host capabilities, weakening NNP or mounting the host cgroup root. Static tests of this proposal do not reduce the existing A01–A03/HOLD gates.
+
+Proposed [ADR0022](../decisions/0022-proposed-compose-ssh-privilege-domains.md) records the competing SSH/manager privilege constraints and explicit real-runtime gates. It is not approval to replace `cap_drop: ALL`, remove `no-new-privileges`, or run Docker.
+
+C5 read-only signed Ubuntu distro metadata [GPG archive/Packages index candidate record](mvp-mode-a-ubuntu-package-index-offline.md) is **not** an installable dependency lock or image authorization.
+
+C1–C4 source-only direction: [Ubuntu 26.04 OCI manifest verification and test-key/offline-import proposal](../superpowers/specs/2026-10-24-mode-a-ssh-source-and-offline-transfer.md). The static `Dockerfile.proposed` intentionally cannot build; C authorization does not permit the image, keys, or guest startup.
+
+For the non-executable SSH boundary decision, review the [OCI privilege and network proof matrix](../superpowers/specs/2026-10-24-mode-a-oci-privilege-and-network-proof-matrix.md): it explicitly distinguishes stateful node→MCP TCP/8000 **NEW** denial from permitted **ESTABLISHED** SSH replies, and tracks per-role UID/cap/FD/NNP/cgroup requirements without relaxing current Compose.
+
+## Required distinct next approvals / acceptance
+
+The dedicated disposable Ubuntu VM selection and its **read-only, fail-closed** configuration checker are documented in [the Mode A VM offline gate](mvp-mode-a-vm-offline-gate.md). A current Lima 2.2 user-mode network declaration does not prove host/LAN egress denial; a syntactic VM match is not startup permission.
+
+
+Before any live test on a disposable **authorized Linux Engine**, independently review and approve: immutable digest **source**, exact SSH image Dockerfile/build provenance, OpenSSH `sshd_config`/ForceCommand/authorized keys, SSH host-key generation and pin trust source, manager/host-agent identity and **minimal CAP_SETUID/CAP_SETGID/UID bootstrap** compatibility, safe cgroup v2 delegation, per-request typed FS containment and resource limits, explicitly treating `CAP_SETUID` as UID 0 impersonation authority in the trusted host-agent, and actual network ingress/egress deny evidence including node-initiated TCP/8000 to MCP. If `no-new-privileges` or `cap_drop: ALL` makes secure sshd startup impossible, do **not** weaken confinement ad hoc; revise ADR0021/plan with a separately authorized privilege model and independent security review first.
+
+M1a `A01`–`A03` are reserved for actual live Mode A positive plus hostile lateral network/data/host-key/restart/manager-outage tests on the same accepted image/source SHA. The existing Native Level-3 and hosted CI runs do not substitute for these. Mode B requires separate **three distinct Linux Engines** and `A15`–`A18`; this overlay is intentionally **not** a Mode B deployment template. The static preflight and bundle check always report `deployment_ready=false`, all host/image/ACL/runtime/live-E2E flags false.
+
+See [MVP status](../mvp-status.md), [ADR0021](../decisions/0021-private-compose-rw-mvp-release-track.md), and [M1a plan](../superpowers/plans/2026-10-23-private-compose-rw-mvp.md).
+
+## Online pilot image: distinct runnable CI candidate, not production
+
+For the networked Mode A decision [ADR0024](../decisions/0024-networked-docker-mvp-vs-isolated-e2e.md),
+the next deliverable is a real **default-boot** OpenSSH image, not another
+air-gapped Engine installation. `ops/mvp/build_online_pilot_review_image.py`
+creates a separate `som-mvp-fs-online-pilot-review:local` candidate from
+the same reviewed signed-APT Ubuntu/OpenSSH source build, baking the exact
+native no-sudo FS ForceCommand and setting its image-default entrypoint to
+`/usr/sbin/sshd` with `-D -e`. Its only permitted caller is a disposable
+**GitHub-hosted PR #342** runner. No Yuz.local Docker build/pull/load occurs.
+
+`ops/mvp/mode_a_hosted_runnable_image_probe.py` then starts that candidate
+using the **image default entrypoint and CMD** (not an overriding CLI entrypoint)
+with `--network none`, no host ports, no production credentials, a read-only
+filesystem, four admission caps and NNP from container start. The actual
+real-SSH typed FS read/write/negative test is reused. The candidate is **never signed or approved as a production release or
+wired into Compose**. To avoid losing the actual runnable bytes, the hosted CI
+now exports a **separately named TEST-ONLY runnable review archive**
+(`som342-online-pilot-review.docker.tar.gz`), confirms its SHA256 and exact
+image ID after a Docker remove/reload, and reruns default-start typed FS checks.
+It then imports the **same archive** into a separate userns-remapped Docker
+daemon for another actual default-boot FS test, recording an observed post-import
+image ID in `ONLINE_PILOT_REMAPPED_TEST_RECEIPT.json`. The same CI now
+verifies **both runnable SSH nodes' image-default startup** against the actual
+central MCP HTTP interface and once-only Security Ledger, including approved
+create-only writes, replay denial, peer-network denial, and reverse TCP/8000
+restriction before issuing the test-only receipt. The control container still
+uses a test-only boot override from the original STOP78 test image; this does
+**not** prove final production Compose startup of the control plane.
+GitHub OIDC attestations
+cover **the review archive bytes and this CI-only receipt separately**;
+an attestation proves origin, **not** production approval. Both contain
+`production_signed_runtime_id=false` / `production_deployed=false`, and
+only short-lived GitHub Actions artifacts carry these synthetic-key-free
+image bytes. The previously signed **STOP78 test** archive remains separate
+and unchanged.
+
+To verify the *test* handoff, require the exact accepted PR HEAD and
+workflow identity, separately verify both GitHub attestations with
+`gh attestation verify`, hash the downloaded archive against
+`ONLINE_PILOT_IMAGE_SHA256SUMS`, compare receipt archive hash/UUID and
+default `/usr/sbin/sshd` + `-D -e`, and treat any mismatched or rewritten
+userns image ID as its own explicit identity. **Do not execute or load this
+CI artifact on Yuz.local merely because it has a valid attestation.**
+
+**Next real release gate:** independently review a final runnable image's exact
+digest, root-owned launch/config, userns/CapBnd policy decision #346, per-node
+keys and private network. Verify it on an **explicitly authorized** isolated
+Compose project / selected Engine with positive MCP→SSH and negative
+SSH→MCP/sibling probes, then release. Do **not** replace the runtime overlay's
+STOP78 guard or make test-only success count as production approval.
+
+## OpenSSH-only FS runtime review overlay (render-only)
+
+For an **inert** review of the runtime shape proven by hosted Docker tests,
+append `deploy/compose/compose.mode-a-openssh-fs.review-candidate.yaml`
+after `compose.yaml` and `compose.dev-ssh.yaml` in the Compose `-f`
+order. Supply all four separate root-owned node host-key and authorized-key
+directory placeholders from `reference.mode-a.env.example`. Only invoke
+`docker compose --profile mvp-fs-review config`, never `up` or `build`.
+
+The candidate aligns rendered fields with validated OpenSSH admission:
+root user inside a dedicated userns, `CAP_SETUID/SETGID/SETPCAP/SYS_CHROOT`
+only, **NNP=1 from container startup**, native no-sudo fixed ForceCommand,
+internal SSH port 2222, read-only per-node host keys/authorized keys and
+node data volumes. Hosted OCI verifies the final FS process UID2201,
+NNP=1, four zero capability sets and an exact **nonzero** CapBnd=0x401c0.
+This is a CI-only candidate security model; independently approved production
+policy still requires **all five sets zero** until separately reviewed. All nodes explicitly retain the STOP78 entrypoint,
+even when the review-only profile is enabled.
+
+The candidate MCP service now **requires** two operator-selected nonconflicting
+RFC1918 values at offline render: `SSH_OVER_MCP_MODE_A_ORIGIN_CIDR`
+(e.g. `172.30.252.0/24`) and `SSH_OVER_MCP_MODE_A_ORIGIN_IPV4`
+(e.g. `172.30.252.10`, contained in that subnet). The MCP listener and
+`origin_internal` static address must be identical; healthcheck probes this
+address rather than loopback. Nodes remain on their separate `node01_ssh`
+and `node02_ssh` bridges. This removes `0.0.0.0` from the Mode A review-only
+control service with **no NET_ADMIN/host firewall capability**. CI separately
+exercises a disposable origin-only TCP listener against real two SSH nodes,
+followed by the existing stateful ACL test; neither is a production startup
+or signed guest acceptance.
+
+This does NOT prove or authorize live Mode A networking, production directional
+ACL, signed production image identity, rollback or no-NIC OCI guest runtime.
+No host secrets or bind-source paths are created by `config`. Keep STOP78.

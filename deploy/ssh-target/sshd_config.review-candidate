@@ -1,0 +1,29 @@
+# PROPOSED ONLY - not wired into Compose or an approved SSH image.
+# Must be reviewed alongside exact startup, sudo, cgroup, host policy, image
+# provenance and host-key/authorized-key supply before any runtime use.
+Port 22
+AddressFamily inet
+HostKey /etc/ssh/hostkeys/ssh_host_ed25519_key
+AuthorizedKeysFile /etc/ssh/authorized_keys/%u
+# E2E-only identity; NOT a production container account contract.
+AllowUsers ssh-over-mcp-e2e-host
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+PermitRootLogin no
+UsePAM no
+StrictModes yes
+PermitTTY no
+AllowTcpForwarding no
+DisableForwarding yes
+AllowStreamLocalForwarding no
+AllowAgentForwarding no
+X11Forwarding no
+PermitTunnel no
+PermitUserEnvironment no
+PermitUserRC no
+GatewayPorts no
+ForceCommand /usr/bin/sudo -n /usr/bin/python3 -I -S /usr/local/libexec/ssh-over-mcp-oci-launcher.py
+LogLevel VERBOSE

@@ -1,91 +1,82 @@
-"""Remote ForceCommand host-agent components."""
+"""Remote ForceCommand host-agent public API (lazy compatibility exports).
 
-from .cgroup_v2 import CgroupV2Backend, CgroupV2Handle
-from .containment import (
-    REQUIRED_CGROUP_V2_CONTROLLERS,
-    CgroupV2Probe,
-    ContainmentBackend,
-    ContainmentError,
-    ContainmentHandle,
-    ContainmentLimits,
-    ContainmentRequest,
-    ContainmentStats,
-    ContainmentUnavailableError,
-    probe_cgroup_v2,
-)
-from .containment_manager import (
-    ContainmentManagerClient,
-    ContainmentManagerDispatcher,
-    ContainmentManagerProtocolError,
-    ContainmentManagerTransport,
-    InMemoryContainmentManagerTransport,
-    ManagedContainmentHandle,
-)
-from .containment_manager_endpoint import (
-    ContainmentManagerEndpointError,
-    UnixContainmentManagerListener,
-    UnixManagerEndpointPolicy,
-)
-from .containment_manager_identity import (
-    ContainmentServiceIdentityPlan,
-    LinuxProcessIdentity,
-    LinuxProcessIdentityError,
-    LinuxProcessIdentityPolicy,
-    LinuxProcessIdentitySnapshot,
-    read_linux_process_identity,
-    require_linux_process_identity,
-)
-from .containment_manager_peer import (
-    ContainmentManagerPeerAuthError,
-    LinuxPeerCredentialPolicy,
-    LinuxPeerCredentials,
-    authenticate_linux_unix_peer,
-    read_linux_unix_peer_credentials,
-)
-from .containment_manager_service import (
-    ContainmentManagerService,
-    ContainmentManagerServiceError,
-)
-from .containment_manager_unix import (
-    UnixContainmentManagerTransport,
-    connect_authenticated_containment_manager,
-    serve_containment_manager_connection,
-)
-from .execute import (
-    NativeExecSpec,
-    NativeExecutionError,
-    build_native_exec_spec,
-    exec_prepared_native_in_child,
-)
-from .policy import (
-    HostArgvRule,
-    HostAuthorizationResult,
-    HostChildLimits,
-    HostCommandRule,
-    HostExecutionPolicy,
-    HostPolicyError,
-    authorize_request,
-    load_host_policy,
-)
-from .prepare import CommandPreparationError, PreparedCommand, prepare_command
-from .protocol import (
-    HostAgentProtocolError,
-    read_application_stdin,
-    read_envelope,
-    read_request,
-    validate_ssh_context,
-)
-from .run import (
-    BoundedExecutionError,
-    SupervisedExecutionResult,
-    run_prepared_native,
-)
-from .supervisor import (
-    ChildSupervisorError,
-    SpawnedChild,
-    spawn_prepared_native,
-    spawn_prepared_native_contained,
-)
+Keep package initialization stdlib-only: the OCI root admission imports
+its fixed pidfd modules before the nonroot agent may load pydantic/yaml.
+Public API names still resolve from their original modules on access.
+"""
+
+from __future__ import annotations
+
+from importlib import import_module
+from typing import Any
+
+_EXPORT_MODULE = {
+    "BoundedExecutionError": "run",
+    "CgroupV2Backend": "cgroup_v2",
+    "CgroupV2Handle": "cgroup_v2",
+    "CgroupV2Probe": "containment",
+    "ChildSupervisorError": "supervisor",
+    "CommandPreparationError": "prepare",
+    "ContainmentBackend": "containment",
+    "ContainmentError": "containment",
+    "ContainmentHandle": "containment",
+    "ContainmentLimits": "containment",
+    "ContainmentManagerClient": "containment_manager",
+    "ContainmentManagerDispatcher": "containment_manager",
+    "ContainmentManagerEndpointError": "containment_manager_endpoint",
+    "ContainmentManagerPeerAuthError": "containment_manager_peer",
+    "ContainmentManagerProtocolError": "containment_manager",
+    "ContainmentManagerService": "containment_manager_service",
+    "ContainmentManagerServiceError": "containment_manager_service",
+    "ContainmentManagerTransport": "containment_manager",
+    "ContainmentRequest": "containment",
+    "ContainmentServiceIdentityPlan": "containment_manager_identity",
+    "ContainmentStats": "containment",
+    "ContainmentUnavailableError": "containment",
+    "HostAgentProtocolError": "protocol",
+    "HostArgvRule": "policy",
+    "HostAuthorizationResult": "policy",
+    "HostChildLimits": "policy",
+    "HostCommandRule": "policy",
+    "HostExecutionPolicy": "policy",
+    "HostPolicyError": "policy",
+    "InMemoryContainmentManagerTransport": "containment_manager",
+    "LinuxPeerCredentialPolicy": "containment_manager_peer",
+    "LinuxPeerCredentials": "containment_manager_peer",
+    "LinuxProcessIdentity": "containment_manager_identity",
+    "LinuxProcessIdentityError": "containment_manager_identity",
+    "LinuxProcessIdentityPolicy": "containment_manager_identity",
+    "LinuxProcessIdentitySnapshot": "containment_manager_identity",
+    "ManagedContainmentHandle": "containment_manager",
+    "NativeExecSpec": "execute",
+    "NativeExecutionError": "execute",
+    "PreparedCommand": "prepare",
+    "REQUIRED_CGROUP_V2_CONTROLLERS": "containment",
+    "SpawnedChild": "supervisor",
+    "SupervisedExecutionResult": "run",
+    "UnixContainmentManagerListener": "containment_manager_endpoint",
+    "UnixContainmentManagerTransport": "containment_manager_unix",
+    "UnixManagerEndpointPolicy": "containment_manager_endpoint",
+    "authenticate_linux_unix_peer": "containment_manager_peer",
+    "authorize_request": "policy",
+    "build_native_exec_spec": "execute",
+    "connect_authenticated_containment_manager": "containment_manager_unix",
+    "exec_prepared_native_in_child": "execute",
+    "load_host_policy": "policy",
+    "prepare_command": "prepare",
+    "probe_cgroup_v2": "containment",
+    "read_application_stdin": "protocol",
+    "read_envelope": "protocol",
+    "read_linux_process_identity": "containment_manager_identity",
+    "read_linux_unix_peer_credentials": "containment_manager_peer",
+    "read_request": "protocol",
+    "require_linux_process_identity": "containment_manager_identity",
+    "run_prepared_native": "run",
+    "serve_containment_manager_connection": "containment_manager_unix",
+    "spawn_prepared_native": "supervisor",
+    "spawn_prepared_native_contained": "supervisor",
+    "validate_ssh_context": "protocol",
+}
 
 __all__ = [
     "REQUIRED_CGROUP_V2_CONTROLLERS",
@@ -154,3 +145,16 @@ __all__ = [
     "spawn_prepared_native_contained",
     "validate_ssh_context",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    module = _EXPORT_MODULE.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(f".{module}", __name__), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

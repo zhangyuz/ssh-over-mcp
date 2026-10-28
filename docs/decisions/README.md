@@ -35,3 +35,11 @@ Current ADRs:
 - [0020 — Trusted PR native E2E admission (proposed; not activated)](0020-trusted-pr-native-e2e-admission.md) — staged default-branch identity gate, no present workflow changes.
 
 - [0021 — Private multi-SSH Compose read/write MVP release track (proposed)](0021-private-compose-rw-mvp-release-track.md) — two mandatory deployment topologies confirmed by operator (single-engine development/E2E; separate control-plane plus two remote SSH Compose Engines for actual deployment); remaining safety/release-track decision Proposed, no security-gate waiver or implementation authorization.
+
+- [0022 — Proposed Compose SSH runtime privilege domains (NOT accepted)](0022-proposed-compose-ssh-privilege-domains.md) — mode A sshd/launcher/manager split and exact authority/evidence gates.
+
+- [0023 — FS-only OpenSSH admission (proposed, NOT accepted)](0023-proposed-fs-only-openssh-admission.md) — fixed sudo/setpriv capability-drop handoff and unchanged deployment HOLD.
+
+- [0024 — Networked Docker MVP versus isolated no-NIC E2E](0024-networked-docker-mvp-vs-isolated-e2e.md) — operator-selected online Mode A delivery direction: signed Ubuntu APT + private MCP↔SSH network, no custom offline Engine/no-NIC OCI guest production prerequisite; security/launch authorization remains separate.
+
+- [0025 — Operator-approved private Mode A FS-only pilot release](0025-mode-a-fs-only-operator-pilot-release.md) — exact image IDs, scoped four-cap acceptance, local-only ingress and verified rollback.

@@ -1,0 +1,32 @@
+# PROPOSED OpenSSH privileged admission only; FS child retains zero capabilities.
+# NOT Compose-wired; no host/root privilege change is authorized by this file.
+# PROPOSED ONLY - not wired into Compose or an approved SSH image.
+# Must be reviewed alongside exact startup, sudo, cgroup, host policy, image
+# provenance and host-key/authorized-key supply before any runtime use.
+# Unprivileged OpenSSH listener; deployment/inventory port is not switched.
+Port 2222
+AddressFamily inet
+HostKey /etc/ssh/hostkeys/ssh_host_ed25519_key
+AuthorizedKeysFile /etc/ssh/authorized_keys/%u
+# E2E-only identity; NOT a production container account contract.
+AllowUsers ssh-over-mcp-e2e-host
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+PermitRootLogin no
+UsePAM no
+StrictModes yes
+PermitTTY no
+AllowTcpForwarding no
+DisableForwarding yes
+AllowStreamLocalForwarding no
+AllowAgentForwarding no
+X11Forwarding no
+PermitTunnel no
+PermitUserEnvironment no
+PermitUserRC no
+GatewayPorts no
+ForceCommand /usr/bin/sudo -n /usr/bin/setpriv --inh-caps=-all --ambient-caps=-all --bounding-set=-all --no-new-privs --reuid=2201 --regid=3201 --clear-groups /usr/bin/python3 -I -S /usr/local/libexec/ssh-over-mcp-fs-only-launcher.py
+LogLevel VERBOSE

@@ -1,0 +1,115 @@
+# Mode A ONLY: off-line renderable single-Engine, two-target isolation SHAPE.
+# NOT a runnable/approved SSH image bootstrap, release or real E2E fixture.
+# SSH target images MUST be separately designed, provenance-verified and
+# authorized before ANY docker compose up/pull/build operation.
+services:
+  # Override the old mutable phase6b tag in *every* control role. `:?`
+  # makes an omitted/empty control image a hard Compose render error.
+  ledger-init:
+    image: ${SSH_OVER_MCP_IMAGE:?set immutable control image digest}
+  ledger:
+    image: ${SSH_OVER_MCP_IMAGE:?set immutable control image digest}
+  approvalctl:
+    image: ${SSH_OVER_MCP_IMAGE:?set immutable control image digest}
+
+  # Preserve the existing reviewed Cloudflare digest, omitting its tag to
+  # satisfy the strict digest-only offline verification contract.
+  cloudflared:
+    image: cloudflare/cloudflared@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
+
+  mcp:
+    image: ${SSH_OVER_MCP_IMAGE:?set immutable control image digest}
+    # Compose 2.24.4+ replacement, not additive merging: remove unreviewed
+    # legacy `ssh_egress`, restrict attachments to the two target bridges.
+    networks: !override
+      origin_internal:
+        aliases:
+          - ssh-over-mcp-origin
+          - ${SSH_OVER_MCP_PRIVATE_HOSTNAME:-mcp.internal.example}
+      node01_ssh: {}
+      node02_ssh: {}
+    # Baseline historical mounts can implicitly create host paths. Override
+    # the complete collection to forbid *all* absent host-source creation.
+    volumes: !override
+      - type: bind
+        source: ${SSH_OVER_MCP_CONFIG_FILE:?set SSH_OVER_MCP_CONFIG_FILE}
+        target: /etc/ssh-over-mcp/config.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${SSH_OVER_MCP_CREDENTIAL_MAP_FILE:?set SSH_OVER_MCP_CREDENTIAL_MAP_FILE}
+        target: /etc/ssh-over-mcp/credentials.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${SSH_OVER_MCP_SSH_SECRETS_DIR:?set SSH_OVER_MCP_SSH_SECRETS_DIR}
+        target: /run/secrets/ssh
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${SSH_OVER_MCP_ORIGIN_BEARER_FILE:?set SSH_OVER_MCP_ORIGIN_BEARER_FILE}
+        target: /run/secrets/origin-bearer
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: ledger-exec
+        target: /run/ssh-over-mcp-exec
+        read_only: true
+
+  node01:
+    # Intentionally no startup command, UID or manager privilege contract:
+    # an *approved* immutable SSH target image must supply those separately.
+    image: ${SSH_OVER_MCP_NODE01_IMAGE:?set immutable node01 SSH image digest}
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    networks: [node01_ssh]
+    expose: ["22"]
+    volumes:
+      - type: volume
+        source: node01-data
+        target: /srv/data
+      - type: volume
+        source: node01-hostkeys
+        target: /etc/ssh/hostkeys
+        read_only: true
+
+  node02:
+    image: ${SSH_OVER_MCP_NODE02_IMAGE:?set immutable node02 SSH image digest}
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    networks: [node02_ssh]
+    expose: ["22"]
+    volumes:
+      - type: volume
+        source: node02-data
+        target: /srv/data
+      - type: volume
+        source: node02-hostkeys
+        target: /etc/ssh/hostkeys
+        read_only: true
+
+# Replace the broad original network definition, preserving only authorized
+# control/Cloudflare network definitions plus per-SSH-node private bridges.
+networks: !override
+  origin_internal:
+    internal: true
+  cloudflare_egress: {}
+  node01_ssh:
+    internal: true
+  node02_ssh:
+    internal: true
+
+volumes: !override
+  ledger-data: {}
+  ledger-exec: {}
+  ledger-admin: {}
+  node01-data: {}
+  node01-hostkeys: {}
+  node02-data: {}
+  node02-hostkeys: {}

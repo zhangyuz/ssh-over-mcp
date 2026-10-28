@@ -1,0 +1,53 @@
+# OpenSSH-only *source-build* candidate. No service is authorized to start.
+# Build atop the already pinned official-Ubuntu, exact-lock FS source layer.
+# Never use a mutable registry tag as an approved image or Docker runtime input.
+ARG SOM_FS_SOURCE_IMAGE
+FROM ${SOM_FS_SOURCE_IMAGE}
+
+USER 0:0
+ENV DEBIAN_FRONTEND=noninteractive
+# Trusted Ubuntu archive signatures remain mandatory: no unsigned packages.
+RUN set -eu; \
+    test -f /usr/share/keyrings/ubuntu-archive-keyring.gpg; \
+    test -x /usr/bin/setpriv; \
+    grep -q 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' \
+      /etc/apt/sources.list.d/ubuntu.sources; \
+    apt-get update; \
+    mkdir -p /usr/share/ssh-over-mcp/provenance/privsep-signed-apt-lists \
+      /tmp/privsep-apt-archives/partial; \
+    cp -a /var/lib/apt/lists/*_InRelease \
+      /usr/share/ssh-over-mcp/provenance/privsep-signed-apt-lists/; \
+    cp -a /var/lib/apt/lists/*_Packages* \
+      /usr/share/ssh-over-mcp/provenance/privsep-signed-apt-lists/; \
+    cp /etc/apt/sources.list.d/ubuntu.sources \
+      /usr/share/ssh-over-mcp/provenance/privsep-signed-apt-lists/ubuntu.sources; \
+    cp /usr/share/keyrings/ubuntu-archive-keyring.gpg \
+      /usr/share/ssh-over-mcp/provenance/privsep-signed-apt-lists/ubuntu-archive-keyring.gpg; \
+    (cd /usr/share/ssh-over-mcp/provenance/privsep-signed-apt-lists \
+      && sha256sum ./* > ../privsep-signed-apt-lists-sha256.txt); \
+    apt-get -y -o Dir::Cache::archives=/tmp/privsep-apt-archives \
+      install --download-only --no-install-recommends \
+      sudo=1.9.17p2-1ubuntu3.2 sudo-common=1.2ubuntu; \
+    test -n "$(find /tmp/privsep-apt-archives -maxdepth 1 -name '*.deb' -print -quit)"; \
+    (cd /tmp/privsep-apt-archives && sha256sum ./*.deb) \
+      > /usr/share/ssh-over-mcp/provenance/openssh-fs-privsep-deb-sha256.txt; \
+    apt-get -y -o Dir::Cache::archives=/tmp/privsep-apt-archives \
+      install --no-install-recommends \
+      sudo=1.9.17p2-1ubuntu3.2 sudo-common=1.2ubuntu; \
+    dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' \
+      > /usr/share/ssh-over-mcp/provenance/apt-installed-final.tsv; \
+    rm -rf /tmp/privsep-apt-archives /var/lib/apt/lists/*
+
+COPY deploy/ssh-target/sshd_config.fs-privsep-review-candidate /etc/ssh/sshd_config
+COPY deploy/ssh-target/sudoers.fs-privsep-review-candidate /etc/sudoers.d/ssh-over-mcp-fs
+RUN set -eu; \
+    chown root:root /etc/ssh/sshd_config /etc/sudoers.d/ssh-over-mcp-fs; \
+    chmod 0644 /etc/ssh/sshd_config; \
+    chmod 0440 /etc/sudoers.d/ssh-over-mcp-fs; \
+    visudo -c -f /etc/sudoers.d/ssh-over-mcp-fs; \
+    test -z "$(find /etc/ssh -maxdepth 1 -name 'ssh_host_*' -print -quit)"
+
+EXPOSE 2222
+# Image is NOT runnable pending bounded OCI caps/NNP private-userns and
+# per-node host-key isolation / bidirectional network / MCP Level-2 tests.
+ENTRYPOINT ["/usr/local/libexec/ssh-over-mcp-image-hold"]

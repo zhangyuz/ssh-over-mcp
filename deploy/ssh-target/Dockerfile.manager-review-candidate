@@ -1,0 +1,58 @@
+# TEST-ONLY MANAGER IMAGE BUILD SOURCE. NO RUNTIME ADMISSION OR COMPOSE WIRING.
+# Build solely in an independently approved disposable, secret-free builder.
+# The separate SSH candidate retains its own image and STOP entrypoint.
+FROM --platform=linux/amd64 docker.io/library/ubuntu@sha256:42527649dbc4f9197a6073f426f488cbff0e9cc9f2afce32d91c383e4875634a
+
+ENV DEBIAN_FRONTEND=noninteractive PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+
+# Pin the small direct Python/CA package set; resolve transitive packages via
+# Ubuntu's signed archive. Preserve signature/index and downloaded-deb hashes
+# BEFORE apt cache cleanup. A missing exact version MUST stop the build.
+RUN set -eu; \
+    test -f /usr/share/keyrings/ubuntu-archive-keyring.gpg; \
+    grep -q 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' /etc/apt/sources.list.d/ubuntu.sources; \
+    apt-get update; \
+    mkdir -p /tmp/apt-archives/partial /usr/share/ssh-over-mcp/provenance/signed-apt-lists; \
+    cp -a /var/lib/apt/lists/*_InRelease /usr/share/ssh-over-mcp/provenance/signed-apt-lists/; \
+    cp -a /var/lib/apt/lists/*_Packages* /usr/share/ssh-over-mcp/provenance/signed-apt-lists/; \
+    cp /etc/apt/sources.list.d/ubuntu.sources /usr/share/ssh-over-mcp/provenance/signed-apt-lists/ubuntu.sources; \
+    cp /usr/share/keyrings/ubuntu-archive-keyring.gpg /usr/share/ssh-over-mcp/provenance/signed-apt-lists/ubuntu-archive-keyring.gpg; \
+    (cd /usr/share/ssh-over-mcp/provenance/signed-apt-lists && sha256sum ./* > ../signed-apt-lists-sha256.txt); \
+    apt-get -y -o Dir::Cache::archives=/tmp/apt-archives --download-only install --no-install-recommends \
+      python3=3.14.3-0ubuntu2 ca-certificates=20260816ubuntu0.26.04.1; \
+    test -n "$(find /tmp/apt-archives -maxdepth 1 -name '*.deb' -print -quit)"; \
+    (cd /tmp/apt-archives && sha256sum ./*.deb) > /usr/share/ssh-over-mcp/provenance/apt-deb-sha256.txt; \
+    apt-get -y -o Dir::Cache::archives=/tmp/apt-archives install --no-install-recommends \
+      python3=3.14.3-0ubuntu2 ca-certificates=20260816ubuntu0.26.04.1; \
+    dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' > /usr/share/ssh-over-mcp/provenance/apt-installed.tsv; \
+    rm -rf /tmp/apt-archives /var/lib/apt/lists/*
+
+# OCI manager source imports only stdlib with python3 -I -S, even without
+# third-party site packages; there are no unverified wheel/ABI dependencies.
+# Image contains code only; node-id, UID/GID maps, cgroup delegation and
+# socket parent MUST be provisioned by an independently approved guest.
+COPY src /opt/ssh-over-mcp-e2e/workspace/src
+COPY ops/mvp/ssh-over-mcp-oci-manager.py /usr/local/libexec/ssh-over-mcp-oci-manager.py
+COPY deploy/ssh-target/entrypoint.manager-review-hold /usr/local/libexec/ssh-over-mcp-manager-hold
+
+RUN set -eu; \
+    test -z "$(find /opt/ssh-over-mcp-e2e/workspace/src \
+      \( -type l -o -name __pycache__ -o -name '*.pyc' -o -name '*.pyo' \) -print -quit)"; \
+    groupadd -g 3299 som-manager-client; \
+    groupadd -g 3204 som-manager; \
+    useradd -u 2204 -g 3204 -G 3299 --no-create-home -d /nonexistent \
+      -s /usr/sbin/nologin som-manager; \
+    passwd -l som-manager; \
+    find /opt/ssh-over-mcp-e2e/workspace/src -type d -exec chmod 0555 {} +; \
+    find /opt/ssh-over-mcp-e2e/workspace/src -type f -exec chmod 0444 {} +; \
+    chmod 0555 /opt/ssh-over-mcp-e2e/workspace/src /usr/local/libexec; \
+    chmod 0555 /usr/local/libexec/ssh-over-mcp-oci-manager.py; \
+    chmod 0555 /usr/local/libexec/ssh-over-mcp-manager-hold
+
+# The container runtime must separately attest USER 2204:3204 + group3299,
+# no-new-privileges, ALL caps dropped, private node cgroup mount and AF_UNIX
+# peer/userns mappings. None of those are granted by this image.
+USER som-manager
+
+# NEVER start the manager or SSH server from this non-admitted candidate.
+ENTRYPOINT ["/usr/local/libexec/ssh-over-mcp-manager-hold"]

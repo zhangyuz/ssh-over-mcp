@@ -1,0 +1,107 @@
+# THIRD/FINAL overlay ONLY for render-time alignment to ACTUALLY tested
+# OpenSSH FS-only OCI admission. Not runnable or a release authorization.
+#
+# docker compose -f compose.yaml -f compose.dev-ssh.yaml \
+#   -f compose.mode-a-openssh-fs.review-candidate.yaml config
+#
+# mvp-fs-REVIEW profile is intentionally never set by production runbooks.
+# STOP78 is repeated as service entrypoint: even explicitly enabling the
+# profile cannot launch sshd before signed media/no-NIC runtime/ACL review.
+# DO NOT copy test-only root sshd entrypoint overrides into this file.
+# The control listens ONLY on the origin bridge interface, never 0.0.0.0.
+# Node bridges have no MCP listener; no NET_ADMIN / privileged firewall init.
+# The operator must choose a private nonconflicting CIDR and contained IP.
+services:
+  mcp:
+    environment:
+      SSH_OVER_MCP_BIND_HOST: ${SSH_OVER_MCP_MODE_A_ORIGIN_IPV4:?required origin-only static IPv4}
+    networks: !override
+      origin_internal:
+        ipv4_address: ${SSH_OVER_MCP_MODE_A_ORIGIN_IPV4:?required origin-only static IPv4}
+        aliases:
+          - ssh-over-mcp-origin
+          - ${SSH_OVER_MCP_PRIVATE_HOSTNAME:-mcp.internal.example}
+      node01_ssh: {}
+      node02_ssh: {}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os,urllib.request;urllib.request.urlopen('http://'+os.environ['SSH_OVER_MCP_BIND_HOST']+':8000/readyz',timeout=2).read()"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 2s
+
+  node01:
+    profiles: ["mvp-fs-review"]
+    user: "0:0"
+    read_only: true
+    cap_drop: !override ["ALL"]
+    # Only the 4 caps established by real hosted userns-remapped OpenSSH test.
+    cap_add: !override ["SETUID", "SETGID", "SETPCAP", "SYS_CHROOT"]
+    # No-sudo native ForceCommand: NNP=1 from container start through SSH login.
+    # Final FS process: 4 capability sets zero, CapBnd exactly 0x401c0.
+    # Still a P1 review candidate, not all-five-zero production acceptance.
+    security_opt: !override ["no-new-privileges:true"]
+    entrypoint: ["/usr/local/libexec/ssh-over-mcp-image-hold"]
+    expose: !override ["2222"]
+    tmpfs:
+      - "/run:rw,noexec,nosuid,nodev,mode=0755,size=8m"
+      - "/run/sshd:rw,noexec,nosuid,nodev,mode=0755,size=2m"
+      - "/tmp:rw,nosuid,nodev,mode=1777,size=8m"
+    volumes: !override
+      - type: bind
+        source: ${SSH_OVER_MCP_NODE01_HOSTKEYS_DIR:?required reviewed node01 root-owned host keys}
+        target: /etc/ssh/hostkeys
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${SSH_OVER_MCP_NODE01_AUTHORIZED_KEYS_DIR:?required reviewed node01 root-owned authorized keys}
+        target: /etc/ssh/authorized_keys
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: node01-data
+        target: /srv/data
+
+  node02:
+    profiles: ["mvp-fs-review"]
+    user: "0:0"
+    read_only: true
+    cap_drop: !override ["ALL"]
+    cap_add: !override ["SETUID", "SETGID", "SETPCAP", "SYS_CHROOT"]
+    security_opt: !override ["no-new-privileges:true"]
+    entrypoint: ["/usr/local/libexec/ssh-over-mcp-image-hold"]
+    expose: !override ["2222"]
+    tmpfs:
+      - "/run:rw,noexec,nosuid,nodev,mode=0755,size=8m"
+      - "/run/sshd:rw,noexec,nosuid,nodev,mode=0755,size=2m"
+      - "/tmp:rw,nosuid,nodev,mode=1777,size=8m"
+    volumes: !override
+      - type: bind
+        source: ${SSH_OVER_MCP_NODE02_HOSTKEYS_DIR:?required reviewed node02 root-owned host keys}
+        target: /etc/ssh/hostkeys
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${SSH_OVER_MCP_NODE02_AUTHORIZED_KEYS_DIR:?required reviewed node02 root-owned authorized keys}
+        target: /etc/ssh/authorized_keys
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: node02-data
+        target: /srv/data
+
+# Pin only the ingress bridge; SSH bridges remain separate dynamic networks.
+networks:
+  origin_internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${SSH_OVER_MCP_MODE_A_ORIGIN_CIDR:?required private origin subnet CIDR}
