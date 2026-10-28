@@ -99,3 +99,24 @@ root-owned ancestor traversal, key group readability and no writable alternate
 mount, unprivileged code provenance, separate per-host secret rotation,
 failure/recovery behavior, and authentic two-node acceptance before enabling
 the candidate Host Agent.
+
+
+## 2026-10-28: source-only fixed SMCP v2 SSH admission candidate
+
+The existing **test-only**, non-sudo FS-only launcher source can select either
+literal `mcp-v1` or `mcp-v2`, with *all* pre-existing isolated Linux
+UID/GID/NNP/zero-capability, trusted full source/import-tree and exact v3
+FS-only policy checks retained before dispatch. No shell, custom command,
+PTY, group privilege or fallback is allowed. For v2 it additionally requires
+the root-owned fixed `/etc/ssh-over-mcp/v5/host-visibility.json`,
+validates the dedicated v5 policy and restricts every declared visibility
+allow root to `/srv/data` or its strict descendants. Missing v5 trust
+material refuses before filesystem access, and v1 remains unchanged.
+
+The current `ops/mvp/ssh-over-mcp-fs-only-launcher.py` is a proposed
+source-review launcher, **not** the running digest-pinned Mode A image.
+Changing its source did not alter the approved live ForceCommand, Compose
+overlay or guest. TDD covered strict command selection, broadened roots and
+legacy launcher/source tests. A fresh trusted-image build, real root-owned
+config/key/nonce mount proof, exact-host OpenSSH/NNP evidence and separately
+approved promotion are required before it can be installed.

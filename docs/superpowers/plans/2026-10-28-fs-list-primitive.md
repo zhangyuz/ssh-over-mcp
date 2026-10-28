@@ -167,3 +167,10 @@ scope only for inactive local code. Task 2 runtime gates remain open. See ADR002
   immutable image and bind mounts and both-host failure behavior before startup.
 - [ ] Run exact-head Linux CI, mandatory Native Level-3 and real two-node
   MCP/SSH/Ledger acceptance before PR Ready. No live deployment approved.
+
+- [x] Stage source-only fixed v2 dispatch from test-only FS-only launcher,
+  preserving old mandatory NNP/UID/capability/import-tree/v3 FS policy gates;
+  v2 additionally denies any visibility root outside `/srv/data`.
+- [ ] CI and actual separately approved image/ForceCommand build with root-owned
+  v5 policy/verifier mounts, persistent nonce storage, no privilege broadening,
+  two real OpenSSH positives/denials and immutable rotation acceptance.
