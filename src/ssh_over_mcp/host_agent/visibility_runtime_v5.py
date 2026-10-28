@@ -157,6 +157,11 @@ class PersistentSnapshotNonces:
                 "CREATE TABLE IF NOT EXISTS nonces "
                 "(id TEXT PRIMARY KEY NOT NULL, expires_at INTEGER NOT NULL)"
             )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS policy_epoch_state "
+                "(id INTEGER PRIMARY KEY CHECK (id = 1), "
+                "epoch INTEGER NOT NULL, digest TEXT NOT NULL)"
+            )
             return connection
         except (sqlite3.Error, OSError, VisibilityRuntimeError) as exc:
             raise VisibilityRuntimeError("v5 nonce persistence unavailable") from exc
@@ -190,6 +195,74 @@ class PersistentSnapshotNonces:
             except sqlite3.Error:
                 pass
             raise VisibilityRuntimeError("v5 nonce persistence unavailable") from exc
+        finally:
+            connection.close()
+
+    def consume_bound(
+        self,
+        snapshot_id: str,
+        *,
+        expires_at: int,
+        now: int,
+        policy_epoch: int,
+        central_policy_sha256: str,
+    ) -> bool:
+        """Atomically consume a request and retain a nondecreasing policy epoch.
+
+        This is a host-local rollback floor, NOT a central policy revocation
+        ACK. The database must survive restarts and must not be reset during
+        a downgrade. The host policy must be independently trusted.
+        """
+
+        if (
+            not isinstance(snapshot_id, str)
+            or _NONCE_ID.fullmatch(snapshot_id) is None
+            or type(expires_at) is not int
+            or type(now) is not int
+            or expires_at <= now
+            or type(policy_epoch) is not int
+            or policy_epoch < 1
+            or type(central_policy_sha256) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", central_policy_sha256) is None
+        ):
+            raise VisibilityRuntimeError("invalid v5 snapshot epoch binding")
+
+        connection = self._open_db()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT epoch, digest FROM policy_epoch_state WHERE id=1"
+            ).fetchone()
+            if row is not None and (
+                policy_epoch < row[0]
+                or (policy_epoch == row[0] and central_policy_sha256 != row[1])
+            ):
+                raise VisibilityRuntimeError("v5 policy epoch rollback refused")
+
+            (count,) = connection.execute("SELECT COUNT(*) FROM nonces").fetchone()
+            if count >= _MAX_NONCES:
+                raise VisibilityRuntimeError("v5 nonce resource limit reached")
+            before = connection.total_changes
+            connection.execute(
+                "INSERT OR IGNORE INTO nonces(id, expires_at) VALUES (?,?)",
+                (snapshot_id, expires_at),
+            )
+            accepted = connection.total_changes == before + 1
+            if accepted and (row is None or policy_epoch > row[0]):
+                connection.execute(
+                    "INSERT INTO policy_epoch_state (id, epoch, digest) VALUES (1, ?, ?) "
+                    "ON CONFLICT(id) DO UPDATE SET epoch=excluded.epoch, "
+                    "digest=excluded.digest",
+                    (policy_epoch, central_policy_sha256),
+                )
+            connection.execute("COMMIT")
+            return accepted
+        except (sqlite3.Error, VisibilityRuntimeError) as exc:
+            try:
+                connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise VisibilityRuntimeError("v5 snapshot epoch persistence unavailable") from exc
         finally:
             connection.close()
 

@@ -88,7 +88,13 @@ def run_v2(
             now=instant,
             consume_snapshot_id=lambda nonce: PersistentSnapshotNonces(
                 config.nonce_db_path
-            ).consume(nonce, expires_at=snap.expires_at, now=instant),
+            ).consume_bound(
+                nonce,
+                expires_at=snap.expires_at,
+                now=instant,
+                policy_epoch=snap.policy_epoch,
+                central_policy_sha256=snap.central_policy_sha256,
+            ),
         )
     except VisibilityRuntimeError:
         print("ssh-over-mcp-host-agent-v2: trusted state unavailable", file=stderr)

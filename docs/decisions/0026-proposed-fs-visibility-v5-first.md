@@ -259,3 +259,26 @@ statements describe historical checkpoints; there is still no production
 composition, default MCP registration, live host-policy change or deployed
 acceptance. ADR0027 now records the separately authorized, construction-only
 MCP opt-in; its production activation gates remain open.
+
+
+## 2026-10-28: durable host-local epoch rollback floor (INACTIVE)
+
+The v5 candidate nonce ledger now atomically records the highest accepted
+central policy epoch and its SHA-256 digest in the same SQLite transaction
+as consuming one signed snapshot ID. A restart with an older local policy
+epoch, or a different digest under the same epoch, refuses further listings
+instead of erasing the past decision. The v2 candidate Host Agent calls
+`consume_bound` so it cannot accidentally use the older nonce-only API.
+TDD covers persistence across reopened stores, stale epoch, equal-epoch
+digest mutation, and malformed binding. No deployment, credential, policy,
+or v1 ForceCommand changed.
+
+**This is only local rollback defense**, not monotonic central epoch
+propagation or a distributed revocation acknowledgement. The trusted
+owner-controlled database must persist across redeployments and never be
+reset during downgrade. There is still no safe automatic enablement of
+`fs_list`: the authenticated central signer/host verifier trust bootstrap,
+revocation ACK and in-flight cancellation, two-real-OpenSSH Mode A E2E,
+Native Level-3 and independent security review remain mandatory. Any
+operator decision to use immutable, no-hot-reload policy updates rather
+than an online ACK protocol must be formally approved before activation.

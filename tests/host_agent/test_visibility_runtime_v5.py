@@ -140,3 +140,62 @@ def test_store_never_auto_erases_old_nonce_under_same_identity(tmp_path):
     first = "c" * 32
     assert store.consume(first, expires_at=1_800_000_010, now=1_800_000_000)
     assert not store.consume(first, expires_at=1_800_000_020, now=1_800_000_015)
+
+
+def test_host_epoch_and_digest_cannot_roll_back_after_restart(tmp_path):
+    db = tmp_path / "nonces.sqlite"
+    current = PersistentSnapshotNonces(db)
+    assert current.consume_bound(
+        "1" * 32,
+        expires_at=1_900_000_000,
+        now=1_800_000_000,
+        policy_epoch=11,
+        central_policy_sha256="a" * 64,
+    )
+    assert current.consume_bound(
+        "2" * 32,
+        expires_at=1_900_000_000,
+        now=1_800_000_000,
+        policy_epoch=12,
+        central_policy_sha256="b" * 64,
+    )
+    reopened = PersistentSnapshotNonces(db)
+    for epoch, digest in ((11, "a" * 64), (12, "a" * 64)):
+        with pytest.raises(VisibilityRuntimeError):
+            reopened.consume_bound(
+                "3" * 32,
+                expires_at=1_900_000_000,
+                now=1_800_000_000,
+                policy_epoch=epoch,
+                central_policy_sha256=digest,
+            )
+    assert reopened.consume_bound(
+        "3" * 32,
+        expires_at=1_900_000_000,
+        now=1_800_000_000,
+        policy_epoch=12,
+        central_policy_sha256="b" * 64,
+    )
+    assert not reopened.consume_bound(
+        "3" * 32,
+        expires_at=1_900_000_000,
+        now=1_800_000_000,
+        policy_epoch=12,
+        central_policy_sha256="b" * 64,
+    )
+
+
+@pytest.mark.parametrize(
+    "epoch,digest",
+    [(True, "a" * 64), (0, "a" * 64), (-1, "a" * 64), (3, "abc"), (3, "F" * 64)],
+)
+def test_atomic_epoch_state_rejects_invalid_binding(tmp_path, epoch, digest):
+    store = PersistentSnapshotNonces(tmp_path / "nonces.sqlite")
+    with pytest.raises(VisibilityRuntimeError):
+        store.consume_bound(
+            "4" * 32,
+            expires_at=1_900_000_000,
+            now=1_800_000_000,
+            policy_epoch=epoch,
+            central_policy_sha256=digest,
+        )
