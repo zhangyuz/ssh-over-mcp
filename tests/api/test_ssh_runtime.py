@@ -239,3 +239,38 @@ def test_build_ssh_runtime_shares_transport_with_filesystem_client(
     assert runtime.filesystem.authorizer.policy is policy
     assert runtime.filesystem.authorizer.ledger is ledger
     assert ledger.events == []
+
+
+def test_build_ssh_runtime_injects_explicit_visibility_authority(
+    tmp_path: Path,
+) -> None:
+    key_path = _write_key(tmp_path)
+    inventory = _inventory()
+    policy = _policy(inventory)
+
+    class TestAuthority:
+        engine = policy
+
+    authority = TestAuthority()
+    runtime = _ssh_runtime().build_ssh_runtime(
+        inventory=inventory,
+        policy=policy,
+        credential_map={"secret://host-a": key_path},
+        ledger=NoopLedger(),
+        visibility_authority=authority,
+    )
+    assert runtime.filesystem.visibility_authority is authority
+
+
+def test_build_ssh_runtime_keeps_visibility_disabled_by_default(
+    tmp_path: Path,
+) -> None:
+    key_path = _write_key(tmp_path)
+    inventory = _inventory()
+    runtime = _ssh_runtime().build_ssh_runtime(
+        inventory=inventory,
+        policy=_policy(inventory),
+        credential_map={"secret://host-a": key_path},
+        ledger=NoopLedger(),
+    )
+    assert runtime.filesystem.visibility_authority is None
