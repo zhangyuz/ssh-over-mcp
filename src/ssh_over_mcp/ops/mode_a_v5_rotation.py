@@ -1,0 +1,109 @@
+"""Candidate Mode A v5 rotation ordering; no production/live adapter is installed.
+
+The injected, separately trusted operator adapter must *prove* that ingress
+closure is durable and all in-flight requests have terminated. A boolean
+returned by an untrusted adapter is not an acknowledgement.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Protocol
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class RotationFailure(RuntimeError):
+    """A prerequisite failed: keep ingress closed and do not retry blindly."""
+
+
+class RotationSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    epoch: int = Field(strict=True, ge=1)
+    policy_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    generation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    host_keys: dict[str, str]
+
+    @model_validator(mode="after")
+    def require_distinct_pinned_hosts(self) -> RotationSpec:
+        if (
+            set(self.host_keys) != {"node01", "node02"}
+            or len(set(self.host_keys.values())) != 2
+            or any(re.fullmatch(r"[0-9a-f]{64}", v) is None for v in self.host_keys.values())
+        ):
+            raise ValueError("two distinct pinned Mode A hosts are required")
+        return self
+
+
+class HostReceipt(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    host: str
+    host_key_sha256: str
+    epoch: int = Field(strict=True, ge=1)
+    policy_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    generation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class TrustedRotationOps(Protocol):
+    """Operator-specific, privileged implementation is NOT provided here."""
+
+    async def freeze_ingress(self) -> bool: ...
+    async def drain_inflight(self) -> bool: ...
+    async def stop_control(self) -> bool: ...
+    async def stop_host(self, host: str) -> bool: ...
+    async def install(self, host: str, spec: RotationSpec) -> bool: ...
+    async def start_host(self, host: str) -> bool: ...
+    async def attest_host(self, host: str, spec: RotationSpec) -> HostReceipt: ...
+    async def start_control(self) -> bool: ...
+    async def open_ingress(self) -> bool: ...
+
+
+async def _require_ack(value: bool) -> None:
+    if value is not True:
+        raise RotationFailure("required maintenance proof unavailable")
+
+
+async def run_rotation(spec: RotationSpec, ops: TrustedRotationOps) -> None:
+    """Gate reopening on quiescence and two exact host/generation ACKs.
+
+    Never auto-rollback to a prior epoch; the controller must be fenced
+    from new ingress for every stage, even after process failure.
+    """
+    # Frozen Pydantic models do not deep-freeze dict fields. Snapshot the
+    # operator-authorized release before calling a potentially faulty adapter.
+    # Never pass the original or the reference snapshot to the adapter.
+    expected = spec.model_copy(deep=True)
+    try:
+        await _require_ack(await ops.freeze_ingress())
+        await _require_ack(await ops.drain_inflight())
+        await _require_ack(await ops.stop_control())
+        for host in ("node01", "node02"):
+            await _require_ack(await ops.stop_host(host))
+        for host in ("node01", "node02"):
+            installation = expected.model_copy(deep=True)
+            await _require_ack(await ops.install(host, installation))
+            if installation != expected:
+                raise RotationFailure("installation mutated approved release")
+        for host in ("node01", "node02"):
+            await _require_ack(await ops.start_host(host))
+        for host in ("node01", "node02"):
+            attestation = expected.model_copy(deep=True)
+            receipt = await ops.attest_host(host, attestation)
+            if (
+                attestation != expected
+                or not isinstance(receipt, HostReceipt)
+                or receipt.host != host
+                or receipt.host_key_sha256 != expected.host_keys[host]
+                or receipt.epoch != expected.epoch
+                or receipt.policy_sha256 != expected.policy_sha256
+                or receipt.generation_sha256 != expected.generation_sha256
+            ):
+                raise RotationFailure("host attestation does not match expected generation")
+        await _require_ack(await ops.start_control())
+        await _require_ack(await ops.open_ingress())
+    except RotationFailure:
+        raise
+    except Exception as exc:
+        raise RotationFailure("rotation incomplete; ingress must remain closed") from exc

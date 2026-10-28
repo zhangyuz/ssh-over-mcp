@@ -44,4 +44,6 @@ Current ADRs:
 
 - [0025 — Operator-approved private Mode A FS-only pilot release](0025-mode-a-fs-only-operator-pilot-release.md) — exact image IDs, scoped four-cap acceptance, local-only ingress and verified rollback.
 
-- [0027 — Opt-in fs_list control-plane adapter (runtime PROPOSED)](0027-proposed-fs-list-control-plane-adapter.md) — trusted injection only; no MCP registration or deployed v2 authority.
+- [0027 — Opt-in fs_list control-plane adapter (runtime PROPOSED)](0027-proposed-fs-list-control-plane-adapter.md) — MCP tool is explicitly construction-gated and disabled in production; no deployed v2 authority.
+
+- [0028 — Mode A v5 immutable rotation (design APPROVED, runtime NOT ACTIVATED)](0028-mode-a-fs-list-immutable-rotation.md) — operator-selected stop/drain/rotate/verify/resume scheme and mandatory two-host proof; no production adapter or new privileges.

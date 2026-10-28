@@ -1,0 +1,91 @@
+# ADR 0028: Mode A fs_list v5 uses stop/drain/rotate/verify/resume
+
+**Decision: APPROVED by operator on 2026-10-28 for design and development only.**
+**Runtime activation: NOT APPROVED. No new ForceCommand, secret, container,
+filesystem privilege or network exposure is authorized by this ADR.**
+Supersedes the need to construct a *continuously running* central epoch
+notification service for the narrow Mode A v5 pilot; does not waive
+revocation, identity, authentication, or correct verification.
+
+## First principles
+
+Two real SSH nodes must never execute `fs_list` under an outdated permission.
+For this small pilot, operator-controlled downtime at policy updates is acceptable.
+Use existing private MCP/SSH deployment and its narrowly scoped stop/start path,
+not a new distributed policy service. Exposing `fs_list` only after a verified
+complete policy generation is installed on **both** independently pinned nodes
+is the user-visible outcome. Acknowledgement is an observable trusted state
+transition, not a returned string, a synthetic fixture, or an exit code.
+
+## Release protocol (single immutable generation)
+
+1. Prepare an immutable generation manifest outside untrusted data: distinct
+   host IDs, authoritative RFC4253 hostkey SHA256 pins, new monotonically
+   increasing epoch and central policy digest, host-specific signer/key IDs
+   and artifact fingerprints. Never commit, echo, or log secrets.
+2. **Fence all ingress durably**, including the live loopback MCP forwarding
+   and any authenticated internal alternate path; no traffic can start through
+   an unfenced control instance or stale rollback container.
+3. Confirm **zero active work across control and both Host Agents**, including
+   requests already admitted over SSH. A timeout, partition, unknown process
+   or ambiguous cancellation is a failed drain. Existing Ledger outcome-UNKNOWN
+   and operation audits must remain intact; never auto-retry mutations.
+4. Stop control then both SSH nodes and verify containers/processes are absent
+   (not just command success). Keep ingress closed across any controller crash.
+5. Install separately provisioned, immutable v5 Host Policy and HMAC verifier
+   key for **each** node, matching central signer identity and inventory hostkey.
+   Keep signer and verifier authorization materials out of the Host Agent's
+   writable ownership domain; read-only mounts alone must be backed by an
+   appropriate ownership, capability and mount privilege boundary. Keep the
+   durable nonce+epoch floor in a *different* owned persistent volume. Verify
+   an epoch rollback cannot be caused by replacing that volume with a blank DB.
+6. Start both hosts in constrained v2 read-only mode. Through independent
+   SSH hostkey-verified checks, obtain each node's actual hostkey, generation
+   digest, epoch, Host Policy state and key identity; the controller must not
+   trust a receipt that merely echoes the expected parameters.
+7. Start control in the prepared generation but keep ingress fenced. Verify
+   its signer, central policy digest, runtime epoch, pinned node inventory,
+   Ledger and audit availability. Check both host receipts still match. Only
+   after this full post-start evidence can the operator **explicitly**
+   unfreeze the authenticated MCP ingress.
+8. On any failure, uncertain result or loss of one host: **do not resume**.
+   Do not silently restore an older policy (durable epoch floor rejects it).
+   Maintain an operator-verifiable closed ingress state and reconcile the
+   failed generation before a new attempt. No "best effort" partial roll.
+
+## Code/evidence boundary
+
+`ssh_over_mcp.ops.mode_a_v5_rotation.run_rotation` is an *inactive* sequencing
+candidate. It accepts a separately implemented trusted adapter that must
+enforce and prove all the operating-system/container preconditions above. A
+`bool` alone is not cryptographic evidence or a durable fence. Neither a
+production adapter nor an automatic release trigger is installed. The unit
+tests cover ordering, both distinct host identities, aborts on each stage,
+spoofed/different digests, and mutation of a release manifest.
+
+The host's local persistent epoch+digest floor is necessary defense against
+rollback but is **not** distributed revocation proof. A live policy update must
+use this full stop/drain/rotate path, never hot-reload. This decision is
+applicable to low-frequency Mode A changes; if the product requires immediate
+revocation of already-running operations, either fail-closed synchronous
+admission/cancellation or a separately approved online epoch/ACK design is
+needed.
+
+## Real acceptance gates before PR #347 Ready
+
+- Independent whole-change security review of trustworthy freeze, read-only
+  trust material ownership, Host Agent privilege and actual attestation path.
+- Real two-independent-OpenSSH E2E for true MCP HTTP -> Ledger -> pinned SSH
+  -> bounded `fs_list` -> central recheck/audit, including denied names,
+  request spoofing, policy rotation, stale epoch, interruption between stages,
+  restart and both-host independent confirmations.
+- Exact-head Linux CI; trusted-main Native Level-3 with verified cleanup.
+- Separate operator approval for the actual Mode A deployment/restart, and
+  separate approval for PR merge. Mode B remains out of this decision.
+
+**Not yet safe:** the current v5 candidate config/key loader uses same-UID
+ownership and owner-private 0700 parents. A compromised Host Agent UID could
+rewrite its own policy/key, so that loader **must be split into
+administrator-owned immutable trust input and separately writable nonce
+storage** before any actual v2 startup. Changing ownership requirements may
+necessitate new container bind mounts, per-node keys and Linux acceptance.

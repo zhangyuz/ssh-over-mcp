@@ -144,3 +144,24 @@ Draft PR. The full runtime activation design remains PROPOSED.
 
 This newer operator-scoped increment supersedes Task 1's historical no-adapter
 scope only for inactive local code. Task 2 runtime gates remain open. See ADR0027.
+
+
+### Task 1E: operator-approved plan A rotation guard (isolated, uninstalled)
+
+- [x] Operator approved stop/drain/rotate/bilateral attest/resume architecture,
+  **not** runtime deployment or merger; record exact scope in ADR 0028.
+- [x] TDD RED then GREEN for a candidate sequencer with 2 pinned hosts and
+  exact expected epoch, policy digest and generation digest.
+- [x] Refuse every failed stage (including false vs true proof), spoofed
+  receipts and rollback. No ingress reopen before both host receipts.
+- [x] TDD RED then GREEN for mutable release input: isolate deep copies and
+  reject a trusted adapter attempting to rewrite the expected host keys.
+- [ ] Implement and independently review a **real** durable ingress fence,
+  zero-inflight proof and hostkey-authenticated two-host attestation adapter.
+  A mocked callback is not a security proof. Do not install a live runner
+  until full source+OS+network validation and independent review.
+- [ ] Split administrator-owned immutable config/key (unwritable by the Host
+  Agent UID) from the separate persistent Host Agent nonce/epoch DB; current
+  euid-owned 0700 v5 trust loader is unsafe to activate.
+- [ ] Run exact-head Linux CI, mandatory Native Level-3 and real two-node
+  MCP/SSH/Ledger acceptance before PR Ready. No live deployment approved.
