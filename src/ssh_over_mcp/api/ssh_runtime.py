@@ -22,8 +22,8 @@ from ssh_over_mcp.ssh import (
     SSHExecutor,
     SSHFilesystemClient,
 )
-from ssh_over_mcp.ssh.transport import StructuredSSHTransport
 from ssh_over_mcp.ssh.filesystem_list_v2 import VisibilityAuthority
+from ssh_over_mcp.ssh.transport import StructuredSSHTransport
 
 from .errors import RuntimeConfigurationError
 
