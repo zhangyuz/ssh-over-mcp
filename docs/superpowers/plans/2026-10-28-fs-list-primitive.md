@@ -160,8 +160,10 @@ scope only for inactive local code. Task 2 runtime gates remain open. See ADR002
   zero-inflight proof and hostkey-authenticated two-host attestation adapter.
   A mocked callback is not a security proof. Do not install a live runner
   until full source+OS+network validation and independent review.
-- [ ] Split administrator-owned immutable config/key (unwritable by the Host
-  Agent UID) from the separate persistent Host Agent nonce/epoch DB; current
-  euid-owned 0700 v5 trust loader is unsafe to activate.
+- [x] Candidate v5 loader now refuses same-UID-owned trust inputs by default,
+  requiring administrator-owned config/key distinct from Agent-owned durable
+  nonce/epoch storage (test-first RED→GREEN). No live mounts installed.
+- [ ] Verify root-owned trust ancestry, actual Linux UID/GID/group readability,
+  immutable image and bind mounts and both-host failure behavior before startup.
 - [ ] Run exact-head Linux CI, mandatory Native Level-3 and real two-node
   MCP/SSH/Ledger acceptance before PR Ready. No live deployment approved.

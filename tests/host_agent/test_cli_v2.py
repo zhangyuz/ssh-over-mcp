@@ -27,18 +27,34 @@ _KEY = bytes(range(32))
 _CLOCK = 1_800_000_015
 
 
+@pytest.fixture(autouse=True)
+def test_only_admin_owner(monkeypatch):
+    """Simulate root-owned trust files without giving test processes root."""
+    import ssh_over_mcp.host_agent.visibility_runtime_v5 as module
+
+    monkeypatch.setattr(module, "_TRUSTED_ADMIN_UID", os.geteuid())
+
+
+def _replace_policy(policy_path: Path, raw: dict) -> None:
+    os.chmod(policy_path, 0o600)
+    policy_path.write_text(json.dumps(raw), encoding="utf-8")
+    os.chmod(policy_path, 0o400)
+
+
 def _fixture(tmp_path: Path):
     private = tmp_path / "private"
     private.mkdir(mode=0o700)
+    trusted = tmp_path / "trusted"
+    trusted.mkdir(mode=0o700)
     root = tmp_path / "data"
     root.mkdir()
     (root / "public.txt").write_bytes(b"data")
     (root / "secret").mkdir()
     (root / "secret" / "password").write_bytes(b"secret")
-    key_file = private / "signer.key"
+    key_file = trusted / "signer.key"
     key_file.write_bytes(_KEY)
-    os.chmod(key_file, 0o600)
-    policy_path = private / "host-v5.json"
+    os.chmod(key_file, 0o400)
+    policy_path = trusted / "host-v5.json"
     policy = {
         "version": 5,
         "enabled": True,
@@ -60,7 +76,7 @@ def _fixture(tmp_path: Path):
         },
     }
     policy_path.write_text(json.dumps(policy), encoding="utf-8")
-    os.chmod(policy_path, 0o600)
+    os.chmod(policy_path, 0o400)
     snap = VisibilitySnapshotV5.model_validate(
         {
             "version": 5,
@@ -143,7 +159,7 @@ def test_v2_linux_real_directory_listing_and_durable_replay(tmp_path):
 def test_host_v5_unsigned_policy_mutation_is_rejected_before_listing(tmp_path):
     policy, raw, req = _fixture(tmp_path)
     raw["visibility"]["policy_epoch"] = 12
-    policy.write_text(json.dumps(raw), encoding="utf-8")
+    _replace_policy(policy, raw)
     code, output, _ = _run(policy, encode_request_v2(req))
     assert code == EX_DENIED_V2
     assert output == b""
@@ -165,7 +181,7 @@ def test_config_changed_during_read_invalidates_result(tmp_path, monkeypatch):
 
     def mutate(*args, **kwargs):
         raw["visibility"]["policy_epoch"] = 12
-        policy.write_text(json.dumps(raw), encoding="utf-8")
+        _replace_policy(policy, raw)
         return original(*args, **kwargs)
 
     monkeypatch.setattr(mod, "list_verified_directory_candidate", mutate)

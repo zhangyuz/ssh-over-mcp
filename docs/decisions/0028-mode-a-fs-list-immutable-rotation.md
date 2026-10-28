@@ -83,9 +83,19 @@ needed.
 - Separate operator approval for the actual Mode A deployment/restart, and
   separate approval for PR merge. Mode B remains out of this decision.
 
-**Not yet safe:** the current v5 candidate config/key loader uses same-UID
-ownership and owner-private 0700 parents. A compromised Host Agent UID could
-rewrite its own policy/key, so that loader **must be split into
-administrator-owned immutable trust input and separately writable nonce
-storage** before any actual v2 startup. Changing ownership requirements may
-necessitate new container bind mounts, per-node keys and Linux acceptance.
+**2026-10-28 candidate improvement:** v5 config and HMAC verifier-key
+loaders now require files and their immediate directory to be owned by
+administrator UID 0, with no group/other writes; the only accepted file modes
+are 0400/0440. An unprivileged Host Agent is not trusted to own these files.
+The nonce/epoch store still requires its separate 0700 Agent-owned directory,
+and the runtime config rejects sharing the trust parent with the nonce parent.
+TDD demonstrated the former vulnerability (agent-owned key accepted), then
+verified refusal and independent nonce storage. Unit tests model administrator
+ownership via an explicit **test-only** patch; they are not Linux container
+ownership/mount or secure-ancestor proof.
+
+**Still not safe to activate:** verify actual UID/GID/mount mappings, immutable
+root-owned ancestor traversal, key group readability and no writable alternate
+mount, unprivileged code provenance, separate per-host secret rotation,
+failure/recovery behavior, and authentic two-node acceptance before enabling
+the candidate Host Agent.

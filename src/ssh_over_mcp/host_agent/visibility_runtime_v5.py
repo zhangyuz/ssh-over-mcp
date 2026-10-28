@@ -1,7 +1,8 @@
 """Restricted local v5 trust inputs and persistent anti-replay store.
 
-No active Host Agent or MCP code imports this module. Enabling it requires
-a separately reviewed private config, key provisioning and epoch ACK plan.
+Only the inactive SMCP v2 candidate uses these inputs. Enabling it requires
+reviewed immutable administrator-owned config/key mounts and separate persistent
+nonce storage, plus approved policy-rotation and two-node acceptance evidence.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from .visibility_policy_v5 import VisibilityPolicyV5, canonical_visibility_path
 
 _NONCE_ID = re.compile(r"^[0-9a-f]{32}$")
 _MAX_NONCES = 100_000
+_TRUSTED_ADMIN_UID = 0  # Only privileged image/mount owner, never the Host Agent.
 
 
 class VisibilityRuntimeError(RuntimeError):
@@ -57,7 +59,7 @@ class HostVisibilityRuntimeV5(BaseModel):
         if (
             not self.visibility.enabled
             or self.visibility.host != self.host
-            or self.nonce_db_path == self.signer_key_path
+            or Path(self.nonce_db_path).parent == Path(self.signer_key_path).parent
         ):
             raise ValueError("invalid v5 host visibility runtime binding")
         return self
@@ -72,6 +74,34 @@ def _require_protected_parent(path: Path) -> None:
             raise VisibilityRuntimeError("v5 private parent is unsafe")
     except OSError as exc:
         raise VisibilityRuntimeError("v5 private parent is unsafe") from exc
+
+
+def _require_trusted_parent(path: Path) -> None:
+    # The unprivileged agent must not own the directory holding authority.
+    # The runtime's trusted image bind mount must also prevent replacement
+    # of this directory by a writable ancestor.
+    try:
+        parent = path.parent
+        info = parent.lstat()
+        if (
+            not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != _TRUSTED_ADMIN_UID
+            or info.st_mode & 0o022
+            or parent.resolve(strict=True) != parent
+        ):
+            raise VisibilityRuntimeError("v5 administrator trust parent is unsafe")
+    except OSError as exc:
+        raise VisibilityRuntimeError("v5 administrator trust parent is unsafe") from exc
+
+
+def _require_trusted_regular(info: os.stat_result) -> None:
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != _TRUSTED_ADMIN_UID
+        or stat.S_IMODE(info.st_mode) not in {0o400, 0o440}
+        or info.st_nlink != 1
+    ):
+        raise VisibilityRuntimeError("v5 administrator trust file is unsafe")
 
 
 def _require_owned_regular(info: os.stat_result, *, key: bool) -> None:
@@ -90,14 +120,14 @@ def load_trusted_visibility_key(path: Path | str) -> bytes:
     try:
         text = _file_path(str(path))
         file = Path(text)
-        _require_protected_parent(file)
+        _require_trusted_parent(file)
         fd = os.open(
             file,
             os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
         )
         try:
             before = os.fstat(fd)
-            _require_owned_regular(before, key=True)
+            _require_trusted_regular(before)
             if before.st_size != 32:
                 raise VisibilityRuntimeError("v5 trusted key length invalid")
             data = os.read(fd, 33)
@@ -286,11 +316,11 @@ def load_host_visibility_runtime(path: Path | str) -> HostVisibilityRuntimeV5:
 
     try:
         path = Path(_file_path(str(path)))
-        _require_protected_parent(path)
+        _require_trusted_parent(path)
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
         try:
             before = os.fstat(fd)
-            _require_owned_regular(before, key=True)
+            _require_trusted_regular(before)
             if not 1 <= before.st_size <= 64 * 1024:
                 raise VisibilityRuntimeError("v5 policy size invalid")
             raw = os.read(fd, 64 * 1024 + 1)

@@ -23,7 +23,7 @@ def _config(tmp_path: Path, **changes):
         "host": "node01",
         "host_key_sha256": "a" * 64,
         "signer_key_path": str(tmp_path / "signer.key"),
-        "nonce_db_path": str(tmp_path / "nonce.sqlite"),
+        "nonce_db_path": str(tmp_path / "nonce-storage" / "nonce.sqlite"),
         "visibility": {
             "version": 5,
             "host": "node01",
@@ -64,21 +64,28 @@ def test_v5_runtime_config_matches_local_host_and_has_no_escape_hatches(tmp_path
             HostVisibilityRuntimeV5.model_validate(raw)
 
 
-def test_host_signer_key_requires_exact_32_bytes_and_mode(tmp_path):
+def test_host_signer_key_requires_exact_32_bytes_and_mode(tmp_path, monkeypatch):
+    import ssh_over_mcp.host_agent.visibility_runtime_v5 as module
+
+    monkeypatch.setattr(module, "_TRUSTED_ADMIN_UID", os.geteuid())
     path = tmp_path / "signer.key"
     path.write_bytes(bytes(range(32)))
-    os.chmod(path, 0o600)
+    os.chmod(path, 0o400)
     assert load_trusted_visibility_key(path) == bytes(range(32))
     os.chmod(path, 0o644)
     with pytest.raises(VisibilityRuntimeError):
         load_trusted_visibility_key(path)
     os.chmod(path, 0o600)
     path.write_bytes(b"too-short")
+    os.chmod(path, 0o400)
     with pytest.raises(VisibilityRuntimeError):
         load_trusted_visibility_key(path)
 
 
-def test_signer_key_symlink_is_rejected(tmp_path):
+def test_signer_key_symlink_is_rejected(tmp_path, monkeypatch):
+    import ssh_over_mcp.host_agent.visibility_runtime_v5 as module
+
+    monkeypatch.setattr(module, "_TRUSTED_ADMIN_UID", os.geteuid())
     real = tmp_path / "real.key"
     real.write_bytes(bytes(range(32)))
     os.chmod(real, 0o600)
@@ -198,4 +205,33 @@ def test_atomic_epoch_state_rejects_invalid_binding(tmp_path, epoch, digest):
             now=1_800_000_000,
             policy_epoch=epoch,
             central_policy_sha256=digest,
+        )
+
+
+def test_unprivileged_agent_owned_key_and_policy_not_trusted(tmp_path):
+    """The running Host Agent must not own the authority that grants access."""
+    if os.geteuid() == 0:
+        pytest.skip("requires non-root test UID")
+    from ssh_over_mcp.host_agent.visibility_runtime_v5 import (
+        load_host_visibility_runtime,
+    )
+
+    key = tmp_path / "key"
+    key.write_bytes(bytes(range(32)))
+    os.chmod(key, 0o400)
+    policy = tmp_path / "policy.json"
+    policy.write_text("{}", encoding="utf-8")
+    os.chmod(policy, 0o400)
+    with pytest.raises(VisibilityRuntimeError):
+        load_trusted_visibility_key(key)
+    with pytest.raises(VisibilityRuntimeError):
+        load_host_visibility_runtime(policy)
+
+
+def test_v5_trusted_inputs_and_nonce_storage_must_have_separate_parent(tmp_path):
+    """Read-only administrator grants must not share a mutable host-user directory."""
+    with pytest.raises(ValueError):
+        HostVisibilityRuntimeV5.model_validate(
+            _config(tmp_path).model_dump(mode="json")
+            | {"nonce_db_path": str(tmp_path / "different-nonce.sqlite")}
         )
