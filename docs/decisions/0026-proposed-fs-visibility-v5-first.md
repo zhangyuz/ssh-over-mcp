@@ -135,3 +135,47 @@ this candidate can be spoofed by tests; they are **not** trust boundaries
 until wired exclusively to the authenticated host-local runtime. The HMAC
 scheme is a candidate for independently reviewing this specific trust
 model, not a broad approval to distribute secrets or enable an SSH tool.
+
+## 2026-10-28 checkpoint: central policy compiler and response reauthorization (INACTIVE)
+
+- Candidate `policy/visibility_compiler_v5.py` now checks the actual
+  `PolicyEngine.evaluate(root)` result and the effective roles, host,
+  capabilities, and tool selectors of existing central rules. To avoid
+  unsafe `fnmatchcase` assumptions, it accepts only canonical literal
+  paths or terminal `/literal/**` subtree expressions. Unsupported
+  patterns **deny compilation** rather than falling back to a root-only
+  allow. A subtree permission must cover descendants; an exact-path
+  root-only permission is not sufficient for `fs_list`. Any applicable
+  ancestor/global deny rejects the request. Deny `/private/**` also
+  hides the `private` entry itself; exact denies conservatively hide
+  their descendants. Nested deny roots are deduplicated and the host
+  visibility hard limit remains 64, with no truncation.
+- Central `reauthorize_list_paths` accepts only an exactly current policy
+  digest, bounded sorted **direct child** paths with per-child
+  `PolicyEngine.evaluate` ALLOW **and** the compiled deny-first
+  visibility rules; it checks a caller-supplied live epoch guard before,
+  throughout and after the batch, and exposes no partial results.
+  This rejects path/count/order tampering even if a future remote
+  response is malicious, but validates **paths only**, not remote
+  stat metadata/inode identity, response authenticity, output bytes,
+  policy-key provisioning, policy-update synchronization or stable
+  cursor state.
+- These two functions are unregistered test-first **candidate** code. They
+  do not sign on behalf of any trusted central service, authenticate
+  host-keys, provision keys, implement SMCP v2 or activate any capability.
+  The existing central policy's `paths: []` means all paths if the
+  remaining rule selectors match; the compiler always clamps such a
+  grant to the *one requested canonical root*. Central risk decisions
+  requiring approvals cannot be silently treated as ALLOW.
+- **Ruling (YAGNI / fail-closed):** do not implement a generic glob-to-tree
+  language or rewrite all existing policy rules in this slice. Unhandled
+  central path patterns are a deliberate **deny** until separately
+  specified, tested and reviewed. The cost is refusal of some currently
+  expressible central policies, not permission expansion.
+
+**Remaining before #347 can become Ready:** Freeze central/host snapshot
+signer and hostkey pin identity, persistent nonce and monotonic epoch ACK
+protocol, FD mount/hardlink/rename race guarantees, a bounded coherent
+directory snapshot/page protocol, typed SMCP v2 host policy loader, audited
+SSH/MCP glue, exact-response metadata validation, two-node positive/negative
+real Mode A E2E and exact-head Native Level-3 cleanup PASS. No Mode B.

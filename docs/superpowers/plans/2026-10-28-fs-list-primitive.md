@@ -78,3 +78,21 @@
 - [ ] Fresh exact-HEAD hosted Ubuntu full suite and Linux callback/inode tests after push, before accepting the candidate checkpoint.
 
 **Deferred security gates:** trusted provisioning of signer/verifier keys, persistent atomic nonce store, monotonic epoch and revocation ACK, expiry during traversal, entire SMCP v2 schema and trustworthy result verification. These are not optional for activating the feature.
+
+### Task 1B: central deny-first policy projection and result recheck (INACTIVE)
+
+**Files:**
+- Create: `src/ssh_over_mcp/policy/visibility_compiler_v5.py`
+- Test: `tests/policy/test_visibility_compiler_v5.py`
+
+- [x] Write RED test; `ModuleNotFoundError` for candidate compiler.
+- [x] GREEN: consume real `PolicyEngine` rule decisions, refuse complex
+  paths, preserve inherited-role/global denies, hide `secrets/**` entry
+  and descendants, return strictly root-bounded rules plus policy hash.
+  Reject exact-root-only ALLOW and approval-required decisions.
+- [x] Write RED test for absent central `reauthorize_list_paths` hook.
+- [x] GREEN: central `evaluate` every returned direct child against
+  the live policy, deny malformed/stale/duplicate/unsorted/over-limit
+  results, check epoch guard before/throughout/after, no partial result.
+- [ ] Run full exact-head Ubuntu CI and targeted Linux test suites on
+  resulting commit. Remains no runtime activation.
