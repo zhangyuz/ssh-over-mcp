@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 
 from starlette.requests import Request
@@ -45,6 +46,7 @@ def build_application(
         policy=policy,
         credential_map=credential_map,
         ledger=ledger_client,
+        visibility_authority=visibility_authority,
     )
     service = MCPService(
         inventory=bundle.inventory,
@@ -57,6 +59,7 @@ def build_application(
         service=service,
         principal_provider=principal_provider,
         audit=ssh_runtime.audit,
+        enable_fs_list=enable_fs_list,
     )
 
     @mcp.custom_route("/healthz", methods=["GET"])
