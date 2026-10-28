@@ -21,6 +21,7 @@ def test_hosted_compose_startup_is_actual_and_disposable() -> None:
     assert "docker build" not in script
     assert '"docker", "build"' in script
     assert '"Dockerfile"' in script
+    assert '"linux/amd64", "linux/x86_64"' in script
     assert "entrypoint: !reset null" in script
     assert "command: !reset null" in script
     assert "mvp-fs-review" in script

@@ -143,10 +143,8 @@ def main() -> None:
     assert event["pull_request"]["head"]["repo"]["full_name"] == "zhangyuz/ssh-over-mcp"
     assert shutil.which("docker") and shutil.which("ssh-keygen")
     # No production keys, no host ports, and no shared Yuz.local Engine.
-    assert (
-        cli(["docker", "info", "--format", "{{.OSType}}/{{.Architecture}}"]).strip()
-        == "linux/amd64"
-    )
+    platform = cli(["docker", "info", "--format", "{{.OSType}}/{{.Architecture}}"]).strip()
+    assert platform in {"linux/amd64", "linux/x86_64"}, "unexpected Docker Engine architecture"
 
     cli(
         ["docker", "build", "--no-cache", "-f", str(ROOT / "Dockerfile"), "-t", IMAGE, str(ROOT)],
