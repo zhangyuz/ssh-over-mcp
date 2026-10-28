@@ -72,3 +72,25 @@ as runtime E2E acceptance.
 
 Any architectural decision that weakens a current invariant requires
 independent approval. No private pilot key or overlay is placed in Git.
+
+## 2026-10-28 Superpowers checkpoint: Linux FD-list candidate
+
+- Plan: [2026-10-28 fs_list FD primitive](../superpowers/plans/2026-10-28-fs-list-primitive.md).
+- Added **inactive** `host_agent/visibility_listing_candidate.py` with three
+  explicit trusted-callback positions: each traversed prefix, directory
+  enumeration, and each child before *any child metadata*.
+- Resolves ancestry with Linux `O_PATH|O_DIRECTORY|O_NOFOLLOW`, pins the
+  final inode, reopens the pinned directory via `/proc/self/fd/<fd>`,
+  checks identity, enumerates at most 64 physical entries, and sorts
+  authorized results by UTF-8 basename bytes. Refuses unsupported/symlink
+  entries and detects directory inode identity changes during enumeration.
+  The only optional path data returned is individually authorized stat
+  metadata; callback exceptions fail closed. No shell or direct pathname
+  data-capable opens.
+- **Limitations intentionally unresolved:** callback values currently have
+  no authenticated source; a lexical visibility matcher cannot stand in
+  for an epoch-bound central policy or revocation ACK. No stable multi-page
+  snapshot, no central result recheck, and no complete global race-proof
+  directory view. The module is not called by SMCP v1, MCP, Host Policy
+  v3/v4, or the live Yuz.local Mode A deployment. Linux behavior must be
+  verified on actual Ubuntu CI before claiming that tests passed.
