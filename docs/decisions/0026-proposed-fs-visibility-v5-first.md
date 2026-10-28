@@ -225,3 +225,24 @@ real Mode A E2E and exact-head Native Level-3 cleanup PASS. No Mode B.
   over changing the existing v1 ForceCommand or pretending v5 policy
   parsing alone authorizes traversal. Runtime activation requires
   separate security/design approval under the existing release gates.
+
+## 2026-10-28: fixed v2 SSH transport candidate (NOT ACTIVATED)
+
+`StructuredSSHTransport.run_v2()` sends pre-framed bytes using the literal
+SSH command `mcp-v2`; existing `run()` continues to select `mcp-v1`.
+Neither public entrypoint accepts a command override, and their shared
+private channel path rejects any command outside those two exact literals
+before connection acquisition. Payload bytes never select the SSH command;
+there is no retry or protocol downgrade on failure.
+
+Both methods retain inventory-owned connection identity and host-key pins,
+per-host session limits, no PTY/X11/environment forwarding, binary I/O, the
+shared stdout/stderr byte budget, timeout/cancellation cleanup and sanitized
+definite-open versus uncertain-post-send failure semantics. Framing and
+authorization remain the caller/receiver responsibilities; this transport
+does not grant filesystem access or validate a signed snapshot.
+
+The v2 method has no production caller or new MCP registration. Local mock
+channel tests establish selection and refusal/limit behavior, not real SSH
+or Mode A acceptance. Deployed ForceCommand/configuration, trust material,
+approvals and all full-feature/Level-3 activation gates remain unchanged.
