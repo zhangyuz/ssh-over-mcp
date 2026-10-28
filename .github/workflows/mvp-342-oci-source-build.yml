@@ -147,7 +147,9 @@ jobs:
           # and an ephemeral last overlay must never reach production Compose.
           DOCKER_CONFIG="$(mktemp -d /tmp/som342-docker-cli-XXXXXX)"
           export DOCKER_CONFIG
-          trap 'rmdir "$DOCKER_CONFIG"' EXIT
+          # Docker Compose writes transient client state inside this owned
+          # mktemp directory. Remove that one directory, not Docker caches.
+          trap 'rm -r -- "$DOCKER_CONFIG"' EXIT
           python3 ops/mvp/mode_a_hosted_online_compose_startup.py
           echo 'MODE_A_COMPOSE_ALL_FIVE_SERVICES_HEALTHY_CI_ONLY_PASS=true' >> proof/PROVENANCE.txt
           echo 'MODE_A_COMPOSE_TEST_NOT_PRODUCTION=true' >> proof/PROVENANCE.txt

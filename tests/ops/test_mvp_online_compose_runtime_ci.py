@@ -42,3 +42,5 @@ def test_real_hosted_workflow_runs_compose_after_default_boot_before_export() ->
     assert "MODE_A_COMPOSE_ALL_FIVE_SERVICES_HEALTHY_CI_ONLY_PASS" in steps[startup]["run"]
     assert "docker compose up" not in steps[startup]["run"]
     assert "DOCKER_CONFIG" in steps[startup]["run"]
+    assert "mktemp -d /tmp/som342-docker-cli-XXXXXX" in steps[startup]["run"]
+    assert 'rm -r -- "$DOCKER_CONFIG"' in steps[startup]["run"]
