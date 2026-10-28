@@ -1,8 +1,5 @@
 """Tests for the opt-in immutable per-host central visibility signer."""
 
-import hashlib
-from types import SimpleNamespace
-
 import asyncssh
 import pytest
 
@@ -18,7 +15,6 @@ def fixture():
         host: asyncssh.generate_private_key("ssh-ed25519").export_public_key().decode().strip()
         for host in ("node01", "node02")
     }
-    engine = SimpleNamespace()
     # Use a genuine policy engine to ensure the signer never accepts an
     # untrusted fake implementation.
     from ssh_over_mcp.inventory.models import Host, Inventory
