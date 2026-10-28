@@ -1,5 +1,8 @@
 # MVP 当前交付入口：Compose 多 SSH 读写试点
 
+> **2026-10-27 `yuz.local` 实机准备进展（[环境与密钥交接](runbooks/mvp-mode-a-yuz-local-networked-engine.md)）：** 新建独立联网 Ubuntu 26.04.1 Lima VM `som-mode-a-netpilot-oct27`，官方 Docker 签名 APT 安装 Engine 29.9.2 / Compose 5.6.1，实际验证 Docker userns UID/GID `0→100000`、五组 capability 全零和 NNP=1；两套独立 SSH host/client 密钥、默认拒绝配置、一次性 Origin Bearer 已在 guest 私有路径准备，未公开私钥。共享 Docker Desktop、原有 Lima VM 未修改。**这只完成基础设施和受保护的待部署凭据，实际 MCP/SSH 尚未在 `yuz.local` 上启动、无法宣称 LIVE。** 最终可运行镜像生产签名、实际入口与负向网络验证、独立 #346/PR 发布审查仍需完成。
+
+
 > **2026-10-27 联网镜像启动闭环开发：** PR #342 新增独立 **CI-only 默认可启动** OpenSSH 镜像候选与实测脚本，使用已验证的 Ubuntu/OpenSSH 构建层与固定 no-sudo FS ForceCommand，真实 Docker 启动不需要覆盖 `ENTRYPOINT`；复用 SSH typed FS 正向和拒绝测试。仍限 GitHub-hosted 临时 Runner，**不发布该运行镜像、不修改原 STOP78 测试归档、不部署到共享 Docker**。下一步是新 HEAD 的真实 Linux CI、独立发布镜像审查/签名、获准 Engine 私网 Compose 验收。
 
 

@@ -31,6 +31,8 @@ This directory is the canonical behavioral and security specification for `ssh-o
 
 **Mode A disposable VM definition preflight** — [read-only VM gate](runbooks/mvp-mode-a-vm-offline-gate.md) (does not authorize boot; host/LAN egress remains unverified).
 
+**Dedicated Yuz.local online Mode A Engine — provisioned, NOT deployed** — [actual Ubuntu Docker userns/keys/rollback handoff](runbooks/mvp-mode-a-yuz-local-networked-engine.md). Independent release approval, signed final images and live ingress still required.
+
 **Operator-selected networked MVP vs isolated test boundary** — [ADR 0024](decisions/0024-networked-docker-mvp-vs-isolated-e2e.md): production must have controlled MCP↔SSH connectivity, while no-NIC remains for trusted E2E isolation; no offline Docker dependency-chain requirement for online pilot. Not an authorization to deploy or bypass STOP78.
 
 **Mode A OCI/SSH trust proposal** — [per-role and directional network proof matrix](superpowers/specs/2026-10-24-mode-a-oci-privilege-and-network-proof-matrix.md) and [concrete same-node PID, separate-manager OCI execution/no-NIC QEMU Level-2 design](superpowers/specs/2026-10-25-mode-a-runtime-execution-contract.md) (offline review only, P1 executable runtime authority HOLD).
