@@ -94,3 +94,44 @@ independent approval. No private pilot key or overlay is placed in Git.
   directory view. The module is not called by SMCP v1, MCP, Host Policy
   v3/v4, or the live Yuz.local Mode A deployment. Linux behavior must be
   verified on actual Ubuntu CI before claiming that tests passed.
+
+## 2026-10-28 checkpoint: authenticated snapshot candidate (INACTIVE)
+
+This iteration intentionally builds no operator entrypoint or new SMCP v2
+receiver. The new `host_agent/visibility_snapshot_v5.py` has the following
+test-first **candidate** contract:
+
+- **One host-specific independent 32-byte HMAC-SHA256 key** (not the Ledger
+  key) signs a deterministic canonical JSON payload under a fixed SMCPv2
+  domain separator. The payload includes the *full effective central
+  allow/deny rule set*, request ID, principal, host ID, SHA-256 host-key
+  identity, operation, profile, query root, policy digest, policy epoch,
+  random snapshot ID, 1–64 scan budget, issued-at and ≤60-second expiry.
+  A MAC over only a digest or only the root permission is insufficient.
+- Verification compares the signed fields against a **separately supplied
+  trusted exact request binding**, the configured **enabled v5 Host Policy**
+  (host/profile/epoch/digest) and a caller-supplied atomic replay-consumption
+  callback. A failed MAC, stale epoch, disabled policy, caller mismatch,
+  signature expiry or nonce-store failure never produces the verified object.
+  All visible children require the signed central rule **and** local Host
+  Policy rule to allow their path. Allowed ancestors may be opened only via
+  O_PATH in order to reach the separately authorized root; they do not
+  authorize listing or returning their metadata.
+- The FD helper now accepts a **verified** object with a mandatory live
+  epoch guard, checks epoch on every authorized prefix/child and after
+  directory enumeration, and fails closed on revocation. The new Linux
+  regression tests check that neither centrally nor host-denied children
+  are opened, and that no partial output escapes during a revocation.
+
+**Still required before anything becomes live:** trusted key provisioning
+and file permissions, distinct central signer authority and host verifier,
+persistent *atomic* nonce consumption across restarts, trusted monotonic
+policy epoch/ACK barrier including in-flight cancellation, expiry refresh
+during traversal, secure host-key-byte canonicalization, full central
+PolicyEngine compilation (including recursive deny patterns), mount/rename
+containment, consistent bounded pagination, result reauthorization and
+real MCP/Ledger/SSH positive/negative E2E. The callback arguments in
+this candidate can be spoofed by tests; they are **not** trust boundaries
+until wired exclusively to the authenticated host-local runtime. The HMAC
+scheme is a candidate for independently reviewing this specific trust
+model, not a broad approval to distribute secrets or enable an SSH tool.

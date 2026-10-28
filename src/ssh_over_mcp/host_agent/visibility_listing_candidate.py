@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import stat
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from .filesystem import (
     FilesystemAccessError,
@@ -21,6 +22,9 @@ from .filesystem import (
     _same_read_identity,
 )
 from .visibility_policy_v5 import canonical_visibility_path
+
+if TYPE_CHECKING:
+    from .visibility_snapshot_v5 import VerifiedVisibilitySnapshot
 
 MAX_LIST_SCANNED_ENTRIES = 64
 
@@ -150,3 +154,51 @@ def list_directory_candidate(
             os.close(directory_fd)
         if pinned_fd is not None:
             os.close(pinned_fd)
+
+
+def list_verified_directory_candidate(
+    verified: VerifiedVisibilitySnapshot,
+    *,
+    is_epoch_active: Callable[[], bool],
+) -> tuple[ReadOnlyFileStat, ...]:
+    """Wire verified central AND local policies to the inactive FD primitive.
+
+    The epoch guard must be a trusted, live host-local revocation check.
+    The guard is *not* a substitute for an ACK barrier preventing revocation
+    from racing the final returned result. Caller must still central-recheck.
+    """
+
+    from .visibility_snapshot_v5 import VerifiedVisibilitySnapshot
+
+    if (
+        not isinstance(verified, VerifiedVisibilitySnapshot)
+        or verified.snapshot.operation != "fs_list"
+        or not callable(is_epoch_active)
+    ):
+        raise FilesystemAccessError("verified listing authority unavailable")
+
+    def require_active() -> None:
+        try:
+            if is_epoch_active() is True:
+                return
+        except Exception as exc:
+            raise FilesystemAccessError("listing policy epoch unavailable") from exc
+        raise FilesystemAccessError("listing policy epoch unavailable")
+
+    def guarded(callback: Callable[[str], bool]) -> Callable[[str], bool]:
+        def check(path: str) -> bool:
+            require_active()
+            return callback(path)
+
+        return check
+
+    require_active()
+    result = list_directory_candidate(
+        verified.snapshot.root,
+        authorize_traverse=guarded(verified.may_traverse),
+        authorize_directory=guarded(verified.may_inspect),
+        authorize_child=guarded(verified.may_inspect),
+        max_entries=verified.snapshot.max_entries,
+    )
+    require_active()
+    return result

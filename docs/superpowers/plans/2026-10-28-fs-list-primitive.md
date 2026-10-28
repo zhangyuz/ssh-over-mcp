@@ -62,3 +62,19 @@
 - [ ] **Step 2: TDD for protocol downgrade, stale epoch, denied subtree and central result recheck** with genuine Linux E2E on isolated Mode A.
 - [ ] **Step 3: Implement and verify exact-source remote `fs_list` over MCP → Ledger → SSH both nodes**; update security/policy/MCP API docs and test assertions, do not silently enable `fs_search`.
 - [ ] **Step 4: Full CI + Native Level-3 + independent review before Ready, separate merge and deployment consent.**
+
+### Task 1A: Authenticate the snapshot before FD enumeration (inactive candidate)
+
+**Files:**
+- Create: `src/ssh_over_mcp/host_agent/visibility_snapshot_v5.py`
+- Test: `tests/host_agent/test_visibility_snapshot_v5.py`
+- Modify: `src/ssh_over_mcp/host_agent/visibility_listing_candidate.py`
+
+**Interfaces:** `sign_snapshot(payload, key)`, `verify_snapshot(signed, *, trusted_key, expected, active_host_policy, now, consume_snapshot_id)` and `list_verified_directory_candidate(verified, *, is_epoch_active)`. All are **private candidate helpers** with no runtime caller; none may be used with untrusted callback/active-policy/key inputs.
+
+- [x] RED: missing module then missing adapter and `may_traverse`; recorded test-first failures.
+- [x] GREEN: canonical domain-separated HMAC, strict identity/epoch/root/deny/TTL/budget fields, replay callback and fail-closed two-layer path intersection; Linux integration tests deny both central/local children and mid-scan epoch revocation.
+- [x] Local lint/targeted protocol test and strict Linux skips (do not count skips as E2E).
+- [ ] Fresh exact-HEAD hosted Ubuntu full suite and Linux callback/inode tests after push, before accepting the candidate checkpoint.
+
+**Deferred security gates:** trusted provisioning of signer/verifier keys, persistent atomic nonce store, monotonic epoch and revocation ACK, expiry during traversal, entire SMCP v2 schema and trustworthy result verification. These are not optional for activating the feature.
