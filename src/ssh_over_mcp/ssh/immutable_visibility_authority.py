@@ -96,7 +96,7 @@ class ImmutableVisibilityAuthority:
                 and snapshot.host_key_sha256 == self._pinned_host_digest(snapshot.host)
                 and self._check_active(snapshot)
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - trusted callback failures deny authority
             return False
 
     def _check_active(self, snapshot: VisibilitySnapshotV5) -> bool:
