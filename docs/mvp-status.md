@@ -1,3 +1,7 @@
+## Current delivery priority — filesystem capabilities before Mode B (2026-10-28)
+
+The operator prioritizes completion and security acceptance of all eight typed filesystem operations, including replace/append semantics, on Mode A **before** implementing Mode B deployment. The existing Mode A FS-only private pilot remains live but supports only stat/read/create-only mkdir/write. A proposed (not approved or activated) v5 per-node visibility contract has begun in [ADR0026](decisions/0026-proposed-fs-visibility-v5-first.md); do not count its syntactic validation tests as delivered MCP tools. Mode B remains a required **subsequent** product milestone, not canceled.
+
 # MVP 当前交付入口：Compose 多 SSH 读写试点
 
 > **2026-10-28 当前恢复检查：** Mode A **仅本机**试点继续 LIVE。专用 VM 完整停止/重启后，四个持久服务与 `launchd` SSH 隧道自动恢复，Mac 通过 `127.0.0.1:18801/mcp` 完成匿名 401、认证、hosts_list、双 SSH 节点固定数据读回。可重复、只读的仓库验收程序：[`ops/mvp/mode_a_host_loopback_acceptance.py`](../ops/mvp/mode_a_host_loopback_acceptance.py)，操作说明见 [live operations](runbooks/mvp-mode-a-yuz-local-live-operations.md)。**下文较早的「尚未部署」文字属于历史开发检查点，不覆盖此处最新 LIVE 状态。** Mode B、额外四种文件工具及正式独立发布审查仍未完成。
