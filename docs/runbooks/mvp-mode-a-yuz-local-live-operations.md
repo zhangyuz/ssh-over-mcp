@@ -25,6 +25,19 @@
 4. Mac through SSH tunnel: MCP JSON-RPC `initialize`, `hosts_list`, then both `fs_read` verified with Bearer; anonymous POST 401.
 5. Controlled restart of Ledger/MCP/both SSH nodes, followed by the same Mac authenticated readback PASS; subsequent Compose recreation with `unless-stopped` continued to preserve FS data and authentication.
 6. macOS user LaunchAgent managed loopback process was force-restarted (`launchctl kickstart -k`), its PID changed, and authenticated MCP two-node readback PASS.
+7. **2026-10-28 actual cold boot recovery:** stop the dedicated VM with the LaunchAgent temporarily disabled, re-enable the approved LaunchAgent, then verify Lima/guest Docker restart policies recover the four services and the SSH tunnel resumes listening on `127.0.0.1:18801`. Anonymous MCP request returned 401; authenticated init, hosts_list, and byte-exact readback on **both** nodes PASS. No reset of named data volumes or Ledger; no other VM/Engine was touched. This is an operator-observed single cold-start recovery, not a guarantee of all future reboot paths.
+
+## Repeatable Mac-local MCP acceptance
+
+From the repository checkout on `yuz.local`:
+
+```sh
+/usr/bin/python3 ops/mvp/mode_a_host_loopback_acceptance.py
+```
+
+The fixed-target script uses Lima's approved non-interactive guest read to load the existing protected bearer **in memory only**, then talks exclusively to `http://127.0.0.1:18801/mcp`. It verifies anonymous 401, authenticated MCP initialization, hosts_list, and exact readback of the pre-existing two approval-test fixtures on node01 and node02. The script only calls read operations and prints bounded PASS/refusal markers without printing the bearer, private SSH keys or remote response bodies. It does **not** rotate credentials, grant approvals, change data, restart containers, or prove Mode B. If an operator intentionally changes the fixture bytes or paths, the check intentionally refuses rather than claiming health.
+
+Synthetic regression: `PYTHONPATH="$PWD/src:$PWD" python3 -m pytest -q tests/ops/test_mvp_mode_a_host_loopback_acceptance.py` using the project's Python environment with pytest installed. Do not put the bearer into test fixtures or CLI arguments.
 
 ## Read-only health commands
 

@@ -1,5 +1,7 @@
 # MVP 当前交付入口：Compose 多 SSH 读写试点
 
+> **2026-10-28 当前恢复检查：** Mode A **仅本机**试点继续 LIVE。专用 VM 完整停止/重启后，四个持久服务与 `launchd` SSH 隧道自动恢复，Mac 通过 `127.0.0.1:18801/mcp` 完成匿名 401、认证、hosts_list、双 SSH 节点固定数据读回。可重复、只读的仓库验收程序：[`ops/mvp/mode_a_host_loopback_acceptance.py`](../ops/mvp/mode_a_host_loopback_acceptance.py)，操作说明见 [live operations](runbooks/mvp-mode-a-yuz-local-live-operations.md)。**下文较早的「尚未部署」文字属于历史开发检查点，不覆盖此处最新 LIVE 状态。** Mode B、额外四种文件工具及正式独立发布审查仍未完成。
+
 > **2026-10-27 MODE A FS-only 本机私有试点已 LIVE：** 独立 `som-mode-a-netpilot-oct27` Ubuntu VM 的真实五服务 Compose、Ledger 审批与 node01/node02 FS mkdir/write/read/replay deny 已通过；从 `yuz.local` Mac 通过 `launchd` 管理的 SSH 转发 `http://127.0.0.1:18801/mcp` 完成带 Bearer 的 JSON-RPC MCP 初始化、hosts_list、双节点读回及重启后恢复；无 Token 返回 401，节点反向/横向/外网连接拒绝。已启用 four-service `restart: unless-stopped`，控制和 SSH 镜像分别固定为 `sha256:ee89cc1dc8f596f59160daff517dacf3f53e5c6c551bfd20bdd4acb4ded21925` / `sha256:053444836dd806b1adffac47e5887b8c57184f02c5d5f7d3d0b38988149b9529`。**这是操作员批准的仅限本机 Mode A FS-only 试点，不是 LAN/公网暴露、独立外部安全签核、Mode B 或完整八工具产品。** 详见 [运行及回滚](runbooks/mvp-mode-a-yuz-local-live-operations.md)、[ADR0025](decisions/0025-mode-a-fs-only-operator-pilot-release.md)。
 
 
