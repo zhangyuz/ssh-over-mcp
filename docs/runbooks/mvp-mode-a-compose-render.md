@@ -50,10 +50,16 @@ It uses new synthetic SSH identities, private configuration and a one-time
 origin bearer token; it starts **no** Cloudflare tunnel, published host port,
 manager, host-cgroup workload or production secret. The test asserts
 `docker compose config` network and identity shape before `up --wait`,
-checks the actual MCP readiness and node `sshd -t`, and always executes
-project-scoped `down --volumes --remove-orphans` with bounded cleanup.
+checks the actual MCP readiness and node `sshd -t`, and then uses the **running** Compose MCP listener for two-node
+`fs_mkdir` + `fs_write` via one-time `approvalctl` grants, `fs_read`
+readback, replay refusals, and bearer-less origin rejection. Those calls
+exercise the actual Compose Ledger execution/admin sockets and running
+OpenSSH containers instead of an in-process Ledger test fixture.
+It always executes project-scoped `down --volumes --remove-orphans` with
+bounded cleanup.
 The CI marker is
-`MODE_A_COMPOSE_ALL_FIVE_SERVICES_HEALTHY_CI_ONLY_PASS` and does **not**
+`MODE_A_COMPOSE_ALL_FIVE_SERVICES_HEALTHY_CI_ONLY_PASS` plus
+`MODE_A_COMPOSE_REAL_MCP_LEDGER_TWO_NODE_FS_PASS`, and does **not**
 mean network egress ACL enforcement or production approval. Real once-only
 MCP/Ledger FS writes on two runnable OpenSSH nodes remain covered separately
 by the dedicated ordinary and userns-remapped hosted OCI proofs.

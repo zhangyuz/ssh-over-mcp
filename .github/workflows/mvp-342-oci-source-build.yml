@@ -102,6 +102,8 @@ jobs:
             ops/mvp/build_online_pilot_review_image.py \
             ops/mvp/mode_a_hosted_runnable_image_probe.py \
             ops/mvp/mode_a_online_pilot_receipt.py \
+            ops/mvp/mode_a_hosted_online_compose_startup.py \
+            ops/mvp/mode_a_hosted_compose_mcp_client.py \
             > proof/SOURCE_SHA256SUMS
           echo FS_ONLY_OCI_SOURCE_BUILD_OK_NO_RUNTIME
 
@@ -152,6 +154,7 @@ jobs:
           trap 'rm -r -- "$DOCKER_CONFIG"' EXIT
           python3 ops/mvp/mode_a_hosted_online_compose_startup.py
           echo 'MODE_A_COMPOSE_ALL_FIVE_SERVICES_HEALTHY_CI_ONLY_PASS=true' >> proof/PROVENANCE.txt
+          echo 'MODE_A_COMPOSE_REAL_MCP_LEDGER_TWO_NODE_FS_PASS=true' >> proof/PROVENANCE.txt
           echo 'MODE_A_COMPOSE_TEST_NOT_PRODUCTION=true' >> proof/PROVENANCE.txt
 
       - name: Export runnable pilot image as TEST-ONLY candidate (not release)

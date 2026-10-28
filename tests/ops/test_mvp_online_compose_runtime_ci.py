@@ -30,6 +30,23 @@ def test_hosted_compose_startup_is_actual_and_disposable() -> None:
     assert "docker push" not in script
 
 
+def test_running_compose_mcp_ledger_reaches_both_sshd_nodes_and_rejects_replay() -> None:
+    runner = (ROOT / "ops/mvp/mode_a_hosted_online_compose_startup.py").read_text()
+    probe = (ROOT / "ops/mvp/mode_a_hosted_compose_mcp_client.py").read_text()
+    assert "def prove_live_fs_with_approvals(" in runner
+    assert "prove_live_fs_with_approvals(cmd, env)" in runner
+    assert "approvalctl" in runner and '"grant"' in runner
+    assert '"--profile",' in runner and '"admin",' in runner
+    assert "MODE_A_COMPOSE_REAL_MCP_LEDGER_TWO_NODE_FS_PASS" in runner
+    assert '"node01", "node02"' in runner
+    assert "streamable_http_client(" in probe and "from mcp import Client" in probe
+    assert "origin-bearer" in probe
+    assert "fs_mkdir" in probe and "fs_write" in probe and "fs_read" in probe
+    assert "approval_id" in probe and "replay" in probe
+    assert "origin authentication failed" in probe
+    assert "ssh-keygen" not in probe
+
+
 def test_real_hosted_workflow_runs_compose_after_default_boot_before_export() -> None:
     wf = yaml.safe_load((ROOT / ".github/workflows/mvp-342-oci-source-build.yml").read_text())
     steps = wf["jobs"]["build-source"]["steps"]

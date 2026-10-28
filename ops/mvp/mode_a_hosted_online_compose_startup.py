@@ -131,6 +131,54 @@ def payload(work: Path) -> dict[str, str]:
     return env
 
 
+def prove_live_fs_with_approvals(cmd: list[str], env: dict[str, str]) -> None:
+    """Exercise *the running Compose* MCP and admin Ledger authority."""
+    client = Path(__file__).with_name("mode_a_hosted_compose_mcp_client.py").read_bytes()
+
+    def call(stage: str, host: str, approval: str | None = None) -> dict:
+        args = cmd + ["exec", "-T", "mcp", "python", "-", stage, host]
+        if approval is not None:
+            args.append(approval)
+        process = subprocess.run(
+            args, env=env, input=client, capture_output=True, timeout=35, check=False
+        )
+        # Never dump MCP stdout or messages containing token, key or payload.
+        assert process.returncode == 0, ("running Compose MCP client failed", stage, host)
+        result = json.loads(process.stdout)
+        assert result["stage"] == stage
+        return result
+
+    assert call("unauthorized", "node01")["denied"] is True
+    for node in ("node01", "node02"):
+        for operation in ("mkdir", "write"):
+            challenge = call(operation + "_pending", node)
+            approval = challenge["approval_id"]
+            assert len(approval) == 36 and approval.startswith("apr_")
+            # Admin is an isolated, one-shot Compose client. The public MCP
+            # socket has no API granting approvals; it owns only execution.
+            granted = cli(
+                cmd
+                + [
+                    "--profile",
+                    "admin",
+                    "run",
+                    "--rm",
+                    "--no-deps",
+                    "-T",
+                    "approvalctl",
+                    "grant",
+                    approval,
+                ],
+                env=env,
+                timeout=35,
+            )
+            assert json.loads(granted)["state"] == "granted"
+            done = call(operation + "_granted", node, approval)
+            assert done["consumed_once"] is True and done["replay_denied"] is True
+        assert call("read", node)["readback"] is True
+    print("MODE_A_COMPOSE_REAL_MCP_LEDGER_TWO_NODE_FS_PASS", flush=True)
+
+
 def main() -> None:
     assert sys.platform == "linux" and os.geteuid() != 0
     assert os.getenv("GITHUB_ACTIONS") == "true"
@@ -254,6 +302,7 @@ def main() -> None:
                 env=env,
             )
             print("MODE_A_COMPOSE_ALL_FIVE_SERVICES_HEALTHY_CI_ONLY_PASS", flush=True)
+            prove_live_fs_with_approvals(cmd, env)
             print(
                 "TEST_ONLY=no-production-keys RELEASE_AUTHORIZED=false DEPLOYED=false", flush=True
             )
