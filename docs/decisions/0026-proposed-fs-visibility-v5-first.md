@@ -194,3 +194,34 @@ real Mode A E2E and exact-head Native Level-3 cleanup PASS. No Mode B.
   key provisioning or monotonic epoch ACK. The host-key bytes and HMAC
   key are synthetic and replay consumption is not durable. Never call
   this a real two-node SSH test or a release receipt.
+
+
+## 2026-10-28: isolated SMCP v2 + local state checkpoint (NOT ACTIVATED)
+
+- `ssh/protocol_v2.py` introduces a separate `SMCP\\x00\\x02` frame,
+  exact `mcp-v2` ForceCommand check, strict fs_list-only metadata and
+  duplicate-key/trailing-bytes rejection. Legacy `SMCP\\x00\\x01` and
+  Host Agent v3/v4 execution remain untouched and cannot silently downgrade.
+- `host_agent/visibility_runtime_v5.py` validates a dedicated owner-only
+  v5 config and a distinct 32-byte HMAC key using no-follow fd reads,
+  requires a 0700 owner-only private parent, and consumes snapshot IDs
+  through a local persistent SQLite nonce table (no implicit pruning).
+  This blocks replay after process restart when storage remains intact.
+- `host_agent/cli_v2.py` is a **separate uninstalled entrypoint**. It
+  validates the signed request with trusted host/config fields, checks
+  policy file/expiry during and after every FD listing, and returns a
+  bounded JSON response. Test cases include wrong protocol, stale epoch,
+  insecure config, and durable request replay. The legacy ForceCommand and
+  running Mode A pilot do **not** invoke the new entrypoint.
+- These controls do not implement a globally monotonic epoch ledger, ACK
+  barrier or revocation of a previously issued snapshot during network
+  partitions. The signed principal is not independently derived from an
+  SSH execution identity; the central signing authority still needs a
+  trusted mapping. This is deliberately **not** a production v2 release.
+- No paging/cursor or entire host-side safety proof exists. A bounded
+  single-directory response is not a stable paginated snapshot. A
+  genuine two-node Mode A MCP→Ledger→SSH user feature remains absent.
+- Ruling: prioritize an isolated, falsifiable v2 Host Agent contract
+  over changing the existing v1 ForceCommand or pretending v5 policy
+  parsing alone authorizes traversal. Runtime activation requires
+  separate security/design approval under the existing release gates.

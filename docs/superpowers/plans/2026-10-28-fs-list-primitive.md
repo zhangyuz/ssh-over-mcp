@@ -108,3 +108,26 @@
   denied result injection are refused.
 - [ ] Verify on a fresh exact-head Ubuntu 26.04 CI run. Do not count
   local macOS SKIP as Linux PASS or this kernel test as two-OpenSSH E2E.
+
+
+### Task 1D: strict standalone v2 Host Agent read-only candidate (unregistered)
+
+- [x] TDD RED→GREEN for `ssh/protocol_v2.py`: explicit magic,
+  `mcp-v2`, versioned fs_list request and signed payload, no v1
+  downgrade, strict metadata with duplicate-key/EOF/schema rejection.
+- [x] TDD RED→GREEN for `host_agent/visibility_runtime_v5.py`:
+  separate host-bound v5 config, owner-only private 0700 parent, secure
+  no-follow key/config fd reads, persistent bounded nonce ledger.
+- [x] TDD RED→GREEN for `host_agent/cli_v2.py`: separate uninstalled
+  v2 entrypoint, verified request-to-host policy bindings, timestamp
+  and policy freshness during FD listing, bounded output, fail-closed
+  response. No v1 Host Agent change or live activation.
+- [ ] Hosted Ubuntu CI (required; macOS skips real Linux FD case).
+- [ ] Trusted configuration bootstrap and signer identity,
+  monotonic epoch ACK/revocation cancellation, filesystem race audit,
+  error contract, central result/metadata recheck, MCP/SSH/Ledger wiring,
+  actual two-OpenSSH Mode A E2E, Native Level-3 and independent review.
+
+**Ruling:** This increment is not an independently usable feature PR and
+does not qualify #347 for Ready. It is intermediate work on the same
+Draft PR. The full runtime activation design remains PROPOSED.
