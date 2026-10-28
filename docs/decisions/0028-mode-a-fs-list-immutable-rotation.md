@@ -120,3 +120,28 @@ overlay or guest. TDD covered strict command selection, broadened roots and
 legacy launcher/source tests. A fresh trusted-image build, real root-owned
 config/key/nonce mount proof, exact-host OpenSSH/NNP evidence and separately
 approved promotion are required before it can be installed.
+
+
+## Disposable PR347 real-OpenSSH test (CI ONLY; not yet accepted)
+
+An isolated, opt-in, same-repository `pull_request #347` GitHub-hosted
+Ubuntu 26.04 workflow builds the review-only OpenSSH image from the
+pinned-source/signed-APT Dockerfile and invokes two actual independent
+OpenSSH nodes under Docker `--network none`, with no published ports.
+Each gets a fresh per-node Ed25519 host/client identity, 32-byte test-only
+HMAC key, root-owned v5 policy/key read-only bind and separate 0700
+Agent-owned temporary nonce/epoch store. The source-only test covers
+signed SMCP v2 `fs_list`, denied child names, replay, stale epoch,
+fixed-SSH-command downgrade refusal and distinct host-key proof;
+the cleanup removes only its own unique containers/files. No image,
+keys or attestation are exported or promoted.
+
+**Evidence status:** workflow source alone is not runtime proof. Require
+a completed, successful exact-HEAD job and inspect actual container
+logs/exit status before claiming that real SSH test passed. This
+test-only signed snapshot is constructed inside the disposable node;
+it does **not** prove that a separate central MCP/Ledger signer has the
+correct protected identity or that plan A's durable freeze/attest
+adapter works. Real two-node MCP HTTP→Ledger→SSH and exact-HEAD Native
+Level-3 remain mandatory for Ready. This workflow does not touch
+Yuz.local's live Mode A VM or its SSH/image/key supply.

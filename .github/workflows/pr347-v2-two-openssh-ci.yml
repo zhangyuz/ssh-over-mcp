@@ -1,0 +1,69 @@
+name: PR347 isolated SMCP v2 two-OpenSSH proof
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  disposable-v2-two-openssh:
+    if: >-
+      github.event.pull_request.number == 347 &&
+      github.event.pull_request.head.repo.full_name == 'zhangyuz/ssh-over-mcp'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 38
+    steps:
+      - name: Checkout immutable PR merge snapshot without credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Assert disposable GitHub-hosted Ubuntu only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test "$GITHUB_ACTIONS" = true
+          . /etc/os-release
+          test "$ID" = ubuntu && test "$VERSION_ID" = 26.04
+          test "$(uname -m)" = x86_64
+          test "$(id -u)" -ne 0
+          docker info --format '{{.OSType}}/{{.Architecture}}'
+
+      - name: Build pinned Ubuntu and signed-APT FS source image
+        shell: bash
+        run: |
+          set -euo pipefail
+          DOCKER_BUILDKIT=1 docker build --progress=plain \
+            -f deploy/ssh-target/Dockerfile.fs-only-review-candidate \
+            -t som-mvp-fs-source:local .
+
+      - name: Build ephemeral root-owned SSH key custody layer
+        shell: bash
+        run: |
+          set -euo pipefail
+          DOCKER_BUILDKIT=1 docker build --progress=plain \
+            --build-arg SOM_FS_SOURCE_IMAGE=som-mvp-fs-source:local \
+            -f deploy/ssh-target/Dockerfile.fs-privsep-review-candidate \
+            -t som-mvp-fs-privsep:local .
+
+      - name: Bake test-only fixed FS launcher with STOP78 default
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ops/mvp/build_native_review_image.py
+          test "$(docker image inspect som-mvp-fs-native-review:local --format '{{json .Config.Entrypoint}}')" = '["/usr/local/libexec/ssh-over-mcp-image-hold"]'
+
+      - name: Prove independent OpenSSH node01 and node02 SMCP v2 positive and refusal
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ops/mvp/mode_a_hosted_v2_two_openssh.py
+          echo 'CI_ONLY_TWO_REAL_OPENSSH_SMCP_V2_PASS=true'
+          echo 'MCP_LEDGER_V2_REAL_E2E_PROVEN=false'
+          echo 'PRODUCTION_KEYS_USED=false'
+          echo 'DEPLOYED=false'

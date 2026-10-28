@@ -6,6 +6,8 @@ no persistent host/VM state. NOT a private-userns or no-NIC VM acceptance.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import os
 import shutil
@@ -71,6 +73,56 @@ def prepare(node: Path, name: str) -> tuple[Path, Path, Path]:
     return host, client, known
 
 
+def prepare_v5_test_trust(work: Path, host: str) -> list[str]:
+    """Generate per-node test-only root-owned v5 HMAC verifier + immutable policy.
+
+    These are disposable CI credentials. No production key is imported;
+    never print them or package them in image/CI artifacts.
+    """
+    assert host in {"node01", "node02"}
+    public_line = (work / "hostkeys" / "ssh_host_ed25519_key.pub").read_text().split()
+    assert len(public_line) >= 2 and public_line[0] == "ssh-ed25519"
+    hostkey_digest = hashlib.sha256(base64.b64decode(public_line[1], validate=True)).hexdigest()
+    trust = work / "v5-trust"
+    trust.mkdir(mode=0o755)
+    policy = {
+        "version": 5,
+        "enabled": True,
+        "host": host,
+        "host_key_sha256": hostkey_digest,
+        "signer_key_path": "/etc/ssh-over-mcp/v5/signer.key",
+        "nonce_db_path": "/var/lib/som-pr347-nonce/nonces.sqlite",
+        "visibility": {
+            "version": 5,
+            "enabled": True,
+            "host": host,
+            "profile": "rw-operator",
+            "policy_epoch": 11,
+            "central_policy_sha256": "a" * 64,
+            "operations": {
+                "fs_list": {"allow_roots": ["/srv/data"], "deny_subtrees": []},
+                "fs_search": {"allow_roots": ["/srv/data"], "deny_subtrees": []},
+            },
+        },
+    }
+    (trust / "host-visibility.json").write_text(
+        json.dumps(policy, sort_keys=True, separators=(",", ":")), encoding="utf-8"
+    )
+    (trust / "signer.key").write_bytes(os.urandom(32))
+    # Host runner root is trusted only inside disposable GitHub-hosted CI;
+    # group 3201 is the fixed unprivileged FS-only Host Agent's read identity.
+    run(["sudo", "-n", "chown", "-R", "0:3201", str(trust)])
+    run(["sudo", "-n", "chmod", "0755", str(trust)])
+    for file in (trust / "host-visibility.json", trust / "signer.key"):
+        run(["sudo", "-n", "chmod", "0440", str(file)])
+    return [
+        "--mount",
+        f"type=bind,src={trust},dst=/etc/ssh-over-mcp/v5,readonly",
+        "--tmpfs",
+        "/var/lib/som-pr347-nonce:rw,nosuid,nodev,noexec,uid=2201,gid=3201,mode=0700,size=4m",
+    ]
+
+
 def start_node(
     name: str,
     work: Path,
@@ -80,10 +132,12 @@ def start_node(
     alias: str | None = None,
     image: str = IMAGE,
     use_default_entrypoint: bool = False,
+    v5_host_id: str | None = None,
 ) -> tuple[str, Path, Path]:
     if use_default_entrypoint:
         assert image == "som-mvp-fs-online-pilot-review:local"
     _host, client, known = prepare(work, name)
+    v5_mounts = prepare_v5_test_trust(work, v5_host_id) if v5_host_id is not None else []
     # The immutable native no-sudo review files are baked into IMAGE.
     # No per-container code or sshd configuration mounts are accepted.
     args = [
@@ -114,6 +168,7 @@ def start_node(
         f"type=bind,src={work / 'hostkeys'},dst=/etc/ssh/hostkeys,readonly",
         "--mount",
         f"type=bind,src={work / 'authorized_keys'},dst=/etc/ssh/authorized_keys,readonly",
+        *v5_mounts,
         *([] if use_default_entrypoint else ["--entrypoint", "/usr/sbin/sshd"]),
         image,
         *([] if use_default_entrypoint else ["-D", "-e"]),

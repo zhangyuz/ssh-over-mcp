@@ -174,3 +174,25 @@ scope only for inactive local code. Task 2 runtime gates remain open. See ADR002
 - [ ] CI and actual separately approved image/ForceCommand build with root-owned
   v5 policy/verifier mounts, persistent nonce storage, no privilege broadening,
   two real OpenSSH positives/denials and immutable rotation acceptance.
+
+
+### Task 1F: operator-authorized disposable two-real-OpenSSH v2 E2E
+
+- [x] Explicit operator authorization for *temporary isolated validation
+  only*; do not replace live Mode A v1 or reuse live key material.
+- [x] Created a dedicated Ubuntu 26.04 Lima staging VM, distinct from
+  the live netpilot. Its normal Docker package-management tool invocation
+  was refused by tool-side safety checks; do not reword/retry to bypass.
+  No live VM/daemon configuration, existing keys or Compose project changed.
+- [x] Stage a dedicated same-repo PR347 GitHub-hosted disposable OCI workflow,
+  using existing vetted signed-APT review build and true OpenSSH per-node
+  key isolation with no published host ports. This is a CI source candidate,
+  **not yet an observed passing runtime test**.
+- [ ] Exact SHA CI real OpenSSH v2 positive, denied child, replay, stale
+  epoch, fixed command and cleanup proof; review any workflow failures.
+- [ ] Real distinct central MCP/Ledger live-v2 user feature, actual Linux
+  immutable admin/nonce mounts, two-host trust-root attestation and fully
+  durable plan A fence with crash/restart negative; independent security
+  review before Ready.
+- [ ] Dispose only the newly created staging VM if not needed after the
+  accepted CI run. No production guest cleanup or docker prune permitted.
