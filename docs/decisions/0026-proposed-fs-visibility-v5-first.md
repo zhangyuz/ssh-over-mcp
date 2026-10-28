@@ -246,3 +246,14 @@ The v2 method has no production caller or new MCP registration. Local mock
 channel tests establish selection and refusal/limit behavior, not real SSH
 or Mode A acceptance. Deployed ForceCommand/configuration, trust material,
 approvals and all full-feature/Level-3 activation gates remain unchanged.
+
+## 2026-10-28: opt-in control-plane adapter checkpoint (NOT ACTIVATED)
+
+`SSHFilesystemClient.list` now composes authorization/audit, signed compiled
+visibility and fixed v2 transport only with an explicitly injected trusted
+authority. Strict metadata validation and central per-child reauthorization
+reject whole responses, including stale policy/epoch across audit awaits.
+See [ADR0027](0027-proposed-fs-list-control-plane-adapter.md) for the injection,
+pin canonicalization, binding and refusal contracts. Earlier "no caller"
+statements describe historical checkpoints; there is still no production
+composition, MCP registration, live host-policy change or deployed acceptance.

@@ -131,3 +131,16 @@
 **Ruling:** This increment is not an independently usable feature PR and
 does not qualify #347 for Ready. It is intermediate work on the same
 Draft PR. The full runtime activation design remains PROPOSED.
+
+### Task 1E: operator-authorized control-plane adapter (unregistered)
+
+- [x] Test-first `SSHFilesystemClient.list` with explicit trusted authority
+  injection, signed compiled rules, inventory public-key identity and fixed v2.
+- [x] Strict whole-response metadata validation and central path recheck,
+  policy/epoch freshness across awaits, required audit failure refusal.
+- [x] Local synthetic SSH/policy/approvals/audit and candidate regression.
+- [ ] Production signer provisioning/epoch ACK authority, independent review,
+  exact-head Linux CI, real two-node MCP/SSH and Native Level-3 evidence.
+
+This newer operator-scoped increment supersedes Task 1's historical no-adapter
+scope only for inactive local code. Task 2 runtime gates remain open. See ADR0027.

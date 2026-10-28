@@ -91,3 +91,12 @@ Secret material should be provided from a secret manager, mounted file, short-li
 ## Disposable E2E core retention
 
 The trusted disposable-guest gate establishes hard and soft `RLIMIT_CORE=0` and the fixed non-pipe kernel core pattern before fixture keys or target execution, then verifies effective policy in the parent and fork child before the manager/probe and trusted sshd exec paths. Setting/readback failures forbid target execution. The preflight source comes from already-merged trusted main on the guest's independent read-only harness; targets cannot choose its paths, values or source. This guest-only control does not modify persistent-host or production core policy. PID-1-managed services require their own verified limits. It reduces accidental crash retention within the approved guest authority model; guest-root-equivalent target code can still change guest kernel policy, so mandatory whole-VM destruction remains the outer boundary.
+
+## Inactive filesystem visibility adapter
+
+The opt-in v2 `SSHFilesystemClient.list` adapter requires a trusted injected
+signer/epoch authority and shares the transport's inventory. It derives identity
+from OperationContext, binds the parsed inventory SSH public-key blob, full
+central visibility rules, digest, epoch and budget, and rejects stale or denied
+results as a whole. Required audits remain fail-closed. This is not production
+trust provisioning or MCP exposure; see [ADR0027](decisions/0027-proposed-fs-list-control-plane-adapter.md).

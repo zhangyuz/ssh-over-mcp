@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import time
+import uuid
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -11,7 +14,13 @@ from ssh_over_mcp.approvals.binding import fingerprint_bytes
 from ssh_over_mcp.approvals.models import ApprovalExecutionFacts
 from ssh_over_mcp.audit.models import AuditEventType
 from ssh_over_mcp.audit.recorder import AuditPersistenceFailure, AuditRecorder
-from ssh_over_mcp.policy.models import EvaluationRequest
+from ssh_over_mcp.host_agent.visibility_policy_v5 import canonical_visibility_path
+from ssh_over_mcp.host_agent.visibility_snapshot_v5 import VisibilitySnapshotV5
+from ssh_over_mcp.policy.models import Decision, EvaluationRequest
+from ssh_over_mcp.policy.visibility_compiler_v5 import (
+    compile_visibility_rules,
+    reauthorize_list_paths,
+)
 
 from .errors import (
     SSHAuditPersistenceError,
@@ -26,6 +35,13 @@ from .errors import (
     SSHRequestOutcomeUncertain,
     SSHRequestTimeout,
 )
+from .filesystem_list_v2 import (
+    MAX_LIST_RESPONSE_BYTES,
+    SSHFilesystemListResult,
+    VisibilityAuthority,
+    decode_list_response,
+    pinned_host_identity,
+)
 from .protocol import (
     FsMkdirEnvelope,
     FsReadEnvelope,
@@ -33,6 +49,7 @@ from .protocol import (
     FsWriteEnvelope,
     encode_request,
 )
+from .protocol_v2 import FSListRequestV2, encode_request_v2
 from .transport import SSHExecutionResult, StructuredSSHTransport
 
 DEFAULT_FILESYSTEM_TIMEOUT_SECONDS = 60.0
@@ -128,7 +145,9 @@ class SSHFilesystemClient:
         audit: AuditRecorder,
         transport: StructuredSSHTransport,
         default_timeout_seconds: float = DEFAULT_FILESYSTEM_TIMEOUT_SECONDS,
+        visibility_authority: VisibilityAuthority | None = None,
     ) -> None:
+        self.visibility_authority = visibility_authority
         self.authorizer = authorizer
         self.audit = audit
         self.transport = transport
@@ -185,6 +204,204 @@ class SSHFilesystemClient:
             )
         except AuditPersistenceFailure:
             pass
+
+    async def list(
+        self,
+        *,
+        host: str,
+        path: str,
+        context: OperationContext,
+        max_entries: int,
+    ) -> SSHFilesystemListResult:
+        """Inactive v2 adapter: trusted authority injection is mandatory.
+
+        Only logical host, canonical root and scan bound are caller inputs.
+        Identity/profile/request ID come exclusively from OperationContext.
+        """
+        if type(max_entries) is not int or not 1 <= max_entries <= 64:
+            raise ValueError("invalid filesystem listing bound")
+        root = canonical_visibility_path(path)
+        request = EvaluationRequest(
+            host=host, path=root, tool="fs_list", profile=context.principal.profile
+        )
+        authority = self.visibility_authority
+        if authority is None:
+            raise SSHRemoteResponseError("filesystem visibility authority unavailable")
+        try:
+            engine = authority.engine
+            if engine.inventory is not self.transport.connections.inventory:
+                raise ValueError("inventory mismatch")
+            digest = engine.policy_version.removeprefix("sha256:")
+            epoch = authority.current_epoch(host=host, policy_sha256=digest)
+            pin = pinned_host_identity(engine.inventory.hosts[host].host_key)
+            # Bind stable intent, including epoch/budget/pin, using existing
+            # approval facts. Never place a signing key or MAC in audit state.
+            intent = json.dumps(
+                {
+                    "host": host,
+                    "root": root,
+                    "max_entries": max_entries,
+                    "policy_epoch": epoch,
+                    "policy_sha256": digest,
+                    "host_key_sha256": pin,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        except Exception:  # noqa: BLE001 — trusted provider errors must fail closed
+            raise SSHRemoteResponseError("filesystem visibility authority unavailable") from None
+        facts = ApprovalExecutionFacts(
+            effective_timeout_seconds=self.default_timeout_seconds,
+            effective_max_output_bytes=MAX_LIST_RESPONSE_BYTES,
+            stdin_length=len(intent),
+            stdin_fingerprint=fingerprint_bytes(intent),
+        )
+        decision = await self.authorizer.authorize(context, request, facts)
+        # Compiler cannot represent approval grants yet. Even a consumed grant
+        # cannot turn approval-required policy into a subtree ALLOW.
+        if decision.decision != Decision.ALLOW or decision.normalized_path != root:
+            raise SSHPolicyDenied(decision)
+        result = None
+        try:
+            compiled = compile_visibility_rules(
+                engine, host=host, profile=request.profile, operation="fs_list", root=root
+            )
+            if compiled.policy_sha256 != digest or decision.policy_version != "sha256:" + digest:
+                raise ValueError("policy changed")
+            instant = int(time.time())
+            snapshot = VisibilitySnapshotV5(
+                version=5,
+                request_id=context.request_id,
+                host=host,
+                host_key_sha256=pin,
+                principal=context.principal.principal_id,
+                profile=context.principal.profile,
+                operation="fs_list",
+                root=root,
+                policy_epoch=epoch,
+                central_policy_sha256=digest,
+                snapshot_id=uuid.uuid4().hex,
+                max_entries=max_entries,
+                issued_at=instant,
+                expires_at=instant + 60,
+                rules=compiled.rules,
+            )
+
+            def active():
+                return (
+                    authority.engine is engine
+                    and engine.inventory is self.transport.connections.inventory
+                    and engine.policy_version == engine._hash_policy() == "sha256:" + digest
+                    and authority.current_epoch(host=host, policy_sha256=digest) == epoch
+                    and pinned_host_identity(engine.inventory.hosts[host].host_key) == pin
+                    and snapshot.issued_at <= time.time() < snapshot.expires_at
+                    and authority.is_active(snapshot) is True
+                )
+
+            def recheck(entries=()):
+                return reauthorize_list_paths(
+                    engine,
+                    host=host,
+                    profile=request.profile,
+                    root=root,
+                    response_policy_sha256=digest,
+                    result_paths=(e.path for e in entries),
+                    max_entries=max_entries,
+                    is_epoch_active=active,
+                )
+
+            recheck()
+            signed = authority.sign(snapshot)
+            if signed.payload != snapshot:
+                raise ValueError("signer changed binding")
+            frame = encode_request_v2(
+                FSListRequestV2(
+                    request_id=context.request_id,
+                    profile=context.principal.profile,
+                    root=root,
+                    max_entries=max_entries,
+                    signed_snapshot=signed,
+                )
+            )
+            await self._audit_required(
+                AuditEventType.EXECUTION_STARTED,
+                context=context,
+                request=request,
+                decision=decision,
+                facts=facts,
+            )
+            recheck()
+            result = await self.transport.run_v2(
+                host=host,
+                payload=frame,
+                request_id=context.request_id,
+                timeout_seconds=self.default_timeout_seconds,
+                max_output_bytes=MAX_LIST_RESPONSE_BYTES,
+            )
+            if result.request_id != context.request_id or result.host != host:
+                result = None  # Never feed foreign attribution into audit.
+                raise ValueError("transport binding mismatch")
+            _require_success(result)
+            response = decode_list_response(result.stdout)
+            if (
+                response.request_id != context.request_id
+                or response.host != host
+                or response.root != root
+                or response.policy_epoch != epoch
+                or response.snapshot_id != snapshot.snapshot_id
+            ):
+                raise ValueError("response binding mismatch")
+            recheck(response.entries)
+            await self._audit_required(
+                AuditEventType.EXECUTION_COMPLETED,
+                context=context,
+                request=request,
+                decision=decision,
+                facts=facts,
+                result=result,
+            )
+            # Audit persistence awaits may overlap a policy update/revocation.
+            recheck(response.entries)
+            return response
+        except asyncio.CancelledError:
+            await self._audit_preserve(
+                AuditEventType.EXECUTION_CANCELLED,
+                context=context,
+                request=request,
+                decision=decision,
+                facts=facts,
+            )
+            raise
+        except SSHAuditPersistenceError:
+            raise
+        except Exception as exc:
+            event = (
+                AuditEventType.REMOTE_POLICY_DENIED
+                if isinstance(exc, SSHRemotePolicyDenied)
+                else AuditEventType.HOST_KEY_FAILURE
+                if isinstance(exc, SSHHostKeyVerificationError)
+                else AuditEventType.EXECUTION_FAILED
+            )
+            await self._audit_required(
+                event,
+                context=context,
+                request=request,
+                decision=decision,
+                facts=facts,
+                result=result,
+            )
+            if isinstance(
+                exc,
+                (
+                    SSHRemotePolicyDenied,
+                    SSHHostKeyVerificationError,
+                    SSHRequestTimeout,
+                    SSHOutputLimitExceeded,
+                    SSHRemoteOperationError,
+                ),
+            ):
+                raise
+            raise SSHRemoteResponseError("invalid remote filesystem listing") from None
 
     async def stat(
         self,
