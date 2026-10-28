@@ -11,6 +11,7 @@ from ssh_over_mcp.approvals.client import LedgerClientError
 from ssh_over_mcp.approvals.transport import LedgerTransportError
 from ssh_over_mcp.config.loader import load_config
 from ssh_over_mcp.policy.engine import PolicyEngine
+from ssh_over_mcp.ssh.filesystem_list_v2 import VisibilityAuthority
 
 from .ledger_runtime import build_ledger_client
 from .origin_auth import (
@@ -29,12 +30,26 @@ MAX_MCP_HTTP_REQUEST_BYTES = 128 * 1024
 
 def build_application(
     settings: MCPRuntimeSettings,
+    *,
+    visibility_authority_factory: Callable[[PolicyEngine], VisibilityAuthority] | None = None,
+    enable_fs_list: bool = False,
 ) -> ASGIApp:
     bundle = load_config(settings.config_path)
     policy = PolicyEngine(
         inventory=bundle.inventory,
         policy=bundle.policy,
     )
+    if type(enable_fs_list) is not bool or (
+        enable_fs_list and visibility_authority_factory is None
+    ):
+        raise ValueError("trusted visibility authority required for fs_list")
+    visibility_authority = (
+        visibility_authority_factory(policy)
+        if visibility_authority_factory is not None
+        else None
+    )
+    if visibility_authority is not None and visibility_authority.engine is not policy:
+        raise ValueError("visibility authority must share the active policy engine")
     principal_provider = StaticPrincipalProvider(
         profile=settings.profile,
         policy=bundle.policy,
