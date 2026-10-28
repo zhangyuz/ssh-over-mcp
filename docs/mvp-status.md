@@ -1,5 +1,8 @@
 # MVP 当前交付入口：Compose 多 SSH 读写试点
 
+> **2026-10-27 MODE A FS-only 本机私有试点已 LIVE：** 独立 `som-mode-a-netpilot-oct27` Ubuntu VM 的真实五服务 Compose、Ledger 审批与 node01/node02 FS mkdir/write/read/replay deny 已通过；从 `yuz.local` Mac 通过 `launchd` 管理的 SSH 转发 `http://127.0.0.1:18801/mcp` 完成带 Bearer 的 JSON-RPC MCP 初始化、hosts_list、双节点读回及重启后恢复；无 Token 返回 401，节点反向/横向/外网连接拒绝。已启用 four-service `restart: unless-stopped`，控制和 SSH 镜像分别固定为 `sha256:ee89cc1dc8f596f59160daff517dacf3f53e5c6c551bfd20bdd4acb4ded21925` / `sha256:053444836dd806b1adffac47e5887b8c57184f02c5d5f7d3d0b38988149b9529`。**这是操作员批准的仅限本机 Mode A FS-only 试点，不是 LAN/公网暴露、独立外部安全签核、Mode B 或完整八工具产品。** 详见 [运行及回滚](runbooks/mvp-mode-a-yuz-local-live-operations.md)、[ADR0025](decisions/0025-mode-a-fs-only-operator-pilot-release.md)。
+
+
 > **2026-10-27 `yuz.local` 实机准备进展（[环境与密钥交接](runbooks/mvp-mode-a-yuz-local-networked-engine.md)）：** 新建独立联网 Ubuntu 26.04.1 Lima VM `som-mode-a-netpilot-oct27`，官方 Docker 签名 APT 安装 Engine 29.9.2 / Compose 5.6.1，实际验证 Docker userns UID/GID `0→100000`、五组 capability 全零和 NNP=1；两套独立 SSH host/client 密钥、默认拒绝配置、一次性 Origin Bearer 已在 guest 私有路径准备，未公开私钥。共享 Docker Desktop、原有 Lima VM 未修改。**这只完成基础设施和受保护的待部署凭据，实际 MCP/SSH 尚未在 `yuz.local` 上启动、无法宣称 LIVE。** 最终可运行镜像生产签名、实际入口与负向网络验证、独立 #346/PR 发布审查仍需完成。
 
 

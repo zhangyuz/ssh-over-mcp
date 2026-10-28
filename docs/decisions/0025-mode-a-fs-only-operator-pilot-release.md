@@ -1,0 +1,21 @@
+# ADR 0025: Operator-authorized local-only Mode A FS pilot release
+
+- **Status:** ACCEPTED for the narrow private pilot on 2026-10-27; **not** an independent third-party security endorsement or Mode B production acceptance
+- **Authority:** the operator explicitly approved issue #346's bounded SSH privilege exception, promotion of the verified runnable image, and deployment to Yuz.local in the current conversation
+- **Scope:** Mode A **FS-only**, two independent SSH targets on one isolated, userns-remapped Linux Engine, accessed exclusively through authenticated local loopback MCP. No general exec, manager/cgroup, public IP, Cloudflare, Mode B or complete 8-tool contract.
+
+## First-principles decision
+
+The user-visible requirement is that an authenticated MCP client on Yuz.local can manage two SSH nodes with durable once-only approval and separate private data. Offline Docker media and no-NIC OCI guest were test-environment assumptions, not product requirements; Native Level-3 no-NIC remains a separate security test. The simple sufficient topology is a new Ubuntu 26.04.1 Lima VM with signed online Docker Engine 29.9.2/Compose 5.6.1 and private internal Compose bridges.
+
+## Explicitly accepted limits and evidence
+
+- SSH admission is `cap_drop: ALL`, **only** `SETUID,SETGID,SETPCAP,SYS_CHROOT` added, `NoNewPrivileges=1` from startup, read-only rootfs, SSH port 2222 only on separate per-node internal networks. The native FS ForceCommand runs with UID/GID 2201:3201; Inh/Prm/Eff/Amb are zero, **CapBnd=0x401c0 nonzero**, a residual risk accepted by the operator **only for this pilot**. The all-five-zero generic production launcher is unchanged; this ADR does not authorize its weakening. Independent review remains recommended before wider deployment.
+- Engine `userns-remap=default` UID/GID `0→100000`, confirmed in an actual no-NIC/no-cap/NNP test container. Read-only distinct hostkeys and authorized-key mounts; SSH clients and origin bearer remain 0400 with remapped ownership in the guest, never committed or printed.
+- Source commit `e6357316d0c26c31921905a42199b7e121e944da`; control image locally built from pinned-base Dockerfile and identified as `sha256:ee89cc1dc8f596f59160daff517dacf3f53e5c6c551bfd20bdd4acb4ded21925`. SSH image imported as **exact tested remapped ID** `sha256:053444836dd806b1adffac47e5887b8c57184f02c5d5f7d3d0b38988149b9529` from CI runnable archive after SHA256 + GitHub workflow/source-digest attestation verification. Source CI run [#40613519032](https://github.com/zhangyuz/ssh-over-mcp/actions/runs/40613519032); archive [#60636349](https://github.com/zhangyuz/ssh-over-mcp/attestations/60636349), remapped identity [#60636365](https://github.com/zhangyuz/ssh-over-mcp/attestations/60636365). **This is operator-approved promotion of CI-provenanced media, not a separately signed third-party production release.**
+- Tracked third Compose STOP78 hold remains untouched. A **guest-private fourth operator-approved overlay** resets node entrypoint/command only for this digest-pinned limited pilot and adds `restart: unless-stopped` for ledger/mcp/nodes. Separate Ledger init remains a successful one-time task. No published host ports.
+- Real target acceptance **PASS:** five-service Compose startup; bearer-less MCP HTTP **401**; two nodes each mkdir/write/read and consumed-once grants with replay denied; SSH node→origin new TCP8000, node01→node02:2222 and node→internet probes denied; actual Mac→loopback authenticated MCP initialize, hosts_list and both FS readback; full controlled four-service restart and Compose recreation with preserved data; launchd-owned SSH tunnel PID restart and authenticated readback.
+
+## Exposure and remaining product work
+
+The live ingress is **only on Yuz.local itself**, `http://127.0.0.1:18801/mcp`, forwarded via a managed SSH tunnel into VM `som-mode-a-netpilot-oct27`. An external computer or ChatGPT cloud client cannot use it without **separately approved authenticated private routing**. No public internet ingress is claimed. See [operator runbook](../runbooks/mvp-mode-a-yuz-local-live-operations.md). Full product MVP still requires Mode B across distinct hosts and all eight typed FS methods; independent wider-production security review and key rotation remain follow-ups.
