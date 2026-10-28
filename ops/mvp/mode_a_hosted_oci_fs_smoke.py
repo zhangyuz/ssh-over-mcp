@@ -73,13 +73,23 @@ def prepare(node: Path, name: str) -> tuple[Path, Path, Path]:
     return host, client, known
 
 
-def prepare_v5_test_trust(work: Path, host: str) -> list[str]:
+def prepare_v5_test_trust(
+    work: Path,
+    host: str,
+    *,
+    central_policy_sha256: str = "a" * 64,
+    signer_key: bytes | None = None,
+) -> list[str]:
     """Generate per-node test-only root-owned v5 HMAC verifier + immutable policy.
 
     These are disposable CI credentials. No production key is imported;
     never print them or package them in image/CI artifacts.
     """
     assert host in {"node01", "node02"}
+    assert len(central_policy_sha256) == 64 and all(
+        char in "0123456789abcdef" for char in central_policy_sha256
+    )
+    assert signer_key is None or (type(signer_key) is bytes and len(signer_key) == 32)
     public_line = (work / "hostkeys" / "ssh_host_ed25519_key.pub").read_text().split()
     assert len(public_line) >= 2 and public_line[0] == "ssh-ed25519"
     hostkey_digest = hashlib.sha256(base64.b64decode(public_line[1], validate=True)).hexdigest()
@@ -98,7 +108,7 @@ def prepare_v5_test_trust(work: Path, host: str) -> list[str]:
             "host": host,
             "profile": "rw-operator",
             "policy_epoch": 11,
-            "central_policy_sha256": "a" * 64,
+            "central_policy_sha256": central_policy_sha256,
             "operations": {
                 "fs_list": {"allow_roots": ["/srv/data"], "deny_subtrees": []},
                 "fs_search": {"allow_roots": ["/srv/data"], "deny_subtrees": []},
@@ -108,7 +118,9 @@ def prepare_v5_test_trust(work: Path, host: str) -> list[str]:
     (trust / "host-visibility.json").write_text(
         json.dumps(policy, sort_keys=True, separators=(",", ":")), encoding="utf-8"
     )
-    (trust / "signer.key").write_bytes(os.urandom(32))
+    (trust / "signer.key").write_bytes(
+        os.urandom(32) if signer_key is None else signer_key
+    )
     # Host runner root is trusted only inside disposable GitHub-hosted CI;
     # group 3201 is the fixed unprivileged FS-only Host Agent's read identity.
     run(["sudo", "-n", "chown", "-R", "0:3201", str(trust)])
