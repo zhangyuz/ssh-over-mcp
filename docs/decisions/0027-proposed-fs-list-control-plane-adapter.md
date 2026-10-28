@@ -1,7 +1,7 @@
 # ADR 0027: Opt-in fs_list control-plane adapter
 
 Status: PROPOSED for runtime activation. The operator authorized this local,
-unregistered adapter increment within Draft PR #347 on 2026-10-28. ADR0026,
+initially unregistered adapter increment within Draft PR #347 on 2026-10-28. ADR0026,
 v2 deployment and host policy remain PROPOSED.
 
 ## Outcome and boundary
@@ -14,7 +14,8 @@ evidence, not a deployed MCP feature or two-node acceptance.
 
 The smallest sufficient integration reuses the existing authorization gate,
 ApprovalExecutionFacts, audit recorder, central compiler and fixed `run_v2`.
-There is no new approval mechanism, shell fallback or MCP registration.
+There is no new approval mechanism or shell fallback. The subsequent
+construction-only MCP adapter is described below.
 The compiler requires direct central ALLOW; approval-required subtree grants
 remain unsupported even if a Ledger grant was consumed. No automatic approvals.
 
@@ -79,3 +80,22 @@ stable pagination scope, dependency-complete supported-Linux regression, exact-h
 CI, independent review, real MCP→Ledger→SSH two-node Mode A positive/negative
 acceptance and Native Level-3 cleanup. No live Mode A edit or Mode B authority is
 conferred by this ADR or local tests.
+
+## 2026-10-28 MCP adapter increment (default disabled)
+
+The operator authorized local MCP wiring in the same Draft PR, without production
+activation. `build_mcp_server(enable_fs_list=True)` requires an already constructed
+client with a non-null trusted visibility authority; default construction never
+registers the tool. The switch is server-owned and absent from MCP/runtime inputs.
+This implements the existing adapter contract without adding a signer, trust root,
+approval mechanism or transport path. `api/ssh_runtime.py` remains unchanged.
+
+The real MCP handler/service delegate to `SSHFilesystemClient.list` with trusted
+OperationContext and required request audit, after bounded input validation and
+host visibility checks. Input is only host/path/max_entries; public output omits
+internal snapshot/epoch fields. See [MCP contract and usage](../mcp-api.md#opt-in-fs_list-not-installed-in-the-production-runtime).
+Synthetic in-process MCP tests exercise actual central authorization and audit,
+with a test-only signer and mocked remote channel, including default absence,
+input injection, identity/path mismatch, failed audit, and unauthenticated HTTP.
+They are not real SSH, durable Ledger or two-node acceptance. All activation gates
+above remain open; controller review is required for this uncommitted increment.

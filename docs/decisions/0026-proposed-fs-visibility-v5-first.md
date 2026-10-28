@@ -256,4 +256,6 @@ reject whole responses, including stale policy/epoch across audit awaits.
 See [ADR0027](0027-proposed-fs-list-control-plane-adapter.md) for the injection,
 pin canonicalization, binding and refusal contracts. Earlier "no caller"
 statements describe historical checkpoints; there is still no production
-composition, MCP registration, live host-policy change or deployed acceptance.
+composition, default MCP registration, live host-policy change or deployed
+acceptance. ADR0027 now records the separately authorized, construction-only
+MCP opt-in; its production activation gates remain open.

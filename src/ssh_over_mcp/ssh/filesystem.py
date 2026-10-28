@@ -25,6 +25,8 @@ from ssh_over_mcp.policy.visibility_compiler_v5 import (
 from .errors import (
     SSHAuditPersistenceError,
     SSHAuditPersistenceOutcomeUncertain,
+    SSHConnectionError,
+    SSHCredentialError,
     SSHFilesystemWriteCommittedUncertain,
     SSHHostKeyVerificationError,
     SSHOutputLimitExceeded,
@@ -394,6 +396,8 @@ class SSHFilesystemClient:
                 exc,
                 (
                     SSHRemotePolicyDenied,
+                    SSHConnectionError,
+                    SSHCredentialError,
                     SSHHostKeyVerificationError,
                     SSHRequestTimeout,
                     SSHOutputLimitExceeded,

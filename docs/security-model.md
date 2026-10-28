@@ -99,4 +99,6 @@ signer/epoch authority and shares the transport's inventory. It derives identity
 from OperationContext, binds the parsed inventory SSH public-key blob, full
 central visibility rules, digest, epoch and budget, and rejects stale or denied
 results as a whole. Required audits remain fail-closed. This is not production
-trust provisioning or MCP exposure; see [ADR0027](decisions/0027-proposed-fs-list-control-plane-adapter.md).
+trust provisioning. MCP exposure additionally requires an explicit server-construction
+opt-in, is absent by default, and accepts only bounded host/path/max_entries.
+The production runtime installs no authority or opt-in; see [ADR0027](decisions/0027-proposed-fs-list-control-plane-adapter.md).

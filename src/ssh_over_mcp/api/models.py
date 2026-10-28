@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ssh_over_mcp.approvals.models import ApprovalSafeSummary, ApprovalState
+from ssh_over_mcp.host_agent.visibility_policy_v5 import canonical_visibility_path
 from ssh_over_mcp.inventory.models import MAX_HOST_ALIAS_CHARS
 from ssh_over_mcp.policy.models import Decision, RiskLevel
 
@@ -209,6 +210,44 @@ class SSHExecResult(BaseModel):
     duration_ms: int = Field(ge=0)
     timed_out: bool = False
     truncated: bool = False
+
+
+MCPListPath = Annotated[str, Field(min_length=1, max_length=MAX_MCP_PATH_CHARS)]
+MCPListMaxEntries = Annotated[int, Field(strict=True, ge=1, le=64)]
+
+
+class FsListRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    host: MCPHostAlias
+    path: MCPListPath
+    max_entries: MCPListMaxEntries
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, value: str) -> str:
+        return canonical_visibility_path(value)
+
+
+class FsListEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    path: MCPListPath
+    kind: Literal["regular", "directory"]
+    size: int = Field(ge=0, le=2**63 - 1)
+    mode: int = Field(ge=0, le=0o7777)
+    uid: int = Field(ge=0, le=2**32 - 1)
+    gid: int = Field(ge=0, le=2**32 - 1)
+    mtime_ns: int = Field(ge=-(2**63), le=2**63 - 1)
+
+
+class FsListResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request_id: str = Field(min_length=1)
+    host: MCPHostAlias
+    path: MCPListPath
+    entries: tuple[FsListEntry, ...] = Field(max_length=64)
 
 
 class FsStatRequest(BaseModel):
