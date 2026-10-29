@@ -147,10 +147,16 @@ def start_node(
     v5_host_id: str | None = None,
     v5_policy_sha256: str = "a" * 64,
     v5_signer_key: bytes | None = None,
+    prepared_keys: bool = False,
 ) -> tuple[str, Path, Path]:
     if use_default_entrypoint:
         assert image == "som-mvp-fs-online-pilot-review:local"
-    _host, client, known = prepare(work, name)
+    if prepared_keys:
+        assert (work / "hostkeys" / "ssh_host_ed25519_key").is_file()
+        client, known = work / "client", work / "known_hosts"
+        assert client.is_file() and known.is_file()
+    else:
+        _host, client, known = prepare(work, name)
     v5_mounts = (
         prepare_v5_test_trust(
             work, v5_host_id,
