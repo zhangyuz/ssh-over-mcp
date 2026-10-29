@@ -302,6 +302,10 @@ def test_epoch_rollback_is_a_distinct_refusal_not_persistence_failure(tmp_path):
     [
         ("clock_state", "UPDATE clock_state SET high_water='not-a-time' WHERE id=1"),
         ("policy_epoch_state", "UPDATE policy_epoch_state SET epoch='x' WHERE id=1"),
+        ("policy_epoch_state", "UPDATE policy_epoch_state SET digest=5 WHERE id=1"),
+        ("policy_epoch_state", "UPDATE policy_epoch_state SET digest='zz' WHERE id=1"),
+        ("policy_epoch_state", "UPDATE policy_epoch_state SET epoch=0 WHERE id=1"),
+        ("clock_state", "UPDATE clock_state SET high_water=0 WHERE id=1"),
     ],
 )
 def test_corrupt_state_row_is_unavailable_not_a_crash(tmp_path, table, statement):

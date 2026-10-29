@@ -214,7 +214,7 @@ class PersistentSnapshotNonces:
         """Inside the caller's write transaction: refuse regression, then prune."""
 
         row = connection.execute("SELECT high_water FROM clock_state WHERE id=1").fetchone()
-        if row is not None and type(row[0]) is not int:
+        if row is not None and (type(row[0]) is not int or row[0] < 1):
             raise VisibilityRuntimeError("v5 clock state corrupt")
         high_water = now if row is None else max(row[0], now)
         if now < high_water - NONCE_CLOCK_TOLERANCE_SECONDS:
@@ -297,7 +297,12 @@ class PersistentSnapshotNonces:
             row = connection.execute(
                 "SELECT epoch, digest FROM policy_epoch_state WHERE id=1"
             ).fetchone()
-            if row is not None and (type(row[0]) is not int or type(row[1]) is not str):
+            if row is not None and (
+                type(row[0]) is not int
+                or row[0] < 1
+                or type(row[1]) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", row[1]) is None
+            ):
                 raise VisibilityRuntimeError("v5 policy epoch state corrupt")
             if row is not None and (
                 policy_epoch < row[0]
