@@ -20,13 +20,13 @@ import hashlib
 import hmac
 import json
 import re
+import secrets
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TextIO
 
 from .visibility_runtime_v5 import (
-    VisibilityRuntimeError,
     load_host_visibility_runtime,
     load_trusted_visibility_key,
 )
@@ -45,6 +45,25 @@ def require_nonce(nonce: object) -> str:
     if type(nonce) is not str or _NONCE.fullmatch(nonce) is None:
         raise ValueError("nonce must be exactly 32 lowercase hex characters")
     return nonce
+
+
+def new_nonce() -> str:
+    """A fresh 128-bit nonce. The controller must use each nonce exactly once."""
+
+    return secrets.token_hex(16)
+
+
+def proofs_equal(left: object, right: object) -> bool:
+    """Compare two proofs in constant time; anything not a 64-hex string is unequal."""
+
+    if (
+        type(left) is not str
+        or type(right) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", left) is None
+        or re.fullmatch(r"[0-9a-f]{64}", right) is None
+    ):
+        return False
+    return hmac.compare_digest(left.encode("ascii"), right.encode("ascii"))
 
 
 def _canonical(value: object) -> bytes:
@@ -98,8 +117,12 @@ def attest_host_state(policy_path: Path | str, nonce: str) -> dict[str, object]:
     )
     return {
         **fields,
-        # Not part of the proof: the central side cannot know the host's file.
-        "config_sha256": hashlib.sha256(_canonical(config.model_dump(mode="json"))).hexdigest(),
+        # Informational and UNAUTHENTICATED: not part of the proof (the central
+        # side cannot know it) and a hash of the validated model, not of the
+        # file bytes. A controller must not treat it as proven.
+        "config_model_sha256": hashlib.sha256(
+            _canonical(config.model_dump(mode="json"))
+        ).hexdigest(),
         "proof": attestation_proof(key, fields),
     }
 
@@ -129,7 +152,7 @@ def main(
         return EX_USAGE
     try:
         report = attest_host_state(args.policy, args.nonce)
-    except (VisibilityRuntimeError, ValueError, OSError):
+    except Exception:  # noqa: BLE001 - any fault is "unavailable"; never a traceback
         print("attest_v5: trusted state unavailable", file=err)
         return EX_UNAVAILABLE
     out.write(json.dumps(report, sort_keys=True, separators=(",", ":")) + "\n")

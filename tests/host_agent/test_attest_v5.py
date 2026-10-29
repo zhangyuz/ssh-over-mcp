@@ -120,15 +120,38 @@ def test_nonce_must_be_exactly_32_lowercase_hex(nonce):
         attest_v5.require_nonce(nonce)
 
 
+def test_new_nonce_is_fresh_128_bit_lowercase_hex():
+    seen = {attest_v5.new_nonce() for _ in range(200)}
+    assert len(seen) == 200
+    for nonce in seen:
+        assert attest_v5.require_nonce(nonce) == nonce
+
+
+def test_proofs_equal_is_strict_and_constant_time(monkeypatch):
+    import hmac as hmac_module
+
+    good = attest_v5.attestation_proof(_KEY, _FIELDS)
+    assert attest_v5.proofs_equal(good, good) is True
+    assert attest_v5.proofs_equal(good, attest_v5.attestation_proof(bytes([3]) * 32, _FIELDS)) is False
+    for bad in ("", "short", good.upper(), good[:-1], good + "0", None, 5, b"x" * 64):
+        assert attest_v5.proofs_equal(good, bad) is False
+        assert attest_v5.proofs_equal(bad, good) is False
+    calls = []
+    real = hmac_module.compare_digest
+    monkeypatch.setattr(attest_v5.hmac, "compare_digest", lambda a, b: calls.append(1) or real(a, b))
+    assert attest_v5.proofs_equal(good, good) is True
+    assert calls, "proofs must be compared with hmac.compare_digest"
+
+
 # ------------------------------------------------------------------ host side
 
 
 def test_host_report_derives_everything_from_protected_files(tmp_path):
     policy = _trust(tmp_path)
     report = attest_v5.attest_host_state(policy, _NONCE)
-    assert {k: v for k, v in report.items() if k not in {"proof", "config_sha256"}} == _FIELDS
+    assert {k: v for k, v in report.items() if k not in {"proof", "config_model_sha256"}} == _FIELDS
     assert report["proof"] == attest_v5.attestation_proof(_KEY, _FIELDS)
-    assert len(report["config_sha256"]) == 64
+    assert len(report["config_model_sha256"]) == 64
     assert _KEY.hex() not in json.dumps(report)
 
 
@@ -140,7 +163,7 @@ def test_host_report_changes_with_nonce_key_epoch_and_config(tmp_path):
     assert other_key["proof"] != base["proof"] and other_key["verifier_key_id"] != base["verifier_key_id"]
     other_epoch = attest_v5.attest_host_state(_trust(tmp_path / "c", epoch=13), _NONCE)
     assert other_epoch["proof"] != base["proof"]
-    assert other_epoch["config_sha256"] != base["config_sha256"]
+    assert other_epoch["config_model_sha256"] != base["config_model_sha256"]
 
 
 def test_host_report_refuses_unsafe_or_missing_inputs(tmp_path):
@@ -171,29 +194,46 @@ def test_cli_prints_one_json_line_and_exits_zero(tmp_path, capsys):
 
 
 @pytest.mark.parametrize(
-    "argv",
+    "argv,expected",
     [
-        [],
-        ["--nonce", _NONCE],
-        ["--policy", "/x/y.json"],
-        ["--policy", "/x/y.json", "--nonce", "bad"],
-        ["--policy", "/x/y.json", "--nonce", _NONCE, "--extra", "1"],
-        ["--policy", "/x/y.json", "--nonce", _NONCE],
+        ([], 64),
+        (["--nonce", _NONCE], 64),
+        (["--policy", "/x/y.json"], 64),
+        (["--policy", "/x/y.json", "--nonce", "bad"], 64),
+        (["--policy", "/x/y.json", "--nonce", _NONCE, "--extra", "1"], 64),
+        (["--policy", "/nonexistent/y.json", "--nonce", _NONCE], 69),
     ],
 )
-def test_cli_refuses_bad_arguments_and_unavailable_state_without_output(argv, capsys):
+def test_cli_exit_codes_are_exact_and_output_is_empty(argv, expected, capsys):
     code, out, err = _cli(argv, capsys)
-    assert code != 0 and out == ""
+    assert code == expected and out == ""
     assert _KEY.hex() not in err and "Traceback" not in err
+
+
+def test_cli_maps_any_unexpected_error_to_unavailable_without_a_traceback(monkeypatch, capsys):
+    def boom(*args, **kwargs):
+        raise RuntimeError("secret internals " + _KEY.hex())
+
+    monkeypatch.setattr(attest_v5, "attest_host_state", boom)
+    code, out, err = _cli(["--policy", "/x/y.json", "--nonce", _NONCE], capsys)
+    assert code == attest_v5.EX_UNAVAILABLE and out == ""
+    assert err.strip() == "attest_v5: trusted state unavailable"
+    assert _KEY.hex() not in err
 
 
 def test_cli_reads_no_stdin_and_never_writes_files(tmp_path, monkeypatch, capsys):
     policy = _trust(tmp_path)
     monkeypatch.setattr("sys.stdin", None)
-    before = sorted(p.name for p in tmp_path.rglob("*"))
+    def snapshot():
+        return sorted(
+            (str(p.relative_to(tmp_path)), p.stat().st_size, p.stat().st_mtime_ns, p.stat().st_mode)
+            for p in tmp_path.rglob("*")
+        )
+
+    before = snapshot()
     code, _, _ = _cli(["--policy", str(policy), "--nonce", _NONCE], capsys)
     assert code == 0
-    assert sorted(p.name for p in tmp_path.rglob("*")) == before  # read-only: no nonce DB created
+    assert snapshot() == before  # read-only: no file created, touched or chmod'ed
 
 
 # ------------------------------------------------------------------ central side
