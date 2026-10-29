@@ -7,12 +7,16 @@ It has no CLI, no ``install`` and does not start anything: it is one piece of a
 future ``TrustedRotationOps`` and is exercised only through fakes.
 
 Two rounds, because a stopped container cannot be exec'd:
-* before control starts a host is checked against the release (fields only);
-* once ``attest_control`` has succeeded, every host proof must additionally
-  EQUAL the control's proof for the same fresh nonce, which only two parties
-  holding the same key bytes can produce.
-The control-side report comes from an injected source; the control-side
-entrypoint that produces it does not exist yet.
+* while the control containers are observed fully ``exited`` a host is checked
+  against the release (fields only);
+* in every other case, including a control state that cannot be observed, every
+  host proof must additionally EQUAL the control's proof for the same fresh
+  nonce, which only two parties holding the same key bytes can produce.
+The round is decided from the observed container state on each call, never from
+memory held by this object, so a second instance, a retry or a second rotation
+cannot silently fall back to the weaker check. The control-side report comes
+from an injected source; the control-side entrypoint that produces it does not
+exist yet.
 """
 
 from __future__ import annotations
@@ -153,7 +157,6 @@ class LimaDockerAttestor:
         self._central_reports = central_reports
         self._nonce_factory = nonce_factory
         self._used_nonces: set[str] = set()
-        self._control_attested = False
 
     # ------------------------------------------------------------- plumbing
 
@@ -176,11 +179,24 @@ class LimaDockerAttestor:
             raise RotationFailure("attestation command did not complete cleanly")
         return result
 
-    async def _health(self, container: str) -> bool:
-        result = await self._run(
-            self._docker("inspect", "--format", "{{.State.Health.Status}}", container)
-        )
-        return result.stdout.decode("ascii", errors="replace").strip() == "healthy"
+    async def _inspect(self, container: str, template: str) -> str:
+        result = await self._run(self._docker("inspect", "--format", template, container))
+        return result.stdout.decode("ascii", errors="replace").strip()
+
+    async def _control_fully_stopped(self) -> bool:
+        """True only if both control containers are observed ``exited``.
+
+        Anything else, including a state that cannot be read, keeps the stronger
+        check (host proof must equal the control proof) in force.
+        """
+
+        try:
+            for name in (self._cfg.mcp_container, self._cfg.ledger_container):
+                if await self._inspect(name, "{{.State.Status}}") != "exited":
+                    return False
+        except RotationFailure:
+            return False
+        return True
 
     def _validated_central(self, reports: object, nonce: str) -> dict[str, dict[str, object]]:
         if not isinstance(reports, Mapping) or set(reports) != set(_NODES):
@@ -252,7 +268,7 @@ class LimaDockerAttestor:
         }
         if any(report[name] != value for name, value in wanted.items()):
             raise RotationFailure("host report does not match the release")
-        if self._control_attested:
+        if not await self._control_fully_stopped():
             central = (await self._central_for_round(nonce))[host]
             if any(report[name] != central[name] for name in _PROVEN_FIELDS) or not proofs_equal(
                 report["proof"], central["proof"]
@@ -287,8 +303,11 @@ class LimaDockerAttestor:
         epoch, digest = epochs.pop(), digests.pop()
         host_keys = {h: str(reports[h]["host_key_sha256"]) for h in _NODES}
         signer_ids = {h: str(reports[h]["verifier_key_id"]) for h in _NODES}
-        ledger_ok = await self._health(self._cfg.ledger_container)
-        mcp_ok = await self._health(self._cfg.mcp_container)
+        # The ledger service defines no healthcheck, but MCP's /readyz pings it, so a
+        # healthy MCP means the ledger is reachable. The ledger must also be running.
+        mcp_ready = await self._inspect(self._cfg.mcp_container, "{{.State.Health.Status}}") == "healthy"
+        ledger_running = await self._inspect(self._cfg.ledger_container, "{{.State.Status}}") == "running"
+        ledger_ok = mcp_ready and ledger_running
         try:
             generation = generation_id(
                 epoch=int(epoch), policy_sha256=str(digest), host_keys=host_keys, signer_key_ids=signer_ids
@@ -300,9 +319,8 @@ class LimaDockerAttestor:
                 host_keys=host_keys,
                 signer_key_ids=signer_ids,
                 ledger_available=ledger_ok,
-                audit_available=ledger_ok and mcp_ok,
+                audit_available=ledger_ok,
             )
         except ValueError:
             raise RotationFailure("control report is not a valid receipt") from None
-        self._control_attested = True
         return receipt

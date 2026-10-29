@@ -89,7 +89,9 @@ def central_reports(nonce, *, keys=None, changes=None):
 class FakeRunner:
     def __init__(self):
         self.calls: list[tuple[str, ...]] = []
-        self.health = {"somfsl-ledger-1": "healthy", "somfsl-mcp-1": "healthy"}
+        self.health = {"somfsl-mcp-1": "healthy"}  # the ledger service has no healthcheck
+        self.status = {"somfsl-ledger-1": "exited", "somfsl-mcp-1": "exited"}  # control is stopped
+        self.inspect_failures: set[str] = set()
         self.override = None  # callable(argv, nonce) -> CommandResult | None
         self.keys = dict(KEYS)
 
@@ -108,9 +110,25 @@ class FakeRunner:
             body = json.dumps(host_report(host, nonce, key=self.keys[host]), sort_keys=True) + "\n"
             return CommandResult(returncode=0, stdout=body.encode(), stderr=b"", timed_out=False)
         if docker[:1] == ("inspect",):
-            status = self.health[docker[-1]]
-            return CommandResult(returncode=0, stdout=status.encode() + b"\n", stderr=b"", timed_out=False)
+            name = docker[-1]
+            if name in self.inspect_failures:
+                return CommandResult(returncode=1, stdout=b"", stderr=b"template error", timed_out=False)
+            table = self.health if "{{.State.Health.Status}}" in docker else self.status
+            if name not in table:
+                return CommandResult(returncode=1, stdout=b"", stderr=b"no such value", timed_out=False)
+            return CommandResult(returncode=0, stdout=table[name].encode() + b"\n", stderr=b"", timed_out=False)
         raise AssertionError(argv)
+
+
+def attest_execs(runner):
+    """Only the attest_v5 exec commands (state inspects are not attestations)."""
+
+    return [c for c in runner.calls if "ssh_over_mcp.host_agent.attest_v5" in c]
+
+
+def start_control(runner):
+    runner.status["somfsl-ledger-1"] = "running"
+    runner.status["somfsl-mcp-1"] = "running"
 
 
 def adapter_config():
@@ -217,8 +235,8 @@ async def test_every_round_uses_a_fresh_nonce_and_never_reuses_one():
     spec = make_spec()
     for host in ("node01", "node02", "node01"):
         await attestor.attest_host(host, spec)
-    used = [c[-1] for c in runner.calls]
-    assert len(set(used)) == 3
+    used = [c[-1] for c in attest_execs(runner)]
+    assert len(used) == 3 and len(set(used)) == 3
 
 
 @pytest.mark.asyncio
@@ -228,19 +246,20 @@ async def test_a_nonce_source_that_repeats_or_returns_garbage_is_refused():
     await attestor.attest_host("node01", spec)
     with pytest.raises(RotationFailure):
         await attestor.attest_host("node02", spec)  # a replayed nonce must not run a second round
-    assert len(runner.calls) == 1
+    assert len(attest_execs(runner)) == 1
 
     for bad in ("", "short", "A" * 32, "g" * 32, None, 5):
         attestor, runner, _ = make(nonce_factory=lambda bad=bad: bad)
         with pytest.raises(RotationFailure):
             await attestor.attest_host("node01", spec)
-        assert runner.calls == []  # nothing is exec'd with an unusable nonce
+        assert attest_execs(runner) == []  # nothing is exec'd with an unusable nonce
 
 
 @pytest.mark.asyncio
 async def test_control_and_host_rounds_never_share_a_nonce():
-    attestor, _, calls = make()
+    attestor, runner, calls = make()
     spec = make_spec()
+    start_control(runner)
     await attestor.attest_control(spec)
     await attestor.attest_host("node01", spec)
     await attestor.attest_host("node02", spec)
@@ -343,6 +362,7 @@ async def test_report_shape_and_types_are_validated_strictly(mutate):
 @pytest.mark.asyncio
 async def test_control_receipt_carries_the_controls_own_values_not_the_specs():
     attestor, runner, calls = make()
+    start_control(runner)
     spec = make_spec()
     receipt = await attestor.attest_control(spec)
     assert calls == [(f"{1:032x}", PROFILE)]
@@ -350,8 +370,77 @@ async def test_control_receipt_carries_the_controls_own_values_not_the_specs():
     assert receipt.host_keys == PINS and receipt.signer_key_ids == KEY_IDS
     assert receipt.generation_sha256 == spec.generation_sha256
     assert receipt.ledger_available is True and receipt.audit_available is True
-    inspected = [c[-1] for c in runner.calls if c[6] == "inspect"]
-    assert inspected == ["somfsl-ledger-1", "somfsl-mcp-1"]
+    # The ledger service has no healthcheck; MCP readiness (/readyz) pings it.
+    health = [c[-1] for c in runner.calls if c[6] == "inspect" and "{{.State.Health.Status}}" in c]
+    status = [c[-1] for c in runner.calls if c[6] == "inspect" and "{{.State.Status}}" in c]
+    assert health == ["somfsl-mcp-1"]
+    assert "somfsl-ledger-1" in status
+
+
+@pytest.mark.asyncio
+async def test_control_receipt_reports_the_controls_own_pins_ids_and_generation():
+    # Each field the control reports must reach the receipt unchanged, never be
+    # replaced by the release's value, so run_rotation can see the difference.
+    other_pins = {"node01": "7" * 64, "node02": "8" * 64}
+    other_ids = {"node01": "5" * 64, "node02": "6" * 64}
+
+    async def different(nonce, profile):
+        out = {}
+        for host, key in KEYS.items():
+            fields = fields_for(host, nonce, changes={
+                "host_key_sha256": other_pins[host], "verifier_key_id": other_ids[host]})
+            out[host] = {**fields, "proof": attest_v5.attestation_proof(key, fields)}
+        return out
+
+    attestor, runner, _ = make(source=different)
+    start_control(runner)
+    spec = make_spec()
+    receipt = await attestor.attest_control(spec)
+    assert receipt.host_keys == other_pins and receipt.signer_key_ids == other_ids
+    assert receipt.generation_sha256 != spec.generation_sha256
+    assert receipt.generation_sha256 == generation_id(
+        epoch=EPOCH, policy_sha256=DIGEST, host_keys=other_pins, signer_key_ids=other_ids
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_unready_mcp_means_neither_ledger_nor_audit_is_proven():
+    # /readyz pings the ledger, so an unready mcp leaves the ledger unproven too.
+    attestor, runner, _ = make()
+    start_control(runner)
+    runner.health["somfsl-mcp-1"] = "unhealthy"
+    receipt = await attestor.attest_control(make_spec())
+    assert (receipt.ledger_available, receipt.audit_available) == (False, False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["exited", "created", "restarting", "paused", "dead"])
+async def test_a_ledger_that_is_not_running_is_never_available(state):
+    attestor, runner, _ = make()
+    start_control(runner)
+    runner.status["somfsl-ledger-1"] = state
+    receipt = await attestor.attest_control(make_spec())
+    assert receipt.ledger_available is False and receipt.audit_available is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("health", ["starting", "unhealthy", "none", "", "HEALTHY", "healthy-ish"])
+async def test_only_the_exact_word_healthy_counts_as_ready(health):
+    attestor, runner, _ = make()
+    start_control(runner)
+    runner.health["somfsl-mcp-1"] = health
+    receipt = await attestor.attest_control(make_spec())
+    assert receipt.ledger_available is False and receipt.audit_available is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing", ["somfsl-mcp-1", "somfsl-ledger-1"])
+async def test_a_failing_docker_inspect_is_a_rotation_failure_not_a_guess(failing):
+    attestor, runner, _ = make()
+    start_control(runner)
+    runner.inspect_failures = {failing}
+    with pytest.raises(RotationFailure):
+        await attestor.attest_control(make_spec())
 
 
 @pytest.mark.asyncio
@@ -362,15 +451,6 @@ async def test_control_receipt_reports_what_it_sees_when_the_control_differs():
     attestor, _, _ = make(source=stale)
     receipt = await attestor.attest_control(make_spec())
     assert receipt.epoch == EPOCH - 1  # not echoed from the spec; the sequencer will refuse it
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("unhealthy", ["somfsl-ledger-1", "somfsl-mcp-1"])
-async def test_an_unhealthy_ledger_or_mcp_is_reported_unavailable(unhealthy):
-    attestor, runner, _ = make()
-    runner.health[unhealthy] = "unhealthy"
-    receipt = await attestor.attest_control(make_spec())
-    assert receipt.ledger_available is False or receipt.audit_available is False
 
 
 @pytest.mark.asyncio
@@ -405,23 +485,80 @@ async def test_a_failing_central_source_is_a_rotation_failure():
 
 
 @pytest.mark.asyncio
-async def test_after_control_is_attested_host_proofs_must_equal_the_control_proofs():
+async def test_host_proofs_must_equal_the_control_proofs_whenever_control_is_running():
     attestor, runner, calls = make()
     spec = make_spec()
-    await attestor.attest_host("node01", spec)  # first round: fields only
+    await attestor.attest_host("node01", spec)  # control stopped: fields only
     assert calls == []
+    start_control(runner)
     await attestor.attest_control(spec)
     calls.clear()
     receipt = await attestor.attest_host("node01", spec)
     assert receipt.verifier_key_id == KEY_IDS["node01"]
     assert len(calls) == 1 and calls[0][1] == PROFILE  # control asked for the SAME fresh nonce
-    assert calls[0][0] == runner.calls[-1][-1]
+    assert calls[0][0] == [c for c in runner.calls if "attest_v5" in " ".join(c)][-1][-1]
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_attestor_instance_still_requires_equality_when_control_runs():
+    # Round 2 must not depend on per-instance memory: a different instance, or
+    # attest_host called on its own, sees control running and enforces equality.
+    spec = make_spec()
+    first, runner, _ = make()
+    start_control(runner)
+    await first.attest_control(spec)
+    runner.keys["node02"] = bytes([9]) * 32
+
+    def forged(argv, nonce):
+        fields = fields_for("node02", nonce)
+        report = {**fields, "config_model_sha256": "e" * 64,
+                  "proof": attest_v5.attestation_proof(bytes([9]) * 32, fields)}
+        return CommandResult(returncode=0, stdout=(json.dumps(report) + "\n").encode(), stderr=b"", timed_out=False)
+
+    runner.override = forged
+    second, _, _ = make(runner=runner)  # never saw attest_control
+    with pytest.raises(RotationFailure):
+        await second.attest_host("node02", spec)
+
+
+@pytest.mark.asyncio
+async def test_a_second_rotation_on_the_same_instance_starts_in_round_one_again():
+    attestor, runner, calls = make()
+    spec = make_spec()
+    start_control(runner)
+    await attestor.attest_control(spec)
+    await attestor.attest_host("node01", spec)  # equality enforced while control runs
+    runner.status["somfsl-ledger-1"] = "exited"  # the next rotation stops control again
+    runner.status["somfsl-mcp-1"] = "exited"
+    calls.clear()
+    await attestor.attest_host("node01", spec)  # fields-only again; no stale "attested" state
+    assert calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["created", "restarting", "paused", "removing", "dead", "running"])
+async def test_only_a_fully_exited_control_relaxes_to_fields_only(state):
+    # Anything that is not clearly stopped must keep equality required.
+    attestor, runner, calls = make()
+    runner.status["somfsl-mcp-1"] = state
+    runner.status["somfsl-ledger-1"] = "exited"
+    await attestor.attest_host("node01", make_spec())
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_unobservable_control_state_keeps_equality_required():
+    attestor, runner, calls = make()
+    runner.inspect_failures = {"somfsl-mcp-1"}
+    await attestor.attest_host("node01", make_spec())
+    assert len(calls) == 1  # could not prove it is stopped, so the control proof is demanded
 
 
 @pytest.mark.asyncio
 async def test_a_host_holding_a_different_key_is_caught_once_control_is_attested():
     attestor, runner, _ = make()
     spec = make_spec()
+    start_control(runner)
     await attestor.attest_control(spec)
     runner.keys["node02"] = bytes([9]) * 32  # same fields and key ID claim, different key bytes
 
@@ -441,6 +578,7 @@ async def test_a_host_holding_a_different_key_is_caught_once_control_is_attested
 async def test_an_echoed_stale_or_replayed_proof_cannot_match_a_fresh_nonce():
     attestor, runner, _ = make()
     spec = make_spec()
+    start_control(runner)
     await attestor.attest_control(spec)
     stale = host_report("node01", "0" * 32)  # a proof recorded in an earlier round
 
@@ -453,8 +591,9 @@ async def test_an_echoed_stale_or_replayed_proof_cannot_match_a_fresh_nonce():
 
 @pytest.mark.asyncio
 async def test_control_proof_missing_for_the_host_fails_closed():
-    attestor, _, _ = make()
+    attestor, runner, _ = make()
     spec = make_spec()
+    start_control(runner)
     await attestor.attest_control(spec)
 
     async def only_node02(nonce, profile):
@@ -463,6 +602,124 @@ async def test_control_proof_missing_for_the_host_fails_closed():
     attestor._central_reports = only_node02
     with pytest.raises(RotationFailure):
         await attestor.attest_host("node01", spec)
+
+
+# ------------------------------------------------------------------ guards pinned one by one
+
+
+def _valid_stdout(nonce, host="node01"):
+    return (json.dumps(host_report(host, nonce)) + "\n").encode()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flags",
+    [
+        {"returncode": 1},
+        {"returncode": 69},
+        {"stderr": b"a warning\n"},
+        {"timed_out": True},
+        {"truncated": True},
+    ],
+)
+async def test_each_command_failure_flag_alone_refuses_an_otherwise_valid_report(flags):
+    # JSON parsing must not be what rejects these: stdout is a perfectly valid report.
+    attestor, runner, _ = make()
+
+    def only_the_flag(argv, nonce):
+        base = {"returncode": 0, "stdout": _valid_stdout(nonce), "stderr": b"", "timed_out": False}
+        base.update(flags)
+        return CommandResult(**base)
+
+    runner.override = only_the_flag
+    with pytest.raises(RotationFailure):
+        await attestor.attest_host("node01", make_spec())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda n: {**central_reports(n), "node02": central_reports(n, changes={"policy_epoch": EPOCH + 1})["node02"]},
+        lambda n: {**central_reports(n), "node02": central_reports(n, changes={"central_policy_sha256": "9" * 64})["node02"]},
+        lambda n: {**central_reports(n), "node02": central_reports(n, changes={"profile": "other"})["node02"]},
+        lambda n: central_reports(n, changes={"profile": "other"}),
+    ],
+    ids=["epoch-disagrees", "digest-disagrees", "one-profile-wrong", "both-profiles-wrong"],
+)
+async def test_the_two_control_reports_must_agree_on_epoch_digest_and_profile(build):
+    async def source(nonce, profile):
+        return build(nonce)
+
+    attestor, runner, _ = make(source=source)
+    start_control(runner)
+    with pytest.raises(RotationFailure):
+        await attestor.attest_control(make_spec())
+
+
+@pytest.mark.asyncio
+async def test_a_control_report_with_an_unsupported_version_is_refused():
+    async def source(nonce, profile):
+        return central_reports(nonce, changes={"version": 2})
+
+    attestor, runner, _ = make(source=source)
+    start_control(runner)
+    with pytest.raises(RotationFailure):
+        await attestor.attest_control(make_spec())
+
+
+@pytest.mark.asyncio
+async def test_a_config_built_around_the_validators_is_revalidated_in_the_constructor():
+    runner = FakeRunner()
+
+    async def source(nonce, profile):
+        return central_reports(nonce)
+
+    root_cfg = attest_config().model_copy(update={"exec_user": "0:0"})
+    with pytest.raises(ValidationError):
+        LimaDockerAttestor(adapter_config(), root_cfg, runner=runner, central_reports=source)
+    live_cfg = adapter_config().model_copy(update={"vm_name": "som-mode-a-netpilot-oct27"})
+    with pytest.raises(ValidationError):
+        LimaDockerAttestor(live_cfg, attest_config(), runner=runner, central_reports=source)
+    relative = attest_config().model_copy(update={"python_path": "python3"})
+    with pytest.raises(ValidationError):
+        LimaDockerAttestor(adapter_config(), relative, runner=runner, central_reports=source)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["attest_host", "attest_control"])
+async def test_a_spec_built_around_the_validators_is_refused_before_any_command(method):
+    attestor, runner, calls = make()
+    bad = make_spec().model_copy(update={"generation_sha256": "b" * 64})
+    with pytest.raises(ValidationError):
+        if method == "attest_host":
+            await attestor.attest_host("node01", bad)
+        else:
+            await attestor.attest_control(bad)
+    assert runner.calls == [] and calls == []
+
+
+def test_generation_id_is_pinned_to_its_documented_domain_tag():
+    import hashlib
+
+    fields = {
+        "epoch": EPOCH,
+        "policy_sha256": DIGEST,
+        "host_keys": dict(PINS),
+        "signer_key_ids": dict(KEY_IDS),
+    }
+    body = json.dumps(
+        {
+            "epoch": EPOCH,
+            "policy_sha256": DIGEST,
+            "hosts": {h: {"host_key_sha256": PINS[h], "signer_key_id": KEY_IDS[h]} for h in sorted(PINS)},
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    expected = hashlib.sha256(b"ssh-over-mcp/v5/generation/v1\x00" + body).hexdigest()
+    assert generation_id(**fields) == expected
+    assert generation_id(**fields) != hashlib.sha256(body).hexdigest()  # the tag is not optional
 
 
 # ------------------------------------------------------------------ whole sequence
@@ -544,6 +801,9 @@ class FullRunner:
         if docker[0] == "inspect":
             if "{{.State.Health.Status}}" in docker:
                 return await self.attest.run(argv, timeout=timeout)
+            self.sync_status()
+            if docker[-1] in self.attest.status:
+                return await self.attest.run(argv, timeout=timeout)
             return CommandResult(
                 returncode=0, stdout=self.state.get(docker[-1], "running").encode() + b"\n", stderr=b"", timed_out=False
             )
@@ -553,6 +813,10 @@ class FullRunner:
         if docker[0] == "exec":
             return await self.attest.run(argv, timeout=timeout)
         raise AssertionError(argv)
+
+    def sync_status(self):
+        for name in ("somfsl-ledger-1", "somfsl-mcp-1"):
+            self.attest.status[name] = self.state.get(name, "running")
 
 
 class Probe:
@@ -637,3 +901,20 @@ def test_module_has_no_live_entrypoint():
 
     source = Path(module.__file__).read_text()
     assert "__main__" not in source and "def main" not in source
+
+
+@pytest.mark.asyncio
+async def test_host_and_control_proofs_are_compared_with_the_constant_time_helper(monkeypatch):
+    # The behaviour of `==` and compare_digest is identical, so pin the call site:
+    # the attestor must go through attest_v5.proofs_equal (hmac.compare_digest).
+    import ssh_over_mcp.ops.mode_a_v5_attestation as module
+
+    seen = []
+    real = module.proofs_equal
+    monkeypatch.setattr(module, "proofs_equal", lambda a, b: seen.append((a, b)) or real(a, b))
+    attestor, runner, _ = make()
+    start_control(runner)
+    spec = make_spec()
+    await attestor.attest_control(spec)
+    await attestor.attest_host("node01", spec)
+    assert len(seen) == 1 and seen[0][0] == seen[0][1]
