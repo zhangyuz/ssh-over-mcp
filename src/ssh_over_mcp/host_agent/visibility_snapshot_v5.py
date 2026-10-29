@@ -35,7 +35,15 @@ class SnapshotVerificationError(ValueError):
 
 
 class SnapshotBinding(BaseModel):
-    """Exact identity of ONE expected request, sourced from trusted host state."""
+    """Exact identity of ONE expected request.
+
+    `host`, `host_key_sha256`, `profile`, `policy_epoch` and
+    `central_policy_sha256` MUST come from trusted local host configuration.
+    `request_id`, `operation`, `root` and `max_entries` come from the outer
+    request frame and are bound by requiring equality with the MAC'd payload.
+    `principal` and `snapshot_id` are centrally chosen MAC-authenticated
+    payload values; the principal is NOT derived from the SSH identity.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
     request_id: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
@@ -158,11 +166,12 @@ def verify_snapshot(
 ) -> VerifiedVisibilitySnapshot:
     """Verify one exact signed request, active local policy and atomic replay gate.
 
-    `expected`, `active_host_policy`, `trusted_key` and
-    `consume_snapshot_id` MUST be supplied from trusted local/configured
-    sources; never from the untrusted signed envelope itself. Runtime
-    integration must use a persistent fail-closed nonce store and epoch
-    revocation barrier. No call site exists in active SSH/Host Agent code.
+    `active_host_policy`, `trusted_key` and `consume_snapshot_id` MUST be
+    supplied from trusted local/configured sources, never from the envelope.
+    See `SnapshotBinding` for which `expected` fields are trusted-local and
+    which are request values that only the MAC authenticates. Replay-store
+    failures must surface as `SnapshotStateUnavailable` (unavailable, not a
+    denial). The only caller is the inactive, uninstalled `cli_v2` entrypoint.
     """
 
     try:
