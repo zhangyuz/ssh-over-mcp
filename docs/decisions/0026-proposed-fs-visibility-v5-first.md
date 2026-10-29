@@ -107,7 +107,8 @@ test-first **candidate** contract:
   domain separator. The payload includes the *full effective central
   allow/deny rule set*, request ID, principal, host ID, SHA-256 host-key
   identity, operation, profile, query root, policy digest, policy epoch,
-  random snapshot ID, 1–64 scan budget, issued-at and ≤60-second expiry.
+  random snapshot ID, 1–64 visible-entry bound (denied entries never count),
+  issued-at and ≤60-second expiry.
   A MAC over only a digest or only the root permission is insufficient.
 - Verification compares the signed fields against a **separately supplied
   trusted exact request binding**, the configured **enabled v5 Host Policy**

@@ -39,7 +39,7 @@ Principal/profile/request ID come from trusted OperationContext. A production
 provider must configure the host verifier with exactly this public-blob identity.
 
 Full compiled rules, host pin, trusted identity, root, digest, epoch, random
-snapshot ID, 60-second validity and 1–64 scan bound enter the signed snapshot.
+snapshot ID, 60-second validity and 1–64 visible-entry bound enter the signed snapshot.
 The signer must return the exact payload supplied. Stable JSON intent containing
 host/root/pin/digest/epoch/max_entries is bound through the existing stdin
 length/fingerprint ApprovalExecutionFacts fields; this is a semantic intent

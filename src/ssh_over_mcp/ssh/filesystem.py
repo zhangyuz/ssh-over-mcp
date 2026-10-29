@@ -222,7 +222,7 @@ class SSHFilesystemClient:
     ) -> SSHFilesystemListResult:
         """Inactive v2 adapter: trusted authority injection is mandatory.
 
-        Only logical host, canonical root and scan bound are caller inputs.
+        Only logical host, canonical root and visible-entry bound are caller inputs.
         Identity/profile/request ID come exclusively from OperationContext.
         """
         if type(max_entries) is not int or not 1 <= max_entries <= 64:
