@@ -60,6 +60,9 @@ DEFAULT_FILESYSTEM_TIMEOUT_SECONDS = 60.0
 MAX_FILESYSTEM_STAT_RESPONSE_BYTES = 64 * 1024
 MAX_FILESYSTEM_READ_BYTES = 1024 * 1024
 MIN_FILESYSTEM_TRANSPORT_OUTPUT_BYTES = 4096
+# A host clock slightly behind the centre must not refuse every listing; the
+# signed window still totals at most MAX_SNAPSHOT_TTL_SECONDS (60 s).
+SNAPSHOT_CLOCK_SKEW_SECONDS = 5
 _REMOTE_WRITE_COMMITTED_EXIT_STATUS = 74
 _REMOTE_POLICY_DENIED_EXIT_STATUS = 77
 
@@ -324,8 +327,8 @@ class SSHFilesystemClient:
                 central_policy_sha256=digest,
                 snapshot_id=uuid.uuid4().hex,
                 max_entries=max_entries,
-                issued_at=instant,
-                expires_at=instant + 60,
+                issued_at=instant - SNAPSHOT_CLOCK_SKEW_SECONDS,
+                expires_at=instant + 60 - SNAPSHOT_CLOCK_SKEW_SECONDS,
                 rules=compiled.rules,
             )
 

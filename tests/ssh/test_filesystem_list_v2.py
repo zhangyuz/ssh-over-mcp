@@ -613,3 +613,19 @@ async def test_unauditable_authority_failure_fails_closed(setup):
     with pytest.raises(SSHAuditPersistenceError):
         await invoke(s)
     assert not s.calls
+
+
+@pytest.mark.asyncio
+async def test_snapshot_tolerates_small_host_clock_lag_within_fixed_ttl(setup, monkeypatch):
+    import ssh_over_mcp.ssh.filesystem as module
+    from ssh_over_mcp.host_agent.visibility_snapshot_v5 import MAX_SNAPSHOT_TTL_SECONDS
+
+    s = setup
+    enable(s)
+    monkeypatch.setattr(module.time, "time", lambda: 1_800_000_000.5)
+    await invoke(s)
+    snap = s.authority.signed[0]
+    assert snap.issued_at == 1_800_000_000 - module.SNAPSHOT_CLOCK_SKEW_SECONDS
+    assert 1 <= module.SNAPSHOT_CLOCK_SKEW_SECONDS <= 10
+    assert snap.expires_at - snap.issued_at <= MAX_SNAPSHOT_TTL_SECONDS
+    assert snap.expires_at > 1_800_000_000 + 30
