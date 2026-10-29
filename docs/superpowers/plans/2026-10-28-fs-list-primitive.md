@@ -40,7 +40,7 @@
 
 **Interfaces:**
 - Consumes: `filesystem._canonical_absolute_path`, `filesystem._open_root`, `filesystem._open_pinned_final`, `filesystem._same_read_identity`, `filesystem._result_stat` and `FilesystemAccessError` (not accessible from MCP).
-- Produces: `list_directory_candidate(path: str, *, authorize_traverse: Callable[[str], bool], authorize_directory: Callable[[str], bool], authorize_child: Callable[[str], bool], max_entries: int = 64) -> tuple[ReadOnlyFileStat,...]`. It only succeeds with explicit true authorization at all three layers.
+- Produces: `list_directory_candidate(path: str, *, authorize_traverse: Callable[[str], bool], authorize_directory: Callable[[str], bool], authorize_child: Callable[[str], bool], max_entries: int = 64) -> tuple[ReadOnlyFileStat,...]`. It only succeeds with explicit true authorization at all three layers. *(Historical signature. Current code also requires a keyword-only `before_child_open` hook and `max_entries` bounds visible entries; see ADR0026 "Timing (re-review P2)".)*
 
 - [ ] **Step 1: Write failing tests.** Single small directory with sorted allowed files/subdirectories, denied child not opened, denied intermediate not opened, special symlink/FIFO refusal, over-limit refusal, invalid paths/limits and directory-changed-during-scan fail.
 - [ ] **Step 2: Run RED.** `PYTHONPATH=src:. python -m pytest -q tests/host_agent/test_visibility_listing_candidate.py`; expect missing module/function (RED).

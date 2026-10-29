@@ -51,7 +51,7 @@ def test_markers_and_resource_names_are_not_tied_to_one_pull_request():
     # would misattribute evidence (review round 3).
     central = ROOT / "ops/mvp/mode_a_hosted_v2_central_e2e.py"
     smoke = ROOT / "ops/mvp/mode_a_hosted_oci_fs_smoke.py"
-    for path in (RUNNER, central, smoke):
+    for path in (FLOW, RUNNER, CLIENT, central, smoke):
         text = path.read_text()
         assert "pr347" not in text.lower() and "som347" not in text, path
     assert "CI_FS_LIST_V2_REAL_TWO_OPENSSH_DISTINCT_KEYS_PASS" in RUNNER.read_text()

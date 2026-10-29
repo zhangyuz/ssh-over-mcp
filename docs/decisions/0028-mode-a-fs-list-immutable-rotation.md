@@ -90,14 +90,20 @@ needed.
 - Exact-head Linux CI; trusted-main Native Level-3 with verified cleanup.
 - Separate operator approval for the actual Mode A deployment/restart, and
   separate approval for PR merge. Mode B remains out of this decision.
-- **Signer key ID derivation and non-echo attestation (review round 3, N3,
-  OPEN):** `signer_key_ids`/`verifier_key_id` are compared, but no shared,
-  domain-separated derivation from the HMAC key (used by both
-  `ImmutableVisibilityAuthority` and the host verifier-key loader) is
-  specified yet, and an adapter that echoes the expected spec back would pass
-  the sequencer. The production `TrustedRotationOps` adapter must derive every
-  attested field from the running component itself (as step 6 already
-  requires) and needs its own design review before activation.
+- **Signer key ID and non-echo attestation (review round 3, N3):**
+  *Derivation is now specified and implemented:* a key ID is
+  `SHA-256(b"ssh-over-mcp/v5/hmac-key-id/v1\x00" || key)` from
+  `host_agent.visibility_snapshot_v5.visibility_key_id`, used by
+  `ImmutableVisibilityAuthority.signer_key_ids()` (central side) and
+  `visibility_runtime_v5.local_verifier_key_id(path)` (host side, which reads
+  the key only through the protected loader and accepts no expected value).
+  *Still OPEN and a **Ready blocker** (not merely an activation item):* the
+  production `TrustedRotationOps` adapter and an authenticated host attestation
+  path that returns `local_verifier_key_id` plus the running epoch, policy
+  digest and generation from the host itself over the pinned SSH identity.
+  Until it exists, the sequencer's comparison is only as strong as the
+  adapter, and an adapter that echoes the expected spec would still pass. The
+  adapter needs its own design review.
 
 **2026-10-28 candidate improvement:** v5 config and HMAC verifier-key
 loaders now require files and their immediate directory to be owned by
