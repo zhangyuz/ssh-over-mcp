@@ -32,10 +32,6 @@ MAX_LIST_SCANNED_ENTRIES = 64
 MAX_LIST_PHYSICAL_ENTRIES = 4096
 
 
-def _always_allowed(_: str) -> bool:
-    return True
-
-
 def _authorized(callback: Callable[[str], bool], path: str) -> bool:
     try:
         return callback(path) is True
@@ -86,7 +82,7 @@ def list_directory_candidate(
     authorize_traverse: Callable[[str], bool],
     authorize_directory: Callable[[str], bool],
     authorize_child: Callable[[str], bool],
-    before_child_open: Callable[[str], bool] | None = None,
+    before_child_open: Callable[[str], bool],
     max_entries: int = MAX_LIST_SCANNED_ENTRIES,
 ) -> tuple[ReadOnlyFileStat, ...]:
     """Collect one bounded directory without reading denied child metadata.
@@ -98,8 +94,6 @@ def list_directory_candidate(
 
     if type(max_entries) is not int or not 1 <= max_entries <= MAX_LIST_SCANNED_ENTRIES:
         raise FilesystemAccessError("directory listing bound is invalid")
-    if before_child_open is None:
-        before_child_open = _always_allowed
     if not all(
         callable(cb)
         for cb in (

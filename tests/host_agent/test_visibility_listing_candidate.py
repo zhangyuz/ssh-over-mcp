@@ -23,6 +23,7 @@ def _list(root: Path, *, traverse=None, directory=None, child=None, max_entries=
         authorize_traverse=traverse or (lambda _: True),
         authorize_directory=directory or (lambda _: True),
         authorize_child=child or (lambda _: True),
+        before_child_open=lambda _: True,
         max_entries=max_entries,
     )
 
@@ -209,6 +210,7 @@ def test_noncanonical_root_refuses_before_authority_or_io() -> None:
             authorize_traverse=called,
             authorize_directory=called,
             authorize_child=called,
+            before_child_open=called,
         )
     assert callbacks == []
 

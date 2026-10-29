@@ -83,3 +83,16 @@ def test_authorization_failure_fails_closed():
 
     with pytest.raises(FilesystemAccessError):
         select_visible_children(ROOT, ["a"], authorize_child=broken, max_entries=64)
+
+
+def test_open_time_hook_is_required_not_silently_allow_all():
+    from ssh_over_mcp.host_agent.visibility_listing_candidate import list_directory_candidate
+
+    with pytest.raises(TypeError):
+        list_directory_candidate(
+            ROOT,
+            authorize_traverse=lambda _: True,
+            authorize_directory=lambda _: True,
+            authorize_child=lambda _: True,
+            max_entries=1,
+        )
