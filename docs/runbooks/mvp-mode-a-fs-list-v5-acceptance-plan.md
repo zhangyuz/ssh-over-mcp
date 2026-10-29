@@ -93,10 +93,12 @@ Stop at the first unexpected result and fence ingress; never improvise.
 6. **Rotation** with the maintenance primitives and attestation, in order:
    freeze (service absent + disabled + port refused) → drain (zero established
    sockets on MCP and both SSH ports) → stop control → stop nodes → install the
-   next generation → start nodes → `attest_v5` on each node and the control
-   report for a fresh nonce, requiring **equal proofs** and manifest-equal
-   fields → start control → re-attest → operator confirmation → reopen. Evidence:
-   every proof comparison and every observed state.
+   next generation → start nodes → `attest_v5` on each node for a fresh nonce
+   → start control → control report (a post-start `docker exec`; a stopped
+   container cannot be exec'd) and the node reports again for a **new** nonce,
+   requiring **equal host and control proofs** and manifest-equal fields →
+   operator confirmation → reopen. Evidence: every proof comparison, the
+   effective UID/GID of each exec and every observed state.
 7. **Failure recovery:** inject a mismatch (wrong key on one node, stale epoch,
    one node left stopped, drain that never reaches zero). Each must leave
    ingress fenced and the sequencer failed; nothing may reopen by itself.

@@ -169,9 +169,15 @@ only the steps of the protocol whose mechanism is already approved in the
 
 All commands are exact argv lists built from a validated configuration, with
 absolute tool paths, a scrubbed environment (fixed `PATH` plus a short
-allow-list) and no shell. **A configuration naming any identifier of the live
-pilot (VM, LaunchAgent label or plist, tunnel port, `som342-mode-a-` containers)
-is refused with no override**: rotating the live pilot is not authorized.
+allow-list) and no shell; children run in their own session and the whole group
+is killed on timeout, overflow or cancellation. **A configuration naming any
+identifier of the live pilot (VM, LaunchAgent label or plist, tunnel port,
+`som342-mode-a-` containers) is refused with no override**: rotating the live
+pilot is not authorized. Because APFS resolves paths case-insensitively every
+comparison is casefolded, the plist must be named exactly `<label>.plist`, the
+configuration is re-validated in the constructor, and `open_ingress` reads the
+plist's embedded `Label` (no symlinks, 64 KiB cap) and refuses unless it equals
+the configured label before anything is enabled.
 Ordering is enforced as follows: drain, `stop_control`, `stop_host` need the
 fence (and the earlier proofs); `start_host` and `start_control` need only the
 fence; `open_ingress` needs the fence, all four containers observed running and
@@ -183,7 +189,8 @@ Limits: zero established sockets is a defined drain criterion, not a proof of
 no in-memory work; alternate ingress paths other than the LaunchAgent tunnel
 (operator `limactl shell`) are out of scope and must be quiesced by the
 operator; a hard kill between `enable` and the re-fence leaves the label
-enabled for the next login (re-run `freeze_ingress`); killing the local client
+enabled for the next login (re-run `freeze_ingress`), while a second
+cancellation waits for the re-fence to finish before propagating; killing the local client
 does not stop a remote `docker stop`, so state is always re-verified; tests use
 a recording fake runner, so no real launchd, Lima or Docker behaviour is proven.
 
@@ -206,16 +213,18 @@ a recording fake runner, so no real launchd, Lima or Docker behaviour is proven.
   `visibility_runtime_v5.local_verifier_key_id(path)` (host side, which reads
   the key only through the protected loader and accepts no expected value).
   *Still OPEN and a **Ready blocker** (not merely an activation item):* the
-  production `TrustedRotationOps` adapter and an authenticated host attestation
-  path that returns `local_verifier_key_id` plus the running epoch, policy
-  digest and generation from the host itself over the pinned SSH identity.
-  Until it exists, the sequencer's comparison is only as strong as the
-  adapter, and an adapter that echoes the expected spec would still pass. The
-  adapter needs its own design review.
+  production `TrustedRotationOps` adapter that gathers the running epoch,
+  policy digest and key evidence from the host and control themselves. Per the
+  2026-10-29 ruling above that evidence is the nonce-bound `attest_v5` report
+  taken by a read-only operator-side `docker exec` (not over the pinned SSH
+  identity), and the independent live host-key handshake is a separate
+  unimplemented step. Until the adapter exists, the sequencer's comparison is
+  only as strong as the adapter, and one that echoes the expected spec would
+  still pass. The adapter needs its own design review.
   A key ID is an identifier, **not proof of possession**: it is not secret, so
-  an adapter that is handed the expected ID can echo it. The production
-  attestation must be nonce-bound (for example an HMAC over a fresh verifier
-  nonce computed with the verifier key) and keys must come from a CSPRNG.
+  an adapter that is handed the expected ID can echo it. The nonce-bound proof
+  (implemented in `attest_v5`, with `new_nonce` and `proofs_equal`) is what
+  closes that, and keys must come from a CSPRNG.
 
 **2026-10-28 candidate improvement:** v5 config and HMAC verifier-key
 loaders now require files and their immediate directory to be owned by
