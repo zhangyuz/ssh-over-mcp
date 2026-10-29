@@ -135,6 +135,23 @@ def _serialize(payload: VisibilitySnapshotV5) -> bytes:
     ).encode("utf-8")
 
 
+_KEY_ID_DOMAIN = b"ssh-over-mcp/v5/hmac-key-id/v1\x00"
+
+
+def visibility_key_id(key: bytes) -> str:
+    """Identify a v5 HMAC key without revealing it: SHA-256(domain || key).
+
+    The central signer and each host verifier MUST derive their key ID with
+    this one function from the real key bytes, so an attestation can only
+    match if the same key is actually loaded. The domain tag keeps the value
+    distinct from host-key pins and any untagged digest.
+    """
+
+    if type(key) is not bytes or len(key) != 32:
+        raise ValueError("v5 HMAC key must be exactly 32 bytes")
+    return hashlib.sha256(_KEY_ID_DOMAIN + key).hexdigest()
+
+
 def sign_snapshot(payload: VisibilitySnapshotV5, *, key: bytes) -> SignedVisibilitySnapshot:
     """Sign only an already-compiled central policy snapshot using a distinct key.
 

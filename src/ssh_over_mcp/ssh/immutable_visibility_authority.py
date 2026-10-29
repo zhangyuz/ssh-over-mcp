@@ -14,6 +14,7 @@ from ssh_over_mcp.host_agent.visibility_snapshot_v5 import (
     SignedVisibilitySnapshot,
     VisibilitySnapshotV5,
     sign_snapshot,
+    visibility_key_id,
 )
 from ssh_over_mcp.policy.engine import PolicyEngine
 
@@ -53,6 +54,11 @@ class ImmutableVisibilityAuthority:
         self._policy_sha256 = self._digest()
         self._keys = dict(host_keys)
         self._active = generation_active
+
+    def signer_key_ids(self) -> dict[str, str]:
+        """Per-host key IDs derived from the loaded keys (a fresh copy)."""
+
+        return {host: visibility_key_id(key) for host, key in self._keys.items()}
 
     def _digest(self) -> str:
         version = self.engine.policy_version

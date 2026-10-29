@@ -17,6 +17,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .visibility_policy_v5 import VisibilityPolicyV5, canonical_visibility_path
+from .visibility_snapshot_v5 import visibility_key_id
 
 _NONCE_ID = re.compile(r"^[0-9a-f]{32}$")
 _MAX_NONCES = 100_000
@@ -155,6 +156,16 @@ def load_trusted_visibility_key(path: Path | str) -> bytes:
         raise
     except (OSError, ValueError) as exc:
         raise VisibilityRuntimeError("v5 trusted key unavailable") from exc
+
+
+def local_verifier_key_id(path: Path | str) -> str:
+    """Key ID of the verifier key this host would actually use to verify.
+
+    Reads through the same protected loader as verification, so a host can
+    attest only a key it really holds; never accepts an expected value.
+    """
+
+    return visibility_key_id(load_trusted_visibility_key(path))
 
 
 class PersistentSnapshotNonces:
