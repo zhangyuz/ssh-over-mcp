@@ -377,5 +377,12 @@ metadata in an ancestor (a sibling created, mtime) do not refuse.
   is covered by reasoning and not by a test. It must be added to the real
   remapped-OCI acceptance (root-owned, non-replaceable ancestors and mounts)
   that remains an open Ready gate.
-- The attacker model needs write access inside the listed tree; the shipped
-  typed FS tools offer no rename, which is why this is a pre-activation item.
+- The attacker model needs write permission on any directory that contains one
+  of the path components (any ancestor writer counts, not only writers inside
+  the listed tree); the shipped typed FS tools offer no rename, which is why
+  this is a pre-activation item.
+- A benign away-and-back rename (the same inode ends up at the same path) is
+  not detected, and is harmless for the same reason.
+- On an overlayfs OCI root an ancestor copy-up could change `st_ino`/`st_dev`
+  without any path change; that would refuse spuriously (fail closed). Check it
+  in the real remapped-OCI acceptance.

@@ -161,8 +161,9 @@ def load_trusted_visibility_key(path: Path | str) -> bytes:
 def local_verifier_key_id(path: Path | str) -> str:
     """Key ID of the verifier key this host would actually use to verify.
 
-    Reads through the same protected loader as verification, so a host can
-    attest only a key it really holds; never accepts an expected value.
+    Reads through the same protected loader as verification and accepts no
+    expected value, so the ID always reflects the file this host would use.
+    It is an identifier, not proof of possession (see visibility_key_id).
     """
 
     return visibility_key_id(load_trusted_visibility_key(path))

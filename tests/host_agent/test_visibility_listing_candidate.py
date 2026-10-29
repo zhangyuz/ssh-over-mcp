@@ -349,3 +349,24 @@ def test_unrelated_ancestor_metadata_changes_do_not_refuse(tmp_path: Path) -> No
     result = _list(target, child=child)
     assert touched
     assert tuple(item.path for item in result) == (str(target / "a.txt"),)
+
+
+def test_target_directory_replaced_by_another_is_refused(tmp_path: Path) -> None:
+    # The pinned inode is untouched, but a different directory now answers to
+    # the authorized path: only the identity chain can notice.
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "a.txt").write_bytes(b"a")
+    swapped = False
+
+    def child(path: str) -> bool:
+        nonlocal swapped
+        if not swapped:
+            swapped = True
+            os.rename(target, tmp_path / "original")
+            (tmp_path / "target").mkdir()
+        return True
+
+    with pytest.raises(FilesystemAccessError):
+        _list(target, child=child)
+    assert swapped

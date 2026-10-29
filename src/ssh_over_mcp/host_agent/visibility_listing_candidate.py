@@ -64,8 +64,8 @@ def _verify_path_chain(
                 os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
                 dir_fd=current,
             )
-            os.close(current)
-            current = next_fd
+            previous, current = current, next_fd
+            os.close(previous)
             if _identity(current) != chain[index]:
                 raise FilesystemAccessError("directory path changed")
     except OSError as exc:

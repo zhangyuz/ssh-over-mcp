@@ -142,9 +142,14 @@ def visibility_key_id(key: bytes) -> str:
     """Identify a v5 HMAC key without revealing it: SHA-256(domain || key).
 
     The central signer and each host verifier MUST derive their key ID with
-    this one function from the real key bytes, so an attestation can only
-    match if the same key is actually loaded. The domain tag keeps the value
+    this one function from the real key bytes. The domain tag keeps the value
     distinct from host-key pins and any untagged digest.
+
+    This is an IDENTIFIER, not proof of possession: the value is not secret,
+    so any party that is handed the expected ID can echo it. A production
+    attestation must additionally prove possession (for example an HMAC over
+    a fresh verifier nonce). Keys MUST come from a CSPRNG; a low-entropy key
+    could be recovered by brute force from its ID.
     """
 
     if type(key) is not bytes or len(key) != 32:
