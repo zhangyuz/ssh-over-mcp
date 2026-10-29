@@ -153,7 +153,9 @@ first stage signs its snapshot inside the disposable node. A second stage
 Security Ledger and `ImmutableVisibilityAuthority` with per-host test-only
 keys against two OpenSSH nodes on internal networks, checking a positive
 listing and a denied subtree on each node. Exact-head run 40805225509
-(`09a5803`) logged `PR347_REAL_CENTRAL_MCP_LEDGER_TWO_OPENSSH_V2_E2E_PASS`.
+(`09a5803`) logged `PR347_REAL_CENTRAL_MCP_LEDGER_TWO_OPENSSH_V2_E2E_PASS`
+(markers were later renamed to the PR-neutral
+`FS_LIST_V2_REAL_CENTRAL_MCP_LEDGER_TWO_OPENSSH_E2E_PASS` family).
 This is still CI-only: it does **not** prove protected production signer
 identity, the durable freeze/attest adapter, live Mode A acceptance, or
 exact-HEAD Native Level-3, all of which remain mandatory. This workflow does not touch

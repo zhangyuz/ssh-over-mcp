@@ -101,7 +101,7 @@ def prepare_v5_test_trust(
         "host": host,
         "host_key_sha256": hostkey_digest,
         "signer_key_path": "/etc/ssh-over-mcp/v5/signer.key",
-        "nonce_db_path": "/var/lib/som-pr347-nonce/nonces.sqlite",
+        "nonce_db_path": "/var/lib/som-fslist-v2-nonce/nonces.sqlite",
         "visibility": {
             "version": 5,
             "enabled": True,
@@ -131,7 +131,7 @@ def prepare_v5_test_trust(
         "--mount",
         f"type=bind,src={trust},dst=/etc/ssh-over-mcp/v5,readonly",
         "--tmpfs",
-        "/var/lib/som-pr347-nonce:rw,nosuid,nodev,noexec,uid=2201,gid=3201,mode=0700,size=4m",
+        "/var/lib/som-fslist-v2-nonce:rw,nosuid,nodev,noexec,uid=2201,gid=3201,mode=0700,size=4m",
     ]
 
 

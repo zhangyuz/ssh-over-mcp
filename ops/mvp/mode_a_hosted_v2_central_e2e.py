@@ -1,4 +1,4 @@
-"""PR347 disposable real MCP HTTP -> Ledger -> central v5 signer -> two OpenSSH v2."""
+"""Disposable fs_list v2 real MCP HTTP -> Ledger -> central v5 signer -> two OpenSSH v2."""
 
 import json
 import os
@@ -18,7 +18,7 @@ def main():
     assert os.environ.get("GITHUB_EVENT_NAME") == "pull_request"
     running, networks = [], []
     with tempfile.TemporaryDirectory(
-        prefix="som347-central-", dir=os.environ["RUNNER_TEMP"]
+        prefix="som-fslist-central-", dir=os.environ["RUNNER_TEMP"]
     ) as tmp:
         work = Path(tmp)
         try:
@@ -78,10 +78,10 @@ print(engine.policy_version[7:])
             assert signer_keys["node01"] != signer_keys["node02"]
             node_names = []
             for i in (1, 2):
-                network = f"som347-net{i}-{uuid.uuid4().hex[:7]}"
+                network = f"som-fslist-net{i}-{uuid.uuid4().hex[:7]}"
                 run(["docker", "network", "create", "--internal", network])
                 networks.append(network)
-                name = f"som347-ssh{i}-{uuid.uuid4().hex[:7]}"
+                name = f"som-fslist-ssh{i}-{uuid.uuid4().hex[:7]}"
                 start_node(
                     name,
                     work / f"node{i:02}",
@@ -109,7 +109,7 @@ print(engine.policy_version[7:])
                         ),
                     ]
                 )
-            control = f"som347-control-{uuid.uuid4().hex[:7]}"
+            control = f"som-fslist-control-{uuid.uuid4().hex[:7]}"
             run(
                 [
                     "docker",
@@ -137,7 +137,7 @@ print(engine.policy_version[7:])
             )
             running.append(control)
             run(["docker", "network", "connect", networks[1], control])
-            origin_net = f"som347-origin-{uuid.uuid4().hex[:7]}"
+            origin_net = f"som-fslist-origin-{uuid.uuid4().hex[:7]}"
             run(["docker", "network", "create", "--internal", origin_net])
             networks.append(origin_net)
             run(["docker", "network", "connect", origin_net, control])
@@ -198,7 +198,7 @@ print(engine.policy_version[7:])
             for node in ("node01", "node02"):
                 assert f"CENTRAL_MCP_LEDGER_REAL_OPENSSH_V2_{node}_PASS".encode() in result.stdout
             assert b"CENTRAL_MCP_LEDGER_TWO_OPENSSH_V2_TEST_ONLY_PASS" in result.stdout
-            print("PR347_REAL_CENTRAL_MCP_LEDGER_TWO_OPENSSH_V2_E2E_PASS", flush=True)
+            print("FS_LIST_V2_REAL_CENTRAL_MCP_LEDGER_TWO_OPENSSH_E2E_PASS", flush=True)
         finally:
             for name in reversed(running):
                 run(["docker", "rm", "-f", name], timeout=20, ok=False)

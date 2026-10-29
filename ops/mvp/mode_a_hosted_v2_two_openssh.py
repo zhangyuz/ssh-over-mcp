@@ -1,4 +1,4 @@
-"""PR #347: disposable two-node *real* OpenSSH SMCP v2 Docker proof.
+"""fs_list v2: disposable two-node *real* OpenSSH SMCP v2 Docker proof.
 
 Exclusively github-hosted Ubuntu, never production/Yuz.local Docker. The
 signed request in this test is constructed inside each disposable container:
@@ -27,14 +27,14 @@ def main() -> None:
     assert detail["Config"]["Entrypoint"] == ["/usr/local/libexec/ssh-over-mcp-image-hold"]
     workbase = Path(os.environ["RUNNER_TEMP"])
     running: list[str] = []
-    with tempfile.TemporaryDirectory(prefix="som-pr347-v2-", dir=workbase) as owned:
+    with tempfile.TemporaryDirectory(prefix="som-fslist-v2-", dir=workbase) as owned:
         work = Path(owned)
         try:
             keys = []
             probe = Path(__file__).with_name("mode_a_hosted_v2_client_probe.py").read_bytes()
             for i in (1, 2):
                 host = f"node{i:02d}"
-                name = f"som-pr347-v2-{host}-{uuid.uuid4().hex[:8]}"
+                name = f"som-fslist-v2-{host}-{uuid.uuid4().hex[:8]}"
                 _node, _client, known = start_node(
                     name,
                     work / host,
@@ -52,7 +52,7 @@ def main() -> None:
                 trust = [m for m in info["Mounts"] if m["Destination"] == "/etc/ssh-over-mcp/v5"]
                 assert len(trust) == 1 and trust[0]["RW"] is False
                 tmpfs = info["HostConfig"]["Tmpfs"]
-                assert "/var/lib/som-pr347-nonce" in tmpfs
+                assert "/var/lib/som-fslist-v2-nonce" in tmpfs
                 prefill = run(
                     [
                         "docker",
@@ -98,9 +98,9 @@ def main() -> None:
                     result.stderr[-850:],
                     result.stdout[-350:],
                 )
-                print(f"CI_PR347_REAL_TWO_OPENSSH_V2_{host}_PASS", flush=True)
+                print(f"CI_FS_LIST_V2_REAL_TWO_OPENSSH_{host}_PASS", flush=True)
             assert len(set(keys)) == 2, "independent SSH host identities required"
-            print("CI_PR347_REAL_TWO_OPENSSH_V2_DISTINCT_KEYS_PASS", flush=True)
+            print("CI_FS_LIST_V2_REAL_TWO_OPENSSH_DISTINCT_KEYS_PASS", flush=True)
         finally:
             for name in reversed(running):
                 run(["docker", "rm", "-f", name], timeout=20, ok=False)
