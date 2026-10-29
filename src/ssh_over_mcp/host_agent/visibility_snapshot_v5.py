@@ -143,6 +143,10 @@ def sign_snapshot(payload: VisibilitySnapshotV5, *, key: bytes) -> SignedVisibil
     )
 
 
+class SnapshotStateUnavailable(RuntimeError):
+    """Trusted replay/epoch state could not be consulted: unavailable, not deny."""
+
+
 def verify_snapshot(
     signed: SignedVisibilitySnapshot,
     *,
@@ -198,7 +202,7 @@ def verify_snapshot(
         if consume_snapshot_id(snap.snapshot_id) is not True:
             raise SnapshotVerificationError("visibility snapshot replay refused")
         return VerifiedVisibilitySnapshot(snapshot=snap, active_host_policy=active_host_policy)
-    except SnapshotVerificationError:
+    except (SnapshotVerificationError, SnapshotStateUnavailable):
         raise
     except Exception as exc:
         raise SnapshotVerificationError("visibility snapshot verification unavailable") from exc

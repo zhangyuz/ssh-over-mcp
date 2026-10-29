@@ -235,3 +235,63 @@ def test_v5_trusted_inputs_and_nonce_storage_must_have_separate_parent(tmp_path)
             _config(tmp_path).model_dump(mode="json")
             | {"nonce_db_path": str(tmp_path / "different-nonce.sqlite")}
         )
+
+
+_T = 1_800_000_000
+_DIGEST = "a" * 64
+
+
+def _bound(store, nonce, *, now, expires_at=None, epoch=11, digest=_DIGEST):
+    return store.consume_bound(
+        nonce,
+        expires_at=now + 10 if expires_at is None else expires_at,
+        now=now,
+        policy_epoch=epoch,
+        central_policy_sha256=digest,
+    )
+
+
+def test_expired_nonces_are_pruned_so_the_store_cannot_fill_permanently(
+    tmp_path, monkeypatch
+):
+    import ssh_over_mcp.host_agent.visibility_runtime_v5 as module
+
+    monkeypatch.setattr(module, "_MAX_NONCES", 3)
+    store = PersistentSnapshotNonces(tmp_path / "nonces.sqlite")
+    for index in range(3):
+        assert _bound(store, f"{index:032x}", now=_T)
+    with pytest.raises(VisibilityRuntimeError):
+        _bound(store, "f" * 32, now=_T + 1)
+    later = _T + 10 + module.NONCE_CLOCK_TOLERANCE_SECONDS
+    assert _bound(store, "e" * 32, now=later)
+
+
+def test_pruning_never_allows_replay_after_host_clock_regression(tmp_path):
+    import ssh_over_mcp.host_agent.visibility_runtime_v5 as module
+
+    store = PersistentSnapshotNonces(tmp_path / "nonces.sqlite")
+    victim = "1" * 32
+    assert _bound(store, victim, now=_T, expires_at=_T + 60)
+    later = _T + 60 + module.NONCE_CLOCK_TOLERANCE_SECONDS
+    assert _bound(store, "2" * 32, now=later)
+    # The victim row is pruned; a clock stepped back into its validity window
+    # is beyond the tolerance and must refuse instead of re-admitting it.
+    with pytest.raises(VisibilityRuntimeError):
+        _bound(store, victim, now=_T + 1, expires_at=_T + 60)
+
+
+def test_small_clock_regression_within_tolerance_still_detects_replay(tmp_path):
+    store = PersistentSnapshotNonces(tmp_path / "nonces.sqlite")
+    assert _bound(store, "3" * 32, now=_T + 100, expires_at=_T + 150)
+    assert not _bound(store, "3" * 32, now=_T + 90, expires_at=_T + 150)
+
+
+def test_epoch_rollback_is_a_distinct_refusal_not_persistence_failure(tmp_path):
+    from ssh_over_mcp.host_agent.visibility_runtime_v5 import (
+        VisibilityEpochRollbackRefused,
+    )
+
+    store = PersistentSnapshotNonces(tmp_path / "nonces.sqlite")
+    assert _bound(store, "4" * 32, now=_T, epoch=12)
+    with pytest.raises(VisibilityEpochRollbackRefused):
+        _bound(store, "5" * 32, now=_T, epoch=11)

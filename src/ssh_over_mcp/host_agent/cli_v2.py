@@ -26,12 +26,14 @@ from .filesystem import FilesystemAccessError
 from .visibility_listing_candidate import list_verified_directory_candidate
 from .visibility_runtime_v5 import (
     PersistentSnapshotNonces,
+    VisibilityEpochRollbackRefused,
     VisibilityRuntimeError,
     load_host_visibility_runtime,
     load_trusted_visibility_key,
 )
 from .visibility_snapshot_v5 import (
     SnapshotBinding,
+    SnapshotStateUnavailable,
     SnapshotVerificationError,
     verify_snapshot,
 )
@@ -80,23 +82,32 @@ def run_v2(
             max_entries=request.max_entries,
         )
         instant = now()
+
+        def consume(nonce: str) -> bool:
+            # Rollback below the durable epoch floor is a denial; any other
+            # store failure means trusted state is unavailable (not a deny).
+            try:
+                return PersistentSnapshotNonces(config.nonce_db_path).consume_bound(
+                    nonce,
+                    expires_at=snap.expires_at,
+                    now=instant,
+                    policy_epoch=snap.policy_epoch,
+                    central_policy_sha256=snap.central_policy_sha256,
+                )
+            except VisibilityEpochRollbackRefused:
+                return False
+            except VisibilityRuntimeError as exc:
+                raise SnapshotStateUnavailable("v5 replay state unavailable") from exc
+
         verified = verify_snapshot(
             request.signed_snapshot,
             trusted_key=key,
             expected=expected,
             active_host_policy=config.visibility,
             now=instant,
-            consume_snapshot_id=lambda nonce: PersistentSnapshotNonces(
-                config.nonce_db_path
-            ).consume_bound(
-                nonce,
-                expires_at=snap.expires_at,
-                now=instant,
-                policy_epoch=snap.policy_epoch,
-                central_policy_sha256=snap.central_policy_sha256,
-            ),
+            consume_snapshot_id=consume,
         )
-    except VisibilityRuntimeError:
+    except (VisibilityRuntimeError, SnapshotStateUnavailable):
         print("ssh-over-mcp-host-agent-v2: trusted state unavailable", file=stderr)
         return EX_UNAVAILABLE_V2
     except (SnapshotVerificationError, ValueError):

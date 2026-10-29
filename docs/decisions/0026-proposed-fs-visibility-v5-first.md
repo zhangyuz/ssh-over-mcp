@@ -206,7 +206,10 @@ real Mode A E2E and exact-head Native Level-3 cleanup PASS. No Mode B.
 - `host_agent/visibility_runtime_v5.py` validates a dedicated owner-only
   v5 config and a distinct 32-byte HMAC key using no-follow fd reads,
   requires a 0700 owner-only private parent, and consumes snapshot IDs
-  through a local persistent SQLite nonce table (no implicit pruning).
+  through a local persistent SQLite nonce table. (Superseded 2026-10-28:
+  expired rows are pruned only behind a persisted clock high-water mark with
+  a 300 s tolerance; an earlier clock refuses as unavailable, so a pruned
+  snapshot can never pass its TTL check again.)
   This blocks replay after process restart when storage remains intact.
 - `host_agent/cli_v2.py` is a **separate uninstalled entrypoint**. It
   validates the signed request with trusted host/config fields, checks
@@ -316,3 +319,18 @@ every bound gives the same outcome with 0, 1, 64 or 500 denied siblings.
 - Cost if wrong: the fixed bit or directory metadata could aid inference
   about activity in a denied subtree. Mitigation: no caller-controlled
   threshold, denied names never stat'd, and central per-child recheck.
+
+## 2026-10-28: host replay-state error classes and nonce pruning (review P3)
+
+- Nonce/epoch store failures (corrupt or unavailable SQLite, clock regression
+  beyond tolerance, resource limit) now return exit 69 "trusted state
+  unavailable", not 77 "policy denied", so the centre no longer audits an
+  infrastructure fault as `REMOTE_POLICY_DENIED`. Rolling back below the
+  durable epoch floor stays a denial (77) through the distinct
+  `VisibilityEpochRollbackRefused`.
+- The 100 000-row cap no longer turns into a permanent denial of service:
+  rows that expired more than 300 s before the highest admitted host time are
+  deleted in the same `BEGIN IMMEDIATE` transaction that consumes a nonce.
+  Replay of a pruned snapshot would need a clock earlier than that time,
+  which is refused. Regressions cover filling, pruning, refusal of a clock
+  step back past tolerance, and replay detection within tolerance.

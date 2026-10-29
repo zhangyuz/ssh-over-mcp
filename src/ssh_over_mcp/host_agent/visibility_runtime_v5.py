@@ -20,11 +20,20 @@ from .visibility_policy_v5 import VisibilityPolicyV5, canonical_visibility_path
 
 _NONCE_ID = re.compile(r"^[0-9a-f]{32}$")
 _MAX_NONCES = 100_000
+# Expired nonces are pruned only behind a persisted clock high-water mark: a
+# row is deleted once it expired more than this long before the highest time
+# ever admitted, and a clock earlier than high-water minus this tolerance is
+# refused. A pruned snapshot therefore can never pass the TTL check again.
+NONCE_CLOCK_TOLERANCE_SECONDS = 300
 _TRUSTED_ADMIN_UID = 0  # Only privileged image/mount owner, never the Host Agent.
 
 
 class VisibilityRuntimeError(RuntimeError):
     """The local v5 runtime trust state is unavailable or unsafe."""
+
+
+class VisibilityEpochRollbackRefused(VisibilityRuntimeError):
+    """A signed epoch/digest is older than the durable host floor: deny."""
 
 
 def _file_path(value: str) -> str:
@@ -192,9 +201,31 @@ class PersistentSnapshotNonces:
                 "(id INTEGER PRIMARY KEY CHECK (id = 1), "
                 "epoch INTEGER NOT NULL, digest TEXT NOT NULL)"
             )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS clock_state "
+                "(id INTEGER PRIMARY KEY CHECK (id = 1), high_water INTEGER NOT NULL)"
+            )
             return connection
         except (sqlite3.Error, OSError, VisibilityRuntimeError) as exc:
             raise VisibilityRuntimeError("v5 nonce persistence unavailable") from exc
+
+    @staticmethod
+    def _admit_clock_and_prune(connection: sqlite3.Connection, now: int) -> None:
+        """Inside the caller's write transaction: refuse regression, then prune."""
+
+        row = connection.execute("SELECT high_water FROM clock_state WHERE id=1").fetchone()
+        high_water = now if row is None else max(row[0], now)
+        if now < high_water - NONCE_CLOCK_TOLERANCE_SECONDS:
+            raise VisibilityRuntimeError("v5 host clock moved backwards")
+        connection.execute(
+            "INSERT INTO clock_state (id, high_water) VALUES (1, ?) "
+            "ON CONFLICT(id) DO UPDATE SET high_water=excluded.high_water",
+            (high_water,),
+        )
+        connection.execute(
+            "DELETE FROM nonces WHERE expires_at <= ?",
+            (high_water - NONCE_CLOCK_TOLERANCE_SECONDS,),
+        )
 
     def consume(self, snapshot_id: str, *, expires_at: int, now: int) -> bool:
         if (
@@ -208,6 +239,7 @@ class PersistentSnapshotNonces:
         connection = self._open_db()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            self._admit_clock_and_prune(connection, now)
             (count,) = connection.execute("SELECT COUNT(*) FROM nonces").fetchone()
             if count >= _MAX_NONCES:
                 raise VisibilityRuntimeError("v5 nonce resource limit reached")
@@ -267,8 +299,9 @@ class PersistentSnapshotNonces:
                 policy_epoch < row[0]
                 or (policy_epoch == row[0] and central_policy_sha256 != row[1])
             ):
-                raise VisibilityRuntimeError("v5 policy epoch rollback refused")
+                raise VisibilityEpochRollbackRefused("v5 policy epoch rollback refused")
 
+            self._admit_clock_and_prune(connection, now)
             (count,) = connection.execute("SELECT COUNT(*) FROM nonces").fetchone()
             if count >= _MAX_NONCES:
                 raise VisibilityRuntimeError("v5 nonce resource limit reached")
@@ -292,6 +325,8 @@ class PersistentSnapshotNonces:
                 connection.execute("ROLLBACK")
             except sqlite3.Error:
                 pass
+            if isinstance(exc, VisibilityEpochRollbackRefused):
+                raise VisibilityEpochRollbackRefused("v5 policy epoch rollback refused") from exc
             raise VisibilityRuntimeError("v5 snapshot epoch persistence unavailable") from exc
         finally:
             connection.close()

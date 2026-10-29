@@ -188,3 +188,29 @@ def test_config_changed_during_read_invalidates_result(tmp_path, monkeypatch):
     code, output, _ = _run(policy, encode_request_v2(req))
     assert code in {EX_DENIED_V2, EX_UNAVAILABLE_V2}
     assert not output
+
+
+def test_nonce_store_failure_is_unavailable_not_policy_denial(tmp_path):
+    policy, raw, req = _fixture(tmp_path)
+    db = Path(raw["nonce_db_path"])
+    db.write_bytes(b"this is not a sqlite database" * 64)
+    os.chmod(db, 0o600)
+    status, output, _ = _run(policy, encode_request_v2(req))
+    assert status == EX_UNAVAILABLE_V2
+    assert output == b""
+
+
+def test_host_epoch_rollback_remains_a_policy_denial(tmp_path):
+    from ssh_over_mcp.host_agent.visibility_runtime_v5 import PersistentSnapshotNonces
+
+    policy, raw, req = _fixture(tmp_path)
+    assert PersistentSnapshotNonces(raw["nonce_db_path"]).consume_bound(
+        "c" * 32,
+        expires_at=_CLOCK + 30,
+        now=_CLOCK,
+        policy_epoch=12,
+        central_policy_sha256="b" * 64,
+    )
+    status, output, _ = _run(policy, encode_request_v2(req))
+    assert status == EX_DENIED_V2
+    assert output == b""
