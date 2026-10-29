@@ -79,6 +79,44 @@ revocation of already-running operations, either fail-closed synchronous
 admission/cancellation or a separately approved online epoch/ACK design is
 needed.
 
+## Maintenance primitives (2026-10-29, source only, no CLI, not executed live)
+
+`ssh_over_mcp.ops.mode_a_v5_lima_primitives.LimaDockerPrimitives` implements
+only the steps of the protocol whose mechanism is already approved in the
+[live operations runbook](../runbooks/mvp-mode-a-yuz-local-live-operations.md):
+- **Fence (steps 2, 7):** `launchctl disable` then `bootout` of
+  `com.som.modea.loopback`, accepted only after observing the service absent
+  (`launchctl print` = 113), marked disabled (survives login/reboot), and
+  `127.0.0.1:18801` actively refused. A timeout or unreachable port proves
+  nothing and fails.
+- **Drain (step 3):** zero ESTABLISHED sockets on the MCP port and on both
+  nodes' SSH port, read from `/proc/net/tcp` and `/proc/net/tcp6` inside each
+  container. Unreadable or malformed tables, or work that never ends, fail.
+- **Stop/start (steps 4, 6, 7):** `docker stop` / `start` through the Lima
+  guest, accepted only after `inspect` shows `exited` / `running`; control
+  stops before nodes and the Ledger starts before MCP.
+- **Reopen (step 7):** every container observed running, then a mandatory
+  injected operator confirmation, then `enable` + `bootstrap` and a
+  listening check; any failure fences again.
+
+All commands are fixed argv lists built from a validated configuration and run
+without a shell. Stages enforce their order and refuse to run unless the
+previous proof exists. The class deliberately has **no** `install`/`attest_*`,
+so it cannot be passed to `run_rotation` and strand the pilot half-rotated.
+Limits: zero established sockets is a defined drain criterion, not a proof of
+no in-memory work; alternate ingress paths other than the LaunchAgent tunnel
+(operator `limactl shell`) are out of scope and must be quiesced by the
+operator; tests use a recording fake runner, so no real launchd, Lima or
+Docker behaviour is proven.
+
+**Open design decision (needs the operator):** how `install` stages the
+root-owned policy/key generation and how a host proves its *running* state
+(epoch, policy digest, key ID with possession proof, host-key pin). ADR0028
+step 6 says "independent SSH hostkey-verified checks", but no SMCP operation
+returns that state; adding one changes the protocol/ForceCommand surface and
+needs its own ADR, whereas an operator-side read-only `docker exec` attestation
+entrypoint deviates from the written step and its trust boundary.
+
 ## Real acceptance gates before PR #347 Ready
 
 - Independent whole-change security review of trustworthy freeze, read-only
@@ -104,6 +142,10 @@ needed.
   Until it exists, the sequencer's comparison is only as strong as the
   adapter, and an adapter that echoes the expected spec would still pass. The
   adapter needs its own design review.
+  A key ID is an identifier, **not proof of possession**: it is not secret, so
+  an adapter that is handed the expected ID can echo it. The production
+  attestation must be nonce-bound (for example an HMAC over a fresh verifier
+  nonce computed with the verifier key) and keys must come from a CSPRNG.
 
 **2026-10-28 candidate improvement:** v5 config and HMAC verifier-key
 loaders now require files and their immediate directory to be owned by
