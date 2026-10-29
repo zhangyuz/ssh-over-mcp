@@ -172,12 +172,25 @@ absolute tool paths, a scrubbed environment (fixed `PATH` plus a short
 allow-list) and no shell; children run in their own session and the whole group
 is killed on timeout, overflow or cancellation. **A configuration naming any
 identifier of the live pilot (VM, LaunchAgent label or plist, tunnel port,
-`som342-mode-a-` containers) is refused with no override**: rotating the live
+`som342-mode-a-` containers) is refused with no override** (container names
+that could be read as a Docker ID prefix are refused too): rotating the live
 pilot is not authorized. Because APFS resolves paths case-insensitively every
 comparison is casefolded, the plist must be named exactly `<label>.plist`, the
 configuration is re-validated in the constructor, and `open_ingress` reads the
-plist's embedded `Label` (no symlinks, 64 KiB cap) and refuses unless it equals
+plist's embedded `Label` (the path must already be canonical, so a symlinked
+ancestor or final component is refused; regular file only, 64 KiB cap, any parse
+error is a refusal) and refuses unless it equals
 the configured label before anything is enabled.
+
+**What this guard does not do.** It compares *identifiers*. It does not inspect
+the rest of the plist (`Program`, `ProgramArguments`, `KeepAlive`, which ports
+an embedded tunnel script forwards), so a plist that carries an isolated label
+but starts something that reaches live resources is not detected; and the read
+and the later `launchctl bootstrap` open the path separately, leaving a small
+window for a same-user writer. The operator must review the plist body and its
+tunnel port as an acceptance precondition (plan section 2). Signalling a
+process group by pid is also guarded by a single signal per run, because a
+reaped leader's pid could be reused.
 Ordering is enforced as follows: drain, `stop_control`, `stop_host` need the
 fence (and the earlier proofs); `start_host` and `start_control` need only the
 fence; `open_ingress` needs the fence, all four containers observed running and

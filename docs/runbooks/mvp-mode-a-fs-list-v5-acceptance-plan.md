@@ -30,7 +30,10 @@ be stopped, rotated, re-imaged or have files added. Acceptance runs on a
 project and container names, its own loopback tunnel port, its own **LaunchAgent
 label and plist** and its own freshly generated keys. The maintenance primitives
 refuse a configuration that names any live-pilot VM, label, plist, tunnel port or
-`som342-mode-a-` container, with no override. If a second VM is not authorized,
+`som342-mode-a-` container, with no override. That guard compares identifiers
+only: **the operator must also read the isolated plist's body and the tunnel
+script it starts and confirm they name only the isolated guest and port**. If a
+second VM is not authorized,
 the acceptance does not run; there is no "briefly use the live one" variant.
 
 Preconditions (all must hold before any step):
