@@ -23,7 +23,9 @@ from ssh_over_mcp.ops.mode_a_v5_lima_primitives import (
 )
 from ssh_over_mcp.ops.mode_a_v5_rotation import RotationFailure
 
-LABEL = "com.som.modea.loopback"
+LAUNCHCTL = "/bin/launchctl"
+LIMACTL = "/opt/homebrew/bin/limactl"
+LABEL = "com.som.modea.isolated"
 UID = 501
 DISABLED_OUT = f'\tdisabled services = {{\n\t\t"{LABEL}" => disabled\n\t}}\n'.encode()
 ENABLED_OUT = b'\tdisabled services = {\n\t\t"com.other.job" => enabled\n\t}\n'
@@ -44,16 +46,17 @@ def tcp_table(*rows: tuple[int, str]) -> bytes:
 
 def config(**overrides) -> AdapterConfig:
     base = {
-        "vm_name": "som-mode-a-netpilot-oct27",
+        "limactl_path": LIMACTL,
+        "vm_name": "som-isolated-accept-1",
         "launchd_label": LABEL,
         "launchd_plist": f"/Users/yuz/Library/LaunchAgents/{LABEL}.plist",
         "uid": UID,
-        "tunnel_port": 18801,
-        "mcp_container": "som342-mode-a-mcp-1",
-        "ledger_container": "som342-mode-a-ledger-1",
+        "tunnel_port": 18911,
+        "mcp_container": "somfsl-mcp-1",
+        "ledger_container": "somfsl-ledger-1",
         "node_containers": {
-            "node01": "som342-mode-a-node01-1",
-            "node02": "som342-mode-a-node02-1",
+            "node01": "somfsl-node01-1",
+            "node02": "somfsl-node02-1",
         },
     }
     base.update(overrides)
@@ -82,7 +85,7 @@ class FakeRunner:
 
     def default(self, argv):
         ok = CommandResult(returncode=0, stdout=b"", stderr=b"", timed_out=False)
-        if argv[0] == "launchctl":
+        if argv[0] == LAUNCHCTL:
             verb = argv[1]
             if verb == "disable":
                 self.disabled = True
@@ -99,7 +102,7 @@ class FakeRunner:
                 out = DISABLED_OUT if self.disabled else ENABLED_OUT
                 return CommandResult(returncode=0, stdout=out, stderr=b"", timed_out=False)
             return ok
-        assert argv[:3] == ("limactl", "shell", "som-mode-a-netpilot-oct27"), argv
+        assert argv[:3] == (LIMACTL, "shell", "som-isolated-accept-1"), argv
         assert argv[3:6] == ("--", "sudo", "docker"), argv
         docker = argv[6:]
         if docker[0] == "stop":
@@ -178,13 +181,47 @@ def test_config_refuses_unsafe_or_malformed_values(field, value):
         config(**{field: value})
 
 
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"vm_name": "som-mode-a-netpilot-oct27"},
+        {"launchd_label": "com.som.modea.loopback"},
+        {"launchd_plist": "/Users/yuz/Library/LaunchAgents/com.som.modea.loopback.plist"},
+        {"tunnel_port": 18801},
+        {"mcp_container": "som342-mode-a-mcp-1"},
+        {"ledger_container": "som342-mode-a-ledger-1"},
+        {"node_containers": {"node01": "som342-mode-a-node01-1", "node02": "somfsl-node02-1"}},
+    ],
+)
+def test_config_can_never_target_the_live_pilot(overrides):
+    # Rotating the live pilot is not authorized by any ADR, so there is no flag.
+    with pytest.raises(ValidationError):
+        config(**overrides)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"limactl_path": "limactl"},
+        {"limactl_path": "/opt/homebrew/bin/../bin/limactl"},
+        {"limactl_path": "/opt/homebrew/bin/limactl; id"},
+        {"launchctl_path": "launchctl"},
+        {"stop_timeout_seconds": 60, "command_timeout_seconds": 60.0},
+        {"stop_timeout_seconds": 300, "command_timeout_seconds": 305.0},
+    ],
+)
+def test_config_requires_absolute_tools_and_a_command_deadline_beyond_stop(overrides):
+    with pytest.raises(ValidationError):
+        config(**overrides)
+
+
 def test_config_refuses_duplicate_or_wrong_node_set():
     with pytest.raises(ValidationError):
         config(node_containers={"node01": "same-1", "node02": "same-1"})
     with pytest.raises(ValidationError):
         config(node_containers={"node01": "a-1"})
     with pytest.raises(ValidationError):
-        config(mcp_container="som342-mode-a-node01-1")
+        config(mcp_container="somfsl-node01-1")
 
 
 def test_primitives_are_not_a_full_rotation_adapter():
@@ -201,10 +238,10 @@ def test_primitives_are_not_a_full_rotation_adapter():
 async def test_freeze_disables_boots_out_and_verifies_everything():
     prim, runner, probe = make()
     assert await prim.freeze_ingress() is True
-    verbs = [c[1] for c in runner.calls if c[0] == "launchctl"]
+    verbs = [c[1] for c in runner.calls if c[0] == LAUNCHCTL]
     assert verbs[:2] == ["disable", "bootout"]
     assert {"print", "print-disabled"} <= set(verbs)
-    assert probe.calls == [("127.0.0.1", 18801)]
+    assert probe.calls == [("127.0.0.1", 18911), ("::1", 18911)]
 
 
 @pytest.mark.asyncio
@@ -215,7 +252,7 @@ async def test_every_command_is_a_fixed_argv_without_a_shell():
     await prim.stop_control()
     await prim.stop_host("node01")
     for argv in runner.calls:
-        assert argv[0] in {"launchctl", "limactl"}
+        assert argv[0] in {LAUNCHCTL, LIMACTL}
         assert all(type(part) is str and part == part.strip() and "\n" not in part for part in argv)
         assert not any(part in {"sh", "bash", "-c"} for part in argv)
 
@@ -224,12 +261,12 @@ async def test_every_command_is_a_fixed_argv_without_a_shell():
 @pytest.mark.parametrize(
     "break_it",
     [
-        lambda r, p: r.on(lambda a: a[:2] == ("launchctl", "disable"), CommandResult(returncode=1, stdout=b"", stderr=b"", timed_out=False)),
-        lambda r, p: r.on(lambda a: a[:2] == ("launchctl", "print"), CommandResult(returncode=0, stdout=b"", stderr=b"", timed_out=False)),
-        lambda r, p: r.on(lambda a: a[:2] == ("launchctl", "print"), CommandResult(returncode=1, stdout=b"", stderr=b"", timed_out=False)),
-        lambda r, p: r.on(lambda a: a[:2] == ("launchctl", "print-disabled"), CommandResult(returncode=0, stdout=ENABLED_OUT, stderr=b"", timed_out=False)),
-        lambda r, p: r.on(lambda a: a[:2] == ("launchctl", "print-disabled"), CommandResult(returncode=1, stdout=DISABLED_OUT, stderr=b"", timed_out=False)),
-        lambda r, p: r.on(lambda a: a[:2] == ("launchctl", "bootout"), CommandResult(returncode=-9, stdout=b"", stderr=b"", timed_out=True)),
+        lambda r, p: r.on(lambda a: a[:2] == (LAUNCHCTL, "disable"), CommandResult(returncode=1, stdout=b"", stderr=b"", timed_out=False)),
+        lambda r, p: r.on(lambda a: a[:2] == (LAUNCHCTL, "print"), CommandResult(returncode=0, stdout=b"", stderr=b"", timed_out=False)),
+        lambda r, p: r.on(lambda a: a[:2] == (LAUNCHCTL, "print"), CommandResult(returncode=1, stdout=b"", stderr=b"", timed_out=False)),
+        lambda r, p: r.on(lambda a: a[:2] == (LAUNCHCTL, "print-disabled"), CommandResult(returncode=0, stdout=ENABLED_OUT, stderr=b"", timed_out=False)),
+        lambda r, p: r.on(lambda a: a[:2] == (LAUNCHCTL, "print-disabled"), CommandResult(returncode=1, stdout=DISABLED_OUT, stderr=b"", timed_out=False)),
+        lambda r, p: r.on(lambda a: a[:2] == (LAUNCHCTL, "bootout"), CommandResult(returncode=-9, stdout=b"", stderr=b"", timed_out=True)),
         lambda r, p: setattr(p, "listening", True),
         lambda r, p: setattr(p, "listening", OSError("network unreachable")),
     ],
@@ -265,8 +302,8 @@ async def test_drain_requires_a_verified_fence_and_runs_no_command_without_it():
 @pytest.mark.asyncio
 async def test_drain_counts_only_established_connections_on_the_service_port():
     prim, runner, _ = await fenced()
-    mcp = "som342-mode-a-mcp-1"
-    node = "som342-mode-a-node01-1"
+    mcp = "somfsl-mcp-1"
+    node = "somfsl-node01-1"
     # Listening sockets (0A) and other ports' connections must be ignored.
     runner.tcp[(mcp, "/proc/net/tcp")] = [tcp_table((8000, "0A"), (443, "01"), (8000, "06"))]
     runner.tcp[(node, "/proc/net/tcp")] = [tcp_table((2222, "0A"))]
@@ -278,7 +315,7 @@ async def test_drain_counts_only_established_connections_on_the_service_port():
 @pytest.mark.asyncio
 async def test_drain_waits_then_succeeds_when_connections_close():
     prim, runner, _ = await fenced()
-    node = "som342-mode-a-node02-1"
+    node = "somfsl-node02-1"
     runner.tcp[(node, "/proc/net/tcp")] = [tcp_table((2222, "01")), tcp_table((2222, "01")), tcp_table()]
     assert await prim.drain_inflight() is True
 
@@ -286,7 +323,7 @@ async def test_drain_waits_then_succeeds_when_connections_close():
 @pytest.mark.asyncio
 async def test_drain_fails_when_a_connection_never_closes():
     prim, runner, _ = await fenced(drain_attempts=3)
-    runner.tcp[("som342-mode-a-mcp-1", "/proc/net/tcp6")] = [tcp_table((8000, "01"))]
+    runner.tcp[("somfsl-mcp-1", "/proc/net/tcp6")] = [tcp_table((8000, "01"))]
     with pytest.raises(RotationFailure):
         await prim.drain_inflight()
     with pytest.raises(RotationFailure):  # drain unproven -> stop is refused
@@ -329,7 +366,7 @@ async def test_stop_order_verification_and_preconditions():
         await prim.stop_host("node01")
     assert await prim.stop_control()
     stops = [c[-1] for c in runner.calls if c[6] == "stop"]
-    assert stops == ["som342-mode-a-mcp-1", "som342-mode-a-ledger-1"]
+    assert stops == ["somfsl-mcp-1", "somfsl-ledger-1"]
     assert await prim.stop_host("node01") and await prim.stop_host("node02")
     with pytest.raises(RotationFailure):
         await prim.stop_host("node03")
@@ -339,7 +376,7 @@ async def test_stop_order_verification_and_preconditions():
 async def test_stop_is_not_trusted_without_observing_an_exited_state():
     prim, runner, _ = await drained()
     runner.on(
-        lambda a: a[6] == "inspect" and a[-1] == "som342-mode-a-ledger-1",
+        lambda a: a[6] == "inspect" and a[-1] == "somfsl-ledger-1",
         CommandResult(returncode=0, stdout=b"running\n", stderr=b"", timed_out=False),
     )
     with pytest.raises(RotationFailure):
@@ -358,13 +395,13 @@ async def test_start_requires_fence_and_observes_running_state():
     assert await prim.start_control()
     starts = [c[-1] for c in runner.calls if c[6] == "start"]
     assert starts == [
-        "som342-mode-a-node01-1",
-        "som342-mode-a-ledger-1",  # ledger before MCP
-        "som342-mode-a-mcp-1",
+        "somfsl-node01-1",
+        "somfsl-ledger-1",  # ledger before MCP
+        "somfsl-mcp-1",
     ]
-    runner.state["som342-mode-a-node01-1"] = "restarting"
+    runner.state["somfsl-node01-1"] = "restarting"
     runner.on(
-        lambda a: a[6] == "inspect" and a[-1] == "som342-mode-a-node01-1",
+        lambda a: a[6] == "inspect" and a[-1] == "somfsl-node01-1",
         CommandResult(returncode=0, stdout=b"restarting\n", stderr=b"", timed_out=False),
     )
     with pytest.raises(RotationFailure):
@@ -395,7 +432,7 @@ async def test_open_ingress_requires_explicit_operator_confirmation():
     runner.calls.clear()
     with pytest.raises(RotationFailure):
         await prim.open_ingress()
-    assert not any(c[:2] == ("launchctl", "enable") for c in runner.calls)
+    assert not any(c[:2] == (LAUNCHCTL, "enable") for c in runner.calls)
 
 
 @pytest.mark.asyncio
@@ -410,25 +447,57 @@ async def test_open_ingress_without_a_fence_does_nothing():
 async def test_open_ingress_only_after_every_container_is_observed_running():
     prim, runner, _ = await ready_to_open()
     runner.on(
-        lambda a: a[6:7] == ("inspect",) and a[-1] == "som342-mode-a-node02-1",
+        lambda a: a[6:7] == ("inspect",) and a[-1] == "somfsl-node02-1",
         CommandResult(returncode=0, stdout=b"exited\n", stderr=b"", timed_out=False),
     )
     with pytest.raises(RotationFailure):
         await prim.open_ingress()
-    assert not any(c[:2] == ("launchctl", "enable") for c in runner.calls)
+    assert not any(c[:2] == (LAUNCHCTL, "enable") for c in runner.calls)
 
 
 @pytest.mark.asyncio
 async def test_open_ingress_enables_bootstraps_and_verifies_the_tunnel():
     prim, runner, _ = await ready_to_open()
     assert await prim.open_ingress() is True
-    verbs = [c[1] for c in runner.calls if c[0] == "launchctl"]
+    verbs = [c[1] for c in runner.calls if c[0] == LAUNCHCTL]
     assert verbs.index("enable") < verbs.index("bootstrap")
-    bootstrap = next(c for c in runner.calls if c[:2] == ("launchctl", "bootstrap"))
+    bootstrap = next(c for c in runner.calls if c[:2] == (LAUNCHCTL, "bootstrap"))
     assert bootstrap[2:] == (f"gui/{UID}", f"/Users/yuz/Library/LaunchAgents/{LABEL}.plist")
     # Once reopened the fence is gone: later stages must be refused again.
     with pytest.raises(RotationFailure):
         await prim.drain_inflight()
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_open_still_fences_again_and_propagates():
+    prim, runner, probe = await ready_to_open()
+
+    async def cancelled(host, port):
+        raise asyncio.CancelledError
+
+    probe.is_listening = cancelled
+    with pytest.raises(asyncio.CancelledError):
+        await prim.open_ingress()
+    verbs = [c[1] for c in runner.calls if c[0] == LAUNCHCTL]
+    assert verbs.index("bootstrap") < len(verbs) - 1 - verbs[::-1].index("disable")
+    assert runner.disabled is True and runner.launchd_loaded is False
+    with pytest.raises(RotationFailure):
+        await prim.start_control()
+
+
+@pytest.mark.asyncio
+async def test_unexpected_runner_exception_during_open_is_a_rotation_failure():
+    prim, runner, _ = await ready_to_open()
+
+    async def boom(argv, *, timeout):
+        if argv[:2] == (LAUNCHCTL, "bootstrap"):
+            raise RuntimeError("unexpected")
+        return await FakeRunner.run(runner, argv, timeout=timeout)
+
+    runner.run = boom
+    with pytest.raises(RotationFailure):
+        await prim.open_ingress()
+    assert runner.disabled is True
 
 
 @pytest.mark.asyncio
@@ -438,16 +507,23 @@ async def test_open_ingress_fails_when_the_tunnel_does_not_answer():
     with pytest.raises(RotationFailure):
         await prim.open_ingress()
     # A half-opened ingress must be fenced again, not left enabled for login.
-    verbs = [c[1] for c in runner.calls if c[0] == "launchctl"]
+    verbs = [c[1] for c in runner.calls if c[0] == LAUNCHCTL]
     assert verbs.index("bootstrap") < len(verbs) - 1 - verbs[::-1].index("disable")
     assert runner.disabled is True and runner.launchd_loaded is False
-    # A retry must re-verify everything and re-ask the operator, not reuse the
-    # earlier attempt: container state is inspected again before any enable.
+    # The failed attempt must not leave a trusted fence behind: later stages
+    # need a fresh freeze proof, and the retry re-verifies and re-asks.
+    with pytest.raises(RotationFailure):
+        await prim.start_control()
+    with pytest.raises(RotationFailure):
+        await prim.drain_inflight()
+    runner.calls.clear()
+    probe.listening = False
+    await prim.freeze_ingress()
     runner.calls.clear()
     probe.listening = True
     assert await prim.open_ingress() is True
-    first_inspect = next(i for i, c in enumerate(runner.calls) if c[0] == "limactl")
-    first_enable = next(i for i, c in enumerate(runner.calls) if c[:2] == ("launchctl", "enable"))
+    first_inspect = next(i for i, c in enumerate(runner.calls) if c[0] == LIMACTL)
+    first_enable = next(i for i, c in enumerate(runner.calls) if c[:2] == (LAUNCHCTL, "enable"))
     assert first_inspect < first_enable
 
 
@@ -468,6 +544,76 @@ async def test_subprocess_runner_is_shell_free_bounded_and_times_out():
 
     missing = await runner.run(("/nonexistent/binary-for-test",), timeout=5)
     assert missing.returncode == 127 and missing.timed_out is False
+
+
+@pytest.mark.asyncio
+async def test_runner_reads_every_chunk_to_eof_not_just_the_first():
+    runner = SubprocessRunner()
+    code = (
+        "import sys,time\n"
+        "sys.stdout.write('first\\n'); sys.stdout.flush(); time.sleep(0.4)\n"
+        "sys.stdout.write('second\\n'); sys.stderr.write('e1\\n'); sys.stderr.flush()\n"
+    )
+    result = await runner.run((sys.executable, "-c", code), timeout=10)
+    assert result.stdout == b"first\nsecond\n" and result.stderr == b"e1\n"
+    assert result.returncode == 0 and not result.truncated and not result.timed_out
+
+
+@pytest.mark.asyncio
+async def test_runner_returns_large_output_in_full_without_hanging():
+    runner = SubprocessRunner(max_output_bytes=1024 * 1024)
+    result = await runner.run(
+        (sys.executable, "-c", "import sys; sys.stdout.write('x' * 300000)"), timeout=10
+    )
+    assert len(result.stdout) == 300000 and not result.truncated and not result.timed_out
+
+
+@pytest.mark.asyncio
+async def test_runner_over_limit_is_truncated_and_killed_promptly():
+    runner = SubprocessRunner(max_output_bytes=2048)
+    started = asyncio.get_running_loop().time()
+    result = await runner.run(
+        (sys.executable, "-c", "import sys,time\nsys.stdout.write('y'*10**6)\ntime.sleep(30)"),
+        timeout=20,
+    )
+    assert result.truncated is True and len(result.stdout) <= 2048
+    assert asyncio.get_running_loop().time() - started < 10
+
+
+@pytest.mark.asyncio
+async def test_runner_cancellation_kills_the_child(tmp_path):
+    pid_file = tmp_path / "pid"
+    code = f"import os,time,pathlib; pathlib.Path({str(pid_file)!r}).write_text(str(os.getpid())); time.sleep(60)"
+    task = asyncio.ensure_future(SubprocessRunner().run((sys.executable, "-c", code), timeout=60))
+    for _ in range(100):
+        if pid_file.exists() and pid_file.read_text():
+            break
+        await asyncio.sleep(0.05)
+    pid = int(pid_file.read_text())
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    import os
+
+    for _ in range(100):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        await asyncio.sleep(0.05)
+    else:
+        pytest.fail("child process survived cancellation")
+
+
+@pytest.mark.asyncio
+async def test_runner_passes_a_scrubbed_environment(monkeypatch):
+    monkeypatch.setenv("SOM_TEST_AMBIENT_SECRET", "leak")
+    monkeypatch.setenv("LIMA_HOME", "/tmp/lima-home-for-test")
+    code = "import os,json; print(json.dumps(sorted(os.environ)))"
+    result = await SubprocessRunner().run((sys.executable, "-c", code), timeout=10)
+    names = set(__import__("json").loads(result.stdout))
+    assert "SOM_TEST_AMBIENT_SECRET" not in names
+    assert {"PATH"} <= names and "LIMA_HOME" in names
 
 
 @pytest.mark.asyncio

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Protocol
@@ -28,8 +29,18 @@ from .mode_a_v5_rotation import RotationFailure
 _NAME = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,62}$")
 _LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _PLIST = re.compile(r"^/[A-Za-z0-9_.@-]+(/[A-Za-z0-9_.@-]+)*\.plist$")
+_TOOL = re.compile(r"^/[A-Za-z0-9_.@+-]+(/[A-Za-z0-9_.@+-]+)*$")
 _NODES = ("node01", "node02")
 _LAUNCHD_NOT_FOUND = 113  # `launchctl print` for a service that is not loaded
+# The live Mode A pilot is not authorized for rotation by any ADR, so a config
+# naming any of its identifiers is refused outright (there is deliberately no
+# override flag; lifting this needs an ADR and a code change).
+_LIVE_VM = "som-mode-a-netpilot-oct27"
+_LIVE_LABEL = "com.som.modea.loopback"
+_LIVE_TUNNEL_PORT = 18801
+_LIVE_CONTAINER_PREFIX = "som342-mode-a-"
+_LOOPBACKS = ("127.0.0.1", "::1")
+_ENV_ALLOWLIST = ("HOME", "LIMA_HOME", "USER", "LOGNAME", "TMPDIR")
 
 
 class CommandResult(BaseModel):
@@ -55,6 +66,8 @@ class PortProbe(Protocol):
 class AdapterConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
+    limactl_path: str
+    launchctl_path: str = "/bin/launchctl"
     vm_name: str
     launchd_label: str
     launchd_plist: str
@@ -75,6 +88,13 @@ class AdapterConfig(BaseModel):
     def _safe_name(cls, value: str) -> str:
         if _NAME.fullmatch(value) is None:
             raise ValueError("unsafe name")
+        return value
+
+    @field_validator("limactl_path", "launchctl_path")
+    @classmethod
+    def _safe_tool(cls, value: str) -> str:
+        if _TOOL.fullmatch(value) is None or any(p in {".", ".."} for p in value.split("/")):
+            raise ValueError("tool path must be absolute without traversal")
         return value
 
     @field_validator("launchd_label")
@@ -100,14 +120,35 @@ class AdapterConfig(BaseModel):
         names = [self.mcp_container, self.ledger_container, *self.node_containers.values()]
         if len(set(names)) != len(names):
             raise ValueError("container names must be distinct")
+        if (
+            self.vm_name == _LIVE_VM
+            or self.launchd_label == _LIVE_LABEL
+            or self.launchd_plist.endswith(f"/{_LIVE_LABEL}.plist")
+            or self.tunnel_port == _LIVE_TUNNEL_PORT
+            or any(name.startswith(_LIVE_CONTAINER_PREFIX) for name in names)
+        ):
+            raise ValueError("configuration targets the live pilot, which is not authorized")
+        if self.command_timeout_seconds < self.stop_timeout_seconds + 10:
+            raise ValueError("command deadline must exceed the container stop timeout")
         return self
+
+
+def _scrubbed_environment() -> dict[str, str]:
+    """No ambient CLI configuration: a fixed PATH plus a short allow-list."""
+
+    env = {name: os.environ[name] for name in _ENV_ALLOWLIST if name in os.environ}
+    env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+    return env
 
 
 class SubprocessRunner:
     """Run one exact argv with no shell, a deadline and bounded output."""
 
-    def __init__(self, *, max_output_bytes: int = 256 * 1024) -> None:
+    def __init__(
+        self, *, max_output_bytes: int = 256 * 1024, env: dict[str, str] | None = None
+    ) -> None:
         self._limit = max_output_bytes
+        self._env = dict(env) if env is not None else None
 
     async def run(self, argv: Sequence[str], *, timeout: float) -> CommandResult:
         try:
@@ -116,17 +157,32 @@ class SubprocessRunner:
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=self._env if self._env is not None else _scrubbed_environment(),
             )
         except OSError:
             return CommandResult(returncode=127, stdout=b"", stderr=b"", timed_out=False)
 
-        async def read(stream: asyncio.StreamReader) -> tuple[bytes, bool]:
-            data = await stream.read(self._limit + 1)
-            return data[: self._limit], len(data) > self._limit
+        truncated = False
+
+        async def read_to_eof(stream: asyncio.StreamReader) -> bytes:
+            # StreamReader.read(n) returns after the first available chunk, so
+            # loop to EOF; a partial table would make drain "prove" zero.
+            nonlocal truncated
+            kept = bytearray()
+            while True:
+                chunk = await stream.read(65536)
+                if not chunk:
+                    return bytes(kept)
+                room = self._limit - len(kept)
+                if room > 0:
+                    kept.extend(chunk[:room])
+                if len(chunk) > max(room, 0):
+                    truncated = True
+                    process.kill()  # pipes close, so the reads below reach EOF
 
         try:
-            (out, out_cut), (err, err_cut), _ = await asyncio.wait_for(
-                asyncio.gather(read(process.stdout), read(process.stderr), process.wait()),
+            out, err, _ = await asyncio.wait_for(
+                asyncio.gather(read_to_eof(process.stdout), read_to_eof(process.stderr), process.wait()),
                 timeout,
             )
         except TimeoutError:
@@ -138,10 +194,12 @@ class SubprocessRunner:
                 stderr=b"",
                 timed_out=True,
             )
-        truncated = out_cut or err_cut
-        if truncated and process.returncode is None:
+        except BaseException:
+            # Cancellation or any fault: never leave the child running. This
+            # kills only the local client; a remote command may continue, so
+            # callers re-verify state instead of trusting an interrupted run.
             process.kill()
-            await process.wait()
+            raise
         return CommandResult(
             returncode=process.returncode if process.returncode is not None else -9,
             stdout=out,
@@ -215,7 +273,7 @@ class LimaDockerPrimitives:
     # ------------------------------------------------------------- plumbing
 
     def _docker(self, *args: str) -> tuple[str, ...]:
-        return ("limactl", "shell", self._cfg.vm_name, "--", "sudo", "docker", *args)
+        return (self._cfg.limactl_path, "shell", self._cfg.vm_name, "--", "sudo", "docker", *args)
 
     async def _run(self, argv: tuple[str, ...]) -> CommandResult:
         result = await self._runner.run(argv, timeout=self._cfg.command_timeout_seconds)
@@ -249,30 +307,39 @@ class LimaDockerPrimitives:
     def _target(self) -> str:
         return f"gui/{self._cfg.uid}/{self._cfg.launchd_label}"
 
+    def _launchctl(self, *args: str) -> tuple[str, ...]:
+        return (self._cfg.launchctl_path, *args)
+
     async def _service_marked_disabled(self) -> bool:
-        result = await self._ok(("launchctl", "print-disabled", f"gui/{self._cfg.uid}"))
+        result = await self._ok(self._launchctl("print-disabled", f"gui/{self._cfg.uid}"))
         pattern = rb'"' + re.escape(self._cfg.launchd_label.encode()) + rb'"\s*=>\s*(disabled|true)'
         return re.search(pattern, result.stdout) is not None
 
-    async def _listening(self) -> bool:
-        try:
-            return await self._probe.is_listening("127.0.0.1", self._cfg.tunnel_port)
-        except OSError:
-            raise RotationFailure("ingress port state unproven") from None
+    async def _listening(self, hosts: Sequence[str]) -> bool:
+        """True if any address accepts; an unproven address raises (fail closed)."""
+
+        answered = False
+        for host in hosts:
+            try:
+                if await self._probe.is_listening(host, self._cfg.tunnel_port):
+                    answered = True
+            except OSError:
+                raise RotationFailure("ingress port state unproven") from None
+        return answered
 
     # ------------------------------------------------------------- ingress
 
     async def freeze_ingress(self) -> bool:
         self._fenced = self._drained = self._control_stopped = False
-        await self._ok(("launchctl", "disable", self._target))
+        await self._ok(self._launchctl("disable", self._target))
         # The result is verified by observation below; a not-loaded service is fine.
-        await self._run(("launchctl", "bootout", self._target))
-        printed = await self._run(("launchctl", "print", self._target))
+        await self._run(self._launchctl("bootout", self._target))
+        printed = await self._run(self._launchctl("print", self._target))
         if printed.returncode != _LAUNCHD_NOT_FOUND:
             raise RotationFailure("ingress service still loaded or state unproven")
         if not await self._service_marked_disabled():
             raise RotationFailure("ingress fence is not durable")
-        if await self._listening():
+        if await self._listening(_LOOPBACKS):
             raise RotationFailure("ingress port still accepts connections")
         self._fenced = True
         return True
@@ -292,23 +359,34 @@ class LimaDockerPrimitives:
         if confirmed is not True:
             raise RotationFailure("operator did not confirm opening ingress")
         try:
-            await self._ok(("launchctl", "enable", self._target))
+            await self._ok(self._launchctl("enable", self._target))
             await self._ok(
-                ("launchctl", "bootstrap", f"gui/{self._cfg.uid}", self._cfg.launchd_plist)
+                self._launchctl("bootstrap", f"gui/{self._cfg.uid}", self._cfg.launchd_plist)
             )
             if await self._service_marked_disabled():
                 raise RotationFailure("ingress service is still disabled")
-            if not await self._listening():
+            if not await self._listening(_LOOPBACKS[:1]):
                 raise RotationFailure("ingress did not come up")
-        except Exception:
-            await self._refence_best_effort()
+        except BaseException as exc:
+            # Whatever happened (failure or cancellation), distrust every
+            # earlier proof and fence again before reporting.
+            self._fenced = self._drained = self._control_stopped = False
+            with contextlib.suppress(BaseException):
+                await asyncio.shield(self._refence_best_effort())
+            if isinstance(exc, Exception) and not isinstance(exc, RotationFailure):
+                raise RotationFailure("ingress could not be reopened") from None
             raise
         self._fenced = self._drained = self._control_stopped = False
         return True
 
     async def _refence_best_effort(self) -> None:
-        for argv in (("launchctl", "disable", self._target), ("launchctl", "bootout", self._target)):
-            # Best effort: the original failure is re-raised by the caller.
+        for argv in (
+            self._launchctl("disable", self._target),
+            self._launchctl("bootout", self._target),
+        ):
+            # Best effort: the original failure is re-raised by the caller. A
+            # kill between enable and this point still leaves the label enabled
+            # for the next login; the operator must re-run freeze_ingress.
             with contextlib.suppress(Exception):
                 await self._runner.run(argv, timeout=self._cfg.command_timeout_seconds)
 
