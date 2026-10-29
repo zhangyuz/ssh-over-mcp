@@ -18,6 +18,7 @@ from ssh_over_mcp.host_agent.visibility_policy_v5 import canonical_visibility_pa
 from ssh_over_mcp.host_agent.visibility_snapshot_v5 import VisibilitySnapshotV5
 from ssh_over_mcp.policy.models import Decision, EvaluationRequest
 from ssh_over_mcp.policy.visibility_compiler_v5 import (
+    VisibilityCompilationDenied,
     compile_visibility_rules,
     reauthorize_list_paths,
 )
@@ -228,9 +229,9 @@ class SSHFilesystemClient:
             host=host, path=root, tool="fs_list", profile=context.principal.profile
         )
         authority = self.visibility_authority
-        if authority is None:
-            raise SSHRemoteResponseError("filesystem visibility authority unavailable")
         try:
+            if authority is None:
+                raise ValueError("no trusted visibility authority")
             engine = authority.engine
             if engine.inventory is not self.transport.connections.inventory:
                 raise ValueError("inventory mismatch")
@@ -252,6 +253,13 @@ class SSHFilesystemClient:
                 separators=(",", ":"),
             ).encode()
         except Exception:  # noqa: BLE001 — trusted provider errors must fail closed
+            # No trusted decision exists yet; still record a terminal outcome.
+            try:
+                await self.audit.simple_event(
+                    AuditEventType.EXECUTION_FAILED, context=context, tool="fs_list", host=host
+                )
+            except AuditPersistenceFailure:
+                raise SSHAuditPersistenceError("audit persistence failed") from None
             raise SSHRemoteResponseError("filesystem visibility authority unavailable") from None
         facts = ApprovalExecutionFacts(
             effective_timeout_seconds=self.default_timeout_seconds,
@@ -277,11 +285,29 @@ class SSHFilesystemClient:
         # cannot turn approval-required policy into a subtree ALLOW.
         if decision.decision != Decision.ALLOW or decision.normalized_path != root:
             raise SSHPolicyDenied(decision)
-        result = None
         try:
             compiled = compile_visibility_rules(
                 engine, host=host, profile=request.profile, operation="fs_list", root=root
             )
+        except VisibilityCompilationDenied:
+            # Deny-on-ambiguity is a central policy outcome, not an execution
+            # failure: audit and report it as a denial before any signing.
+            denied = decision.model_copy(
+                update={
+                    "decision": Decision.DENY,
+                    "reason": "central visibility policy cannot authorize this listing",
+                }
+            )
+            await self._audit_required(
+                AuditEventType.POLICY_DENIED,
+                context=context,
+                request=request,
+                decision=denied,
+                facts=facts,
+            )
+            raise SSHPolicyDenied(denied) from None
+        result = None
+        try:
             if compiled.policy_sha256 != digest or decision.policy_version != "sha256:" + digest:
                 raise ValueError("policy changed")
             instant = int(time.time())

@@ -557,3 +557,59 @@ async def test_failure_audit_unavailable_still_returns_no_data(setup):
     setup.ledger.fail = AuditEventType.EXECUTION_FAILED
     with pytest.raises(SSHAuditPersistenceError):
         await invoke(setup)
+
+
+@pytest.mark.asyncio
+async def test_unrepresentable_central_rule_is_audited_as_policy_denial(setup):
+    s = setup
+    enable(s)
+    old = s.authority.engine
+    rules = (
+        *old.policy.rules,
+        PolicyRule(
+            id="glob-deny",
+            effect=Effect.DENY,
+            roles=("operator",),
+            tools=("fs_list",),
+            paths=("/srv/data/*.key",),
+        ),
+    )
+    engine = PolicyEngine(
+        inventory=old.inventory, policy=old.policy.model_copy(update={"rules": rules})
+    )
+    s.authority.engine = engine
+    s.client.authorizer = AuditOnlyExecutionAuthorizer(policy=engine, ledger=s.ledger)
+    with pytest.raises(SSHPolicyDenied):
+        await invoke(s)
+    types = [e.event_type for e in s.ledger.events]
+    assert types[-1] == AuditEventType.POLICY_DENIED
+    assert AuditEventType.EXECUTION_STARTED not in types
+    assert AuditEventType.EXECUTION_FAILED not in types
+    assert not s.calls and not s.authority.signed
+
+
+@pytest.mark.asyncio
+async def test_unavailable_authority_before_authorization_is_audited(setup):
+    s = setup
+    enable(s)
+
+    def broken(**kwargs):
+        raise RuntimeError("signer store offline")
+
+    s.authority.current_epoch = broken
+    with pytest.raises(SSHRemoteResponseError):
+        await invoke(s)
+    assert [e.event_type for e in s.ledger.events] == [AuditEventType.EXECUTION_FAILED]
+    assert s.ledger.events[0].host == "node" and s.ledger.events[0].tool == "fs_list"
+    assert not s.calls
+
+
+@pytest.mark.asyncio
+async def test_unauditable_authority_failure_fails_closed(setup):
+    s = setup
+    enable(s)
+    s.authority.current_epoch = lambda **kwargs: (_ for _ in ()).throw(RuntimeError("x"))
+    s.ledger.fail = AuditEventType.EXECUTION_FAILED
+    with pytest.raises(SSHAuditPersistenceError):
+        await invoke(s)
+    assert not s.calls
