@@ -1,4 +1,5 @@
 """PR347 disposable real MCP HTTP -> Ledger -> central v5 signer -> two OpenSSH v2."""
+
 import json
 import os
 import secrets
@@ -9,13 +10,16 @@ from pathlib import Path
 
 from mode_a_hosted_oci_fs_smoke import IMAGE, prepare, run, start_node
 
+
 def main():
     assert sys.platform == "linux" and os.geteuid() != 0
     assert os.environ.get("GITHUB_ACTIONS") == "true"
     assert os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted"
     assert os.environ.get("GITHUB_EVENT_NAME") == "pull_request"
     running, networks = [], []
-    with tempfile.TemporaryDirectory(prefix="som347-central-", dir=os.environ["RUNNER_TEMP"]) as tmp:
+    with tempfile.TemporaryDirectory(
+        prefix="som347-central-", dir=os.environ["RUNNER_TEMP"]
+    ) as tmp:
         work = Path(tmp)
         try:
             for i in (1, 2):
@@ -48,69 +52,162 @@ engine=PolicyEngine(inventory=Inventory.model_validate({"hosts":hosts}),
  policy=PolicyDocument.model_validate(policy))
 print(engine.policy_version[7:])
 """
-            digest = run(
-                ["docker","run","--rm","-i","--network","none","--entrypoint",
-                 "/opt/ssh-over-mcp-e2e/venv/bin/python",IMAGE,"-c",digest_program],
-                stdin=json.dumps(pubkeys).encode(),timeout=30,
-            ).stdout.decode().strip()
+            digest = (
+                run(
+                    [
+                        "docker",
+                        "run",
+                        "--rm",
+                        "-i",
+                        "--network",
+                        "none",
+                        "--entrypoint",
+                        "/opt/ssh-over-mcp-e2e/venv/bin/python",
+                        IMAGE,
+                        "-c",
+                        digest_program,
+                    ],
+                    stdin=json.dumps(pubkeys).encode(),
+                    timeout=30,
+                )
+                .stdout.decode()
+                .strip()
+            )
             assert len(digest) == 64 and all(ch in "0123456789abcdef" for ch in digest)
-            signer_keys = {f"node{i:02}":secrets.token_bytes(32) for i in (1,2)}
+            signer_keys = {f"node{i:02}": secrets.token_bytes(32) for i in (1, 2)}
             assert signer_keys["node01"] != signer_keys["node02"]
             node_names = []
-            for i in (1,2):
-                network=f"som347-net{i}-{uuid.uuid4().hex[:7]}"
-                run(["docker","network","create","--internal",network])
+            for i in (1, 2):
+                network = f"som347-net{i}-{uuid.uuid4().hex[:7]}"
+                run(["docker", "network", "create", "--internal", network])
                 networks.append(network)
-                name=f"som347-ssh{i}-{uuid.uuid4().hex[:7]}"
-                start_node(name,work/f"node{i:02}",running,network=network,
-                    alias=f"node{i:02}",v5_host_id=f"node{i:02}",
-                    v5_policy_sha256=digest,v5_signer_key=signer_keys[f"node{i:02}"],
-                    prepared_keys=True)
+                name = f"som347-ssh{i}-{uuid.uuid4().hex[:7]}"
+                start_node(
+                    name,
+                    work / f"node{i:02}",
+                    running,
+                    network=network,
+                    alias=f"node{i:02}",
+                    v5_host_id=f"node{i:02}",
+                    v5_policy_sha256=digest,
+                    v5_signer_key=signer_keys[f"node{i:02}"],
+                    prepared_keys=True,
+                )
                 node_names.append(name)
-                run(["docker","exec","-u","2201:3201",name,"/bin/sh","-c",
-                     "printf 'public data' > /srv/data/public.txt; mkdir /srv/data/secret; "
-                     "printf 'classified' > /srv/data/secret/password"])
-            control=f"som347-control-{uuid.uuid4().hex[:7]}"
-            run(["docker","run","-d","--rm","--name",control,"--network",networks[0],
-                 "--cap-drop","ALL","--security-opt","no-new-privileges:true",
-                 "--read-only","--user","2201:3201",
-                 "--tmpfs","/tmp:rw,nosuid,nodev,uid=2201,gid=3201,mode=1777,size=16m",
-                 "--entrypoint","/bin/sleep",IMAGE,"180"])
-            running.append(control)
-            run(["docker","network","connect",networks[1],control])
-            origin_net=f"som347-origin-{uuid.uuid4().hex[:7]}"
-            run(["docker","network","create","--internal",origin_net])
-            networks.append(origin_net)
-            run(["docker","network","connect",origin_net,control])
-            details=json.loads(run(["docker","inspect",control]).stdout)[0]
-            origin_ip=details["NetworkSettings"]["Networks"][origin_net]["IPAddress"]
-            ips=[details["NetworkSettings"]["Networks"][net]["IPAddress"] for net in networks[:2]]
-            for i in (1,2):
-                files=[
-                    (f"client{i}",(work/f"node{i:02}"/"client").read_bytes(),"0600"),
-                    (f"hostkey{i}.pub",(work/f"node{i:02}"/"hostkeys"/"ssh_host_ed25519_key.pub").read_bytes(),"0644"),
-                    (f"v5-signer-node{i:02}",signer_keys[f"node{i:02}"],"0600"),
+                run(
+                    [
+                        "docker",
+                        "exec",
+                        "-u",
+                        "2201:3201",
+                        name,
+                        "/bin/sh",
+                        "-c",
+                        (
+                            "printf 'public data' > /srv/data/public.txt; mkdir /srv/data/secret; "
+                            "printf 'classified' > /srv/data/secret/password"
+                        ),
+                    ]
+                )
+            control = f"som347-control-{uuid.uuid4().hex[:7]}"
+            run(
+                [
+                    "docker",
+                    "run",
+                    "-d",
+                    "--rm",
+                    "--name",
+                    control,
+                    "--network",
+                    networks[0],
+                    "--cap-drop",
+                    "ALL",
+                    "--security-opt",
+                    "no-new-privileges:true",
+                    "--read-only",
+                    "--user",
+                    "2201:3201",
+                    "--tmpfs",
+                    "/tmp:rw,nosuid,nodev,uid=2201,gid=3201,mode=1777,size=16m",
+                    "--entrypoint",
+                    "/bin/sleep",
+                    IMAGE,
+                    "180",
                 ]
-                for label,data,mode in files:
-                    run(["docker","exec","-i","-u","2201:3201",control,
-                         "/bin/sh","-c",f"umask 077; cat > /tmp/{label}; chmod {mode} /tmp/{label}"],
-                        stdin=data)
-            script=Path(__file__).with_name("mode_a_hosted_control_ledger_smoke.py").read_bytes()
-            result=run(["docker","exec","-i","-u","2201:3201",control,
-                "/opt/ssh-over-mcp-e2e/venv/bin/python","-",origin_ip,*ips,"--v2"],
-                stdin=script,timeout=100,ok=False)
+            )
+            running.append(control)
+            run(["docker", "network", "connect", networks[1], control])
+            origin_net = f"som347-origin-{uuid.uuid4().hex[:7]}"
+            run(["docker", "network", "create", "--internal", origin_net])
+            networks.append(origin_net)
+            run(["docker", "network", "connect", origin_net, control])
+            details = json.loads(run(["docker", "inspect", control]).stdout)[0]
+            origin_ip = details["NetworkSettings"]["Networks"][origin_net]["IPAddress"]
+            ips = [details["NetworkSettings"]["Networks"][net]["IPAddress"] for net in networks[:2]]
+            for i in (1, 2):
+                files = [
+                    (f"client{i}", (work / f"node{i:02}" / "client").read_bytes(), "0600"),
+                    (
+                        f"hostkey{i}.pub",
+                        (
+                            work / f"node{i:02}" / "hostkeys" / "ssh_host_ed25519_key.pub"
+                        ).read_bytes(),
+                        "0644",
+                    ),
+                    (f"v5-signer-node{i:02}", signer_keys[f"node{i:02}"], "0600"),
+                ]
+                for label, data, mode in files:
+                    run(
+                        [
+                            "docker",
+                            "exec",
+                            "-i",
+                            "-u",
+                            "2201:3201",
+                            control,
+                            "/bin/sh",
+                            "-c",
+                            f"umask 077; cat > /tmp/{label}; chmod {mode} /tmp/{label}",
+                        ],
+                        stdin=data,
+                    )
+            script = Path(__file__).with_name("mode_a_hosted_control_ledger_smoke.py").read_bytes()
+            result = run(
+                [
+                    "docker",
+                    "exec",
+                    "-i",
+                    "-u",
+                    "2201:3201",
+                    control,
+                    "/opt/ssh-over-mcp-e2e/venv/bin/python",
+                    "-",
+                    origin_ip,
+                    *ips,
+                    "--v2",
+                ],
+                stdin=script,
+                timeout=100,
+                ok=False,
+            )
             assert result.returncode == 0, (
-                result.returncode,result.stderr[-3500:],result.stdout[-1200:])
-            for node in ("node01","node02"):
+                result.returncode,
+                result.stderr[-3500:],
+                result.stdout[-1200:],
+            )
+            for node in ("node01", "node02"):
                 assert f"CENTRAL_MCP_LEDGER_REAL_OPENSSH_V2_{node}_PASS".encode() in result.stdout
             assert b"CENTRAL_MCP_LEDGER_TWO_OPENSSH_V2_TEST_ONLY_PASS" in result.stdout
-            print("PR347_REAL_CENTRAL_MCP_LEDGER_TWO_OPENSSH_V2_E2E_PASS",flush=True)
+            print("PR347_REAL_CENTRAL_MCP_LEDGER_TWO_OPENSSH_V2_E2E_PASS", flush=True)
         finally:
             for name in reversed(running):
-                run(["docker","rm","-f",name],timeout=20,ok=False)
+                run(["docker", "rm", "-f", name], timeout=20, ok=False)
             for net in reversed(networks):
-                run(["docker","network","rm",net],timeout=20,ok=False)
-            run(["sudo","-n","chown","-R",f"{os.geteuid()}:{os.getegid()}",str(work)],ok=False)
+                run(["docker", "network", "rm", net], timeout=20, ok=False)
+            run(
+                ["sudo", "-n", "chown", "-R", f"{os.geteuid()}:{os.getegid()}", str(work)], ok=False
+            )
+
 
 if __name__ == "__main__":
     main()

@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, "/opt/ssh-over-mcp-e2e/workspace/src")
 
-import httpx
+import httpx2
 import uvicorn
 import yaml
 from mcp import Client
@@ -30,10 +30,9 @@ from ssh_over_mcp.api.app import build_application
 from ssh_over_mcp.api.runtime import MCPRuntimeSettings
 from ssh_over_mcp.approvals.runtime import SecurityLedgerRuntimeSettings
 from ssh_over_mcp.approvals.service import SecurityLedgerService
-from ssh_over_mcp.ssh.transport import StructuredSSHTransport
-from ssh_over_mcp.ssh.immutable_visibility_authority import ImmutableVisibilityAuthority
-from ssh_over_mcp.config.loader import load_config
 from ssh_over_mcp.policy.engine import PolicyEngine
+from ssh_over_mcp.ssh.immutable_visibility_authority import ImmutableVisibilityAuthority
+from ssh_over_mcp.ssh.transport import StructuredSSHTransport
 
 # Diagnostic-only observer: delegates unmodified to the real SSH transport.
 # It records no request bodies, secrets or file content.
@@ -121,33 +120,37 @@ def policy_config(*, v2: bool = False) -> dict:
             "allowed_roles": ["rw-operator"],
         }
     paths = [f"/srv/data/mvp-node-{i}" for i in (1, 2)]
-    rules = [
-        {
-            "id": "v2.list.allow",
-            "effect": "allow",
-            "roles": ["rw-operator"],
-            "hosts": list(NODES),
-            "tools": ["fs_list"],
-            "paths": ["/srv/data", "/srv/data/**"],
-        },
-        {
-            "id": "v2.list.deny",
-            "effect": "deny",
-            "roles": ["rw-operator"],
-            "hosts": list(NODES),
-            "tools": ["fs_list"],
-            "paths": ["/srv/data/secret", "/srv/data/secret/**"],
-        },
-    ] if v2 else [
-        {
-            "id": "oci.two-node.fs-only",
-            "effect": "allow",
-            "roles": ["rw-operator"],
-            "hosts": list(NODES),
-            "tools": ["fs_stat", "fs_read", "fs_mkdir", "fs_write"],
-            "paths": [*paths, *(f"{p}/approved.bin" for p in paths)],
-        }
-    ]
+    rules = (
+        [
+            {
+                "id": "v2.list.allow",
+                "effect": "allow",
+                "roles": ["rw-operator"],
+                "hosts": list(NODES),
+                "tools": ["fs_list"],
+                "paths": ["/srv/data", "/srv/data/**"],
+            },
+            {
+                "id": "v2.list.deny",
+                "effect": "deny",
+                "roles": ["rw-operator"],
+                "hosts": list(NODES),
+                "tools": ["fs_list"],
+                "paths": ["/srv/data/secret", "/srv/data/secret/**"],
+            },
+        ]
+        if v2
+        else [
+            {
+                "id": "oci.two-node.fs-only",
+                "effect": "allow",
+                "roles": ["rw-operator"],
+                "hosts": list(NODES),
+                "tools": ["fs_stat", "fs_read", "fs_mkdir", "fs_write"],
+                "paths": [*paths, *(f"{p}/approved.bin" for p in paths)],
+            }
+        ]
+    )
     return {
         "inventory": {"hosts": hosts},
         "policy": {
@@ -161,8 +164,12 @@ def policy_config(*, v2: bool = False) -> dict:
 
 
 async def prove(
-    root: Path, ledger: SecurityLedgerRuntimeSettings, origin_ip: str, node_ips: list[str],
-    *, v2: bool = False,
+    root: Path,
+    ledger: SecurityLedgerRuntimeSettings,
+    origin_ip: str,
+    node_ips: list[str],
+    *,
+    v2: bool = False,
 ) -> None:
     cfg = root / "config.yaml"
     cfg.write_text(yaml.safe_dump(policy_config(v2=v2)))
@@ -176,10 +183,14 @@ async def prove(
     token = secrets.token_urlsafe(32)
     bearer.write_text(token)
     os.chmod(bearer, 0o600)
+
     def authority_factory(engine: PolicyEngine) -> ImmutableVisibilityAuthority:
         keys = {node: Path(f"/tmp/v5-signer-{node}").read_bytes() for node in NODES}
         return ImmutableVisibilityAuthority(
-            engine=engine, epoch=11, host_keys=keys, generation_active=lambda: True,
+            engine=engine,
+            epoch=11,
+            host_keys=keys,
+            generation_active=lambda: True,
         )
 
     app = build_application(
@@ -223,7 +234,7 @@ async def prove(
                     "node-facing MCP TCP/8000 should be closed",
                     node_ip,
                 )
-        async with httpx.AsyncClient(
+        async with httpx2.AsyncClient(
             headers={"Authorization": "Bearer " + token}, trust_env=False
         ) as http:
             transport = streamable_http_client(
@@ -241,18 +252,30 @@ async def prove(
                     assert "fs_list" in tools
                     for node in NODES:
                         listing = success(
-                            await client.call_tool("fs_list", {
-                                "host": node, "path": "/srv/data", "max_entries": 64,
-                            }), "central v2 fs_list",
+                            await client.call_tool(
+                                "fs_list",
+                                {
+                                    "host": node,
+                                    "path": "/srv/data",
+                                    "max_entries": 64,
+                                },
+                            ),
+                            "central v2 fs_list",
                         )
                         assert listing["host"] == node
                         assert [e["path"] for e in listing["entries"]] == [
                             "/srv/data/public.txt"
                         ], listing
                         denied = error(
-                            await client.call_tool("fs_list", {
-                                "host": node, "path": "/srv/data/secret", "max_entries": 64,
-                            }), "central denied subtree",
+                            await client.call_tool(
+                                "fs_list",
+                                {
+                                    "host": node,
+                                    "path": "/srv/data/secret",
+                                    "max_entries": 64,
+                                },
+                            ),
+                            "central denied subtree",
                         )
                         assert "denied" in denied.lower()
                         print(f"CENTRAL_MCP_LEDGER_REAL_OPENSSH_V2_{node}_PASS", flush=True)
@@ -370,7 +393,8 @@ async def main() -> None:
             ledger.close()
     print(
         "CENTRAL_MCP_LEDGER_TWO_OPENSSH_V2_TEST_ONLY_PASS"
-        if v2 else "CENTRAL_MCP_LEDGER_TWO_OPENSSH_NODES_TEST_ONLY_PASS",
+        if v2
+        else "CENTRAL_MCP_LEDGER_TWO_OPENSSH_NODES_TEST_ONLY_PASS",
         flush=True,
     )
     print("NETWORK_DIRECTIONAL_ACL_PROVEN=false SIGNED_MEDIA=false DEPLOYED=false")
