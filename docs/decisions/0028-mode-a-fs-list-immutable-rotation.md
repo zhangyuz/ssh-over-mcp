@@ -79,75 +79,113 @@ revocation of already-running operations, either fail-closed synchronous
 admission/cancellation or a separately approved online epoch/ACK design is
 needed.
 
+**Ruling (operator-selected 2026-10-29): host and control state is attested by a
+read-only operator-side `docker exec`, not by a new SMCP operation.**
+- *Decision:* step 6/7 state evidence comes from a read-only entrypoint run
+  inside the running container (`python -m ssh_over_mcp.host_agent.attest_v5`)
+  and a matching control-side report, both executed by the operator through the
+  already-approved `limactl shell ... docker exec` path. No SMCP operation,
+  ForceCommand, port or privilege is added.
+- *This is a larger deviation than a change of transport.* Step 6 asks for each
+  node's **actual** host key obtained through an independent, host-key-verified
+  SSH check. `attest_v5` reports only the host key pin *configured* in the
+  protected policy file, not the key sshd presents. That independent live
+  handshake is therefore **dropped by this ruling and remains a required,
+  unimplemented step** (open item below); the configured pin must not be
+  described as evidence of the live key.
+- *Contract:* each side prints one JSON object with `version`, `host`,
+  `host_key_sha256` (configured), `profile`, `policy_epoch`,
+  `central_policy_sha256`, `verifier_key_id`, the controller's fresh nonce, and
+  `proof = HMAC-SHA256(key, b"ssh-over-mcp/v5/attestation/v1\x00" ||
+  canonical_json(those fields))`. The host derives every field from its
+  protected config and key files (the loaders verification uses). It also
+  reports `config_model_sha256`, which is **unauthenticated**, outside the proof
+  (the central side cannot know it) and a hash of the validated model rather
+  than of the file bytes; a controller must not treat it as proven.
+- *Nonce discipline:* the controller creates every nonce with
+  `attest_v5.new_nonce()` (128-bit CSPRNG), uses it for exactly one
+  attestation round, and compares proofs only with `attest_v5.proofs_equal`
+  (strict 64-hex, `hmac.compare_digest`). The central proof must not be shown to
+  the host side before the host's answer has been recorded; since the host
+  cannot produce the proof without the key, a host cannot simply reflect it.
+- *Equality, not echo:* the controller never sees a key. It requires the host
+  proof to **equal** the control proof for the same nonce and every shared
+  field to equal the approved manifest. Equal proofs under a fresh nonce can
+  only come from two parties holding the same key bytes.
+- *Execution identity:* attestation must run as the Host Agent's real identity
+  (`docker exec --user 2201:3201 ... python -I -m ...`), not as root. The
+  loaders accept root-owned 0400/0440 files, so a root exec could succeed even
+  when the unprivileged ForceCommand user cannot read the key; the acceptance
+  evidence must show the effective UID/GID.
+- *When each report exists:* the node reports are taken after the node starts.
+  The control report can only be taken **after `start_control`** (a stopped
+  container cannot be exec'd), through a post-start `docker exec` into the
+  control container by an entrypoint that loads the control's key set with the
+  same loader the runtime uses. That entrypoint and the production composition
+  that constructs the authority do not exist yet (open item below), and
+  `ImmutableVisibilityAuthority.attest` is only the library function it will
+  call. Node reports are therefore re-taken after control starts, as the
+  sequencer already does.
+- *Why safe enough:* the entrypoint is read-only, opens no socket, reads no
+  stdin and prints no key material; the operator already has this privileged
+  path for stop/start; comparing independent proofs defeats echoing.
+- *Cost if wrong:* `docker exec` trusts the container runtime and the image
+  code that produces the report, so a compromised host image could lie
+  consistently if it also holds the key. A pinned-SSH state operation would not
+  remove that (the same code would answer) but would exercise the production
+  path and the live host key.
+- *Mitigation:* attestation proves *state and key agreement*, not image
+  provenance or the live host key; the separate image-attestation, live
+  host-key handshake and Native Level-3 gates stay open.
+- *Still open:* (1) the independent live SSH host-key handshake against the
+  inventory pin; (2) `install` (staging the root-owned generation, including how
+  the controller learns the per-host expectations); (3) the control-side
+  entrypoint and wiring `attest_host` / `attest_control` into the adapter,
+  including nonce generation and the `--user` identity; (4) the durable
+  nonce/epoch floor, which is not part of this report and stays a real-OCI
+  acceptance item.
+
 ## Maintenance primitives (2026-10-29, source only, no CLI, not executed live)
 
 `ssh_over_mcp.ops.mode_a_v5_lima_primitives.LimaDockerPrimitives` implements
 only the steps of the protocol whose mechanism is already approved in the
 [live operations runbook](../runbooks/mvp-mode-a-yuz-local-live-operations.md):
-- **Fence (steps 2, 7):** `launchctl disable` then `bootout` of
-  `com.som.modea.loopback`, accepted only after observing the service absent
-  (`launchctl print` = 113), marked disabled (survives login/reboot), and
-  `127.0.0.1:18801` actively refused. A timeout or unreachable port proves
-  nothing and fails.
+- **Fence (steps 2, 7):** `launchctl disable` then `bootout` of the configured
+  LaunchAgent, accepted only after observing the service absent (`launchctl
+  print` = 113), marked disabled (survives login/reboot), and both
+  `127.0.0.1` and `::1` on the tunnel port actively refused. A timeout or an
+  unreachable address proves nothing and fails.
 - **Drain (step 3):** zero ESTABLISHED sockets on the MCP port and on both
-  nodes' SSH port, read from `/proc/net/tcp` and `/proc/net/tcp6` inside each
-  container. Unreadable or malformed tables, or work that never ends, fail.
+  nodes' SSH port, read to EOF from `/proc/net/tcp` and `/proc/net/tcp6` inside
+  each container. Unreadable, truncated or malformed tables, or work that never
+  ends, fail.
 - **Stop/start (steps 4, 6, 7):** `docker stop` / `start` through the Lima
   guest, accepted only after `inspect` shows `exited` / `running`; control
   stops before nodes and the Ledger starts before MCP.
 - **Reopen (step 7):** every container observed running, then a mandatory
-  injected operator confirmation, then `enable` + `bootstrap` and a
-  listening check; any failure fences again.
+  injected operator confirmation, then `enable` + `bootstrap` and a listening
+  check. Any failure or cancellation fences again, clears every earlier proof
+  and requires a fresh `freeze_ingress` before any later stage.
 
-All commands are fixed argv lists built from a validated configuration and run
-without a shell. Stages enforce their order and refuse to run unless the
-previous proof exists. The class deliberately has **no** `install`/`attest_*`,
-so it cannot be passed to `run_rotation` and strand the pilot half-rotated.
+All commands are exact argv lists built from a validated configuration, with
+absolute tool paths, a scrubbed environment (fixed `PATH` plus a short
+allow-list) and no shell. **A configuration naming any identifier of the live
+pilot (VM, LaunchAgent label or plist, tunnel port, `som342-mode-a-` containers)
+is refused with no override**: rotating the live pilot is not authorized.
+Ordering is enforced as follows: drain, `stop_control`, `stop_host` need the
+fence (and the earlier proofs); `start_host` and `start_control` need only the
+fence; `open_ingress` needs the fence, all four containers observed running and
+the operator confirmation. The class deliberately has **no**
+`install`/`attest_*`, so it cannot be passed to `run_rotation` and strand the
+pilot half-rotated.
+
 Limits: zero established sockets is a defined drain criterion, not a proof of
 no in-memory work; alternate ingress paths other than the LaunchAgent tunnel
 (operator `limactl shell`) are out of scope and must be quiesced by the
-operator; tests use a recording fake runner, so no real launchd, Lima or
-Docker behaviour is proven.
-
-**Ruling (operator-selected 2026-10-29): host and control state is attested by a
-read-only operator-side `docker exec`, not by a new SMCP operation.**
-- *Decision:* step 6 is implemented as a read-only entrypoint run inside the
-  running node container (`python -m ssh_over_mcp.host_agent.attest_v5`) plus a
-  matching control-side report from the central authority, both executed by the
-  operator through the already-approved `limactl shell ... docker exec`
-  path. No SMCP operation, ForceCommand, port or privilege is added. The SSH
-  host-key pin is still checked (below); only the *transport* of the state
-  differs from the written step.
-- *Contract:* each side prints one JSON object with `version`, `host`,
-  `host_key_sha256`, `profile`, `policy_epoch`, `central_policy_sha256`,
-  `verifier_key_id`, the controller's fresh 128-bit `nonce`, and
-  `proof = HMAC-SHA256(key, b"ssh-over-mcp/v5/attestation/v1\x00" ||
-  canonical_json(those fields))`. The host derives every field from its
-  protected config and key files (the same loaders verification uses) and also
-  reports `config_sha256` (not part of the proof, since the central side cannot
-  know it). The central authority computes the same proof per host from the
-  keys it holds. The controller never sees a key: it requires the host proof to
-  **equal** the control proof for the same nonce and every shared field to equal
-  the approved manifest. Equal proofs under a fresh nonce can only come from two
-  parties holding the same key bytes; a replayed, echoed or stale report fails
-  because the nonce is new.
-- *Why safe enough:* the entrypoint is read-only, opens no network socket and
-  prints no key material; the operator already has this privileged path for
-  stop/start; the compared proofs defeat echoing.
-- *Cost if wrong:* `docker exec` trusts the container runtime and the image
-  code that produces the report, so a compromised host image could lie
-  consistently with a stolen key. A pinned-SSH state operation would not remove
-  that (the same code would answer), but it would exercise the production
-  path; the live pilot remains protected by the separate image-attestation and
-  Native Level-3 gates.
-- *Mitigation:* the live SSH host-key pin handshake is still verified
-  independently of the container; attestation proves *state*, not image
-  provenance; a compromise of the guest is out of scope for this pilot's
-  threat model (ADR0025).
-- *Still open:* `install` (staging the root-owned generation, including how the
-  controller learns the per-host config hash it expects) and wiring
-  `attest_host` / `attest_control` into the adapter; the durable nonce/epoch
-  floor is not part of this report and stays a real-OCI acceptance item.
+operator; a hard kill between `enable` and the re-fence leaves the label
+enabled for the next login (re-run `freeze_ingress`); killing the local client
+does not stop a remote `docker stop`, so state is always re-verified; tests use
+a recording fake runner, so no real launchd, Lima or Docker behaviour is proven.
 
 ## Real acceptance gates before PR #347 Ready
 

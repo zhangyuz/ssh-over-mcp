@@ -1,7 +1,7 @@
 # Mode A `fs_list` v5 — isolated acceptance plan (PROPOSED, NOT AUTHORIZED, NOT EXECUTED)
 
 **Status: a plan for operator review. No command in this document has been run.
-Nothing here authorizes touching the live pilot VM, its Compose project, its
+Nothing here authorizes mutating the live pilot VM, its Compose project, its
 LaunchAgent, its images, keys or data.** Execution needs a separate, explicit
 operator approval that names the target, the window and the rollback condition.
 
@@ -27,17 +27,22 @@ the operator's deployment and merge approvals remain separate gates.
 The live pilot (`som-mode-a-netpilot-oct27`, tunnel `127.0.0.1:18801`) must not
 be stopped, rotated, re-imaged or have files added. Acceptance runs on a
 **separate** Lima VM created for this purpose with its own name, its own Compose
-project name, its own loopback tunnel port and its own freshly generated
-keys. If a second VM is not authorized, the acceptance does not run; there is
-no "briefly use the live one" variant.
+project and container names, its own loopback tunnel port, its own **LaunchAgent
+label and plist** and its own freshly generated keys. The maintenance primitives
+refuse a configuration that names any live-pilot VM, label, plist, tunnel port or
+`som342-mode-a-` container, with no override. If a second VM is not authorized,
+the acceptance does not run; there is no "briefly use the live one" variant.
 
 Preconditions (all must hold before any step):
 1. Written operator approval naming the VM, a time window and the rollback rule.
 2. The exact image digests under test are the CI-attested ones; none is built
    or pulled ad hoc.
-3. The live pilot's health is recorded first with the existing read-only script
-   (`ops/mvp/mode_a_host_loopback_acceptance.py`) and again at the end; any
-   difference is a failure of the acceptance.
+3. The live pilot's health is recorded first and last with the existing
+   read-only script (`ops/mvp/mode_a_host_loopback_acceptance.py`). It reads the
+   live bearer through the approved guest read and calls the live MCP, so it
+   adds ordinary read audit entries; it mutates nothing. A change in the
+   observable result (401, hosts, fixture readback, image IDs, container status)
+   is a failure of the acceptance. Byte-for-byte equality is not claimed.
 4. `progress.md` records the approvals, the SHA under test and every host action.
 
 ## 3. The capability-boundary reconciliation (must be decided first)
@@ -49,8 +54,10 @@ Preconditions (all must hold before any step):
 | Live v1 pilot (ADR0025) | `0x401c0` (SETUID, SETGID, SETPCAP, SYS_CHROOT), accepted for the pilot only | measured, ADR0025 |
 
 Consequences:
-- The v2 launcher as written would refuse to start in an image that matches the
-  live pilot's capability boundary, and a CI PASS of the review variant proves
+- The **generic** source launcher in the repository (not necessarily the
+  operator-approved variant the live v1 pilot actually runs) requires all five
+  sets zero, so it would refuse to start in an image that matches the live
+  pilot's `0x401c0` boundary, and a CI PASS of the review variant proves
   functional compatibility only.
 - **Do not edit the all-five-zero gate to make this work.** Two honest options
   exist and the operator must choose one (a new ADR records it):
@@ -95,15 +102,23 @@ Stop at the first unexpected result and fence ingress; never improvise.
    ingress fenced and the sequencer failed; nothing may reopen by itself.
 8. **Restart persistence:** reboot the isolated VM; verify the fence and the
    anti-rollback floor still hold, then reopen deliberately.
-9. **Teardown** of only the isolated VM and its volumes; confirm the live pilot
-   is byte-for-byte unchanged by the same read-only script.
+9. **Teardown** of only the isolated VM and its volumes; re-run the read-only
+   health script and require the same observable result as before (it adds only
+   read audit entries; the pilot's image IDs, containers and data must be
+   unchanged).
 
 ## 5. Explicit limits and open items
 
 - `install` (staging the root-owned generation and how the controller learns
-  each host's expected `config_sha256`) and the adapter wiring of
+  each host's expectations), the control-side attestation entrypoint, the
+  independent live SSH host-key handshake and the adapter wiring of
   `attest_host`/`attest_control` are **not implemented yet**; steps 2 and 6 need
   them. The current primitives deliberately cannot be passed to `run_rotation`.
+- Attestation (step 6) must run as the Host Agent's identity
+  (`docker exec --user 2201:3201`), record the effective UID/GID, use a fresh
+  one-use nonce per round and compare proofs only with `proofs_equal`.
+- The control report can only be taken after control starts; node reports are
+  taken after node start and again after control start.
 - "Zero established sockets" is the defined drain criterion, not a proof that no
   request is in flight in memory; access paths other than the LaunchAgent
   tunnel (operator `limactl shell`) must be quiesced by the operator.
