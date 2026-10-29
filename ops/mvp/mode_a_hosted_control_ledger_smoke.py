@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, "/opt/ssh-over-mcp-e2e/workspace/src")
 
-import httpx2
+import httpx
 import uvicorn
 import yaml
 from mcp import Client
@@ -223,7 +223,7 @@ async def prove(
                     "node-facing MCP TCP/8000 should be closed",
                     node_ip,
                 )
-        async with httpx2.AsyncClient(
+        async with httpx.AsyncClient(
             headers={"Authorization": "Bearer " + token}, trust_env=False
         ) as http:
             transport = streamable_http_client(

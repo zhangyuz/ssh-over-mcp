@@ -84,7 +84,7 @@ print(engine.policy_version[7:])
             run(["docker","network","connect",origin_net,control])
             details=json.loads(run(["docker","inspect",control]).stdout)[0]
             origin_ip=details["NetworkSettings"]["Networks"][origin_net]["IPAddress"]
-            ips=[details["NetworkSettings"]["Networks"][net]["IPAddress"] for net in networks]
+            ips=[details["NetworkSettings"]["Networks"][net]["IPAddress"] for net in networks[:2]]
             for i in (1,2):
                 files=[
                     (f"client{i}",(work/f"node{i:02}"/"client").read_bytes(),"0600"),
