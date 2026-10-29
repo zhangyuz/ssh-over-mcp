@@ -60,6 +60,38 @@ class ImmutableVisibilityAuthority:
 
         return {host: visibility_key_id(key) for host, key in self._keys.items()}
 
+    def attest(self, *, nonce: str, profile: str) -> dict[str, dict[str, object]]:
+        """Per-host nonce-bound proofs from the keys this release really holds.
+
+        The operator compares each against the proof the host itself reports
+        for the same nonce; see host_agent.attest_v5. Fails while the release
+        is inactive or the policy digest changed. Returns no key material.
+        """
+
+        from ssh_over_mcp.host_agent.attest_v5 import (
+            attestation_fields,
+            attestation_proof,
+            require_nonce,
+        )
+
+        require_nonce(nonce)
+        if type(profile) is not str or not profile:
+            raise ValueError("profile is required")
+        reports: dict[str, dict[str, object]] = {}
+        for host, key in self._keys.items():
+            self._require_active(host, self._policy_sha256)
+            fields = attestation_fields(
+                host=host,
+                host_key_sha256=self._pinned_host_digest(host),
+                profile=profile,
+                policy_epoch=self._epoch,
+                central_policy_sha256=self._policy_sha256,
+                key=key,
+                nonce=nonce,
+            )
+            reports[host] = {**fields, "proof": attestation_proof(key, fields)}
+        return reports
+
     def _digest(self) -> str:
         version = self.engine.policy_version
         if not version.startswith("sha256:") or len(version) != 71:

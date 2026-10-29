@@ -109,13 +109,45 @@ no in-memory work; alternate ingress paths other than the LaunchAgent tunnel
 operator; tests use a recording fake runner, so no real launchd, Lima or
 Docker behaviour is proven.
 
-**Open design decision (needs the operator):** how `install` stages the
-root-owned policy/key generation and how a host proves its *running* state
-(epoch, policy digest, key ID with possession proof, host-key pin). ADR0028
-step 6 says "independent SSH hostkey-verified checks", but no SMCP operation
-returns that state; adding one changes the protocol/ForceCommand surface and
-needs its own ADR, whereas an operator-side read-only `docker exec` attestation
-entrypoint deviates from the written step and its trust boundary.
+**Ruling (operator-selected 2026-10-29): host and control state is attested by a
+read-only operator-side `docker exec`, not by a new SMCP operation.**
+- *Decision:* step 6 is implemented as a read-only entrypoint run inside the
+  running node container (`python -m ssh_over_mcp.host_agent.attest_v5`) plus a
+  matching control-side report from the central authority, both executed by the
+  operator through the already-approved `limactl shell ... docker exec`
+  path. No SMCP operation, ForceCommand, port or privilege is added. The SSH
+  host-key pin is still checked (below); only the *transport* of the state
+  differs from the written step.
+- *Contract:* each side prints one JSON object with `version`, `host`,
+  `host_key_sha256`, `profile`, `policy_epoch`, `central_policy_sha256`,
+  `verifier_key_id`, the controller's fresh 128-bit `nonce`, and
+  `proof = HMAC-SHA256(key, b"ssh-over-mcp/v5/attestation/v1\x00" ||
+  canonical_json(those fields))`. The host derives every field from its
+  protected config and key files (the same loaders verification uses) and also
+  reports `config_sha256` (not part of the proof, since the central side cannot
+  know it). The central authority computes the same proof per host from the
+  keys it holds. The controller never sees a key: it requires the host proof to
+  **equal** the control proof for the same nonce and every shared field to equal
+  the approved manifest. Equal proofs under a fresh nonce can only come from two
+  parties holding the same key bytes; a replayed, echoed or stale report fails
+  because the nonce is new.
+- *Why safe enough:* the entrypoint is read-only, opens no network socket and
+  prints no key material; the operator already has this privileged path for
+  stop/start; the compared proofs defeat echoing.
+- *Cost if wrong:* `docker exec` trusts the container runtime and the image
+  code that produces the report, so a compromised host image could lie
+  consistently with a stolen key. A pinned-SSH state operation would not remove
+  that (the same code would answer), but it would exercise the production
+  path; the live pilot remains protected by the separate image-attestation and
+  Native Level-3 gates.
+- *Mitigation:* the live SSH host-key pin handshake is still verified
+  independently of the container; attestation proves *state*, not image
+  provenance; a compromise of the guest is out of scope for this pilot's
+  threat model (ADR0025).
+- *Still open:* `install` (staging the root-owned generation, including how the
+  controller learns the per-host config hash it expects) and wiring
+  `attest_host` / `attest_control` into the adapter; the durable nonce/epoch
+  floor is not part of this report and stays a real-OCI acceptance item.
 
 ## Real acceptance gates before PR #347 Ready
 
