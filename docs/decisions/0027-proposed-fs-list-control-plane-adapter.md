@@ -126,6 +126,9 @@ above remain open; controller review is required for this uncommitted increment.
   trusted adapter remain separate operator gates.
 - Review fixes (2026-10-28): an approval-required `fs_list` is audited and
   refused before any Ledger approval is created; a central compile refusal is
-  audited as `POLICY_DENIED` and returned as a policy denial; authority
+  audited as `POLICY_DENIED` and returned as a policy denial (the request's
+  audit trail then shows the authorizer's `POLICY_ALLOWED` for the exact root
+  followed by `POLICY_DENIED` for the subtree snapshot; no signing or SSH
+  occurs between them); authority
   failures before authorization record `EXECUTION_FAILED`; snapshots are
   backdated by 5 s within the 60 s TTL for host clock lag.
