@@ -18,7 +18,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import plistlib
 import re
+import signal
+import stat
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Protocol
 
@@ -120,17 +123,55 @@ class AdapterConfig(BaseModel):
         names = [self.mcp_container, self.ledger_container, *self.node_containers.values()]
         if len(set(names)) != len(names):
             raise ValueError("container names must be distinct")
+        # launchd on APFS resolves plist paths case-insensitively, so every
+        # live-pilot comparison is casefolded, and the plist must be named
+        # exactly "<label>.plist" so it cannot be a different file for the
+        # live service.
+        if self.launchd_plist.rsplit("/", 1)[1] != f"{self.launchd_label}.plist":
+            raise ValueError("plist file name must be exactly <label>.plist")
         if (
-            self.vm_name == _LIVE_VM
-            or self.launchd_label == _LIVE_LABEL
-            or self.launchd_plist.endswith(f"/{_LIVE_LABEL}.plist")
+            self.vm_name.casefold() == _LIVE_VM.casefold()
+            or self.launchd_label.casefold() == _LIVE_LABEL.casefold()
+            or self.launchd_plist.casefold().endswith(f"/{_LIVE_LABEL}.plist".casefold())
             or self.tunnel_port == _LIVE_TUNNEL_PORT
-            or any(name.startswith(_LIVE_CONTAINER_PREFIX) for name in names)
+            or any(name.casefold().startswith(_LIVE_CONTAINER_PREFIX) for name in names)
         ):
             raise ValueError("configuration targets the live pilot, which is not authorized")
         if self.command_timeout_seconds < self.stop_timeout_seconds + 10:
             raise ValueError("command deadline must exceed the container stop timeout")
         return self
+
+
+_PLIST_MAX_BYTES = 64 * 1024
+
+
+def read_plist_label(path: str) -> str:
+    """The plist's embedded ``Label``, read without following symlinks.
+
+    ``launchctl bootstrap`` loads whatever Label the file carries, which may
+    differ from the configured one, so the two are compared before enabling.
+    """
+
+    fd = None
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > _PLIST_MAX_BYTES:
+            raise RotationFailure("ingress plist is not a small regular file")
+        data = os.read(fd, _PLIST_MAX_BYTES + 1)
+        if len(data) > _PLIST_MAX_BYTES:
+            raise RotationFailure("ingress plist is not a small regular file")
+        label = plistlib.loads(data).get("Label")
+    except RotationFailure:
+        raise
+    except (OSError, ValueError, plistlib.InvalidFileException, AttributeError):
+        raise RotationFailure("ingress plist unreadable") from None
+    finally:
+        if fd is not None:
+            os.close(fd)
+    if type(label) is not str or not label:
+        raise RotationFailure("ingress plist has no label")
+    return label
 
 
 def _scrubbed_environment() -> dict[str, str]:
@@ -158,11 +199,18 @@ class SubprocessRunner:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=self._env if self._env is not None else _scrubbed_environment(),
+                start_new_session=True,  # so a kill reaches ssh and any forks
             )
         except OSError:
             return CommandResult(returncode=127, stdout=b"", stderr=b"", timed_out=False)
 
         truncated = False
+
+        def kill_group() -> None:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(process.pid, signal.SIGKILL)
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
 
         async def read_to_eof(stream: asyncio.StreamReader) -> bytes:
             # StreamReader.read(n) returns after the first available chunk, so
@@ -178,7 +226,7 @@ class SubprocessRunner:
                     kept.extend(chunk[:room])
                 if len(chunk) > max(room, 0):
                     truncated = True
-                    process.kill()  # pipes close, so the reads below reach EOF
+                    kill_group()  # pipes close, so the reads below reach EOF
 
         try:
             out, err, _ = await asyncio.wait_for(
@@ -186,7 +234,7 @@ class SubprocessRunner:
                 timeout,
             )
         except TimeoutError:
-            process.kill()
+            kill_group()
             await process.wait()
             return CommandResult(
                 returncode=process.returncode if process.returncode is not None else -9,
@@ -198,7 +246,7 @@ class SubprocessRunner:
             # Cancellation or any fault: never leave the child running. This
             # kills only the local client; a remote command may continue, so
             # callers re-verify state instead of trusting an interrupted run.
-            process.kill()
+            kill_group()
             raise
         return CommandResult(
             returncode=process.returncode if process.returncode is not None else -9,
@@ -260,8 +308,12 @@ class LimaDockerPrimitives:
         probe: PortProbe,
         operator_confirms_open: Callable[[], Awaitable[bool]],
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        plist_label_reader: Callable[[str], str] = read_plist_label,
     ) -> None:
-        self._cfg = config
+        # model_copy(update=...) and model_construct skip validation; run it
+        # again so the live-pilot guard cannot be built around.
+        self._cfg = AdapterConfig.model_validate(config.model_dump())
+        self._plist_label = plist_label_reader
         self._runner = runner
         self._probe = probe
         self._confirm = operator_confirms_open
@@ -353,6 +405,14 @@ class LimaDockerPrimitives:
         ):
             await self._expect_status(name, "running")
         try:
+            embedded = self._plist_label(self._cfg.launchd_plist)
+        except RotationFailure:
+            raise
+        except Exception:  # noqa: BLE001 - an unreadable plist keeps ingress closed
+            raise RotationFailure("ingress plist unreadable") from None
+        if embedded != self._cfg.launchd_label:
+            raise RotationFailure("ingress plist label does not match the configuration")
+        try:
             confirmed = await self._confirm()
         except Exception:  # noqa: BLE001 - any confirmation fault keeps ingress closed
             raise RotationFailure("operator confirmation unavailable") from None
@@ -371,13 +431,28 @@ class LimaDockerPrimitives:
             # Whatever happened (failure or cancellation), distrust every
             # earlier proof and fence again before reporting.
             self._fenced = self._drained = self._control_stopped = False
-            with contextlib.suppress(BaseException):
-                await asyncio.shield(self._refence_best_effort())
+            await self._finish_refence()
             if isinstance(exc, Exception) and not isinstance(exc, RotationFailure):
                 raise RotationFailure("ingress could not be reopened") from None
             raise
         self._fenced = self._drained = self._control_stopped = False
         return True
+
+    async def _finish_refence(self) -> None:
+        """Wait for the re-fence even if cancelled again, then let the caller re-raise.
+
+        Each command has a deadline, so this wait is bounded; abandoning it would
+        leave the label enabled if the event loop is torn down first.
+        """
+
+        refence = asyncio.ensure_future(self._refence_best_effort())
+        while not refence.done():
+            try:
+                await asyncio.shield(refence)
+            except asyncio.CancelledError:
+                continue
+            except Exception:  # noqa: BLE001 - best effort; already logged by absence of proof
+                break
 
     async def _refence_best_effort(self) -> None:
         for argv in (
