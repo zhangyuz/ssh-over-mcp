@@ -81,7 +81,8 @@ independent approval. No private pilot key or overlay is placed in Git.
   enumeration, and each child before *any child metadata*.
 - Resolves ancestry with Linux `O_PATH|O_DIRECTORY|O_NOFOLLOW`, pins the
   final inode, reopens the pinned directory via `/proc/self/fd/<fd>`,
-  checks identity, enumerates at most 64 physical entries, and sorts
+  checks identity, enumerates at most 64 physical entries (superseded:
+  see the review-P1 section below), and sorts
   authorized results by UTF-8 basename bytes. Refuses unsupported/symlink
   entries and detects directory inode identity changes during enumeration.
   The only optional path data returned is individually authorized stat
@@ -282,3 +283,36 @@ revocation ACK and in-flight cancellation, two-real-OpenSSH Mode A E2E,
 Native Level-3 and independent security review remain mandatory. Any
 operator decision to use immutable, no-hot-reload policy updates rather
 than an online ACK protocol must be formally approved before activation.
+
+## 2026-10-28: listing bound must not reveal denied totals (review P1)
+
+Independent review of `09a5803` found that the host counted every physical
+entry, including denied children, against the caller-chosen `max_entries`
+(1–64) before child authorization. The smallest bound that succeeded equalled
+the physical count, so `denied = physical − visible` leaked, which violates
+"no denied totals" above.
+
+`select_visible_children` now authorizes each kernel-returned name lexically
+(no child open/stat) in UTF-8 byte order, and counts **only authorized**
+children against `max_entries`. More visible children than the bound still
+refuse the whole listing (no truncation). A separate fixed internal
+`MAX_LIST_PHYSICAL_ENTRIES = 4096` bounds work per readdir and is never
+derived from the request. Platform-neutral and Linux FD tests assert that
+every bound gives the same outcome with 0, 1, 64 or 500 denied siblings.
+
+**Ruling (residual, accepted for this candidate):**
+- Decision: a directory with more than 4096 physical entries refuses
+  regardless of the bound. This reveals one fixed bit ("more than 4096
+  entries") that the caller cannot tune to count denied children.
+- Names that are not canonical visibility paths (glob metacharacters,
+  backslash, control characters, non-UTF-8) refuse the whole listing before
+  any authorization. Denied subtrees are canonical paths, so such a name is
+  never a denied entry and the refusal reveals nothing about denied
+  children. The cost is that such directories cannot be listed; a future
+  escaping scheme needs its own review.
+- Size and mtime returned for a *visible* child directory are its own
+  inode metadata and can change when entries inside it change, including
+  denied grandchildren. No content, name or count is exposed.
+- Cost if wrong: the fixed bit or directory metadata could aid inference
+  about activity in a denied subtree. Mitigation: no caller-controlled
+  threshold, denied names never stat'd, and central per-child recheck.

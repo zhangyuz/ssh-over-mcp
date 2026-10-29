@@ -136,11 +136,38 @@ def test_unsupported_child_fails_before_any_data_capable_child_open(
     assert all(flags & os.O_PATH and flags & os.O_NOFOLLOW for flags in child_opens)
 
 
-def test_total_physical_entry_bound_refuses_instead_of_truncating(
+def test_visible_entry_bound_refuses_instead_of_truncating(
     tmp_path: Path,
 ) -> None:
     for index in range(65):
         (tmp_path / f"x{index:02d}").write_bytes(b"")
+    with pytest.raises(FilesystemAccessError):
+        _list(tmp_path, max_entries=64)
+
+
+@pytest.mark.parametrize("hidden", [0, 1, 64])
+def test_caller_bound_outcome_does_not_reveal_denied_sibling_count(
+    tmp_path: Path, hidden: int
+) -> None:
+    (tmp_path / "public.txt").write_bytes(b"ok")
+    for index in range(hidden):
+        (tmp_path / f"secret{index:02d}").write_bytes(b"")
+
+    def child(path: str) -> bool:
+        return not Path(path).name.startswith("secret")
+
+    for bound in (1, 2, 64):
+        result = _list(tmp_path, child=child, max_entries=bound)
+        assert tuple(item.path for item in result) == (str(tmp_path / "public.txt"),)
+
+
+def test_fixed_physical_scan_ceiling_refuses_oversized_directory(tmp_path: Path) -> None:
+    from ssh_over_mcp.host_agent.visibility_listing_candidate import (
+        MAX_LIST_PHYSICAL_ENTRIES,
+    )
+
+    for index in range(MAX_LIST_PHYSICAL_ENTRIES + 1):
+        (tmp_path / f"d{index:05d}").write_bytes(b"")
     with pytest.raises(FilesystemAccessError):
         _list(tmp_path, child=lambda _: False, max_entries=64)
 
