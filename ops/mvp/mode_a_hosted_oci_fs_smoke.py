@@ -145,11 +145,20 @@ def start_node(
     image: str = IMAGE,
     use_default_entrypoint: bool = False,
     v5_host_id: str | None = None,
+    v5_policy_sha256: str = "a" * 64,
+    v5_signer_key: bytes | None = None,
 ) -> tuple[str, Path, Path]:
     if use_default_entrypoint:
         assert image == "som-mvp-fs-online-pilot-review:local"
     _host, client, known = prepare(work, name)
-    v5_mounts = prepare_v5_test_trust(work, v5_host_id) if v5_host_id is not None else []
+    v5_mounts = (
+        prepare_v5_test_trust(
+            work, v5_host_id,
+            central_policy_sha256=v5_policy_sha256,
+            signer_key=v5_signer_key,
+        )
+        if v5_host_id is not None else []
+    )
     # The immutable native no-sudo review files are baked into IMAGE.
     # No per-container code or sshd configuration mounts are accepted.
     args = [
