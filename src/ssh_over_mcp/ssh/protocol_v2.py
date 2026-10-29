@@ -18,6 +18,8 @@ from ssh_over_mcp.host_agent.visibility_snapshot_v5 import SignedVisibilitySnaps
 
 MAGIC_V2 = b"SMCP\x00\x02"
 MAX_METADATA_V2 = 64 * 1024
+# request -> signed_snapshot -> payload -> rules -> root array.
+MAX_METADATA_DEPTH_V2 = 5
 FORCE_COMMAND_V2 = "mcp-v2"
 
 
@@ -62,7 +64,31 @@ def _unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
+def _require_bounded_depth(metadata: bytes) -> None:
+    # Bound nesting BEFORE invoking the recursive JSON parser; bytes inside
+    # JSON strings (including escaped quotes) never affect depth.
+    depth = 0
+    quoted = escaped = False
+    for byte in metadata:
+        if quoted:
+            if escaped:
+                escaped = False
+            elif byte == 92:  # backslash
+                escaped = True
+            elif byte == 34:  # quote
+                quoted = False
+        elif byte == 34:
+            quoted = True
+        elif byte in (91, 123):  # [ {
+            depth += 1
+            if depth > MAX_METADATA_DEPTH_V2:
+                raise ProtocolV2Error("v2 metadata nesting exceeds bound")
+        elif byte in (93, 125):  # ] }
+            depth -= 1
+
+
 def _decode_metadata(metadata: bytes) -> FSListRequestV2:
+    _require_bounded_depth(metadata)
     try:
         value = json.loads(
             metadata.decode("utf-8", errors="strict"), object_pairs_hook=_unique_pairs

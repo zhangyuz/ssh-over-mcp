@@ -142,3 +142,30 @@ def test_streaming_parser_rejects_extra_application_stdin():
     body = encode_request_v2(_request())
     with pytest.raises(ProtocolV2Error):
         read_request_v2(io.BytesIO(body + b"x"))
+
+
+@pytest.mark.parametrize("nesting", [6, 64, 20_000])
+def test_v2_bounds_nesting_before_invoking_recursive_json_parser(nesting, monkeypatch):
+    import ssh_over_mcp.ssh.protocol_v2 as module
+
+    parsed: list[object] = []
+    real_loads = module.json.loads
+
+    def tracking_loads(*args, **kwargs):
+        parsed.append(args)
+        return real_loads(*args, **kwargs)
+
+    monkeypatch.setattr(module.json, "loads", tracking_loads)
+    metadata = b"[" * nesting + b"]" * nesting
+    frame = MAGIC_V2 + struct.pack(">I", len(metadata)) + metadata
+    with pytest.raises(ProtocolV2Error):
+        decode_request_v2(frame)
+    assert parsed == []
+
+
+def test_v2_brackets_inside_strings_do_not_count_toward_nesting():
+    base = _request().signed_snapshot.payload
+    snapshot = base.model_copy(update={"principal": 'alice[[[[{{{{\\"]]]]'})
+    signed = sign_snapshot(VisibilitySnapshotV5.model_validate(snapshot.model_dump()), key=_KEY)
+    request = _request().model_copy(update={"signed_snapshot": signed})
+    assert decode_request_v2(encode_request_v2(request)) == request
