@@ -239,7 +239,7 @@ async def test_a_nonce_source_that_repeats_or_returns_garbage_is_refused():
 
 @pytest.mark.asyncio
 async def test_control_and_host_rounds_never_share_a_nonce():
-    attestor, runner, calls = make()
+    attestor, _, calls = make()
     spec = make_spec()
     await attestor.attest_control(spec)
     await attestor.attest_host("node01", spec)
