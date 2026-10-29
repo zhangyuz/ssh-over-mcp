@@ -137,13 +137,36 @@ read-only operator-side `docker exec`, not by a new SMCP operation.**
 - *Mitigation:* attestation proves *state and key agreement*, not image
   provenance or the live host key; the separate image-attestation, live
   host-key handshake and Native Level-3 gates stay open.
+- *Implemented (source, fakes only):* `ops/mode_a_v5_attestation.py`
+  (`LimaDockerAttestor.attest_host` / `attest_control`) runs the entrypoint as
+  `docker exec --user 2201:3201 ... <python> -I -m ...` (uid and gid never 0),
+  accepts only one bounded line with an exact member set and strict types, uses
+  a fresh never-reused nonce per round, and checks the report against the
+  release. Round 1 (control still stopped) is fields-only; once
+  `attest_control` has succeeded every host proof must also EQUAL the control
+  proof for the same nonce. The control receipt is built from the control's own
+  reports plus `docker inspect` health (`audit_available` means the Ledger and
+  MCP containers are both healthy, nothing finer), not echoed from the release.
+- *`generation_sha256` is now derived, and what that does and does not prove:*
+  `generation_id` = SHA-256(domain || canonical{epoch, policy digest, per-host
+  host-key pin and signer key ID}); `RotationSpec` refuses any other value and
+  `run_rotation` re-validates its spec first. A host receipt carries the
+  generation only after that host's own contributions were verified from the
+  host itself; the other host proves its own in its own round and
+  `run_rotation` needs both. It proves agreement on those attested fields. It
+  does not prove the host's Host Policy `operations` (allow/deny roots) are the
+  intended ones: `config_model_sha256` stays informational and unauthenticated,
+  so the permitted-path content of the installed policy is verified by `install`
+  (open) and by acceptance, not by this report.
 - *Still open:* (1) the independent live SSH host-key handshake against the
   inventory pin; (2) `install` (staging the root-owned generation, including how
-  the controller learns the per-host expectations); (3) the control-side
-  entrypoint and wiring `attest_host` / `attest_control` into the adapter,
-  including nonce generation and the `--user` identity; (4) the durable
-  nonce/epoch floor, which is not part of this report and stays a real-OCI
-  acceptance item.
+  the controller learns and checks the per-host policy content); (3) the
+  control-side entrypoint that produces the central proofs inside the control
+  container and the production composition that constructs the authority (the
+  attestor takes it as an injected source, so it is only tested with a fake);
+  (4) the durable nonce/epoch floor, which is not part of this report and stays
+  a real-OCI acceptance item; (5) nothing here has run against real launchd,
+  Lima or Docker.
 
 ## Maintenance primitives (2026-10-29, source only, no CLI, not executed live)
 
