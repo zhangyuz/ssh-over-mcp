@@ -122,3 +122,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    from mode_a_hosted_v2_central_e2e import main as prove_central_v2
+    prove_central_v2()
