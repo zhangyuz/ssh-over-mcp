@@ -150,6 +150,13 @@ A versioned policy contains:
 - `rules`: ordered-independent allow/deny rules with unique IDs;
 - `risk.approval_required`: risk levels requiring approval before execution.
 
+The policy digest (`policy_version`, `sha256:` over the canonical JSON dump of
+the policy) MUST be identical in every process that loads the same policy.
+Approval bindings, audit records and remotely pinned v5 host visibility trust
+(`central_policy_sha256`) compare it across processes and hosts, so set-valued
+fields such as `risk.approval_required` serialize in sorted order; they must
+never depend on `PYTHONHASHSEED` or other per-process iteration order.
+
 A rule may constrain roles, host aliases, required host labels, MCP tools, executable paths, executable capability classes, argv prefix, working-directory patterns, filesystem-path patterns, and privilege level.
 
 The implementation evaluates **all matching rules**. Any matching deny wins. At least one allow must match or the request is denied.
