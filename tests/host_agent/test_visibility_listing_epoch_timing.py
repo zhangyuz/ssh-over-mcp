@@ -99,3 +99,41 @@ def test_revoked_epoch_still_refuses_before_visible_child_open(monkeypatch):
         module.list_verified_directory_candidate(
             _verified(), is_epoch_active=lambda: state["active"]
         )
+
+
+def _real_selection_primitive(denied: int):
+    # Uses the REAL lexical selection and the snapshot's real deny subtree
+    # (a repeated denied name is enough to count callback work). Accepts the
+    # older signature too, so a per-name-guarded wrapper fails on the count.
+    names = ["public.txt", *(["secret"] * denied)]
+
+    def fake(path, *, authorize_traverse, authorize_directory, authorize_child,
+             before_child_open=None, max_entries):
+        assert authorize_traverse("/") and authorize_directory(path)
+        visible = module.select_visible_children(
+            path, names, authorize_child=authorize_child, max_entries=max_entries
+        )
+        assert [child for _, _, child in visible] == [ROOT + "/public.txt"]
+        for _, _, child in visible:
+            if before_child_open is not None:
+                assert before_child_open(child)
+        return ()
+
+    return fake
+
+
+@pytest.mark.parametrize("denied", [64, 4000])
+def test_real_selection_epoch_checks_do_not_grow_with_denied_names(monkeypatch, denied):
+    counts = []
+    for n in (0, denied):
+        calls = 0
+
+        def active() -> bool:
+            nonlocal calls
+            calls += 1
+            return True
+
+        monkeypatch.setattr(module, "list_directory_candidate", _real_selection_primitive(n))
+        module.list_verified_directory_candidate(_verified(), is_epoch_active=active)
+        counts.append(calls)
+    assert counts[0] == counts[1]
