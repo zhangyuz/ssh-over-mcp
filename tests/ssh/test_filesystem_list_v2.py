@@ -420,6 +420,42 @@ async def test_approval_required_never_signs_or_executes(setup):
 
 
 @pytest.mark.asyncio
+async def test_approval_required_creates_no_unusable_ledger_approval(setup):
+    from ssh_over_mcp.approvals.authorization import ExecutionAuthorizer
+    from ssh_over_mcp.policy.models import RiskLevel, RiskPolicy
+    from ssh_over_mcp.ssh.errors import SSHApprovalRequired
+
+    s = setup
+    enable(s)
+    old = s.authority.engine
+    engine = PolicyEngine(
+        inventory=old.inventory,
+        policy=old.policy.model_copy(
+            update={"risk": RiskPolicy(approval_required=frozenset({RiskLevel.LOW}))}
+        ),
+    )
+    s.authority.engine = engine
+    ensured: list[object] = []
+
+    class ApprovalLedger(Ledger):
+        async def ensure_approval(self, **kwargs):
+            ensured.append(kwargs)
+            raise AssertionError("fs_list cannot use an approval")
+
+        async def consume_approval(self, **kwargs):
+            raise AssertionError("fs_list cannot use an approval")
+
+    ledger = ApprovalLedger()
+    s.client.authorizer = ExecutionAuthorizer(policy=engine, ledger=ledger)
+    s.client.audit = AuditRecorder(ledger)
+    with pytest.raises(SSHApprovalRequired) as raised:
+        await invoke(s)
+    assert raised.value.approval_status is None
+    assert ensured == [] and not s.calls and not s.authority.signed
+    assert [e.event_type for e in ledger.events] == [AuditEventType.APPROVAL_REQUIRED]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("epoch", [True, 0, -1, "7"])
 async def test_invalid_trusted_epoch_cannot_sign(setup, epoch):
     enable(setup)

@@ -23,6 +23,7 @@ from ssh_over_mcp.policy.visibility_compiler_v5 import (
 )
 
 from .errors import (
+    SSHApprovalRequired,
     SSHAuditPersistenceError,
     SSHAuditPersistenceOutcomeUncertain,
     SSHConnectionError,
@@ -258,6 +259,19 @@ class SSHFilesystemClient:
             stdin_length=len(intent),
             stdin_fingerprint=fingerprint_bytes(intent),
         )
+        # fs_list cannot carry an approval ID, so an approval-required decision
+        # must never reach a Ledger-backed gate that would persist a pending
+        # approval nobody can use. Audit the decision and refuse instead.
+        preliminary = engine.evaluate(request)
+        if preliminary.decision is Decision.APPROVAL_REQUIRED:
+            await self._audit_required(
+                AuditEventType.APPROVAL_REQUIRED,
+                context=context,
+                request=request,
+                decision=preliminary,
+                facts=facts,
+            )
+            raise SSHApprovalRequired(preliminary)
         decision = await self.authorizer.authorize(context, request, facts)
         # Compiler cannot represent approval grants yet. Even a consumed grant
         # cannot turn approval-required policy into a subtree ALLOW.
