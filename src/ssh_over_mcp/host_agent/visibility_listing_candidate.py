@@ -32,6 +32,10 @@ MAX_LIST_SCANNED_ENTRIES = 64
 MAX_LIST_PHYSICAL_ENTRIES = 4096
 
 
+def _always_allowed(_: str) -> bool:
+    return True
+
+
 def _authorized(callback: Callable[[str], bool], path: str) -> bool:
     try:
         return callback(path) is True
@@ -82,6 +86,7 @@ def list_directory_candidate(
     authorize_traverse: Callable[[str], bool],
     authorize_directory: Callable[[str], bool],
     authorize_child: Callable[[str], bool],
+    before_child_open: Callable[[str], bool] | None = None,
     max_entries: int = MAX_LIST_SCANNED_ENTRIES,
 ) -> tuple[ReadOnlyFileStat, ...]:
     """Collect one bounded directory without reading denied child metadata.
@@ -93,12 +98,15 @@ def list_directory_candidate(
 
     if type(max_entries) is not int or not 1 <= max_entries <= MAX_LIST_SCANNED_ENTRIES:
         raise FilesystemAccessError("directory listing bound is invalid")
+    if before_child_open is None:
+        before_child_open = _always_allowed
     if not all(
         callable(cb)
         for cb in (
             authorize_traverse,
             authorize_directory,
             authorize_child,
+            before_child_open,
         )
     ):
         raise FilesystemAccessError("directory authorization callbacks are unavailable")
@@ -166,6 +174,10 @@ def list_directory_candidate(
 
         results: list[ReadOnlyFileStat] = []
         for _, name, child_path in visible:
+            # Runs only for visible children, so its cost cannot reveal how
+            # many denied siblings exist. A refusal discards every result.
+            if not _authorized(before_child_open, child_path):
+                raise FilesystemAccessError("listing authorization changed")
             child_fd = None
             try:
                 child_fd, info = _open_pinned_final(directory_fd, name)
@@ -226,11 +238,16 @@ def list_verified_directory_candidate(
         return check
 
     require_active()
+    # Child names are authorized lexically against the verified snapshot with
+    # no epoch reload: a per-name reload made latency proportional to the
+    # number of denied siblings (timing oracle). The live epoch is checked
+    # for traversal, the root, each *visible* child before open, and after.
     result = list_directory_candidate(
         verified.snapshot.root,
         authorize_traverse=guarded(verified.may_traverse),
         authorize_directory=guarded(verified.may_inspect),
-        authorize_child=guarded(verified.may_inspect),
+        authorize_child=verified.may_inspect,
+        before_child_open=guarded(verified.may_inspect),
         max_entries=verified.snapshot.max_entries,
     )
     require_active()

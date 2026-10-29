@@ -319,6 +319,18 @@ every bound gives the same outcome with 0, 1, 64 or 500 denied siblings.
 - Cost if wrong: the fixed bit or directory metadata could aid inference
   about activity in a denied subtree. Mitigation: no caller-controlled
   threshold, denied names never stat'd, and central per-child recheck.
+- **Timing (re-review P2, 2026-10-29):** the first fix authorized every
+  physical name through the live epoch guard, which reloads the host policy
+  file (~0.3 ms each), so latency grew with the number of denied siblings
+  (measured 0.4 ms → 1.2 s for 0 → 4000 denied). Child names are now
+  authorized lexically against the verified snapshot only; the epoch guard
+  runs for traversal, the root, each *visible* child immediately before its
+  open (`before_child_open`), and once after. The number of epoch checks is
+  therefore independent of denied entries (regression-tested). Residual:
+  readdir plus a lexical check is still O(physical entries) at roughly µs per
+  entry (~24 ms for 4000). That is intrinsic to listing a real directory,
+  bounded by the fixed 4096 ceiling, and accepted for this candidate; a
+  constant-time listing would need padding to the ceiling and its own review.
 
 ## 2026-10-28: host replay-state error classes and nonce pruning (review P3)
 

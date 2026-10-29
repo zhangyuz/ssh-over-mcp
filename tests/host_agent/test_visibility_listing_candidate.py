@@ -227,3 +227,39 @@ def test_filenames_with_invalid_utf8_refuse_entire_list(tmp_path: Path) -> None:
     os.close(fd)
     with pytest.raises(FilesystemAccessError):
         _list(tmp_path)
+
+
+def test_open_time_check_runs_once_per_visible_child_only(tmp_path: Path) -> None:
+    (tmp_path / "public.txt").write_bytes(b"ok")
+    for index in range(50):
+        (tmp_path / f"secret{index:02d}").write_bytes(b"")
+    opened: list[str] = []
+
+    def before_open(path: str) -> bool:
+        opened.append(path)
+        return True
+
+    result = list_directory_candidate(
+        str(tmp_path),
+        authorize_traverse=lambda _: True,
+        authorize_directory=lambda _: True,
+        authorize_child=lambda path: not Path(path).name.startswith("secret"),
+        before_child_open=before_open,
+        max_entries=64,
+    )
+    assert opened == [str(tmp_path / "public.txt")]
+    assert tuple(item.path for item in result) == (str(tmp_path / "public.txt"),)
+
+
+def test_open_time_refusal_returns_no_partial_result(tmp_path: Path) -> None:
+    (tmp_path / "a.txt").write_bytes(b"a")
+    (tmp_path / "b.txt").write_bytes(b"b")
+    with pytest.raises(FilesystemAccessError):
+        list_directory_candidate(
+            str(tmp_path),
+            authorize_traverse=lambda _: True,
+            authorize_directory=lambda _: True,
+            authorize_child=lambda _: True,
+            before_child_open=lambda path: not path.endswith("b.txt"),
+            max_entries=64,
+        )
