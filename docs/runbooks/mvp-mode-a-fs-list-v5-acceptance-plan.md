@@ -115,15 +115,23 @@ Stop at the first unexpected result and fence ingress; never improvise.
 ## 5. Explicit limits and open items
 
 - `install` (staging the root-owned generation and how the controller learns
-  each host's expectations), the control-side attestation entrypoint, the
-  independent live SSH host-key handshake and the adapter wiring of
-  `attest_host`/`attest_control` are **not implemented yet**; steps 2 and 6 need
-  them. The current primitives deliberately cannot be passed to `run_rotation`.
-- Attestation (step 6) must run as the Host Agent's identity
-  (`docker exec --user 2201:3201`), record the effective UID/GID, use a fresh
-  one-use nonce per round and compare proofs only with `proofs_equal`.
+  each host's expectations), the control-side attestation entrypoint that
+  produces the central proofs and the independent live SSH host-key handshake are
+  **not implemented yet**; steps 2 and 6 need them. `attest_host` and
+  `attest_control` exist (source only, fakes only) but the primitives still lack
+  `install`, so no object can be passed to `run_rotation` for a real rotation.
+- **Prerequisite:** the Compose `ledger` service has no healthcheck. The control
+  receipt therefore uses MCP's `/readyz` (which pings the Ledger) plus the Ledger
+  container's `running` state; do not "fix" this by assuming a ledger healthcheck.
+- Attestation (step 6) runs as the FS-only ForceCommand identity from ADR0025
+  (`docker exec --user 2201:3201`; the generic runtime contract's `2202:3202` is a
+  different component). Record the effective UID/GID of every exec and show the
+  key file is readable by that identity; use a fresh one-use nonce per round and
+  compare proofs only with `proofs_equal`.
 - The control report can only be taken after control starts; node reports are
-  taken after node start and again after control start.
+  taken after node start (control still `exited`: fields only) and again after
+  control start (equal control proof required). The round is chosen from the
+  observed container state on every call.
 - "Zero established sockets" is the defined drain criterion, not a proof that no
   request is in flight in memory; access paths other than the LaunchAgent
   tunnel (operator `limactl shell`) must be quiesced by the operator.

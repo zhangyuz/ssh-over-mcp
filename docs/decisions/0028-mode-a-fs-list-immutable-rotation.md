@@ -125,7 +125,12 @@ read-only operator-side `docker exec`, not by a new SMCP operation.**
   that constructs the authority do not exist yet (open item below), and
   `ImmutableVisibilityAuthority.attest` is only the library function it will
   call. Node reports are therefore re-taken after control starts, as the
-  sequencer already does.
+  sequencer already does. A host receipt's `generation_sha256` is the release's
+  own derived value, returned only after that host's own epoch, digest, pin and
+  key ID matched; it is not independent evidence about the other host, and the
+  sequencer's per-host generation comparison is a tautology. The control
+  receipt's generation is real evidence because it is derived from the control's
+  own reports.
 - *Why safe enough:* the entrypoint is read-only, opens no socket, reads no
   stdin and prints no key material; the operator already has this privileged
   path for stop/start; comparing independent proofs defeats echoing.
@@ -142,11 +147,24 @@ read-only operator-side `docker exec`, not by a new SMCP operation.**
   `docker exec --user 2201:3201 ... <python> -I -m ...` (uid and gid never 0),
   accepts only one bounded line with an exact member set and strict types, uses
   a fresh never-reused nonce per round, and checks the report against the
-  release. Round 1 (control still stopped) is fields-only; once
-  `attest_control` has succeeded every host proof must also EQUAL the control
-  proof for the same nonce. The control receipt is built from the control's own
-  reports plus `docker inspect` health (`audit_available` means the Ledger and
-  MCP containers are both healthy, nothing finer), not echoed from the release.
+  release. Which round applies is decided on every call from the **observed**
+  control state, not from memory kept by the object: only when both control
+  containers are seen `exited` is the check fields-only; in every other case,
+  including a state that cannot be read, each host proof must also EQUAL the
+  control proof for the same nonce. A second instance, a retry or a second
+  rotation therefore cannot silently fall back to the weaker check. The control
+  receipt is built from the control's own reports and container state, not
+  echoed from the release. The Compose `ledger` service defines **no
+  healthcheck**; MCP's `/readyz` pings the Ledger, so "MCP healthy and Ledger
+  `running`" is what `ledger_available` and `audit_available` mean (both are the
+  same single condition, nothing finer; a real audit-append probe would be a
+  separate item).
+- *Exec identity:* `2201:3201` is the FS-only pilot's native ForceCommand identity
+  (ADR0025). The generic runtime contract's `2202:3202` Host Agent is a different
+  component and is not the identity that verifies v5 snapshots in this pilot.
+  The configuration only enforces "numeric and neither id is 0"; whether the
+  key file is actually readable by the ForceCommand identity, and the effective
+  UID/GID of each exec, are acceptance evidence, not something this code proves.
 - *`generation_sha256` is now derived, and what that does and does not prove:*
   `generation_id` = SHA-256(domain || canonical{epoch, policy digest, per-host
   host-key pin and signer key ID}); `RotationSpec` refuses any other value and
