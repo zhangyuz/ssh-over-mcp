@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 
 from ssh_over_mcp.ops.mode_a_v5_rotation import (
+    ControlReceipt,
     HostReceipt,
     RotationFailure,
     RotationSpec,
@@ -24,6 +25,8 @@ class RecordingOps:
     def __init__(self):
         self.calls = []
         self.bad = None
+        self.bad_control = None
+        self.bad_reattest = False
 
     async def freeze_ingress(self):
         self.calls.append("freeze")
@@ -55,6 +58,8 @@ class RecordingOps:
         r = HostReceipt(
             host=host, host_key_sha256=key, epoch=12, policy_sha256=D, generation_sha256=G
         )
+        if self.bad_reattest and "start_control" in self.calls and host == "node02":
+            return r.model_copy(update={"generation_sha256": "0" * 64})
         if self.bad == "spoof":
             return r.model_copy(update={"host": "node01"})
         if self.bad == "rollback":
@@ -66,6 +71,30 @@ class RecordingOps:
     async def start_control(self):
         self.calls.append("start_control")
         return True
+
+    async def attest_control(self, spec):
+        self.calls.append("attest_control")
+        receipt = ControlReceipt(
+            epoch=12,
+            policy_sha256=D,
+            generation_sha256=G,
+            host_keys={"node01": K1, "node02": K2},
+            ledger_available=True,
+            audit_available=True,
+        )
+        if self.bad_control == "epoch":
+            return receipt.model_copy(update={"epoch": 11})
+        if self.bad_control == "digest":
+            return receipt.model_copy(update={"policy_sha256": "0" * 64})
+        if self.bad_control == "pins":
+            return receipt.model_copy(update={"host_keys": {"node01": K2, "node02": K1}})
+        if self.bad_control == "ledger":
+            return receipt.model_copy(update={"ledger_available": False})
+        if self.bad_control == "audit":
+            return receipt.model_copy(update={"audit_available": False})
+        if self.bad_control == "type":
+            return True
+        return receipt
 
     async def open_ingress(self):
         self.calls.append("open")
@@ -98,8 +127,31 @@ async def test_success_requires_quiescence_and_both_attestations_before_resume()
         "attest_node01",
         "attest_node02",
         "start_control",
+        "attest_control",
+        "attest_node01",
+        "attest_node02",
         "open",
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad", ["epoch", "digest", "pins", "ledger", "audit", "type"])
+async def test_control_post_start_evidence_must_match_before_unfreeze(bad):
+    ops = RecordingOps()
+    ops.bad_control = bad
+    with pytest.raises(RotationFailure):
+        await run_rotation(spec(), ops)
+    assert "open" not in ops.calls
+
+
+@pytest.mark.asyncio
+async def test_host_receipts_are_rechecked_after_control_start():
+    ops = RecordingOps()
+    ops.bad_reattest = True
+    with pytest.raises(RotationFailure):
+        await run_rotation(spec(), ops)
+    assert "open" not in ops.calls
+    assert ops.calls.count("attest_node02") == 2
 
 
 @pytest.mark.asyncio

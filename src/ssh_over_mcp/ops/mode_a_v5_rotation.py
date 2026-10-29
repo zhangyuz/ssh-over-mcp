@@ -46,6 +46,19 @@ class HostReceipt(BaseModel):
     generation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class ControlReceipt(BaseModel):
+    """Post-start control evidence gathered while ingress is still fenced."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    epoch: int = Field(strict=True, ge=1)
+    policy_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    generation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    host_keys: dict[str, str]
+    ledger_available: bool
+    audit_available: bool
+
+
 class TrustedRotationOps(Protocol):
     """Operator-specific, privileged implementation is NOT provided here."""
 
@@ -57,12 +70,29 @@ class TrustedRotationOps(Protocol):
     async def start_host(self, host: str) -> bool: ...
     async def attest_host(self, host: str, spec: RotationSpec) -> HostReceipt: ...
     async def start_control(self) -> bool: ...
+    async def attest_control(self, spec: RotationSpec) -> ControlReceipt: ...
     async def open_ingress(self) -> bool: ...
 
 
 async def _require_ack(value: bool) -> None:
     if value is not True:
         raise RotationFailure("required maintenance proof unavailable")
+
+
+async def _attest_both_hosts(expected: RotationSpec, ops: TrustedRotationOps) -> None:
+    for host in ("node01", "node02"):
+        attestation = expected.model_copy(deep=True)
+        receipt = await ops.attest_host(host, attestation)
+        if (
+            attestation != expected
+            or not isinstance(receipt, HostReceipt)
+            or receipt.host != host
+            or receipt.host_key_sha256 != expected.host_keys[host]
+            or receipt.epoch != expected.epoch
+            or receipt.policy_sha256 != expected.policy_sha256
+            or receipt.generation_sha256 != expected.generation_sha256
+        ):
+            raise RotationFailure("host attestation does not match expected generation")
 
 
 async def run_rotation(spec: RotationSpec, ops: TrustedRotationOps) -> None:
@@ -88,20 +118,24 @@ async def run_rotation(spec: RotationSpec, ops: TrustedRotationOps) -> None:
                 raise RotationFailure("installation mutated approved release")
         for host in ("node01", "node02"):
             await _require_ack(await ops.start_host(host))
-        for host in ("node01", "node02"):
-            attestation = expected.model_copy(deep=True)
-            receipt = await ops.attest_host(host, attestation)
-            if (
-                attestation != expected
-                or not isinstance(receipt, HostReceipt)
-                or receipt.host != host
-                or receipt.host_key_sha256 != expected.host_keys[host]
-                or receipt.epoch != expected.epoch
-                or receipt.policy_sha256 != expected.policy_sha256
-                or receipt.generation_sha256 != expected.generation_sha256
-            ):
-                raise RotationFailure("host attestation does not match expected generation")
+        await _attest_both_hosts(expected, ops)
         await _require_ack(await ops.start_control())
+        # ADR0028 step 7: verify control post-start evidence and re-check both
+        # hosts while ingress is still fenced; only then may it be unfrozen.
+        attestation = expected.model_copy(deep=True)
+        control = await ops.attest_control(attestation)
+        if (
+            attestation != expected
+            or not isinstance(control, ControlReceipt)
+            or control.epoch != expected.epoch
+            or control.policy_sha256 != expected.policy_sha256
+            or control.generation_sha256 != expected.generation_sha256
+            or control.host_keys != expected.host_keys
+            or control.ledger_available is not True
+            or control.audit_available is not True
+        ):
+            raise RotationFailure("control attestation does not match expected generation")
+        await _attest_both_hosts(expected, ops)
         await _require_ack(await ops.open_ingress())
     except RotationFailure:
         raise
