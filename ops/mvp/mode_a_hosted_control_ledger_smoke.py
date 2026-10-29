@@ -326,8 +326,8 @@ async def prove(
 
 async def main() -> None:
     assert os.getuid() == 2201 and os.getgid() == 3201
-    assert len(sys.argv) in (4, 5)
-    v2 = len(sys.argv) == 5 and sys.argv[-1] == "--v2"
+    assert len(sys.argv) in (4, 5, 6)
+    v2 = len(sys.argv) == 6 and sys.argv[-1] == "--v2"
     origin_ip, *node_ips = sys.argv[1:-1] if v2 else sys.argv[1:]
     assert origin_ip not in node_ips and len(set(node_ips)) == 2
     assert Path("/tmp/client1").is_file() and Path("/tmp/client2").is_file()
