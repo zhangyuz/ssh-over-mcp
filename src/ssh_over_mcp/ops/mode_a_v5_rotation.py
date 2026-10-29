@@ -7,10 +7,43 @@ returned by an untrusted adapter is not an acknowledgement.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+_GENERATION_DOMAIN = b"ssh-over-mcp/v5/generation/v1\x00"
+
+
+def generation_id(
+    *,
+    epoch: int,
+    policy_sha256: str,
+    host_keys: dict[str, str],
+    signer_key_ids: dict[str, str],
+) -> str:
+    """The generation fingerprint, derived only from values hosts can attest.
+
+    It is not an opaque manifest label: every input is something each host
+    reports from its own protected files (epoch, policy digest, host-key pin,
+    verifier key ID), so a receipt can only carry it after those were verified.
+    """
+
+    body = json.dumps(
+        {
+            "epoch": epoch,
+            "policy_sha256": policy_sha256,
+            "hosts": {
+                host: {"host_key_sha256": host_keys[host], "signer_key_id": signer_key_ids[host]}
+                for host in sorted(host_keys)
+            },
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return hashlib.sha256(_GENERATION_DOMAIN + body).hexdigest()
 
 
 class RotationFailure(RuntimeError):
@@ -39,6 +72,13 @@ class RotationSpec(BaseModel):
                 raise ValueError("two distinct pinned Mode A hosts and signer keys are required")
         if set(self.host_keys.values()) & set(self.signer_key_ids.values()):
             raise ValueError("signer key identity must differ from host-key pins")
+        if self.generation_sha256 != generation_id(
+            epoch=self.epoch,
+            policy_sha256=self.policy_sha256,
+            host_keys=self.host_keys,
+            signer_key_ids=self.signer_key_ids,
+        ):
+            raise ValueError("generation must be derived from the attested fields")
         return self
 
 
@@ -113,7 +153,9 @@ async def run_rotation(spec: RotationSpec, ops: TrustedRotationOps) -> None:
     # Frozen Pydantic models do not deep-freeze dict fields. Snapshot the
     # operator-authorized release before calling a potentially faulty adapter.
     # Never pass the original or the reference snapshot to the adapter.
-    expected = spec.model_copy(deep=True)
+    # model_copy(update=...) and model_construct skip validation, so validate
+    # again before anything runs; a failure here is raised before the fence.
+    expected = RotationSpec.model_validate(spec.model_dump())
     try:
         await _require_ack(await ops.freeze_ingress())
         await _require_ack(await ops.drain_inflight())

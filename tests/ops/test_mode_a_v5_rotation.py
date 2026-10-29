@@ -12,17 +12,21 @@ from ssh_over_mcp.ops.mode_a_v5_rotation import (
     HostReceipt,
     RotationFailure,
     RotationSpec,
+    generation_id,
     run_rotation,
 )
 
 D = "a" * 64
-G = "b" * 64
 K1 = "c" * 64
 K2 = "d" * 64
 # Signer/verifier key IDs (fingerprints only; never key bytes).
 S1 = "e" * 64
 S2 = "f" * 64
 SIGNERS = {"node01": S1, "node02": S2}
+# The generation is DERIVED from attested values, never an opaque manifest id.
+G = generation_id(
+    epoch=12, policy_sha256=D, host_keys={"node01": K1, "node02": K2}, signer_key_ids=SIGNERS
+)
 
 
 class RecordingOps:
@@ -256,6 +260,39 @@ def test_refuse_non_distinct_or_invalid_host_inventory():
             )
 
 
+def test_generation_id_is_deterministic_and_covers_every_attested_input():
+    base = {
+        "epoch": 12,
+        "policy_sha256": D,
+        "host_keys": {"node01": K1, "node02": K2},
+        "signer_key_ids": SIGNERS,
+    }
+    first = generation_id(**base)
+    assert first == generation_id(**{**base, "host_keys": {"node02": K2, "node01": K1}})
+    assert len(first) == 64 and int(first, 16) >= 0
+    others = [
+        {"epoch": 13},
+        {"policy_sha256": "0" * 64},
+        {"host_keys": {"node01": K2, "node02": K1}},
+        {"signer_key_ids": {"node01": S2, "node02": S1}},
+    ]
+    assert all(generation_id(**{**base, **change}) != first for change in others)
+
+
+def test_rotation_spec_refuses_a_generation_that_is_not_derived_from_its_fields():
+    fields = {
+        "epoch": 12,
+        "policy_sha256": D,
+        "host_keys": {"node01": K1, "node02": K2},
+        "signer_key_ids": dict(SIGNERS),
+    }
+    RotationSpec(generation_sha256=generation_id(**fields), **fields)
+    with pytest.raises(ValueError):
+        RotationSpec(generation_sha256="b" * 64, **fields)
+    with pytest.raises(ValueError):
+        RotationSpec(generation_sha256=generation_id(**{**fields, "epoch": 13}), **fields)
+
+
 def test_refuse_shared_missing_or_invalid_signer_key_ids():
     for ids in (
         {"node01": S1},
@@ -313,3 +350,19 @@ async def test_spec_object_is_not_mutated_in_place_during_rotation():
     with pytest.raises(RotationFailure):
         await run_rotation(value, TamperingOps())
     assert value.host_keys["node02"] == K2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda s: s.model_copy(update={"generation_sha256": "c" * 64}),
+        lambda s: s.model_copy(update={"epoch": 99}),
+        lambda s: type(s).model_construct(**{**s.model_dump(), "generation_sha256": "d" * 64}),
+    ],
+)
+async def test_run_rotation_revalidates_a_spec_built_around_the_validators(build):
+    ops = RecordingOps()
+    with pytest.raises(ValueError):
+        await run_rotation(build(spec()), ops)
+    assert ops.calls == []  # nothing, not even the fence, ran for an unvalidated release
