@@ -1,4 +1,4 @@
-name: PR347 isolated SMCP v2 two-OpenSSH proof
+name: MVP fs_list SMCP v2 two-OpenSSH and central MCP proof
 
 on:
   pull_request:
@@ -9,9 +9,8 @@ permissions:
 
 jobs:
   disposable-v2-two-openssh:
-    if: >-
-      github.event.pull_request.number == 347 &&
-      github.event.pull_request.head.repo.full_name == 'zhangyuz/ssh-over-mcp'
+    # Same-repository PRs only; disposable GitHub-hosted runner, never deployed.
+    if: github.event.pull_request.head.repo.full_name == 'zhangyuz/ssh-over-mcp'
     runs-on: ubuntu-26.04
     timeout-minutes: 38
     steps:
@@ -58,12 +57,13 @@ jobs:
           python3 ops/mvp/build_native_review_image.py
           test "$(docker image inspect som-mvp-fs-native-review:local --format '{{json .Config.Entrypoint}}')" = '["/usr/local/libexec/ssh-over-mcp-image-hold"]'
 
-      - name: Prove independent OpenSSH node01 and node02 SMCP v2 positive and refusal
+      - name: Prove two OpenSSH nodes and central MCP/Ledger fs_list positive and refusal
         shell: bash
         run: |
           set -euo pipefail
           python3 ops/mvp/mode_a_hosted_v2_two_openssh.py
           echo 'CI_ONLY_TWO_REAL_OPENSSH_SMCP_V2_PASS=true'
-          echo 'MCP_LEDGER_V2_REAL_E2E_PROVEN=false'
+          echo 'CI_ONLY_CENTRAL_MCP_LEDGER_TWO_OPENSSH_V2_PASS=true'
           echo 'PRODUCTION_KEYS_USED=false'
           echo 'DEPLOYED=false'
+          echo 'MODE_A_LIVE_ACCEPTED=false'
