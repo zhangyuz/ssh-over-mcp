@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 
 class Effect(StrEnum):
@@ -64,6 +64,12 @@ class RiskPolicy(BaseModel):
     approval_required: frozenset[RiskLevel] = frozenset(
         {RiskLevel.HIGH, RiskLevel.CRITICAL}
     )
+
+    @field_serializer("approval_required")
+    def sorted_approval_required(self, values: frozenset[RiskLevel]) -> list[RiskLevel]:
+        # Set iteration order varies with PYTHONHASHSEED; the policy digest
+        # is pinned across processes and hosts, so serialize canonically.
+        return sorted(values)
 
 
 class PolicyDocument(BaseModel):

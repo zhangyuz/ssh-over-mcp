@@ -22,6 +22,7 @@ from ssh_over_mcp.ssh import (
     SSHExecutor,
     SSHFilesystemClient,
 )
+from ssh_over_mcp.ssh.filesystem_list_v2 import VisibilityAuthority
 from ssh_over_mcp.ssh.transport import StructuredSSHTransport
 
 from .errors import RuntimeConfigurationError
@@ -132,6 +133,7 @@ def build_ssh_runtime(
     policy: PolicyEngine,
     credential_map: Mapping[str, Path],
     ledger: ApprovalLedger,
+    visibility_authority: VisibilityAuthority | None = None,
 ) -> SSHRuntime:
     validated = _validate_mapping(credential_map)
     required_refs = {
@@ -168,6 +170,7 @@ def build_ssh_runtime(
         authorizer=filesystem_authorizer,
         audit=audit,
         transport=transport,
+        visibility_authority=visibility_authority,
     )
     return SSHRuntime(
         credentials=credentials,

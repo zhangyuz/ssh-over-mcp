@@ -32,6 +32,8 @@ This directory is the canonical behavioral and security specification for `ssh-o
 
 **Mode A disposable VM definition preflight** — [read-only VM gate](runbooks/mvp-mode-a-vm-offline-gate.md) (does not authorize boot; host/LAN egress remains unverified).
 
+**Mode A `fs_list` v5 isolated acceptance plan (PROPOSED, NOT AUTHORIZED)** — [review-only plan and the CapBnd reconciliation](runbooks/mvp-mode-a-fs-list-v5-acceptance-plan.md); no command in it has been run and it never mutates the live pilot VM (a separate isolated guest is required).
+
 **Yuz.local Mode A FS-only pilot — LIVE ON HOST LOOPBACK** — [operational endpoint, exact pinned image IDs, tests and rollback](runbooks/mvp-mode-a-yuz-local-live-operations.md) and [operator-scoped decision ADR0025](decisions/0025-mode-a-fs-only-operator-pilot-release.md). Accessible only at `127.0.0.1:18801/mcp` on the Mac with bearer auth; not a public or Mode B release. [Historical Engine/key preparation](runbooks/mvp-mode-a-yuz-local-networked-engine.md).
 
 **Operator-selected networked MVP vs isolated test boundary** — [ADR 0024](decisions/0024-networked-docker-mvp-vs-isolated-e2e.md): production must have controlled MCP↔SSH connectivity, while no-NIC remains for trusted E2E isolation; no offline Docker dependency-chain requirement for online pilot. Not an authorization to deploy or bypass STOP78.

@@ -625,3 +625,398 @@ async def test_server_invalid_fs_read_input_is_sanitized() -> None:
     assert "invalid tool input" in text
     assert "SUPERSECRET" not in text
     assert service.calls == []
+
+
+# Real service/client/authorizer path; only the remote channel and trust provider
+# are synthetic. These fixtures do not confer production signing authority.
+@pytest.fixture
+def list_stack():
+    import json
+    from types import SimpleNamespace
+
+    import asyncssh
+
+    from ssh_over_mcp.approvals.authorization import ExecutionAuthorizer
+    from ssh_over_mcp.host_agent.visibility_snapshot_v5 import sign_snapshot
+    from ssh_over_mcp.policy.engine import PolicyEngine
+    from ssh_over_mcp.policy.models import Effect, PolicyDocument, PolicyRule, RoleSpec
+    from ssh_over_mcp.ssh.filesystem import SSHFilesystemClient
+    from ssh_over_mcp.ssh.protocol_v2 import decode_request_v2
+    from ssh_over_mcp.ssh.transport import SSHExecutionResult
+
+    inventory = _inventory()
+    inventory.hosts["visible"] = inventory.hosts["visible"].model_copy(
+        update={
+            "host_key": asyncssh.generate_private_key("ssh-ed25519")
+            .export_public_key()
+            .decode()
+            .strip(),
+        }
+    )
+    engine = PolicyEngine(
+        inventory=inventory,
+        policy=PolicyDocument(
+            roles={"developer": RoleSpec(), "ops": RoleSpec()},
+            rules=(
+                PolicyRule(
+                    id="list",
+                    effect=Effect.ALLOW,
+                    roles=("developer",),
+                    tools=("fs_list",),
+                    paths=("/srv/app", "/srv/app/**"),
+                ),
+                PolicyRule(
+                    id="deny",
+                    effect=Effect.DENY,
+                    roles=("developer",),
+                    tools=("fs_list",),
+                    paths=("/srv/app/private/**",),
+                ),
+            ),
+        ),
+    )
+    state = SimpleNamespace(
+        calls=[], events=[], signed=[], error=None, fail_audit=None, child="/srv/app/file"
+    )
+
+    class Ledger:
+        async def append_audit(self, event):
+            if event.event_type == state.fail_audit:
+                raise RuntimeError("SUPERSECRET ledger")
+            state.events.append(event)
+            return "evt_" + "a" * 32
+
+    class Authority:
+        def __init__(self):
+            self.engine = engine
+
+        def current_epoch(self, **kwargs):
+            return 7
+
+        def is_active(self, snapshot):
+            return snapshot.principal == "static:developer"
+
+        def sign(self, snapshot):
+            state.signed.append(snapshot)
+            return sign_snapshot(snapshot, key=b"t" * 32)
+
+    async def run_v2(**kwargs):
+        state.calls.append(kwargs)
+        if state.error:
+            raise state.error
+        snap = decode_request_v2(kwargs["payload"]).signed_snapshot.payload
+        body = {
+            "request_id": snap.request_id,
+            "host": snap.host,
+            "root": snap.root,
+            "policy_epoch": snap.policy_epoch,
+            "snapshot_id": snap.snapshot_id,
+            "entries": [
+                {
+                    "path": state.child,
+                    "kind": "regular",
+                    "size": 1,
+                    "mode": 0o600,
+                    "uid": 1000,
+                    "gid": 1000,
+                    "mtime_ns": 123,
+                }
+            ],
+        }
+        return SSHExecutionResult(
+            request_id=snap.request_id,
+            host=snap.host,
+            exit_status=0,
+            duration_ms=1,
+            stdout=json.dumps(body).encode(),
+        )
+
+    ledger = Ledger()
+    state.audit = AuditRecorder(ledger)
+    state.filesystem = SSHFilesystemClient(
+        authorizer=ExecutionAuthorizer(policy=engine, ledger=ledger),
+        audit=state.audit,
+        transport=SimpleNamespace(run_v2=run_v2, connections=SimpleNamespace(inventory=inventory)),
+        visibility_authority=Authority(),
+    )
+    state.service = MCPService(inventory=inventory, policy=engine, ssh_filesystem=state.filesystem)
+    return state
+
+
+def _list_server(s, **kwargs):
+    return build_mcp_server(
+        service=s.service,
+        audit=s.audit,
+        principal_provider=kwargs.pop("principal_provider", StaticPrincipalProvider()),
+        **kwargs,
+    )
+
+
+@pytest.mark.asyncio
+async def test_fs_list_default_absent_even_with_authority(list_stack):
+    async with Client(_list_server(list_stack)) as client:
+        assert "fs_list" not in {t.name for t in (await client.list_tools()).tools}
+        result = await client.call_tool(
+            "fs_list", {"host": "visible", "path": "/srv/app", "max_entries": 8}
+        )
+        assert result.is_error
+    assert not list_stack.calls
+
+
+def test_fs_list_opt_in_requires_existing_authority(list_stack):
+    list_stack.filesystem.visibility_authority = None
+    with pytest.raises(ValueError, match="visibility authority"):
+        _list_server(list_stack, enable_fs_list=True)
+
+
+@pytest.mark.asyncio
+async def test_fs_list_real_client_context_audit_and_schema(list_stack):
+    from ssh_over_mcp.audit.models import AuditEventType as E
+
+    s = list_stack
+    async with Client(_list_server(s, enable_fs_list=True)) as client:
+        tool = next(t for t in (await client.list_tools()).tools if t.name == "fs_list")
+        assert set(tool.input_schema["properties"]) == {"host", "path", "max_entries"}
+        assert tool.input_schema["additionalProperties"] is False
+        assert tool.input_schema["properties"]["max_entries"]["maximum"] == 64
+        assert tool.annotations.read_only_hint and not tool.annotations.open_world_hint
+        result = await client.call_tool(
+            "fs_list", {"host": "visible", "path": "/srv/app", "max_entries": 8}
+        )
+    assert not result.is_error
+    assert set(result.structured_content) == {"request_id", "host", "path", "entries"}
+    assert result.structured_content["entries"][0]["path"] == "/srv/app/file"
+    snap = s.signed[0]
+    assert (snap.principal, snap.profile, snap.max_entries) == ("static:developer", "developer", 8)
+    assert result.structured_content["request_id"] == snap.request_id
+    assert [e.event_type for e in s.events] == [
+        E.REQUEST_RECEIVED,
+        E.POLICY_ALLOWED,
+        E.EXECUTION_STARTED,
+        E.EXECUTION_COMPLETED,
+    ]
+    assert all(e.request_id == snap.request_id for e in s.events)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"max_entries": True},
+        {"max_entries": "8"},
+        {"max_entries": 0},
+        {"max_entries": 65},
+        {"path": "/srv/../app"},
+        {"path": "x"},
+        {"path": "/" + "é" * 2048},
+        {"host": "h" * 257},
+        {"profile": "ops"},
+        {"principal_id": "other"},
+        {"enable_fs_list": True},
+        {"key": "SUPERSECRET"},
+        {"epoch": 7},
+        {"command": "mcp-v1"},
+        {"approval_id": APR_ID},
+    ],
+)
+async def test_fs_list_rejects_untrusted_input_before_network(list_stack, patch):
+    s = list_stack
+    async with Client(_list_server(s, enable_fs_list=True)) as client:
+        result = await client.call_tool(
+            "fs_list",
+            {
+                "host": "visible",
+                "path": "/srv/app",
+                "max_entries": 8,
+                **patch,
+            },
+        )
+    assert result.is_error
+    assert "SUPERSECRET" not in str(result.content)
+    assert not s.calls and not s.signed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "host,path", [("hidden", "/srv/app"), ("visible", "/etc"), ("visible", "/srv/app/private")]
+)
+async def test_fs_list_denied_host_or_path_never_opens_ssh(list_stack, host, path):
+    s = list_stack
+    async with Client(_list_server(s, enable_fs_list=True)) as client:
+        result = await client.call_tool("fs_list", {"host": host, "path": path, "max_entries": 8})
+    assert result.is_error and not s.calls
+
+
+@pytest.mark.asyncio
+async def test_fs_list_mismatched_trusted_principal_never_opens_ssh(list_stack):
+    class OtherPrincipal:
+        def get_principal(self):
+            return models.PrincipalContext(principal_id="other", profile="developer")
+
+    s = list_stack
+    async with Client(
+        _list_server(s, enable_fs_list=True, principal_provider=OtherPrincipal())
+    ) as client:
+        result = await client.call_tool(
+            "fs_list", {"host": "visible", "path": "/srv/app", "max_entries": 8}
+        )
+    assert result.is_error and not s.calls
+
+
+@pytest.mark.asyncio
+async def test_fs_list_denied_response_is_not_disclosed(list_stack):
+    list_stack.child = "/srv/app/private/SECRET"
+    async with Client(_list_server(list_stack, enable_fs_list=True)) as client:
+        result = await client.call_tool(
+            "fs_list", {"host": "visible", "path": "/srv/app", "max_entries": 8}
+        )
+    assert result.is_error
+    assert "SECRET" not in str(result.content)
+    assert result.structured_content is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event", ["request_received", "policy_allowed", "execution_started"])
+async def test_fs_list_audit_failure_never_opens_ssh(list_stack, event):
+    from ssh_over_mcp.audit.models import AuditEventType
+
+    list_stack.fail_audit = AuditEventType(event)
+    async with Client(_list_server(list_stack, enable_fs_list=True)) as client:
+        result = await client.call_tool(
+            "fs_list", {"host": "visible", "path": "/srv/app", "max_entries": 8}
+        )
+    assert result.is_error and not list_stack.calls
+    assert "SUPERSECRET" not in str(result.content)
+
+
+def test_fs_list_unauthenticated_http_never_opens_ssh(list_stack):
+    from starlette.testclient import TestClient
+
+    from ssh_over_mcp.api.origin_auth import OriginBearerAuthMiddleware
+
+    server = _list_server(list_stack, enable_fs_list=True)
+    app = server.streamable_http_app(stateless_http=True, json_response=True)
+    app.add_middleware(OriginBearerAuthMiddleware, token=b"test-only-token")
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "fs_list",
+                    "arguments": {"host": "visible", "path": "/srv/app", "max_entries": 8},
+                },
+            },
+        )
+    assert response.status_code == 401
+    assert not list_stack.calls and not list_stack.events
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error,message",
+    [
+        (SSHCredentialError("SUPERSECRET"), "SSH credential is unavailable"),
+        (SSHHostKeyVerificationError("SUPERSECRET"), "SSH host key verification failed"),
+        (SSHConnectionError("SUPERSECRET"), "SSH transport failed"),
+        (SSHRemotePolicyDenied("SUPERSECRET"), "remote filesystem policy denied request"),
+        (SSHRequestTimeout("SUPERSECRET"), "remote filesystem request timed out"),
+        (SSHOutputLimitExceeded("SUPERSECRET"), "remote filesystem response exceeded output limit"),
+        (SSHRemoteResponseError("SUPERSECRET"), "remote filesystem operation failed"),
+        (RuntimeError("SUPERSECRET"), "remote filesystem operation failed"),
+    ],
+)
+async def test_fs_list_sanitizes_transport_errors(list_stack, error, message):
+    list_stack.error = error
+    async with Client(_list_server(list_stack, enable_fs_list=True)) as client:
+        result = await client.call_tool(
+            "fs_list",
+            {
+                "host": "visible",
+                "path": "/srv/app",
+                "max_entries": 8,
+            },
+        )
+    assert result.is_error
+    assert message in str(result.content) and "SUPERSECRET" not in str(result.content)
+    assert result.structured_content is None
+
+
+@pytest.mark.asyncio
+async def test_fs_list_removed_authority_fails_closed(list_stack):
+    server = _list_server(list_stack, enable_fs_list=True)
+    list_stack.filesystem.visibility_authority = None
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "fs_list",
+            {
+                "host": "visible",
+                "path": "/srv/app",
+                "max_entries": 8,
+            },
+        )
+    assert result.is_error and not list_stack.calls
+
+
+@pytest.mark.asyncio
+async def test_fs_list_completion_audit_failure_discloses_no_result(list_stack):
+    from ssh_over_mcp.audit.models import AuditEventType
+
+    list_stack.fail_audit = AuditEventType.EXECUTION_COMPLETED
+    async with Client(_list_server(list_stack, enable_fs_list=True)) as client:
+        result = await client.call_tool(
+            "fs_list",
+            {
+                "host": "visible",
+                "path": "/srv/app",
+                "max_entries": 8,
+            },
+        )
+    assert result.is_error and len(list_stack.calls) == 1
+    assert result.structured_content is None
+    assert "SUPERSECRET" not in str(result.content)
+
+
+def test_fs_list_production_runtime_has_no_authority(list_stack, tmp_path):
+    from ssh_over_mcp.api.ssh_runtime import build_ssh_runtime
+
+    engine = list_stack.filesystem.visibility_authority.engine
+    key = tmp_path / "synthetic-key"
+    key.write_text("test-only-not-a-private-key")
+    runtime = build_ssh_runtime(
+        inventory=engine.inventory,
+        policy=engine,
+        credential_map={h.credential_ref: key for h in engine.inventory.hosts.values()},
+        ledger=_AuditLedger(),
+    )
+    assert runtime.filesystem.visibility_authority is None
+    service = MCPService(
+        inventory=engine.inventory, policy=engine, ssh_filesystem=runtime.filesystem
+    )
+    with pytest.raises(ValueError, match="visibility authority"):
+        build_mcp_server(
+            service=service,
+            audit=runtime.audit,
+            principal_provider=StaticPrincipalProvider(),
+            enable_fs_list=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_fs_list_approval_required_does_not_offer_unsupported_retry(list_stack):
+    async def requires_approval(**kwargs):
+        raise SSHApprovalRequired(
+            _policy_failure(Decision.APPROVAL_REQUIRED, approval_required=True),
+            approval_status=_approval_status("fs_list"),
+        )
+
+    list_stack.filesystem.list = requires_approval
+    async with Client(_list_server(list_stack, enable_fs_list=True)) as client:
+        result = await client.call_tool("fs_list", {
+            "host": "visible", "path": "/srv/app", "max_entries": 8,
+        })
+    assert result.is_error and not list_stack.calls
+    assert "approval required by central policy" in str(result.content)
+    assert APR_ID not in str(result.content) and "retry" not in str(result.content)

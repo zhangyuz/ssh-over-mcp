@@ -53,6 +53,8 @@ from .errors import (
 from .models import (
     ApprovalStatusRequest,
     ApprovalStatusResult,
+    FsListRequest,
+    FsListResult,
     FsMkdirRequest,
     FsMkdirResult,
     FsReadRequest,
@@ -306,6 +308,80 @@ class MCPService:
             duration_ms=result.duration_ms,
             timed_out=result.timed_out,
             truncated=result.truncated,
+        )
+
+    @property
+    def fs_list_available(self) -> bool:
+        return (
+            self._ssh_filesystem is not None
+            and self._ssh_filesystem.visibility_authority is not None
+        )
+
+    async def fs_list(
+        self,
+        context: OperationContext,
+        request: FsListRequest,
+    ) -> FsListResult:
+        self._visible_host(context.principal, request.host)
+        if not self.fs_list_available:
+            raise FilesystemOperationError("filesystem operation is unavailable")
+
+        try:
+            result = await self._ssh_filesystem.list(
+                host=request.host,
+                path=request.path,
+                max_entries=request.max_entries,
+                context=context,
+            )
+        except SSHPolicyDenied:
+            raise PolicyDeniedError(
+                "request denied by central policy"
+            ) from None
+        except SSHApprovalRequired:
+            # Visibility compilation requires direct ALLOW; no MCP approval retry.
+            raise ApprovalRequiredError("approval required by central policy") from None
+        except SSHCredentialError:
+            raise SSHCredentialUnavailableError(
+                "SSH credential is unavailable"
+            ) from None
+        except SSHHostKeyVerificationError:
+            raise SSHHostKeyError(
+                "SSH host key verification failed"
+            ) from None
+        except SSHConnectionError:
+            raise SSHTransportError("SSH transport failed") from None
+        except SSHAuditPersistenceOutcomeUncertain:
+            raise AuditPersistenceOutcomeUncertainError(
+                "audit persistence outcome is uncertain; do not retry blindly"
+            ) from None
+        except SSHAuditPersistenceError:
+            raise AuditPersistenceError("audit persistence failed") from None
+        except SSHRemotePolicyDenied:
+            raise RemotePolicyDeniedError(
+                "remote filesystem policy denied request"
+            ) from None
+        except SSHRequestTimeout:
+            raise RemoteTimeoutError(
+                "remote filesystem request timed out"
+            ) from None
+        except SSHOutputLimitExceeded:
+            raise RemoteOutputLimitError(
+                "remote filesystem response exceeded output limit"
+            ) from None
+        except (SSHRemoteOperationError, SSHRemoteResponseError):
+            raise FilesystemOperationError(
+                "remote filesystem operation failed"
+            ) from None
+        except Exception:  # noqa: BLE001
+            raise FilesystemOperationError(
+                "remote filesystem operation failed"
+            ) from None
+
+        return FsListResult(
+            request_id=result.request_id,
+            host=result.host,
+            path=result.root,
+            entries=tuple(entry.model_dump() for entry in result.entries),
         )
 
     async def fs_stat(

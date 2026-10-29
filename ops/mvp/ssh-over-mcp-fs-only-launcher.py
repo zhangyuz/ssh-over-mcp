@@ -167,10 +167,32 @@ def _fixed_policy(policy: object) -> None:
         raise FsOnlyStartRefused("filesystem-only policy limits unexpectedly expanded")
 
 
+def _fixed_v5_policy(config: object) -> None:
+    """v2 listing cannot widen the earlier fixed /srv/data FS-only authority."""
+    if getattr(config, "version", None) != 5 or getattr(config, "enabled", None) is not True:
+        raise FsOnlyStartRefused("v5 trusted policy unavailable")
+    visibility = getattr(config, "visibility", None)
+    operations = getattr(visibility, "operations", None)
+    if getattr(visibility, "enabled", None) is not True or not isinstance(operations, dict):
+        raise FsOnlyStartRefused("v5 visibility operations unavailable")
+    if set(operations) != {"fs_list", "fs_search"}:
+        raise FsOnlyStartRefused("unexpected v5 visibility operations")
+    for rules in operations.values():
+        roots = getattr(rules, "allow_roots", ())
+        if not roots or any(
+            not isinstance(root, str)
+            or (root != DATA_ROOT and not root.startswith(DATA_ROOT + "/"))
+            for root in roots
+        ):
+            raise FsOnlyStartRefused("v5 filesystem roots exceed FS-only authority")
+
+
 def main(argv: tuple[str, ...] | None = None) -> int:
     if tuple(sys.argv[1:] if argv is None else argv):
         raise FsOnlyStartRefused("no CLI arguments permitted")
-    if os.environ.get("SSH_ORIGINAL_COMMAND") != "mcp-v1" or os.environ.get("SSH_TTY"):
+    if os.environ.get("SSH_ORIGINAL_COMMAND") not in {"mcp-v1", "mcp-v2"} or os.environ.get(
+        "SSH_TTY"
+    ):
         raise FsOnlyStartRefused("not a fixed SSH command")
     _kernel_identity()
     _data_root()
@@ -202,6 +224,27 @@ def main(argv: tuple[str, ...] | None = None) -> int:
         PATH="/usr/bin:/bin",
         LANG="C.UTF-8",
     )
+    if saved_command == "mcp-v2":
+        # A distinct, fully trusted v5 config is mandatory. No v1 fallback.
+        # This is source-only until an operator approves a new image and
+        # independently proves the actual immutable mounts/host SSH identity.
+        from ssh_over_mcp.host_agent.cli_v2 import DEFAULT_POLICY_V2, run_v2
+        from ssh_over_mcp.host_agent.visibility_runtime_v5 import (
+            load_host_visibility_runtime,
+        )
+
+        _trusted(str(DEFAULT_POLICY_V2))
+        local_v5 = load_host_visibility_runtime(DEFAULT_POLICY_V2)
+        _fixed_v5_policy(local_v5)
+        return run_v2(
+            env=dict(os.environ),
+            stdin=sys.stdin.buffer,
+            stdout=sys.stdout.buffer,
+            stderr=sys.stderr,
+            execution_stderr=sys.stderr.buffer,
+            policy_path=DEFAULT_POLICY_V2,
+        )
+
     return run(
         env=dict(os.environ),
         stdin=sys.stdin.buffer,

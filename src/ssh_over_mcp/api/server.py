@@ -20,6 +20,8 @@ from .models import (
     ApprovalStatusRequest,
     ApprovalStatusResult,
     ExplainableTool,
+    FsListRequest,
+    FsListResult,
     FsMkdirRequest,
     FsMkdirResult,
     FsReadRequest,
@@ -32,6 +34,8 @@ from .models import (
     HostSummary,
     MCPApprovalID,
     MCPHostAlias,
+    MCPListMaxEntries,
+    MCPListPath,
     PolicyExplainRequest,
     PolicyExplainResult,
     SSHExecRequest,
@@ -103,7 +107,13 @@ def build_mcp_server(
     service: MCPService,
     principal_provider: PrincipalProvider,
     audit: AuditRecorder,
+    enable_fs_list: bool = False,
 ) -> MCPServer:
+    # Construction-only opt-in; never sourced from MCP input or runtime env.
+    if type(enable_fs_list) is not bool:
+        raise ValueError("invalid filesystem visibility opt-in")
+    if enable_fs_list and not service.fs_list_available:
+        raise ValueError("filesystem visibility authority is required")
     mcp = StrictMCPServer("ssh-over-mcp")
 
     def operation_context(
@@ -459,5 +469,25 @@ def build_mcp_server(
             return await service.fs_write(context, request)
         except ApiError as exc:
             raise ToolError(str(exc)) from None
+
+    if enable_fs_list:
+        @mcp.tool(annotations=_READ_ONLY_ANNOTATIONS)
+        async def fs_list(
+            host: MCPHostAlias,
+            path: MCPListPath,
+            max_entries: MCPListMaxEntries,
+        ) -> FsListResult:
+            """List one bounded remote directory with central visibility checks."""
+            try:
+                request = FsListRequest(host=host, path=path, max_entries=max_entries)
+            except ValidationError:
+                raise ToolError("invalid tool input") from None
+
+            context = operation_context()
+            await record_request_received(context, tool="fs_list", host=host)
+            try:
+                return await service.fs_list(context, request)
+            except ApiError as exc:
+                raise ToolError(str(exc)) from None
 
     return mcp

@@ -299,3 +299,52 @@ def test_main_checks_complete_import_tree_before_application(monkeypatch):
     with pytest.raises(entry.FsOnlyStartRefused, match="module closure"):
         entry.main(argv=())
     assert trace == ["kernel", "volume", entry.SOURCE]
+
+
+def test_review_launcher_admits_literal_v2_only_to_existing_kernel_gate(monkeypatch):
+    """v2 must never select a general command or bypass existing NNP checks."""
+    entry = _entry()
+    monkeypatch.setattr(entry.os, "environ", {"SSH_ORIGINAL_COMMAND": "mcp-v2"})
+
+    def kernel_gate():
+        raise entry.FsOnlyStartRefused("kernel identity reached")
+
+    monkeypatch.setattr(entry, "_kernel_identity", kernel_gate)
+    with pytest.raises(entry.FsOnlyStartRefused, match="kernel identity reached"):
+        entry.main(argv=())
+
+
+@pytest.mark.parametrize("bad_root", ["/etc", "/", "/srv/databackup", "/tmp", "/srv"])
+def test_v2_launcher_refuses_visibility_outside_fixed_data_root(bad_root):
+    entry = _entry()
+    local = SimpleNamespace(
+        allow_roots=(bad_root,),
+        deny_subtrees=(),
+    )
+    v5 = SimpleNamespace(
+        version=5,
+        enabled=True,
+        visibility=SimpleNamespace(
+            enabled=True,
+            operations={"fs_list": local, "fs_search": local},
+        ),
+    )
+    with pytest.raises(entry.FsOnlyStartRefused):
+        entry._fixed_v5_policy(v5)
+
+
+def test_v2_launcher_v5_only_allows_subtrees_under_legacy_data_root():
+    entry = _entry()
+    local = SimpleNamespace(
+        allow_roots=("/srv/data", "/srv/data/reports"),
+        deny_subtrees=("/srv/data/reports/secret",),
+    )
+    v5 = SimpleNamespace(
+        version=5,
+        enabled=True,
+        visibility=SimpleNamespace(
+            enabled=True,
+            operations={"fs_list": local, "fs_search": local},
+        ),
+    )
+    entry._fixed_v5_policy(v5)

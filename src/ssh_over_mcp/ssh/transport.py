@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -39,8 +39,7 @@ class SSHExecutionResult(BaseModel):
     truncated: bool = Field(
         default=False,
         description=(
-            "The control-plane SSH reader discarded bytes beyond its shared "
-            "stdout/stderr budget."
+            "The control-plane SSH reader discarded bytes beyond its shared stdout/stderr budget."
         ),
     )
 
@@ -84,12 +83,53 @@ class StructuredSSHTransport:
         timeout_seconds: float,
         max_output_bytes: int,
     ) -> SSHExecutionResult:
+        return await self._run(
+            command=REMOTE_PROTOCOL_COMMAND,
+            host=host,
+            payload=payload,
+            request_id=request_id,
+            timeout_seconds=timeout_seconds,
+            max_output_bytes=max_output_bytes,
+        )
+
+    async def run_v2(
+        self,
+        *,
+        host: str,
+        payload: bytes,
+        request_id: str,
+        timeout_seconds: float,
+        max_output_bytes: int,
+    ) -> SSHExecutionResult:
+        """Send a pre-framed v2 request using only the fixed v2 command."""
+        return await self._run(
+            command="mcp-v2",
+            host=host,
+            payload=payload,
+            request_id=request_id,
+            timeout_seconds=timeout_seconds,
+            max_output_bytes=max_output_bytes,
+        )
+
+    async def _run(
+        self,
+        *,
+        command: Literal["mcp-v1", "mcp-v2"],
+        host: str,
+        payload: bytes,
+        request_id: str,
+        timeout_seconds: float,
+        max_output_bytes: int,
+    ) -> SSHExecutionResult:
+        if command not in ("mcp-v1", "mcp-v2"):
+            raise ValueError("unsupported structured SSH command")
+
         started = time.monotonic()
         async with self.connections.session_slot(host):
             connection = await self.connections.get_connection(host)
             try:
                 process = await connection.create_process(
-                    REMOTE_PROTOCOL_COMMAND,
+                    command,
                     input=payload,
                     request_pty=False,
                     term_type=None,
@@ -102,9 +142,7 @@ class StructuredSSHTransport:
                 )
             except Exception as exc:  # noqa: BLE001
                 if _is_asyncssh_channel_open_error(exc):
-                    raise SSHConnectionError(
-                        "SSH structured channel open failed"
-                    ) from None
+                    raise SSHConnectionError("SSH structured channel open failed") from None
                 raise SSHRequestOutcomeUncertain(
                     "structured SSH request outcome is uncertain"
                 ) from None
@@ -178,11 +216,7 @@ class StructuredSSHTransport:
                 timed_out = True
                 aborting.set()
                 await self._abort_process(process)
-            elif (
-                overflow_task in done
-                and overflow.is_set()
-                and not close_task.done()
-            ):
+            elif overflow_task in done and overflow.is_set() and not close_task.done():
                 aborting.set()
                 await self._abort_process(process)
 
@@ -217,16 +251,8 @@ class StructuredSSHTransport:
                 stdout = b""
                 stderr = b""
 
-        exit_status = (
-            getattr(completed, "exit_status", None)
-            if completed
-            else None
-        )
-        exit_signal = (
-            _signal_name(getattr(completed, "exit_signal", None))
-            if completed
-            else None
-        )
+        exit_status = getattr(completed, "exit_status", None) if completed else None
+        exit_signal = _signal_name(getattr(completed, "exit_signal", None)) if completed else None
 
         return SSHExecutionResult(
             request_id=request_id,
@@ -235,9 +261,7 @@ class StructuredSSHTransport:
             exit_signal=exit_signal,
             stdout=stdout,
             stderr=stderr,
-            duration_ms=max(
-                0, int((time.monotonic() - started) * 1000)
-            ),
+            duration_ms=max(0, int((time.monotonic() - started) * 1000)),
             timed_out=timed_out,
             truncated=budget.truncated,
         )

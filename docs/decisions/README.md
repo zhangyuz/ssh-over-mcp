@@ -43,3 +43,9 @@ Current ADRs:
 - [0024 — Networked Docker MVP versus isolated no-NIC E2E](0024-networked-docker-mvp-vs-isolated-e2e.md) — operator-selected online Mode A delivery direction: signed Ubuntu APT + private MCP↔SSH network, no custom offline Engine/no-NIC OCI guest production prerequisite; security/launch authorization remains separate.
 
 - [0025 — Operator-approved private Mode A FS-only pilot release](0025-mode-a-fs-only-operator-pilot-release.md) — exact image IDs, scoped four-cap acceptance, local-only ingress and verified rollback.
+
+- [0026 — Complete typed filesystem operations before Mode B (PROPOSED)](0026-proposed-fs-visibility-v5-first.md) — fs_list/fs_search over a signed, epoch-bound Host Policy v5 snapshot first; no denied totals; mutations follow.
+
+- [0027 — Opt-in fs_list control-plane adapter (runtime PROPOSED)](0027-proposed-fs-list-control-plane-adapter.md) — MCP tool is explicitly construction-gated and disabled in production; no deployed v2 authority.
+
+- [0028 — Mode A v5 immutable rotation (design APPROVED, runtime NOT ACTIVATED)](0028-mode-a-fs-list-immutable-rotation.md) — operator-selected stop/drain/rotate/verify/resume scheme and mandatory two-host proof; no production adapter or new privileges.

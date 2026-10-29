@@ -30,6 +30,8 @@ from ssh_over_mcp.api.app import build_application
 from ssh_over_mcp.api.runtime import MCPRuntimeSettings
 from ssh_over_mcp.approvals.runtime import SecurityLedgerRuntimeSettings
 from ssh_over_mcp.approvals.service import SecurityLedgerService
+from ssh_over_mcp.policy.engine import PolicyEngine
+from ssh_over_mcp.ssh.immutable_visibility_authority import ImmutableVisibilityAuthority
 from ssh_over_mcp.ssh.transport import StructuredSSHTransport
 
 # Diagnostic-only observer: delegates unmodified to the real SSH transport.
@@ -104,7 +106,7 @@ async def grant(approval_id: str, setting: SecurityLedgerRuntimeSettings) -> Non
     assert json.loads(out)["state"] == "granted"
 
 
-def policy_config() -> dict:
+def policy_config(*, v2: bool = False) -> dict:
     hosts = {}
     for index, node in enumerate(NODES, 1):
         public = Path(f"/tmp/hostkey{index}.pub").read_text().split()
@@ -118,6 +120,37 @@ def policy_config() -> dict:
             "allowed_roles": ["rw-operator"],
         }
     paths = [f"/srv/data/mvp-node-{i}" for i in (1, 2)]
+    rules = (
+        [
+            {
+                "id": "v2.list.allow",
+                "effect": "allow",
+                "roles": ["rw-operator"],
+                "hosts": list(NODES),
+                "tools": ["fs_list"],
+                "paths": ["/srv/data", "/srv/data/**"],
+            },
+            {
+                "id": "v2.list.deny",
+                "effect": "deny",
+                "roles": ["rw-operator"],
+                "hosts": list(NODES),
+                "tools": ["fs_list"],
+                "paths": ["/srv/data/secret", "/srv/data/secret/**"],
+            },
+        ]
+        if v2
+        else [
+            {
+                "id": "oci.two-node.fs-only",
+                "effect": "allow",
+                "roles": ["rw-operator"],
+                "hosts": list(NODES),
+                "tools": ["fs_stat", "fs_read", "fs_mkdir", "fs_write"],
+                "paths": [*paths, *(f"{p}/approved.bin" for p in paths)],
+            }
+        ]
+    )
     return {
         "inventory": {"hosts": hosts},
         "policy": {
@@ -125,25 +158,21 @@ def policy_config() -> dict:
             "default": "deny",
             "roles": {"rw-operator": {}},
             "risk": {"approval_required": ["medium", "high", "critical"]},
-            "rules": [
-                {
-                    "id": "oci.two-node.fs-only",
-                    "effect": "allow",
-                    "roles": ["rw-operator"],
-                    "hosts": list(NODES),
-                    "tools": ["fs_stat", "fs_read", "fs_mkdir", "fs_write"],
-                    "paths": [*paths, *(f"{p}/approved.bin" for p in paths)],
-                }
-            ],
+            "rules": rules,
         },
     }
 
 
 async def prove(
-    root: Path, ledger: SecurityLedgerRuntimeSettings, origin_ip: str, node_ips: list[str]
+    root: Path,
+    ledger: SecurityLedgerRuntimeSettings,
+    origin_ip: str,
+    node_ips: list[str],
+    *,
+    v2: bool = False,
 ) -> None:
     cfg = root / "config.yaml"
-    cfg.write_text(yaml.safe_dump(policy_config()))
+    cfg.write_text(yaml.safe_dump(policy_config(v2=v2)))
     os.chmod(cfg, 0o600)
     creds = root / "credentials.yaml"
     creds.write_text(
@@ -154,6 +183,16 @@ async def prove(
     token = secrets.token_urlsafe(32)
     bearer.write_text(token)
     os.chmod(bearer, 0o600)
+
+    def authority_factory(engine: PolicyEngine) -> ImmutableVisibilityAuthority:
+        keys = {node: Path(f"/tmp/v5-signer-{node}").read_bytes() for node in NODES}
+        return ImmutableVisibilityAuthority(
+            engine=engine,
+            epoch=11,
+            host_keys=keys,
+            generation_active=lambda: True,
+        )
+
     app = build_application(
         MCPRuntimeSettings(
             config_path=cfg,
@@ -164,7 +203,9 @@ async def prove(
             ledger_server_gid=ledger.service_gid,
             bind_host=origin_ip,
             origin_bearer_token_file=bearer,
-        )
+        ),
+        visibility_authority_factory=authority_factory if v2 else None,
+        enable_fs_list=v2,
     )
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     # Allow normal rapid listener restarts within this disposable OCI test.
@@ -207,6 +248,38 @@ async def prove(
                 tools = {x.name for x in (await client.list_tools()).tools}
                 assert {"fs_stat", "fs_read", "fs_mkdir", "fs_write", "approval_status"} <= tools
                 assert "approval_grant" not in tools and "approval_deny" not in tools
+                if v2:
+                    assert "fs_list" in tools
+                    for node in NODES:
+                        listing = success(
+                            await client.call_tool(
+                                "fs_list",
+                                {
+                                    "host": node,
+                                    "path": "/srv/data",
+                                    "max_entries": 64,
+                                },
+                            ),
+                            "central v2 fs_list",
+                        )
+                        assert listing["host"] == node
+                        assert [e["path"] for e in listing["entries"]] == [
+                            "/srv/data/public.txt"
+                        ], listing
+                        denied = error(
+                            await client.call_tool(
+                                "fs_list",
+                                {
+                                    "host": node,
+                                    "path": "/srv/data/secret",
+                                    "max_entries": 64,
+                                },
+                            ),
+                            "central denied subtree",
+                        )
+                        assert "denied" in denied.lower()
+                        print(f"CENTRAL_MCP_LEDGER_REAL_OPENSSH_V2_{node}_PASS", flush=True)
+                    return
                 for i, node in enumerate(NODES, 1):
                     base = f"/srv/data/mvp-node-{i}"
                     target = f"{base}/approved.bin"
@@ -276,8 +349,9 @@ async def prove(
 
 async def main() -> None:
     assert os.getuid() == 2201 and os.getgid() == 3201
-    assert len(sys.argv) == 4
-    origin_ip, *node_ips = sys.argv[1:]
+    assert len(sys.argv) in (4, 5)
+    v2 = len(sys.argv) == 5 and sys.argv[-1] == "--v2"
+    origin_ip, *node_ips = sys.argv[1:-1] if v2 else sys.argv[1:]
     assert origin_ip not in node_ips and len(set(node_ips)) == 2
     assert Path("/tmp/client1").is_file() and Path("/tmp/client2").is_file()
     with tempfile.TemporaryDirectory(prefix="som342-central-", dir="/tmp") as td:
@@ -311,13 +385,18 @@ async def main() -> None:
         )
         thread.start()
         try:
-            await prove(root, setting, origin_ip, node_ips)
+            await prove(root, setting, origin_ip, node_ips, v2=v2)
         finally:
             stop.set()
             thread.join(timeout=4)
             assert not thread.is_alive()
             ledger.close()
-    print("CENTRAL_MCP_LEDGER_TWO_OPENSSH_NODES_TEST_ONLY_PASS", flush=True)
+    print(
+        "CENTRAL_MCP_LEDGER_TWO_OPENSSH_V2_TEST_ONLY_PASS"
+        if v2
+        else "CENTRAL_MCP_LEDGER_TWO_OPENSSH_NODES_TEST_ONLY_PASS",
+        flush=True,
+    )
     print("NETWORK_DIRECTIONAL_ACL_PROVEN=false SIGNED_MEDIA=false DEPLOYED=false")
 
 
