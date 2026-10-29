@@ -25,8 +25,11 @@ remain unsupported even if a Ledger grant was consumed. No automatic approvals.
 injected `VisibilityAuthority` supplies a central PolicyEngine, current epoch,
 snapshot signer and live epoch/revocation predicate. This interface is not a
 trust anchor: production provisioning, signer identity and authenticated
-monotonic epoch/ACK authority remain unresolved. No default implementation,
-secret loader or environment-controlled opt-in is introduced.
+monotonic epoch/ACK authority remain unresolved. No default construction,
+secret loader or environment-controlled opt-in is introduced. (Later
+increment, below: an opt-in `ImmutableVisibilityAuthority` class and
+construction-time `build_application` parameters exist, but nothing in the
+production entrypoint constructs them.)
 
 The authority engine and transport must share the inventory object. The adapter
 parses the inventory OpenSSH public key with AsyncSSH and hashes its RFC 4253
@@ -88,7 +91,9 @@ activation. `build_mcp_server(enable_fs_list=True)` requires an already construc
 client with a non-null trusted visibility authority; default construction never
 registers the tool. The switch is server-owned and absent from MCP/runtime inputs.
 This implements the existing adapter contract without adding a signer, trust root,
-approval mechanism or transport path. `api/ssh_runtime.py` remains unchanged.
+approval mechanism or transport path. (Superseded by the composition
+increment below: `api/ssh_runtime.py` now accepts an optional
+`visibility_authority`, default `None`.)
 
 The real MCP handler/service delegate to `SSHFilesystemClient.list` with trusted
 OperationContext and required request audit, after bounded input validation and
@@ -99,3 +104,28 @@ with a test-only signer and mocked remote channel, including default absence,
 input injection, identity/path mismatch, failed audit, and unauthenticated HTTP.
 They are not real SSH, durable Ledger or two-node acceptance. All activation gates
 above remain open; controller review is required for this uncommitted increment.
+
+## 2026-10-28 composition increment (opt-in, production default off)
+
+- `build_ssh_runtime(..., visibility_authority=None)` passes an optional
+  authority to `SSHFilesystemClient`; the default stays `None`.
+- `build_application(settings, visibility_authority_factory=None,
+  enable_fs_list=False)` accepts a server-owned factory that receives the
+  application's own `PolicyEngine` and must return an authority bound to that
+  same engine object (otherwise construction fails). `enable_fs_list=True`
+  without a factory fails. `api/main.py` calls `build_application(settings)`
+  with neither, so the production entrypoint registers no `fs_list` and has
+  no signer.
+- `ssh/immutable_visibility_authority.py` provides `ImmutableVisibilityAuthority`
+  for one immutable release generation (ADR0028): a fixed epoch, a required
+  independent 32-byte HMAC key per inventory host (all distinct, exactly the
+  inventory's host set), no hot reload, and a `generation_active` callback.
+  It signs only when the policy digest, epoch and pinned host-key identity
+  still match. The callback is supplied by the release controller and is
+  **not** by itself evidence of a durable fence; key provisioning and the
+  trusted adapter remain separate operator gates.
+- Review fixes (2026-10-28): an approval-required `fs_list` is audited and
+  refused before any Ledger approval is created; a central compile refusal is
+  audited as `POLICY_DENIED` and returned as a policy denial; authority
+  failures before authorization record `EXECUTION_FAILED`; snapshots are
+  backdated by 5 s within the 60 s TTL for host clock lag.

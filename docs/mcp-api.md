@@ -238,6 +238,10 @@ constructed `SSHFilesystemClient` carries a non-null trusted
 registry omits `fs_list`, even when a client has an authority. Removal of the
 authority after construction refuses calls before SSH. This switch is not an
 MCP argument, environment setting, or production configuration option.
+At the application level the equivalent construction-only switch is
+`build_application(settings, visibility_authority_factory=..., enable_fs_list=True)`;
+the factory receives the application's own `PolicyEngine` and must return an
+authority bound to it. The production entrypoint passes neither.
 
 For an independently authorized composition, the MCP call is:
 
@@ -248,8 +252,12 @@ For an independently authorized composition, the MCP call is:
 Only these three fields are accepted: bounded inventory alias, absolute canonical
 UTF-8 path shorter than 4096 bytes, and strict integer `max_entries` from 1 to 64.
 No principal/profile, approval handle, key, epoch, feature switch or SSH command
-is accepted. The bound is a scan ceiling, not pagination; overflow refuses rather
-than truncates. Results contain `request_id`, `host`, `path`, and typed `entries`
+is accepted. The bound limits **visible** entries and is not pagination: more
+visible children than `max_entries` refuses rather than truncates. Denied
+children never count toward it, so no bound reveals how many exist; a fixed
+host-side ceiling of 4096 physical entries per directory also refuses. Names
+that are not canonical paths (glob metacharacters, backslash, control
+characters, non-UTF-8) refuse the whole listing. Results contain `request_id`, `host`, `path`, and typed `entries`
 with path, kind, size, permission mode, uid, gid and mtime_ns. Internal snapshot
 IDs and epochs are not returned.
 
@@ -257,8 +265,10 @@ The adapter records request receipt, checks host visibility and passes the
 server-owned OperationContext to the existing `SSHFilesystemClient.list`.
 That client retains central authorization/Ledger/audit, signed snapshot binding,
 fixed `mcp-v2` transport and full per-child central reauthorization. Direct ALLOW
-is required; approval-required policies are not converted into visibility grants
-and the public error offers no unsupported approval-handle retry.
+is required; approval-required policies are not converted into visibility grants,
+no Ledger approval is created for them, and the public error offers no
+unsupported approval-handle retry. A central rule that cannot be represented
+as a visibility snapshot is a policy denial.
 Errors use the existing sanitized filesystem/policy/audit contracts; malformed,
 denied or stale responses disclose no partial entries. Origin bearer checks
 remain ahead of MCP dispatch.

@@ -127,9 +127,10 @@ config/key/nonce mount proof, exact-host OpenSSH/NNP evidence and separately
 approved promotion are required before it can be installed.
 
 
-## Disposable PR347 real-OpenSSH test (CI ONLY; not yet accepted)
+## Disposable fs_list v2 real-OpenSSH test (CI ONLY; not yet accepted)
 
-An isolated, opt-in, same-repository `pull_request #347` GitHub-hosted
+An isolated, same-repository pull-request GitHub-hosted (workflow
+`mvp-fs-list-v2-two-openssh-ci.yml`, formerly PR #347-only)
 Ubuntu 26.04 workflow builds the review-only OpenSSH image from the
 pinned-source/signed-APT Dockerfile and invokes two actual independent
 OpenSSH nodes under Docker `--network none`, with no published ports.
@@ -144,9 +145,13 @@ keys or attestation are exported or promoted.
 **Evidence status:** workflow source alone is not runtime proof. Require
 a completed, successful exact-HEAD job and inspect actual container
 logs/exit status before claiming that real SSH test passed. This
-test-only signed snapshot is constructed inside the disposable node;
-it does **not** prove that a separate central MCP/Ledger signer has the
-correct protected identity or that plan A's durable freeze/attest
-adapter works. Real two-node MCP HTTP→Ledger→SSH and exact-HEAD Native
-Level-3 remain mandatory for Ready. This workflow does not touch
+first stage signs its snapshot inside the disposable node. A second stage
+(`mode_a_hosted_v2_central_e2e.py`) runs the real central MCP HTTP server,
+Security Ledger and `ImmutableVisibilityAuthority` with per-host test-only
+keys against two OpenSSH nodes on internal networks, checking a positive
+listing and a denied subtree on each node. Exact-head run 40805225509
+(`09a5803`) logged `PR347_REAL_CENTRAL_MCP_LEDGER_TWO_OPENSSH_V2_E2E_PASS`.
+This is still CI-only: it does **not** prove protected production signer
+identity, the durable freeze/attest adapter, live Mode A acceptance, or
+exact-HEAD Native Level-3, all of which remain mandatory. This workflow does not touch
 Yuz.local's live Mode A VM or its SSH/image/key supply.
