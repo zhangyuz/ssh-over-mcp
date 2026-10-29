@@ -19,6 +19,10 @@ D = "a" * 64
 G = "b" * 64
 K1 = "c" * 64
 K2 = "d" * 64
+# Signer/verifier key IDs (fingerprints only; never key bytes).
+S1 = "e" * 64
+S2 = "f" * 64
+SIGNERS = {"node01": S1, "node02": S2}
 
 
 class RecordingOps:
@@ -56,8 +60,15 @@ class RecordingOps:
         self.calls.append("attest_" + host)
         key = {"node01": K1, "node02": K2}[host]
         r = HostReceipt(
-            host=host, host_key_sha256=key, epoch=12, policy_sha256=D, generation_sha256=G
+            host=host,
+            host_key_sha256=key,
+            epoch=12,
+            policy_sha256=D,
+            generation_sha256=G,
+            verifier_key_id=SIGNERS[host],
         )
+        if self.bad == "verifier":
+            return r.model_copy(update={"verifier_key_id": "0" * 64})
         if self.bad_reattest and "start_control" in self.calls and host == "node02":
             return r.model_copy(update={"generation_sha256": "0" * 64})
         if self.bad == "spoof":
@@ -79,6 +90,7 @@ class RecordingOps:
             policy_sha256=D,
             generation_sha256=G,
             host_keys={"node01": K1, "node02": K2},
+            signer_key_ids=dict(SIGNERS),
             ledger_available=True,
             audit_available=True,
         )
@@ -88,6 +100,8 @@ class RecordingOps:
             return receipt.model_copy(update={"policy_sha256": "0" * 64})
         if self.bad_control == "pins":
             return receipt.model_copy(update={"host_keys": {"node01": K2, "node02": K1}})
+        if self.bad_control == "signer":
+            return receipt.model_copy(update={"signer_key_ids": {"node01": S2, "node02": S1}})
         if self.bad_control == "ledger":
             return receipt.model_copy(update={"ledger_available": False})
         if self.bad_control == "audit":
@@ -107,6 +121,7 @@ def spec():
         policy_sha256=D,
         generation_sha256=G,
         host_keys={"node01": K1, "node02": K2},
+        signer_key_ids=dict(SIGNERS),
     )
 
 
@@ -135,7 +150,9 @@ async def test_success_requires_quiescence_and_both_attestations_before_resume()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("bad", ["epoch", "digest", "pins", "ledger", "audit", "type"])
+@pytest.mark.parametrize(
+    "bad", ["epoch", "digest", "pins", "signer", "ledger", "audit", "type"]
+)
 async def test_control_post_start_evidence_must_match_before_unfreeze(bad):
     ops = RecordingOps()
     ops.bad_control = bad
@@ -213,7 +230,7 @@ async def test_failure_never_unfreezes_even_if_one_host_started(failing):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("bad", ["spoof", "rollback", "digest"])
+@pytest.mark.parametrize("bad", ["spoof", "rollback", "digest", "verifier"])
 async def test_wrong_ack_prevents_control_or_ingress_restart(bad):
     ops = RecordingOps()
     ops.bad = bad
@@ -230,7 +247,31 @@ def test_refuse_non_distinct_or_invalid_host_inventory():
         {"node01": K1, "node03": K2},
     ):
         with pytest.raises(ValueError):
-            RotationSpec(epoch=12, policy_sha256=D, generation_sha256=G, host_keys=keys)
+            RotationSpec(
+                epoch=12,
+                policy_sha256=D,
+                generation_sha256=G,
+                host_keys=keys,
+                signer_key_ids=dict(SIGNERS),
+            )
+
+
+def test_refuse_shared_missing_or_invalid_signer_key_ids():
+    for ids in (
+        {"node01": S1},
+        {"node01": S1, "node02": S1},
+        {"node01": S1, "node03": S2},
+        {"node01": S1, "node02": "not-hex"},
+        {"node01": K1, "node02": S2},  # signer ID must differ from a host-key pin
+    ):
+        with pytest.raises(ValueError):
+            RotationSpec(
+                epoch=12,
+                policy_sha256=D,
+                generation_sha256=G,
+                host_keys={"node01": K1, "node02": K2},
+                signer_key_ids=ids,
+            )
 
 
 @pytest.mark.asyncio

@@ -24,15 +24,21 @@ class RotationSpec(BaseModel):
     policy_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     generation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     host_keys: dict[str, str]
+    # Per-host signer/verifier key fingerprints (never key bytes); ADR0028
+    # steps 6 and 7 require proving control and hosts use exactly these keys.
+    signer_key_ids: dict[str, str]
 
     @model_validator(mode="after")
     def require_distinct_pinned_hosts(self) -> RotationSpec:
-        if (
-            set(self.host_keys) != {"node01", "node02"}
-            or len(set(self.host_keys.values())) != 2
-            or any(re.fullmatch(r"[0-9a-f]{64}", v) is None for v in self.host_keys.values())
-        ):
-            raise ValueError("two distinct pinned Mode A hosts are required")
+        for values in (self.host_keys, self.signer_key_ids):
+            if (
+                set(values) != {"node01", "node02"}
+                or len(set(values.values())) != 2
+                or any(re.fullmatch(r"[0-9a-f]{64}", v) is None for v in values.values())
+            ):
+                raise ValueError("two distinct pinned Mode A hosts and signer keys are required")
+        if set(self.host_keys.values()) & set(self.signer_key_ids.values()):
+            raise ValueError("signer key identity must differ from host-key pins")
         return self
 
 
@@ -44,6 +50,7 @@ class HostReceipt(BaseModel):
     epoch: int = Field(strict=True, ge=1)
     policy_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     generation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    verifier_key_id: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class ControlReceipt(BaseModel):
@@ -55,6 +62,7 @@ class ControlReceipt(BaseModel):
     policy_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     generation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     host_keys: dict[str, str]
+    signer_key_ids: dict[str, str]
     ledger_available: bool
     audit_available: bool
 
@@ -91,6 +99,7 @@ async def _attest_both_hosts(expected: RotationSpec, ops: TrustedRotationOps) ->
             or receipt.epoch != expected.epoch
             or receipt.policy_sha256 != expected.policy_sha256
             or receipt.generation_sha256 != expected.generation_sha256
+            or receipt.verifier_key_id != expected.signer_key_ids[host]
         ):
             raise RotationFailure("host attestation does not match expected generation")
 
@@ -131,6 +140,7 @@ async def run_rotation(spec: RotationSpec, ops: TrustedRotationOps) -> None:
             or control.policy_sha256 != expected.policy_sha256
             or control.generation_sha256 != expected.generation_sha256
             or control.host_keys != expected.host_keys
+            or control.signer_key_ids != expected.signer_key_ids
             or control.ledger_available is not True
             or control.audit_available is not True
         ):

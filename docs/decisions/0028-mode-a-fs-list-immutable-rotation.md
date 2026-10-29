@@ -64,9 +64,12 @@ tests cover ordering, both distinct host identities, aborts on each stage,
 spoofed/different digests, and mutation of a release manifest. Step 7 is
 sequenced too (review P3): after `start_control` the adapter must return a
 `ControlReceipt` whose epoch, central policy digest, generation, pinned host
-keys and Ledger/audit availability match the approved release, and both host
-receipts are re-attested, before `open_ingress` may run. Any mismatch keeps
-ingress closed.
+keys, per-host **signer key IDs** and Ledger/audit availability match the
+approved release, and both host receipts are re-attested, before
+`open_ingress` may run. The release spec carries one distinct signer key
+fingerprint per host (never key bytes, never equal to a host-key pin), and
+each `HostReceipt` must report the matching verifier key ID (step 6). Any
+mismatch keeps ingress closed.
 
 The host's local persistent epoch+digest floor is necessary defense against
 rollback but is **not** distributed revocation proof. A live policy update must
