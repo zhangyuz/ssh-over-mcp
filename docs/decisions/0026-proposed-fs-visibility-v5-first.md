@@ -349,3 +349,33 @@ every bound gives the same outcome with 0, 1, 64 or 500 denied siblings.
   Replay of a pruned snapshot would need a clock earlier than that time,
   which is refused. Regressions cover filling, pruning, refusal of a clock
   step back past tolerance, and replay detection within tolerance.
+
+## 2026-10-29: ancestor relocation and replacement during a listing (review P2)
+
+The global architecture review noted that the listing pinned only the final
+directory and compared only that directory's own identity, so an ancestor
+renamed or replaced during the walk or the scan left the pinned directory
+reachable under a path string the policy never authorized for that inode.
+Three Linux CI regressions reproduced it (all `DID NOT RAISE` on the old code,
+run 40869156199): relocation during traversal, relocation while scanning, and
+replacement by another directory.
+
+Fix: the walk records `(st_dev, st_ino)` for the root and every component, and
+`_verify_path_chain` re-walks the path with `O_PATH|O_NOFOLLOW` and requires
+the same identities both before the directory is read and before results are
+returned. Any mismatch, missing component or error refuses the whole listing.
+The check compares two integers per component, so its cost is independent of
+the number of denied entries (no new timing channel), and changes to unrelated
+metadata in an ancestor (a sibling created, mtime) do not refuse.
+
+**Residual (accepted for this candidate):**
+- This narrows but cannot close a race that occurs after the final re-walk and
+  before the response is sent; closing it would need `openat2(RESOLVE_BENEATH)`
+  style kernel support that the standard library does not expose.
+- A bind mount over an ancestor changes the identity chain and is refused by
+  the same comparison, but unprivileged CI cannot create mounts, so that case
+  is covered by reasoning and not by a test. It must be added to the real
+  remapped-OCI acceptance (root-owned, non-replaceable ancestors and mounts)
+  that remains an open Ready gate.
+- The attacker model needs write access inside the listed tree; the shipped
+  typed FS tools offer no rename, which is why this is a pre-activation item.

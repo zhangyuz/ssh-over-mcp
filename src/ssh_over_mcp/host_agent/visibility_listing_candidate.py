@@ -40,6 +40,46 @@ def _authorized(callback: Callable[[str], bool], path: str) -> bool:
         raise FilesystemAccessError("filesystem authorization unavailable") from exc
 
 
+def _verify_path_chain(
+    components: list[str] | tuple[str, ...], chain: list[tuple[int, int]]
+) -> None:
+    """Re-walk the path and require every component to be the pinned inode.
+
+    The walk pins each ancestor by descriptor, but a later rename, replacement
+    or mount over an ancestor leaves the pinned directory reachable under a
+    path the policy never authorized for it. Comparing only (st_dev, st_ino)
+    per component keeps the check constant-cost and independent of directory
+    contents, and unrelated metadata changes in ancestors are ignored. This
+    narrows, but cannot close, a race after the final re-walk.
+    """
+
+    current: int | None = None
+    try:
+        current = _open_root()
+        if _identity(current) != chain[0]:
+            raise FilesystemAccessError("directory path changed")
+        for index, component in enumerate(components, start=1):
+            next_fd = os.open(
+                component,
+                os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                dir_fd=current,
+            )
+            os.close(current)
+            current = next_fd
+            if _identity(current) != chain[index]:
+                raise FilesystemAccessError("directory path changed")
+    except OSError as exc:
+        raise FilesystemAccessError("directory path changed") from exc
+    finally:
+        if current is not None:
+            os.close(current)
+
+
+def _identity(fd: int) -> tuple[int, int]:
+    info = os.fstat(fd)
+    return (info.st_dev, info.st_ino)
+
+
 def select_visible_children(
     parent: str,
     names: Iterable[str],
@@ -121,6 +161,10 @@ def list_directory_candidate(
     directory_fd: int | None = None
     try:
         pinned_fd = _open_root()
+        try:
+            chain = [_identity(pinned_fd)]
+        except OSError as exc:
+            raise FilesystemAccessError("cannot open filesystem root") from exc
         prefix = ""
         for component in components:
             prefix += "/" + component
@@ -136,6 +180,10 @@ def list_directory_candidate(
                 raise FilesystemAccessError("unsafe directory traversal") from exc
             os.close(pinned_fd)
             pinned_fd = next_fd
+            try:
+                chain.append(_identity(pinned_fd))
+            except OSError as exc:
+                raise FilesystemAccessError("unsafe directory traversal") from exc
 
         # Reopen the pinned inode (not the mutable original pathname) for
         # readdir. /proc/self/fd/N is necessarily a procfs symlink; O_NOFOLLOW
@@ -153,6 +201,7 @@ def list_directory_candidate(
             raise FilesystemAccessError("cannot inspect pinned listing directory") from exc
         if not _same_read_identity(pinned_before, directory_before):
             raise FilesystemAccessError("directory changed before listing")
+        _verify_path_chain(components, chain)
 
         # The kernel has returned these names, but do not touch any child
         # inode/metadata until that child's authorization succeeds.
@@ -188,6 +237,7 @@ def list_directory_candidate(
             raise FilesystemAccessError("listing directory verification failed") from exc
         if not _same_read_identity(directory_before, after):
             raise FilesystemAccessError("directory changed during listing")
+        _verify_path_chain(components, chain)
         return tuple(results)
     finally:
         if directory_fd is not None:
