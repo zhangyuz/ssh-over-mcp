@@ -260,6 +260,35 @@ def test_primitives_revalidate_a_config_built_around_the_validators(build):
 
 
 @pytest.mark.asyncio
+async def test_open_ingress_uses_the_real_plist_reader_by_default(tmp_path):
+    import plistlib
+
+    label = "com.som.modea.isolated"
+    plist = tmp_path / f"{label}.plist"
+    runner, probe = FakeRunner(), FakeProbe(False)
+
+    async def yes():
+        return True
+
+    prim = LimaDockerPrimitives(
+        config(launchd_plist=str(plist)),
+        runner=runner,
+        probe=probe,
+        sleep=nosleep,
+        operator_confirms_open=yes,
+    )
+    await prim.freeze_ingress()
+    runner.calls.clear()
+    plist.write_bytes(plistlib.dumps({"Label": "com.som.modea.loopback"}))
+    with pytest.raises(RotationFailure):  # the file's own Label is the live one
+        await prim.open_ingress()
+    assert not any(c[:2] in {(LAUNCHCTL, "enable"), (LAUNCHCTL, "bootstrap")} for c in runner.calls)
+    plist.write_bytes(plistlib.dumps({"Label": label}))
+    probe.listening = True
+    assert await prim.open_ingress() is True
+
+
+@pytest.mark.asyncio
 async def test_open_refuses_a_plist_whose_embedded_label_is_not_the_configured_one():
     prim, runner, _ = make(plist_label="com.som.modea.loopback")
     await prim.freeze_ingress()
@@ -287,12 +316,37 @@ def test_plist_label_reader_is_bounded_and_refuses_unsafe_files(tmp_path):
         path.write_bytes(data)
         with pytest.raises(RotationFailure):
             read_plist_label(str(path))
+    for name, data in (
+        ("truncated.plist", b"<?xml version='1.0'?><plist><dict><key>Label"),
+        ("deep.plist", b"<plist>" + b"<array>" * 5000 + b"</plist>"),
+    ):
+        path = tmp_path / name
+        path.write_bytes(data)
+        with pytest.raises(RotationFailure):  # never a raw ExpatError/RecursionError
+            read_plist_label(str(path))
     link = tmp_path / "link.plist"
     link.symlink_to(good)
     with pytest.raises(RotationFailure):
         read_plist_label(str(link))
+    # An intermediate directory symlink is refused too, not just a final one.
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    (real_dir / "a.plist").write_bytes(good.read_bytes())
+    (tmp_path / "alias").symlink_to(real_dir)
+    with pytest.raises(RotationFailure):
+        read_plist_label(str(tmp_path / "alias" / "a.plist"))
     with pytest.raises(RotationFailure):
         read_plist_label(str(tmp_path / "absent.plist"))
+
+
+@pytest.mark.parametrize(
+    "name", ["abc123", "0123456789ab", "deadbeef", "f" * 64, "1"]
+)
+def test_container_names_that_docker_could_resolve_as_an_id_are_refused(name):
+    with pytest.raises(ValidationError):
+        config(mcp_container=name)
+    with pytest.raises(ValidationError):
+        config(node_containers={"node01": name, "node02": "somfsl-node02-1"})
 
 
 def test_config_refuses_duplicate_or_wrong_node_set():
@@ -619,6 +673,28 @@ async def test_a_second_cancellation_does_not_abandon_the_refence():
 
 
 @pytest.mark.asyncio
+async def test_cancellation_during_the_refence_after_an_ordinary_failure_is_not_swallowed():
+    prim, runner, probe = await ready_to_open()
+    probe.listening = False  # an ordinary RotationFailure("ingress did not come up")
+    refencing = asyncio.Event()
+    original = runner.run
+
+    async def slow(argv, *, timeout):
+        if argv[:2] == (LAUNCHCTL, "disable") and runner.launchd_loaded:
+            refencing.set()
+            await asyncio.sleep(0.3)
+        return await original(argv, timeout=timeout)
+
+    runner.run = slow
+    task = asyncio.ensure_future(prim.open_ingress())
+    await refencing.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):  # the caller's cancel must win
+        await task
+    assert runner.disabled is True and runner.launchd_loaded is False
+
+
+@pytest.mark.asyncio
 async def test_unexpected_runner_exception_during_open_is_a_rotation_failure():
     prim, runner, _ = await ready_to_open()
 
@@ -743,6 +819,10 @@ async def test_runner_kills_forked_grandchildren_on_timeout_and_on_overflow(tmp_
     import os
 
     async def gone(pid_file):
+        for _ in range(100):  # the grandchild writes its pid shortly after the parent starts
+            if pid_file.exists() and pid_file.read_text().strip():
+                break
+            await asyncio.sleep(0.05)
         pid = int(pid_file.read_text())
         for _ in range(100):
             try:
@@ -776,6 +856,35 @@ async def test_runner_kills_forked_grandchildren_on_timeout_and_on_overflow(tmp_
         )
         assert result.timed_out or result.truncated, (label, result)
         assert await gone(pid_file), f"grandchild survived ({label})"
+
+
+@pytest.mark.asyncio
+async def test_runner_tolerates_killpg_finding_no_process(monkeypatch):
+    import os
+
+    def no_such_group(pid, sig):
+        raise ProcessLookupError
+
+    monkeypatch.setattr(os, "killpg", no_such_group)
+    result = await SubprocessRunner(max_output_bytes=64).run(
+        (sys.executable, "-c", "import sys,time; sys.stdout.write('x'*100000); time.sleep(5)"),
+        timeout=10,
+    )
+    assert result.truncated is True
+
+
+@pytest.mark.asyncio
+async def test_runner_signals_the_group_once_not_once_per_chunk(monkeypatch):
+    import os
+
+    calls = []
+    real = os.killpg
+    monkeypatch.setattr(os, "killpg", lambda pid, sig: (calls.append(pid), real(pid, sig))[1])
+    result = await SubprocessRunner(max_output_bytes=64).run(
+        (sys.executable, "-c", "import sys,time; sys.stdout.write('x'*400000); time.sleep(5)"),
+        timeout=10,
+    )
+    assert result.truncated is True and len(calls) == 1
 
 
 @pytest.mark.asyncio

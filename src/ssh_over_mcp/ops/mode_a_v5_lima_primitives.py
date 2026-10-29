@@ -30,6 +30,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .mode_a_v5_rotation import RotationFailure
 
 _NAME = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,62}$")
+# docker resolves a full name, then a full ID, then an ID prefix; refuse names
+# that could be read as a hex ID prefix.
+_HEX_ID = re.compile(r"^[0-9a-f]{1,64}$")
 _LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _PLIST = re.compile(r"^/[A-Za-z0-9_.@-]+(/[A-Za-z0-9_.@-]+)*\.plist$")
 _TOOL = re.compile(r"^/[A-Za-z0-9_.@+-]+(/[A-Za-z0-9_.@+-]+)*$")
@@ -93,6 +96,13 @@ class AdapterConfig(BaseModel):
             raise ValueError("unsafe name")
         return value
 
+    @field_validator("mcp_container", "ledger_container")
+    @classmethod
+    def _not_an_id_prefix(cls, value: str) -> str:
+        if _HEX_ID.fullmatch(value) is not None:
+            raise ValueError("container name could be read as an ID prefix")
+        return value
+
     @field_validator("limactl_path", "launchctl_path")
     @classmethod
     def _safe_tool(cls, value: str) -> str:
@@ -117,7 +127,8 @@ class AdapterConfig(BaseModel):
     @model_validator(mode="after")
     def _validate_topology(self) -> AdapterConfig:
         if set(self.node_containers) != set(_NODES) or any(
-            _NAME.fullmatch(name) is None for name in self.node_containers.values()
+            _NAME.fullmatch(name) is None or _HEX_ID.fullmatch(name) is not None
+            for name in self.node_containers.values()
         ):
             raise ValueError("exactly node01 and node02 containers are required")
         names = [self.mcp_container, self.ledger_container, *self.node_containers.values()]
@@ -154,6 +165,10 @@ def read_plist_label(path: str) -> str:
 
     fd = None
     try:
+        # O_NOFOLLOW only covers the last component; refuse any symlinked
+        # ancestor too (launchctl would follow it on its own).
+        if os.path.realpath(path) != path:
+            raise RotationFailure("ingress plist path is not canonical")
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_size > _PLIST_MAX_BYTES:
@@ -164,7 +179,7 @@ def read_plist_label(path: str) -> str:
         label = plistlib.loads(data).get("Label")
     except RotationFailure:
         raise
-    except (OSError, ValueError, plistlib.InvalidFileException, AttributeError):
+    except Exception:  # noqa: BLE001 - parser errors (ExpatError, recursion...) all mean "unusable"
         raise RotationFailure("ingress plist unreadable") from None
     finally:
         if fd is not None:
@@ -205,8 +220,15 @@ class SubprocessRunner:
             return CommandResult(returncode=127, stdout=b"", stderr=b"", timed_out=False)
 
         truncated = False
+        group_signalled = False
 
         def kill_group() -> None:
+            # Signal the group at most once: after the leader is reaped its pid
+            # could be reused, so a repeat must not reach an unrelated group.
+            nonlocal group_signalled
+            if group_signalled:
+                return
+            group_signalled = True
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(process.pid, signal.SIGKILL)
             with contextlib.suppress(ProcessLookupError):
@@ -431,28 +453,34 @@ class LimaDockerPrimitives:
             # Whatever happened (failure or cancellation), distrust every
             # earlier proof and fence again before reporting.
             self._fenced = self._drained = self._control_stopped = False
-            await self._finish_refence()
+            cancelled_meanwhile = await self._finish_refence()
+            if cancelled_meanwhile and not isinstance(exc, asyncio.CancelledError):
+                raise asyncio.CancelledError from None  # the caller's cancel wins
             if isinstance(exc, Exception) and not isinstance(exc, RotationFailure):
                 raise RotationFailure("ingress could not be reopened") from None
             raise
         self._fenced = self._drained = self._control_stopped = False
         return True
 
-    async def _finish_refence(self) -> None:
-        """Wait for the re-fence even if cancelled again, then let the caller re-raise.
+    async def _finish_refence(self) -> bool:
+        """Wait for the re-fence even if cancelled again; report whether it was.
 
         Each command has a deadline, so this wait is bounded; abandoning it would
-        leave the label enabled if the event loop is torn down first.
+        leave the label enabled if the event loop is torn down first. The caller
+        re-raises a cancellation so it is never swallowed.
         """
 
         refence = asyncio.ensure_future(self._refence_best_effort())
+        cancelled = False
         while not refence.done():
             try:
                 await asyncio.shield(refence)
             except asyncio.CancelledError:
+                cancelled = True
                 continue
             except Exception:  # noqa: BLE001 - best effort; already logged by absence of proof
                 break
+        return cancelled
 
     async def _refence_best_effort(self) -> None:
         for argv in (
