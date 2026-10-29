@@ -121,7 +121,9 @@ test-first **candidate** contract:
   authorize listing or returning their metadata.
 - The FD helper now accepts a **verified** object with a mandatory live
   epoch guard, checks epoch on every authorized prefix/child and after
-  directory enumeration, and fails closed on revocation. The new Linux
+  directory enumeration, and fails closed on revocation. (Superseded
+  2026-10-29, see "Timing (re-review P2)" below: child names are now checked
+  lexically and the epoch guard runs only before each visible child's open.) The new Linux
   regression tests check that neither centrally nor host-denied children
   are opened, and that no partial output escapes during a revocation.
 
@@ -329,7 +331,7 @@ every bound gives the same outcome with 0, 1, 64 or 500 denied siblings.
   open (`before_child_open`), and once after. The number of epoch checks is
   therefore independent of denied entries (regression-tested). Residual:
   readdir plus a lexical check is still O(physical entries) at roughly µs per
-  entry (~24 ms for 4000). That is intrinsic to listing a real directory,
+  entry (tens of ms for 4000; platform-dependent). That is intrinsic to listing a real directory,
   bounded by the fixed 4096 ceiling, and accepted for this candidate; a
   constant-time listing would need padding to the ceiling and its own review.
 

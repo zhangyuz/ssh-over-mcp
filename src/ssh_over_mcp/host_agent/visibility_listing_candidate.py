@@ -26,7 +26,8 @@ from .visibility_policy_v5 import canonical_visibility_path
 if TYPE_CHECKING:
     from .visibility_snapshot_v5 import VerifiedVisibilitySnapshot
 
-MAX_LIST_SCANNED_ENTRIES = 64
+# Caller bound on *visible* entries returned (denied entries never count).
+MAX_LIST_VISIBLE_ENTRIES = 64
 # Fixed work bound for one readdir; never derived from the caller's request.
 # Only this constant (not max_entries) may refuse because of denied entries.
 MAX_LIST_PHYSICAL_ENTRIES = 4096
@@ -83,7 +84,7 @@ def list_directory_candidate(
     authorize_directory: Callable[[str], bool],
     authorize_child: Callable[[str], bool],
     before_child_open: Callable[[str], bool],
-    max_entries: int = MAX_LIST_SCANNED_ENTRIES,
+    max_entries: int = MAX_LIST_VISIBLE_ENTRIES,
 ) -> tuple[ReadOnlyFileStat, ...]:
     """Collect one bounded directory without reading denied child metadata.
 
@@ -92,7 +93,7 @@ def list_directory_candidate(
     is not a remotely authorized or audited FS tool.
     """
 
-    if type(max_entries) is not int or not 1 <= max_entries <= MAX_LIST_SCANNED_ENTRIES:
+    if type(max_entries) is not int or not 1 <= max_entries <= MAX_LIST_VISIBLE_ENTRIES:
         raise FilesystemAccessError("directory listing bound is invalid")
     if not all(
         callable(cb)

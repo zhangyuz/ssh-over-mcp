@@ -257,7 +257,10 @@ visible children than `max_entries` refuses rather than truncates. Denied
 children never count toward it, so no bound reveals how many exist; a fixed
 host-side ceiling of 4096 physical entries per directory also refuses. Names
 that are not canonical paths (glob metacharacters, backslash, control
-characters, non-UTF-8) refuse the whole listing. Results contain `request_id`, `host`, `path`, and typed `entries`
+characters, non-UTF-8) refuse the whole listing. Accepted residual side
+channels (a fixed "more than 4096 entries" refusal, visible directories' own
+metadata, and µs-scale readdir cost per physical entry) are recorded in
+[ADR0026](decisions/0026-proposed-fs-visibility-v5-first.md). Results contain `request_id`, `host`, `path`, and typed `entries`
 with path, kind, size, permission mode, uid, gid and mtime_ns. Internal snapshot
 IDs and epochs are not returned.
 
