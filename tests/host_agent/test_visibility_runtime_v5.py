@@ -295,3 +295,23 @@ def test_epoch_rollback_is_a_distinct_refusal_not_persistence_failure(tmp_path):
     assert _bound(store, "4" * 32, now=_T, epoch=12)
     with pytest.raises(VisibilityEpochRollbackRefused):
         _bound(store, "5" * 32, now=_T, epoch=11)
+
+
+@pytest.mark.parametrize(
+    "table,statement",
+    [
+        ("clock_state", "UPDATE clock_state SET high_water='not-a-time' WHERE id=1"),
+        ("policy_epoch_state", "UPDATE policy_epoch_state SET epoch='x' WHERE id=1"),
+    ],
+)
+def test_corrupt_state_row_is_unavailable_not_a_crash(tmp_path, table, statement):
+    import sqlite3
+
+    db = tmp_path / "nonces.sqlite"
+    store = PersistentSnapshotNonces(db)
+    assert _bound(store, "6" * 32, now=_T)
+    with sqlite3.connect(db) as connection:
+        connection.execute(statement)
+    with pytest.raises(VisibilityRuntimeError) as raised:
+        _bound(store, "7" * 32, now=_T + 1)
+    assert type(raised.value) is VisibilityRuntimeError

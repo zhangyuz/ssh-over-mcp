@@ -214,3 +214,23 @@ def test_host_epoch_rollback_remains_a_policy_denial(tmp_path):
     status, output, _ = _run(policy, encode_request_v2(req))
     assert status == EX_DENIED_V2
     assert output == b""
+
+
+def test_corrupt_replay_state_row_is_unavailable_not_policy_denial(tmp_path):
+    import sqlite3
+
+    from ssh_over_mcp.host_agent.visibility_runtime_v5 import PersistentSnapshotNonces
+
+    policy, raw, req = _fixture(tmp_path)
+    assert PersistentSnapshotNonces(raw["nonce_db_path"]).consume_bound(
+        "d" * 32,
+        expires_at=_CLOCK + 30,
+        now=_CLOCK,
+        policy_epoch=11,
+        central_policy_sha256="a" * 64,
+    )
+    with sqlite3.connect(raw["nonce_db_path"]) as connection:
+        connection.execute("UPDATE clock_state SET high_water='corrupt' WHERE id=1")
+    status, output, _ = _run(policy, encode_request_v2(req))
+    assert status == EX_UNAVAILABLE_V2
+    assert output == b""

@@ -96,7 +96,7 @@ def run_v2(
                 )
             except VisibilityEpochRollbackRefused:
                 return False
-            except VisibilityRuntimeError as exc:
+            except Exception as exc:  # any store fault is unavailable, never a denial
                 raise SnapshotStateUnavailable("v5 replay state unavailable") from exc
 
         verified = verify_snapshot(
