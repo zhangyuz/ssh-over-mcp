@@ -265,3 +265,87 @@ def test_open_time_refusal_returns_no_partial_result(tmp_path: Path) -> None:
             before_child_open=lambda path: not path.endswith("b.txt"),
             max_entries=64,
         )
+
+
+def test_ancestor_relocated_during_traversal_is_refused(tmp_path: Path) -> None:
+    # An ancestor is moved after it was pinned but before the next component
+    # opens: the listed directory would no longer live under the authorized
+    # path string. The walk must be re-verified, not trusted.
+    outer = tmp_path / "outer"
+    (outer / "inner").mkdir(parents=True)
+    (outer / "inner" / "file.txt").write_bytes(b"x")
+    moved = False
+
+    def traverse(prefix: str) -> bool:
+        nonlocal moved
+        if prefix.endswith("/outer/inner") and not moved:
+            moved = True
+            os.rename(outer, tmp_path / "relocated")
+        return True
+
+    with pytest.raises(FilesystemAccessError):
+        _list(outer / "inner", traverse=traverse)
+    assert moved
+
+
+def test_ancestor_relocated_while_scanning_is_refused(tmp_path: Path) -> None:
+    outer = tmp_path / "outer"
+    target = outer / "inner"
+    target.mkdir(parents=True)
+    (target / "a.txt").write_bytes(b"a")
+    moved = False
+
+    def child(path: str) -> bool:
+        nonlocal moved
+        if not moved:
+            moved = True
+            os.rename(outer, tmp_path / "relocated")
+        return True
+
+    with pytest.raises(FilesystemAccessError):
+        _list(target, child=child)
+    assert moved
+
+
+def test_ancestor_replaced_by_other_directory_is_refused(tmp_path: Path) -> None:
+    # Same name, different inode: the original was moved away and a different
+    # directory now answers to the authorized path.
+    outer = tmp_path / "outer"
+    target = outer / "inner"
+    target.mkdir(parents=True)
+    (target / "a.txt").write_bytes(b"a")
+    swapped = False
+
+    def child(path: str) -> bool:
+        nonlocal swapped
+        if not swapped:
+            swapped = True
+            os.rename(outer, tmp_path / "original")
+            (tmp_path / "outer" / "inner").mkdir(parents=True)
+        return True
+
+    with pytest.raises(FilesystemAccessError):
+        _list(target, child=child)
+    assert swapped
+
+
+def test_unrelated_ancestor_metadata_changes_do_not_refuse(tmp_path: Path) -> None:
+    # Only the identity of each path component matters; creating siblings in
+    # an ancestor while listing must not become a denial-of-service lever.
+    outer = tmp_path / "outer"
+    target = outer / "inner"
+    target.mkdir(parents=True)
+    (target / "a.txt").write_bytes(b"a")
+    touched = False
+
+    def child(path: str) -> bool:
+        nonlocal touched
+        if not touched:
+            touched = True
+            (outer / "unrelated-sibling").write_bytes(b"s")
+            (tmp_path / "another-top-level").mkdir()
+        return True
+
+    result = _list(target, child=child)
+    assert touched
+    assert tuple(item.path for item in result) == (str(target / "a.txt"),)
