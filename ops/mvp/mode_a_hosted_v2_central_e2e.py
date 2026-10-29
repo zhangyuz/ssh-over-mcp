@@ -78,7 +78,12 @@ print(engine.policy_version[7:])
                  "--entrypoint","/bin/sleep",IMAGE,"180"])
             running.append(control)
             run(["docker","network","connect",networks[1],control])
+            origin_net=f"som347-origin-{uuid.uuid4().hex[:7]}"
+            run(["docker","network","create","--internal",origin_net])
+            networks.append(origin_net)
+            run(["docker","network","connect",origin_net,control])
             details=json.loads(run(["docker","inspect",control]).stdout)[0]
+            origin_ip=details["NetworkSettings"]["Networks"][origin_net]["IPAddress"]
             ips=[details["NetworkSettings"]["Networks"][net]["IPAddress"] for net in networks]
             for i in (1,2):
                 files=[
@@ -92,7 +97,7 @@ print(engine.policy_version[7:])
                         stdin=data)
             script=Path(__file__).with_name("mode_a_hosted_control_ledger_smoke.py").read_bytes()
             result=run(["docker","exec","-i","-u","2201:3201",control,
-                "/opt/ssh-over-mcp-e2e/venv/bin/python","-",ips[0],*ips,"--v2"],
+                "/opt/ssh-over-mcp-e2e/venv/bin/python","-",origin_ip,*ips,"--v2"],
                 stdin=script,timeout=100,ok=False)
             assert result.returncode == 0, (
                 result.returncode,result.stderr[-3500:],result.stdout[-1200:])
